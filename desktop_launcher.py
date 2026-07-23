@@ -16,6 +16,37 @@ import webview
 
 APP_TITLE = "INTERSOS Protection Analytics"
 SERVER_START_TIMEOUT = 20.0
+GWL_STYLE = -16
+WS_OVERLAPPEDWINDOW = 0x00CF0000
+MONITOR_DEFAULTTONEAREST = 2
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOZORDER = 0x0004
+SWP_NOOWNERZORDER = 0x0200
+SWP_FRAMECHANGED = 0x0020
+
+
+class Point(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+class Rect(ctypes.Structure):
+    _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long), ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+
+class WindowPlacement(ctypes.Structure):
+    _fields_ = [
+        ("length", ctypes.c_uint),
+        ("flags", ctypes.c_uint),
+        ("show_cmd", ctypes.c_uint),
+        ("min_position", Point),
+        ("max_position", Point),
+        ("normal_position", Rect),
+    ]
+
+
+class MonitorInfo(ctypes.Structure):
+    _fields_ = [("size", ctypes.c_uint), ("monitor", Rect), ("work", Rect), ("flags", ctypes.c_uint)]
 
 
 def resource_path(*parts: str) -> Path:
@@ -55,24 +86,68 @@ class LocalServer:
             self.thread.join(timeout=5)
 
 
-class DesktopApi:
-    def __init__(self) -> None:
-        self.window: Any | None = None
+class NativeFullscreenController:
+    def __init__(self, title: str) -> None:
+        self.title = title
         self.fullscreen = False
+        self.style = 0
+        self.placement: WindowPlacement | None = None
 
-    def attach(self, window: Any) -> None:
-        self.window = window
+    def toggle(self) -> bool:
+        user32 = ctypes.windll.user32
+        user32.FindWindowW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
+        user32.FindWindowW.restype = ctypes.c_void_p
+        user32.GetWindowPlacement.argtypes = [ctypes.c_void_p, ctypes.POINTER(WindowPlacement)]
+        user32.MonitorFromWindow.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        user32.MonitorFromWindow.restype = ctypes.c_void_p
+        user32.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.POINTER(MonitorInfo)]
+        user32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
+        user32.SetWindowPlacement.argtypes = [ctypes.c_void_p, ctypes.POINTER(WindowPlacement)]
+        user32.SetWindowPos.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p,
+            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint,
+        ]
+        hwnd = user32.FindWindowW(None, self.title)
+        if not hwnd:
+            raise RuntimeError("The application window is not ready.")
+        if not self.fullscreen:
+            placement = WindowPlacement()
+            placement.length = ctypes.sizeof(WindowPlacement)
+            if not user32.GetWindowPlacement(hwnd, ctypes.byref(placement)):
+                raise RuntimeError("Unable to read the application window state.")
+            monitor = user32.MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST)
+            info = MonitorInfo()
+            info.size = ctypes.sizeof(MonitorInfo)
+            if not monitor or not user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+                raise RuntimeError("Unable to identify the application display.")
+            self.style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+            self.placement = placement
+            user32.SetWindowLongW(hwnd, GWL_STYLE, self.style & ~WS_OVERLAPPEDWINDOW)
+            user32.SetWindowPos(
+                hwnd, 0, info.monitor.left, info.monitor.top,
+                info.monitor.right - info.monitor.left,
+                info.monitor.bottom - info.monitor.top,
+                SWP_NOOWNERZORDER | SWP_FRAMECHANGED,
+            )
+        else:
+            user32.SetWindowLongW(hwnd, GWL_STYLE, self.style)
+            if self.placement is not None:
+                user32.SetWindowPlacement(hwnd, ctypes.byref(self.placement))
+            user32.SetWindowPos(
+                hwnd, 0, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED,
+            )
+        self.fullscreen = not self.fullscreen
+        return self.fullscreen
+
+
+class DesktopApi:
+    def __init__(self, fullscreen: Any) -> None:
+        self.fullscreen = fullscreen
 
     def toggle_fullscreen(self) -> bool:
-        if self.window is None:
-            raise RuntimeError("The application window is not ready.")
-        self.fullscreen = not self.fullscreen
-        threading.Thread(
-            target=self.window.toggle_fullscreen,
-            name="intersos-fullscreen-toggle",
-            daemon=True,
-        ).start()
-        return self.fullscreen
+        return bool(self.fullscreen.toggle())
 
 
 def main() -> None:
@@ -93,9 +168,10 @@ def main() -> None:
     webview.settings["ALLOW_DOWNLOADS"] = True
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     try:
-        desktop_api = DesktopApi()
-        window = webview.create_window(
-            f"{APP_TITLE} {APP_VERSION}",
+        window_title = f"{APP_TITLE} {APP_VERSION}"
+        desktop_api = DesktopApi(NativeFullscreenController(window_title))
+        webview.create_window(
+            window_title,
             url,
             width=1440,
             height=900,
@@ -105,7 +181,6 @@ def main() -> None:
             background_color="#f4f7fb",
             js_api=desktop_api,
         )
-        desktop_api.attach(window)
         webview.start(gui="edgechromium", debug=False, private_mode=True)
     except Exception as exc:
         show_error(

@@ -21,22 +21,20 @@ class FakeServer:
 
 class DesktopLauncherTests(unittest.TestCase):
     def test_native_fullscreen_api_toggles_window(self):
-        class FakeWindow:
+        class FakeFullscreen:
             calls = 0
+            state = False
 
-            def toggle_fullscreen(self):
+            def toggle(self):
                 self.calls += 1
+                self.state = not self.state
+                return self.state
 
-        window = FakeWindow()
-        api = desktop_launcher.DesktopApi()
-        api.attach(window)
+        fullscreen = FakeFullscreen()
+        api = desktop_launcher.DesktopApi(fullscreen)
         self.assertTrue(api.toggle_fullscreen())
         self.assertFalse(api.toggle_fullscreen())
-        for _ in range(100):
-            if window.calls == 2:
-                break
-            time.sleep(0.001)
-        self.assertEqual(window.calls, 2)
+        self.assertEqual(fullscreen.calls, 2)
 
     def test_local_server_starts_and_stops(self):
         with patch.object(desktop_launcher.uvicorn, "Config", return_value=object()), patch.object(
