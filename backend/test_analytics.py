@@ -5,11 +5,14 @@ import polars as pl
 
 from backend.analytics import DataStore
 
+WORKBOOK = Path(__file__).resolve().parents[1] / "# Legal platform Analysis - share.xlsx"
 
-class AnalyticsTests(unittest.TestCase):
+
+@unittest.skipUnless(WORKBOOK.exists(), "Private analytics workbook is not available in CI")
+class WorkbookAnalyticsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.store = DataStore.from_path(Path(__file__).resolve().parents[1] / "# Legal platform Analysis - share.xlsx")
+        cls.store = DataStore.from_path(WORKBOOK)
 
     def test_source_reconciliation(self):
         expected = {"assessment": 11372, "services": 19211, "deportation": 64}
@@ -42,6 +45,8 @@ class AnalyticsTests(unittest.TestCase):
         self.assertGreater(len(result["cells"]), 0)
         self.assertTrue(all(cell["count"] <= result["total"] for cell in result["cells"]))
 
+
+class AnalyticsSecurityTests(unittest.TestCase):
     def test_csv_export_escapes_spreadsheet_formula_prefixes(self):
         store = DataStore(
             "test.xlsx",
