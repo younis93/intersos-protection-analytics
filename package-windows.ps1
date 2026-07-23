@@ -1,3 +1,7 @@
+param(
+    [string]$AppVersion
+)
+
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $VenvPython = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
@@ -7,6 +11,12 @@ $PackageTemp = Join-Path $ProjectRoot 'packaging-temp'
 $BuildDist = Join-Path $PackageTemp 'dist'
 $BuildWork = Join-Path $PackageTemp 'work'
 $BuildSpec = Join-Path $PackageTemp 'spec'
+if (-not $AppVersion) {
+    $VersionSource = Get-Content -LiteralPath (Join-Path $ProjectRoot 'backend\version.py') -Raw
+    $AppVersionMatch = [regex]::Match($VersionSource, 'APP_VERSION\s*=\s*["''](?<version>[^"'']+)["'']')
+    if (-not $AppVersionMatch.Success) { throw 'Unable to read APP_VERSION from backend/version.py.' }
+    $AppVersion = $AppVersionMatch.Groups['version'].Value
+}
 
 if (-not (Test-Path -LiteralPath $VenvPython)) {
     throw 'Run start-dashboard.ps1 once before packaging so the Python environment exists.'
@@ -21,7 +31,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'frontend\node_modules'
 if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
 & $VenvPython -m pip install pyinstaller
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller installation failed.' }
-& $VenvPython -m PyInstaller --noconfirm --clean --onedir --name 'INTERSOS Protection Analytics' --icon (Join-Path $ProjectRoot 'intersos-protection-analytics.ico') --distpath $BuildDist --workpath $BuildWork --specpath $BuildSpec --add-data "$ProjectRoot\frontend\dist;frontend\dist" --collect-all polars (Join-Path $ProjectRoot 'desktop_launcher.py')
+& $VenvPython -m PyInstaller --noconfirm --clean --windowed --onedir --name 'INTERSOS Protection Analytics' --icon (Join-Path $ProjectRoot 'intersos-protection-analytics.ico') --distpath $BuildDist --workpath $BuildWork --specpath $BuildSpec --add-data "$ProjectRoot\frontend\dist;frontend\dist" --collect-all polars (Join-Path $ProjectRoot 'desktop_launcher.py')
 if ($LASTEXITCODE -ne 0) { throw 'Portable application build failed.' }
 
 if (Test-Path -LiteralPath $StagingReleaseRoot) { Remove-Item -LiteralPath $StagingReleaseRoot -Recurse -Force }
@@ -40,7 +50,15 @@ if (-not $InnoCompiler) {
     ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 }
 if ($InnoCompiler) {
-    & $InnoCompiler "/DMyAppVersion=1.0.0" (Join-Path $ProjectRoot 'installer\INTERSOS Protection Analytics.iss')
+    $WebViewBootstrapper = Join-Path $ProjectRoot 'installer\MicrosoftEdgeWebview2Setup.exe'
+    if (-not (Test-Path -LiteralPath $WebViewBootstrapper)) {
+        Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $WebViewBootstrapper
+    }
+    $WebViewSignature = Get-AuthenticodeSignature -LiteralPath $WebViewBootstrapper
+    if ($WebViewSignature.Status -ne 'Valid' -or $WebViewSignature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') {
+        throw 'The Microsoft WebView2 bootstrapper signature is invalid.'
+    }
+    & $InnoCompiler "/DMyAppVersion=$AppVersion" (Join-Path $ProjectRoot 'installer\INTERSOS Protection Analytics.iss')
     if ($LASTEXITCODE -ne 0) { throw 'Windows installer build failed.' }
     Write-Host "Per-user installer created in $ProjectRoot\release"
 } else {

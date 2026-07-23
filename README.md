@@ -9,6 +9,8 @@ Run `start-dashboard.ps1` from PowerShell. The first run creates a local Python 
 - Application: http://127.0.0.1:5173
 - API documentation: http://127.0.0.1:8000/docs
 
+The packaged Windows EXE uses a native Edge WebView2 window instead of opening a browser. The development script intentionally continues to use the browser and Vite development server.
+
 The expected workbook sheets are `Assessments`, `Legal Services`, and `Deportation`. Use the upload button to refresh the application with a newer `.xlsx` file.
 
 ## Analytical definitions

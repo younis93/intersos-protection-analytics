@@ -5,6 +5,7 @@
 #define MyAppExeName "INTERSOS Protection Analytics.exe"
 #define SigningCertificateName "INTERSOS-Code-Signing.cer"
 #define SigningCertificateThumbprint "C4F1B12A3BCCC73BEF903FA3796304CF0E67670D"
+#define WebView2BootstrapperName "MicrosoftEdgeWebview2Setup.exe"
 
 [Setup]
 AppId={{D8924146-2D10-43B4-8B98-686B8F208699}
@@ -28,6 +29,7 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 [Files]
 Source: "..\packaging-temp\dist\INTERSOS Protection Analytics\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "INTERSOS-Code-Signing.cer"; Flags: dontcopy
+Source: "MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -59,6 +61,49 @@ end;
 function UpdateTrustReady: Boolean;
 begin
   Result := CertificateInstalled('Root') and CertificateInstalled('TrustedPublisher');
+end;
+
+function WebView2VersionAvailable(const RootKey: Integer): Boolean;
+var
+  Version: String;
+begin
+  Result := RegQueryStringValue(RootKey,
+    'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+    'pv', Version) and (Version <> '') and (CompareText(Version, '0.0.0.0') <> 0);
+end;
+
+function WebView2Installed: Boolean;
+begin
+  Result := WebView2VersionAvailable(HKLM32) or WebView2VersionAvailable(HKCU32);
+end;
+
+function EnsureWebView2Runtime: String;
+var
+  BootstrapperPath: String;
+  ResultCode: Integer;
+  Attempt: Integer;
+begin
+  Result := '';
+  if WebView2Installed then
+    exit;
+
+  WizardForm.StatusLabel.Caption := 'Installing Microsoft Edge WebView2 Runtime...';
+  ExtractTemporaryFile('{#WebView2BootstrapperName}');
+  BootstrapperPath := ExpandConstant('{tmp}\{#WebView2BootstrapperName}');
+  if not Exec(BootstrapperPath, '/silent /install', '', SW_HIDE,
+    ewWaitUntilTerminated, ResultCode) or ((ResultCode <> 0) and (ResultCode <> 3010)) then
+  begin
+    Result := 'Microsoft Edge WebView2 Runtime could not be installed. Check the internet connection and run setup again.';
+    exit;
+  end;
+
+  for Attempt := 1 to 20 do
+  begin
+    if WebView2Installed then
+      exit;
+    Sleep(500);
+  end;
+  Result := 'Microsoft Edge WebView2 Runtime installation did not complete. Restart Windows and run setup again.';
 end;
 
 function ChangeCertificateStore(const Operation, StoreName, CertificatePath: String): Boolean;
@@ -134,54 +179,57 @@ var
   PublisherAdded: Boolean;
 begin
   Result := '';
-  if UpdateTrustReady then
-    exit;
-
-  if WizardSilent then
-  begin
-    Result := 'The first installation must be run interactively so the INTERSOS signing certificate can be confirmed.';
-    exit;
-  end;
-
-  if not CertificateConsent.Checked then
-  begin
-    Result := 'The INTERSOS signing certificate was not confirmed.';
-    exit;
-  end;
-
-  ExtractTemporaryFile('{#SigningCertificateName}');
-  CertificatePath := ExpandConstant('{tmp}\{#SigningCertificateName}');
-  RootAdded := False;
-  PublisherAdded := False;
-
-  if not CertificateInstalled('Root') then
-  begin
-    RootAdded := ChangeCertificateStore('add', 'Root', CertificatePath);
-    if not RootAdded then
-    begin
-      Result := 'Unable to trust the INTERSOS signing certificate in the current user Root store.';
-      exit;
-    end;
-  end;
-
-  if not CertificateInstalled('TrustedPublisher') then
-  begin
-    PublisherAdded := ChangeCertificateStore('add', 'TrustedPublisher', CertificatePath);
-    if not PublisherAdded then
-    begin
-      if RootAdded then
-        ChangeCertificateStore('delete', 'Root', '');
-      Result := 'Unable to trust the INTERSOS signing certificate in the current user Trusted Publishers store.';
-      exit;
-    end;
-  end;
-
   if not UpdateTrustReady then
   begin
-    if PublisherAdded then
-      ChangeCertificateStore('delete', 'TrustedPublisher', '');
-    if RootAdded then
-      ChangeCertificateStore('delete', 'Root', '');
-    Result := 'Windows could not verify the installed INTERSOS signing certificate.';
+    if WizardSilent then
+    begin
+      Result := 'The first installation must be run interactively so the INTERSOS signing certificate can be confirmed.';
+      exit;
+    end;
+
+    if not CertificateConsent.Checked then
+    begin
+      Result := 'The INTERSOS signing certificate was not confirmed.';
+      exit;
+    end;
+
+    ExtractTemporaryFile('{#SigningCertificateName}');
+    CertificatePath := ExpandConstant('{tmp}\{#SigningCertificateName}');
+    RootAdded := False;
+    PublisherAdded := False;
+
+    if not CertificateInstalled('Root') then
+    begin
+      RootAdded := ChangeCertificateStore('add', 'Root', CertificatePath);
+      if not RootAdded then
+      begin
+        Result := 'Unable to trust the INTERSOS signing certificate in the current user Root store.';
+        exit;
+      end;
+    end;
+
+    if not CertificateInstalled('TrustedPublisher') then
+    begin
+      PublisherAdded := ChangeCertificateStore('add', 'TrustedPublisher', CertificatePath);
+      if not PublisherAdded then
+      begin
+        if RootAdded then
+          ChangeCertificateStore('delete', 'Root', '');
+        Result := 'Unable to trust the INTERSOS signing certificate in the current user Trusted Publishers store.';
+        exit;
+      end;
+    end;
+
+    if not UpdateTrustReady then
+    begin
+      if PublisherAdded then
+        ChangeCertificateStore('delete', 'TrustedPublisher', '');
+      if RootAdded then
+        ChangeCertificateStore('delete', 'Root', '');
+      Result := 'Windows could not verify the installed INTERSOS signing certificate.';
+      exit;
+    end;
   end;
+
+  Result := EnsureWebView2Runtime;
 end;

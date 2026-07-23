@@ -11,4 +11,5 @@ __pycache__/
 tmp/
 .env
 certificate.pfx
+installer/MicrosoftEdgeWebview2Setup.exe
 *.tsbuildinfo
