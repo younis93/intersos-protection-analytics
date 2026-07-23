@@ -55,7 +55,7 @@ def require_store() -> DataStore:
 class DashboardRequest(BaseModel):
     filters: dict[str, list[str]] = {}
     measure: str = "records"
-    defaultYtd: bool = True
+    defaultYtd: bool = False
 
 
 class StudioRequest(BaseModel):
@@ -64,7 +64,7 @@ class StudioRequest(BaseModel):
     columnDimension: str | None = None
     filters: dict[str, list[str]] = {}
     measure: str = "records"
-    defaultYtd: bool = True
+    defaultYtd: bool = False
 
 
 @app.get("/api/health")
@@ -136,7 +136,7 @@ async def upload(file: UploadFile = File(...)):
 
 
 @app.get("/api/export/{page}")
-def export(page: str, filters: str = Query("{}"), default_ytd: bool = True):
+def export(page: str, filters: str = Query("{}"), default_ytd: bool = False):
     active_store = require_store()
     if page not in active_store.frames: raise HTTPException(404, "Unknown dashboard page")
     try: parsed = json.loads(filters)

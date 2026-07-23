@@ -38,8 +38,16 @@ class UpdaterTests(unittest.TestCase):
     def test_update_installer_gets_explicit_relaunch_marker(self):
         command = updater._installer_command(Path("setup.exe"))
         self.assertIn("/INTERSOSUPDATE", command)
+        self.assertIn("/EXTERNALRELAUNCH", command)
         self.assertIn("/NORESTART", command)
         self.assertNotIn("/RESTARTAPPLICATIONS", command)
+
+    def test_relaunch_helper_waits_for_installer_then_starts_app(self):
+        command = updater._relaunch_command(Path("setup.exe"), Path("app.exe"))
+        self.assertEqual(command[0], "powershell.exe")
+        self.assertIn("WaitForExit", command[-1])
+        self.assertIn("app.exe", command[-1])
+        self.assertIn("/EXTERNALRELAUNCH", command[-1])
 
     def test_expected_signing_certificate_is_pinned(self):
         self.assertEqual(

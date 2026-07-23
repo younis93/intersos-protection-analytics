@@ -523,6 +523,10 @@ export function FilterDrawer({
   onChange: (f: Filters) => void;
   onReset: () => void;
 }) {
+  const datePriority: Record<string, number> = { year: 0, quarter: 1, month: 2 };
+  const availableFilters = Object.entries(available).sort(
+    ([left], [right]) => (datePriority[left] ?? 3) - (datePriority[right] ?? 3),
+  );
   return (
     <aside className={`filter-drawer glass ${open ? "open" : ""}`}><div className="filter-scroll">
       <div className="filter-head">
@@ -538,7 +542,7 @@ export function FilterDrawer({
         Reset all filters
       </button>
       <div className="filter-list">
-        {Object.entries(available).map(([field, values]) => (
+        {availableFilters.map(([field, values]) => (
           <FilterGroup
             key={field}
             field={field}

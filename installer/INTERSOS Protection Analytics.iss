@@ -46,22 +46,28 @@ var
   DesktopShortcutConsent: TNewCheckBox;
   LaunchAfterInstallConsent: TNewCheckBox;
 
-function IsUpdateInstall: Boolean;
+function HasCommandLineSwitch(const SwitchName: String): Boolean;
 var
   Index: Integer;
 begin
   Result := False;
   for Index := 1 to ParamCount do
-    if CompareText(ParamStr(Index), '/INTERSOSUPDATE') = 0 then
+    if CompareText(ParamStr(Index), SwitchName) = 0 then
     begin
       Result := True;
       exit;
     end;
 end;
 
+function IsUpdateInstall: Boolean;
+begin
+  Result := HasCommandLineSwitch('/INTERSOSUPDATE');
+end;
+
 function ShouldRestartAfterUpdate: Boolean;
 begin
-  Result := WizardSilent or IsUpdateInstall;
+  Result := (WizardSilent or IsUpdateInstall) and
+    (not HasCommandLineSwitch('/EXTERNALRELAUNCH'));
 end;
 
 function ShouldCreateDesktopShortcut: Boolean;

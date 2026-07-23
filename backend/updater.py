@@ -75,7 +75,20 @@ def _installer_command(target: Path) -> list[str]:
         "/CLOSEAPPLICATIONS",
         "/NORESTART",
         "/INTERSOSUPDATE",
+        "/EXTERNALRELAUNCH",
     ]
+
+
+def _relaunch_command(target: Path, application: Path) -> list[str]:
+    installer = str(target).replace("'", "''")
+    app = str(application).replace("'", "''")
+    arguments = ",".join("'{}'".format(argument.replace("'", "''")) for argument in _installer_command(target)[1:])
+    script = (
+        f"$process=Start-Process -FilePath '{installer}' -ArgumentList @({arguments}) -PassThru; "
+        "$process.WaitForExit(); "
+        f"if ($process.ExitCode -in @(0,5,3010)) {{ Start-Sleep -Seconds 2; Start-Process -FilePath '{app}' }}"
+    )
+    return ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script]
 
 
 def _cleanup_stale_downloads() -> None:
@@ -142,8 +155,9 @@ def _download_and_install(manifest: dict[str, Any]) -> None:
         creation_flags = 0
         if os.name == "nt":
             creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        command = _relaunch_command(target, Path(sys.executable)) if os.name == "nt" and getattr(sys, "frozen", False) else _installer_command(target)
         subprocess.Popen(
-            _installer_command(target),
+            command,
             close_fds=True,
             creationflags=creation_flags,
         )
