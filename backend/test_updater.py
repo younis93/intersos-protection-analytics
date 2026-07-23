@@ -1,0 +1,36 @@
+import unittest
+from unittest.mock import patch
+
+from backend import updater
+
+
+class UpdaterTests(unittest.TestCase):
+    def setUp(self):
+        updater._available = None
+
+    def test_semantic_version_comparison(self):
+        self.assertGreater(updater._version("v1.10.0"), updater._version("1.9.9"))
+
+    def test_unconfigured_repository_is_safe(self):
+        with patch.object(updater, "ENABLED", False):
+            result = updater.check()
+        self.assertFalse(result["available"])
+        self.assertFalse(result["enabled"])
+
+    def test_valid_manifest_reports_update(self):
+        release = {"assets": [{"name": "update.json", "browser_download_url": "https://github.com/example/update.json"}]}
+        manifest = {"version": "1.1.0", "installerUrl": "https://github.com/example/setup.exe", "sha256": "a" * 64, "publishedAt": "2026-07-23T00:00:00Z"}
+        with patch.object(updater, "ENABLED", True), patch.object(updater, "REPOSITORY", "example/repo"), patch.object(updater, "_json", side_effect=[release, manifest]):
+            result = updater.check()
+        self.assertTrue(result["available"])
+        self.assertEqual(result["latestVersion"], "1.1.0")
+
+    def test_network_failure_never_raises(self):
+        with patch.object(updater, "ENABLED", True), patch.object(updater, "_json", side_effect=OSError("offline")):
+            result = updater.check()
+        self.assertFalse(result["available"])
+        self.assertIn("Unable to check", result["message"])
+
+
+if __name__ == "__main__":
+    unittest.main()
