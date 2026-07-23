@@ -29,7 +29,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'frontend\node_modules'
 
 & npm.cmd run build --prefix (Join-Path $ProjectRoot 'frontend')
 if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
-& $VenvPython -m pip install pyinstaller
+& $VenvPython -m pip install pyinstaller==6.21.0
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller installation failed.' }
 & $VenvPython -m PyInstaller --noconfirm --clean --windowed --onedir --name 'INTERSOS Protection Analytics' --icon (Join-Path $ProjectRoot 'intersos-protection-analytics.ico') --distpath $BuildDist --workpath $BuildWork --specpath $BuildSpec --add-data "$ProjectRoot\frontend\dist;frontend\dist" --collect-all polars (Join-Path $ProjectRoot 'desktop_launcher.py')
 if ($LASTEXITCODE -ne 0) { throw 'Portable application build failed.' }

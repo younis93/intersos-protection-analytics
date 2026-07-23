@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,7 @@ from urllib.parse import urlparse
 from .version import APP_VERSION, DEFAULT_GITHUB_REPOSITORY
 
 REPOSITORY = os.getenv("INTERSOS_GITHUB_REPOSITORY", DEFAULT_GITHUB_REPOSITORY).strip()
+SIGNING_CERTIFICATE_THUMBPRINT = "C4F1B12A3BCCC73BEF903FA3796304CF0E67670D"
 ENABLED = "/" in REPOSITORY and not REPOSITORY.startswith("YOUR_")
 _lock = threading.Lock()
 _state: dict[str, Any] = {"phase": "idle", "progress": 0, "error": None}
@@ -76,11 +78,37 @@ def _installer_command(target: Path) -> list[str]:
     ]
 
 
+def _cleanup_stale_downloads() -> None:
+    cutoff = time.time() - 24 * 60 * 60
+    for directory in Path(tempfile.gettempdir()).glob("intersos-update-*"):
+        try:
+            if directory.is_dir() and directory.stat().st_mtime < cutoff:
+                shutil.rmtree(directory)
+        except OSError:
+            continue
+
+
+def _trusted_installer_url(url: str) -> bool:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    trusted_host = host == "github.com" or host == "githubusercontent.com" or host.endswith(".githubusercontent.com")
+    return parsed.scheme == "https" and trusted_host
+
+
+def _has_expected_signature(output: str) -> bool:
+    details = [line.strip() for line in output.splitlines() if line.strip()]
+    return (
+        len(details) >= 2
+        and details[0] == "Valid"
+        and details[1].replace(" ", "").upper() == SIGNING_CERTIFICATE_THUMBPRINT
+    )
+
+
 def _download_and_install(manifest: dict[str, Any]) -> None:
     try:
+        _cleanup_stale_downloads()
         url = str(manifest["installerUrl"])
-        host = (urlparse(url).hostname or "").lower()
-        if urlparse(url).scheme != "https" or not (host == "github.com" or host.endswith("githubusercontent.com")):
+        if not _trusted_installer_url(url):
             raise ValueError("Untrusted installer URL")
         target = Path(tempfile.mkdtemp(prefix="intersos-update-")) / "INTERSOS-Protection-Analytics-Setup.exe"
         request = urllib.request.Request(url, headers={"User-Agent": "INTERSOS-Protection-Analytics"})
@@ -102,13 +130,14 @@ def _download_and_install(manifest: dict[str, Any]) -> None:
             target.unlink(missing_ok=True)
             raise ValueError("Downloaded installer checksum does not match the release manifest")
         if os.name == "nt" and (getattr(sys, "frozen", False) or os.getenv("INTERSOS_REQUIRE_SIGNED_UPDATES") == "1"):
+            escaped_target = str(target).replace("'", "''")
             signature = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", f"(Get-AuthenticodeSignature -LiteralPath '{str(target).replace("'", "''")}').Status"],
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", f"$s=Get-AuthenticodeSignature -LiteralPath '{escaped_target}'; Write-Output $s.Status; Write-Output $s.SignerCertificate.Thumbprint"],
                 capture_output=True, text=True, timeout=20, check=False,
             )
-            if signature.stdout.strip() != "Valid":
+            if not _has_expected_signature(signature.stdout):
                 target.unlink(missing_ok=True)
-                raise ValueError("The update installer does not have a valid trusted signature")
+                raise ValueError("The update installer is not signed by the expected INTERSOS certificate")
         _set(phase="installing", progress=98)
         creation_flags = 0
         if os.name == "nt":

@@ -1,9 +1,12 @@
+import io
 import unittest
+import zipfile
 from pathlib import Path
 
+import pandas as pd
 import polars as pl
 
-from backend.analytics import DataStore, _text
+from backend.analytics import COLS, SHEETS, DataStore, _text, validate_xlsx_archive
 
 WORKBOOK = Path(__file__).resolve().parents[1] / "# Legal platform Analysis - share.xlsx"
 
@@ -47,6 +50,37 @@ class WorkbookAnalyticsTests(unittest.TestCase):
 
 
 class AnalyticsSecurityTests(unittest.TestCase):
+    def test_synthetic_workbook_exercises_all_required_sheets(self):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            for page, sheet in SHEETS.items():
+                row = {}
+                for key, source_column in COLS[page].items():
+                    if key in {"date", "completed_date"}:
+                        row[source_column] = "2026-01-15"
+                    elif key == "status":
+                        row[source_column] = "Completed" if page == "services" else "Open"
+                    elif key == "assessment_id":
+                        row[source_column] = "assessment-1"
+                    elif key == "beneficiary":
+                        row[source_column] = "beneficiary-1"
+                    else:
+                        row[source_column] = f"{key}-1"
+                pd.DataFrame([row]).to_excel(writer, sheet_name=sheet, index=False)
+
+        store = DataStore.from_bytes(output.getvalue(), "synthetic.xlsx")
+        self.assertEqual(
+            {page: frame.height for page, frame in store.frames.items()},
+            {"assessment": 1, "services": 1, "deportation": 1},
+        )
+
+    def test_rejects_extreme_xlsx_compression_ratio(self):
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("xl/worksheets/sheet1.xml", b"0" * 1_000_000)
+        with self.assertRaisesRegex(ValueError, "unsafe compression ratio"):
+            validate_xlsx_archive(output.getvalue())
+
     def test_bilingual_answers_keep_each_english_choice(self):
         self.assertEqual(
             _text("Legal Assistance - مساعدة,Legal Counselling - استشارة"),

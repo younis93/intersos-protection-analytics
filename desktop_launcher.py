@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import secrets
 import socket
 import sys
 import threading
@@ -153,6 +154,7 @@ class DesktopApi:
 def main() -> None:
     os.environ["UNHCR_UPLOAD_ONLY"] = "1"
     os.environ["UNHCR_STATIC_DIR"] = str(resource_path("frontend", "dist"))
+    os.environ["INTERSOS_LOCAL_SESSION_TOKEN"] = secrets.token_urlsafe(32)
     from backend import main as backend_main
     from backend.version import APP_VERSION
 

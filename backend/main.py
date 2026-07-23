@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import sys
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from .analytics import DataStore
@@ -21,6 +23,8 @@ STATIC_DIR = Path(os.getenv("UNHCR_STATIC_DIR", BUNDLE_ROOT / "frontend" / "dist
 DEFAULT_FILE = ROOT / "# Legal platform Analysis - share.xlsx"
 UPLOAD_ONLY = os.getenv("UNHCR_UPLOAD_ONLY", "").lower() in {"1", "true", "yes"}
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+LOCAL_SESSION_TOKEN = os.getenv("INTERSOS_LOCAL_SESSION_TOKEN", "")
+SESSION_COOKIE = "intersos_session"
 workbook = Path(os.getenv("UNHCR_WORKBOOK", DEFAULT_FILE))
 store: DataStore | None = None if UPLOAD_ONLY or not workbook.exists() else DataStore.from_path(workbook)
 
@@ -30,9 +34,15 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http
 
 @app.middleware("http")
 async def prevent_stale_api_state(request, call_next):
+    if request.url.path.startswith("/api/") and LOCAL_SESSION_TOKEN:
+        supplied_token = request.cookies.get(SESSION_COOKIE, "")
+        if not secrets.compare_digest(supplied_token, LOCAL_SESSION_TOKEN):
+            return Response(status_code=403, content="Local application session required.")
     response = await call_next(request)
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    elif LOCAL_SESSION_TOKEN:
+        response.set_cookie(SESSION_COOKIE, LOCAL_SESSION_TOKEN, httponly=True, samesite="strict", path="/")
     return response
 
 
@@ -116,7 +126,7 @@ async def upload(file: UploadFile = File(...)):
             if total > MAX_UPLOAD_BYTES:
                 raise HTTPException(413, "Workbook must be 100 MB or smaller.")
             chunks.append(chunk)
-        store = DataStore.from_bytes(b"".join(chunks), file.filename)
+        store = await run_in_threadpool(DataStore.from_bytes, b"".join(chunks), file.filename)
     except HTTPException:
         raise
     except Exception as exc: raise HTTPException(400, str(exc)) from exc

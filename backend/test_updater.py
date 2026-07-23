@@ -1,3 +1,6 @@
+import os
+import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -37,6 +40,30 @@ class UpdaterTests(unittest.TestCase):
         self.assertIn("/INTERSOSUPDATE", command)
         self.assertIn("/NORESTART", command)
         self.assertNotIn("/RESTARTAPPLICATIONS", command)
+
+    def test_expected_signing_certificate_is_pinned(self):
+        self.assertEqual(
+            updater.SIGNING_CERTIFICATE_THUMBPRINT,
+            "C4F1B12A3BCCC73BEF903FA3796304CF0E67670D",
+        )
+        self.assertTrue(updater._has_expected_signature(f"Valid\n{updater.SIGNING_CERTIFICATE_THUMBPRINT}\n"))
+        self.assertFalse(updater._has_expected_signature("Valid\n0000000000000000000000000000000000000000\n"))
+
+    def test_installer_url_requires_a_real_github_hostname(self):
+        self.assertTrue(updater._trusted_installer_url("https://objects.githubusercontent.com/setup.exe"))
+        self.assertFalse(updater._trusted_installer_url("https://attacker-githubusercontent.com/setup.exe"))
+        self.assertFalse(updater._trusted_installer_url("http://github.com/setup.exe"))
+
+    def test_stale_update_downloads_are_removed(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            stale = Path(temp_root) / "intersos-update-old"
+            stale.mkdir()
+            (stale / "setup.exe").write_bytes(b"old")
+            old_time = time.time() - 25 * 60 * 60
+            os.utime(stale, (old_time, old_time))
+            with patch.object(updater.tempfile, "gettempdir", return_value=temp_root):
+                updater._cleanup_stale_downloads()
+            self.assertFalse(stale.exists())
 
 
 if __name__ == "__main__":

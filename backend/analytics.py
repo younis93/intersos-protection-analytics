@@ -1,11 +1,39 @@
 from __future__ import annotations
 
 import io
+import zipfile
 import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
+
+MAX_XLSX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+MAX_XLSX_ENTRY_BYTES = 128 * 1024 * 1024
+MAX_XLSX_ENTRIES = 10_000
+MAX_XLSX_COMPRESSION_RATIO = 200
+OPEN_STATUS_PATTERN = "open|pend"
+CLOSED_STATUS_PATTERN = "closed"
+COMPLETED_STATUS_PATTERN = "completed"
+IN_PROCESS_STATUS_PATTERN = "process"
+UNCOMPLETED_STATUS_PATTERN = "uncompleted"
+
+
+def validate_xlsx_archive(raw: bytes) -> None:
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            entries = archive.infolist()
+            if len(entries) > MAX_XLSX_ENTRIES:
+                raise ValueError("Workbook contains too many internal files.")
+            if sum(entry.file_size for entry in entries) > MAX_XLSX_UNCOMPRESSED_BYTES:
+                raise ValueError("Workbook expands beyond the allowed size.")
+            for entry in entries:
+                if entry.file_size > MAX_XLSX_ENTRY_BYTES:
+                    raise ValueError("Workbook contains an oversized internal file.")
+                if entry.file_size > MAX_XLSX_COMPRESSION_RATIO * max(entry.compress_size, 1):
+                    raise ValueError("Workbook contains an unsafe compression ratio.")
+    except zipfile.BadZipFile as exc:
+        raise ValueError("Workbook is not a valid .xlsx file.") from exc
 
 import pandas as pd
 import polars as pl
@@ -112,6 +140,7 @@ class DataStore:
 
     @classmethod
     def from_bytes(cls, raw: bytes, source_name: str) -> "DataStore":
+        validate_xlsx_archive(raw)
         excel = pd.ExcelFile(io.BytesIO(raw), engine="openpyxl")
         missing = [s for s in SHEETS.values() if s not in excel.sheet_names]
         if missing: raise ValueError(f"Missing required sheets: {', '.join(missing)}")
@@ -137,16 +166,7 @@ class DataStore:
             df["quarter"] = primary_date.dt.to_period("Q").astype(str).replace("NaT", None)
             df["month"] = primary_date.dt.to_period("M").astype(str).replace("NaT", None)
             df["invalid_date"] = primary_date.isna() | (primary_date > today) | (primary_date.dt.year < 2023)
-            if page == "assessment":
-                df["legal_need"] = df["legal_need"].map(
-                    lambda value: value.replace("Legal Assistance - مساعدة", "Legal Representation - تمثيل")
-                    if isinstance(value, str) else value
-                )
             if page == "services":
-                df["service_type"] = df["service_type"].map(
-                    lambda value: value.replace("Legal Assistance - مساعدة", "Legal Representation - تمثيل")
-                    if isinstance(value, str) else value
-                )
                 completed_date = df["completed_date"]
                 df["completed_year"] = completed_date.dt.year.astype("Int64").astype(str).replace("<NA>", None)
                 df["completed_quarter"] = completed_date.dt.to_period("Q").astype(str).replace("NaT", None)
@@ -177,7 +197,7 @@ class DataStore:
                 options[page]["legal_need"] = pl.from_pandas(service_need, include_index=False)
                 unmatched = int(df["assessment_id"].notna().sum() - df["assessment_id"].isin(assessment_map).sum())
                 quality.append({"page": page, "severity": "High" if unmatched else "Low", "check": "Service Assessment ID not matched", "count": unmatched, "rate": unmatched / max(len(df), 1), "impact": "Unmatched services cannot inherit assessment legal need."})
-                completed_status = df["status"].fillna("").str.lower().str.contains("completed|اکتملت") & ~df["status"].fillna("").str.lower().str.contains("uncompleted")
+                completed_status = df["status"].fillna("").str.lower().str.contains(COMPLETED_STATUS_PATTERN) & ~df["status"].fillna("").str.lower().str.contains(UNCOMPLETED_STATUS_PATTERN)
                 missing_completion = int((completed_status & df["completed_date"].isna()).sum())
                 invalid_completion = int((df["completed_date"].notna() & ((df["completed_date"] > today) | (df["completed_date"].dt.year < 2023))).sum())
                 quality.append({"page": page, "severity": "High" if missing_completion else "Low", "check": "Completed service without completion date", "count": missing_completion, "rate": missing_completion / max(int(completed_status.sum()), 1), "impact": "Completion-period reporting is incomplete."})
@@ -230,14 +250,14 @@ class DataStore:
             return df.filter(expr).get_column(metric).drop_nulls().n_unique()
 
         if page == "assessment":
-            closed = distinct_where(pl.col("status").str.to_lowercase().str.contains("closed|مغلق"))
-            open_cases = distinct_where(pl.col("status").str.to_lowercase().str.contains("open|pend|مفتوح|معلق"))
+            closed = distinct_where(pl.col("status").str.to_lowercase().str.contains(CLOSED_STATUS_PATTERN))
+            open_cases = distinct_where(pl.col("status").str.to_lowercase().str.contains(OPEN_STATUS_PATTERN))
             detained = distinct_where(pl.col("detained").str.to_lowercase().str.contains("yes|نعم"))
             kpis = [("Assessments" if measure == "records" else "Unique beneficiaries", total), ("Open caseload", open_cases), ("Closed", closed), ("Closure rate", closed / total if total else 0), ("Detained", detained), ("Projects", df.get_column("project").drop_nulls().n_unique()), ("Locations", df.get_column("location").drop_nulls().n_unique())]
         elif page == "services":
-            completed = distinct_where(pl.col("status").str.to_lowercase().str.contains("completed|اکتملت") & ~pl.col("status").str.to_lowercase().str.contains("uncompleted"))
-            in_process = distinct_where(pl.col("status").str.to_lowercase().str.contains("process|المعالجة"))
-            uncompleted = distinct_where(pl.col("status").str.to_lowercase().str.contains("uncompleted|لم تكتمل"))
+            completed = distinct_where(pl.col("status").str.to_lowercase().str.contains(COMPLETED_STATUS_PATTERN) & ~pl.col("status").str.to_lowercase().str.contains(UNCOMPLETED_STATUS_PATTERN))
+            in_process = distinct_where(pl.col("status").str.to_lowercase().str.contains(IN_PROCESS_STATUS_PATTERN))
+            uncompleted = distinct_where(pl.col("status").str.to_lowercase().str.contains(UNCOMPLETED_STATUS_PATTERN))
             kpis = [("Services" if measure == "records" else "Unique beneficiaries", total), ("Completed", completed), ("In process", in_process), ("Uncompleted", uncompleted), ("Completion rate", completed / total if total else 0), ("Projects", df.get_column("project").drop_nulls().n_unique()), ("Locations", df.get_column("location").drop_nulls().n_unique())]
         else:
             kpis = [("Deportation records", total), ("Destinations", df.get_column("destination").drop_nulls().n_unique()), ("Nationalities", df.get_column("nationality").drop_nulls().n_unique()), ("Authorities", df.get_column("authority").drop_nulls().n_unique()), ("Projects", df.get_column("project").drop_nulls().n_unique()), ("Locations", df.get_column("location").drop_nulls().n_unique())]
@@ -264,8 +284,8 @@ class DataStore:
         closed_trend = []
         if page == "assessment":
             valid_dates = ~pl.col("invalid_date") & pl.col("month").is_not_null()
-            open_by_month = df.filter(valid_dates & pl.col("status").str.to_lowercase().str.contains("open|pend|مفتوح|معلق")).group_by("month").agg(pl.col(metric).n_unique().alias("count")).sort("month")
-            closed_by_month = df.filter(valid_dates & pl.col("status").str.to_lowercase().str.contains("closed|مغلق")).group_by("month").agg(pl.col(metric).n_unique().alias("count")).sort("month")
+            open_by_month = df.filter(valid_dates & pl.col("status").str.to_lowercase().str.contains(OPEN_STATUS_PATTERN)).group_by("month").agg(pl.col(metric).n_unique().alias("count")).sort("month")
+            closed_by_month = df.filter(valid_dates & pl.col("status").str.to_lowercase().str.contains(CLOSED_STATUS_PATTERN)).group_by("month").agg(pl.col(metric).n_unique().alias("count")).sort("month")
             open_trend = [{"label": r["month"], "count": int(r["count"]), "percent": r["count"] / total if total else 0} for r in open_by_month.to_dicts()]
             closed_trend = [{"label": r["month"], "count": int(r["count"]), "percent": r["count"] / total if total else 0} for r in closed_by_month.to_dicts()]
         completion_trend = []
@@ -280,8 +300,8 @@ class DataStore:
         a, s, d = frames["assessment"], frames["services"], frames["deportation"]
         assessment_count = a.get_column("id").drop_nulls().n_unique()
         service_count = s.get_column("id").drop_nulls().n_unique()
-        completed = s.filter(pl.col("status").str.to_lowercase().str.contains("completed|اکتملت") & ~pl.col("status").str.to_lowercase().str.contains("uncompleted")).get_column("id").drop_nulls().n_unique()
-        open_count = a.filter(pl.col("status").str.to_lowercase().str.contains("open|pend|مفتوح|معلق")).get_column("id").drop_nulls().n_unique()
+        completed = s.filter(pl.col("status").str.to_lowercase().str.contains(COMPLETED_STATUS_PATTERN) & ~pl.col("status").str.to_lowercase().str.contains(UNCOMPLETED_STATUS_PATTERN)).get_column("id").drop_nulls().n_unique()
+        open_count = a.filter(pl.col("status").str.to_lowercase().str.contains(OPEN_STATUS_PATTERN)).get_column("id").drop_nulls().n_unique()
         assessed = a.get_column("beneficiary").drop_nulls().n_unique()
         served = s.get_column("beneficiary").drop_nulls().n_unique()
         assessed_ids = set(a.get_column("beneficiary").drop_nulls().unique().to_list())

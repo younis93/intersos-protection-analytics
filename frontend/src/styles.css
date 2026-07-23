@@ -1,5 +1,4 @@
-﻿@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
-:root{font-family:'DM Sans','Segoe UI',sans-serif;color:var(--ink);background:var(--bg);--blue:#1683d8;--bg:#eef5fb;--ink:#122334;--muted:#637586;--panel:rgba(255,255,255,.68);--panel-strong:rgba(255,255,255,.9);--line:rgba(255,255,255,.78);--shadow:0 18px 50px rgba(40,75,105,.12);--radius:24px}
+:root{font-family:'Segoe UI',sans-serif;color:var(--ink);background:var(--bg);--blue:#1683d8;--bg:#eef5fb;--ink:#122334;--muted:#637586;--panel:rgba(255,255,255,.68);--panel-strong:rgba(255,255,255,.9);--line:rgba(255,255,255,.78);--shadow:0 18px 50px rgba(40,75,105,.12);--radius:24px}
 :root[data-theme='glass-dark']{--bg:#07131e;--ink:#edf7ff;--muted:#9eb3c5;--panel:rgba(18,39,56,.66);--panel-strong:rgba(22,45,63,.94);--line:rgba(255,255,255,.12);--shadow:0 22px 60px rgba(0,0,0,.34)}
 :root[data-theme='unhcr']{--blue:#0072bc;--bg:#f3f7fa;--ink:#172b3a;--muted:#607789;--panel:#fff;--panel-strong:#fff;--line:#d7e3eb;--shadow:0 8px 26px rgba(18,66,98,.08);--radius:14px}
 :root[data-theme='executive']{--blue:#9b722a;--bg:#f4f2ed;--ink:#202a30;--muted:#6d7376;--panel:#fff;--panel-strong:#fff;--line:#d9d5cc;--shadow:0 8px 28px rgba(45,45,40,.08);--radius:8px}
