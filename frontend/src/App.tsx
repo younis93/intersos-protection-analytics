@@ -8,6 +8,8 @@ import {
   FileCheck2,
   Filter,
   LayoutDashboard,
+  Maximize2,
+  Minimize2,
   Palette,
   RotateCcw,
   RefreshCw,
@@ -131,12 +133,22 @@ export default function App() {
   const [updateInfo, setUpdateInfo] = useState<UpdateCheck | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateOpen, setUpdateOpen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(Boolean(document.fullscreenElement));
   const input = useRef<HTMLInputElement>(null);
   const copy = pageCopy[page];
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+  useEffect(() => {
+    const syncFullscreen = () => setFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    return () => document.removeEventListener("fullscreenchange", syncFullscreen);
+  }, []);
+  const toggleFullscreen = async () => {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else await document.documentElement.requestFullscreen();
+  };
   useEffect(() => {
     let active = true;
     const refreshUpdateInfo = (openWhenAvailable: boolean) => {
@@ -270,7 +282,6 @@ export default function App() {
           </div>
           <div>
             <strong>Protection Analytics</strong>
-            <small>CfP evidence workspace</small>
           </div>
         </div>
         <nav>
@@ -302,6 +313,7 @@ export default function App() {
                 ? `Loaded ${new Date(metadata.loadedAt).toLocaleString()}`
                 : ""}
             </small>
+            <div className="sidebar-credit"><span>Designed by</span><strong>Younis Jamal</strong></div>
           </div>
         </div>
       </aside>
@@ -311,6 +323,7 @@ export default function App() {
           <div className={`header-actions ${headerFiltersVisible ? "header-actions-pinned" : ""}`}>
             {headerFiltersVisible && <div className="header-filter-actions"><button className="primary" onClick={() => setDrawer(true)}><Filter/>Filters {activeCount > 0 && <b>{activeCount}</b>}</button><button className="soft" onClick={clearFilters} disabled={!activeCount}><RotateCcw/>Clear</button></div>}
             <AppSelect label="Theme" value={theme} onChange={(value) => setTheme(value as Theme)} variant="theme" icon={Palette} ariaLabel="Application theme" options={[["glass-light", "Liquid Glass Light"], ["glass-dark", "Liquid Glass Dark"], ["unhcr", "INTERSOS"], ["multicolor", "Chromatic Executive"], ["executive", "Executive Minimal"]]} />
+            <button className="soft fullscreen-button" onClick={toggleFullscreen} title={fullscreen ? "Exit full screen" : "Enter full screen"} aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}>{fullscreen ? <Minimize2/> : <Maximize2/>}<span>{fullscreen ? "Exit full screen" : "Full screen"}</span></button>
             <button className="soft update-button" onClick={checkUpdates} title="Check for updates"><RefreshCw/><span>Updates</span>{updateInfo?.available&&<b/>}</button>
             <button className="soft upload-button" onClick={() => input.current?.click()} disabled={uploading} aria-busy={uploading}>
               {uploading ? <span className="button-spinner"/> : <Upload />}
@@ -398,7 +411,7 @@ export default function App() {
               >
                 <div className="refresh-indicator">Updating filters…</div>
                 <div className="kpi-grid">
-                  {dash.kpis.map((k) => (
+                  {dash.kpis.filter((k) => page !== "executive" || !["Service coverage", "Beneficiaries served"].includes(k.label)).map((k) => (
                     <KpiCard key={k.label} {...k} />
                   ))}
                 </div>
@@ -406,7 +419,7 @@ export default function App() {
                   <TrendCard
                     rows={page === "assessment" && dash.openTrend ? dash.openTrend : dash.trend}
                     comparisonRows={page === "services" ? dash.completionTrend : page === "assessment" ? dash.closedTrend : undefined}
-                    primaryLabel={page === "assessment" ? "Open" : page === "services" ? "Started" : undefined}
+                    primaryLabel={page === "assessment" || page === "services" ? "Open" : undefined}
                     comparisonLabel={page === "assessment" ? "Closed" : "Completed"}
                     display={display}
                     theme={theme}
@@ -416,7 +429,7 @@ export default function App() {
                     }
                     title={
                       page === "services"
-                        ? "Services started and completed over time"
+                        ? "Services opened and completed over time"
                         : page === "assessment"
                           ? "Open and closed assessments over time"
                         : page === "executive"
@@ -438,10 +451,6 @@ export default function App() {
               </div>
             )
           )}
-          <footer className="designer-credit">
-            <span>Designed by</span>
-            <strong>Younis Jamal</strong>
-          </footer>
         </section>
       </main>
       {!["studio", "quality"].includes(page) && (

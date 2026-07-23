@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -82,7 +83,15 @@ def _clean_id(value: Any) -> str | None:
 def _text(value: Any) -> str | None:
     if pd.isna(value): return None
     value = " ".join(str(value).split())
-    return value or None
+    arabic = re.compile(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufeff]")
+    english_answers: list[str] = []
+    for answer in value.split(","):
+        match = arabic.search(answer)
+        english = answer[:match.start()] if match else answer
+        english = re.sub(r"[\s\-/–—]+$", "", english.strip())
+        if english and english not in english_answers:
+            english_answers.append(english)
+    return ",".join(english_answers) or None
 
 
 def _date_series(series: pd.Series) -> pd.Series:

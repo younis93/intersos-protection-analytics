@@ -3,7 +3,7 @@ from pathlib import Path
 
 import polars as pl
 
-from backend.analytics import DataStore
+from backend.analytics import DataStore, _text
 
 WORKBOOK = Path(__file__).resolve().parents[1] / "# Legal platform Analysis - share.xlsx"
 
@@ -47,6 +47,14 @@ class WorkbookAnalyticsTests(unittest.TestCase):
 
 
 class AnalyticsSecurityTests(unittest.TestCase):
+    def test_bilingual_answers_keep_each_english_choice(self):
+        self.assertEqual(
+            _text("Legal Assistance - مساعدة,Legal Counselling - استشارة"),
+            "Legal Assistance,Legal Counselling",
+        )
+        self.assertEqual(_text("Female أنثى"), "Female")
+        self.assertIsNone(_text("العربية فقط"))
+
     def test_csv_export_escapes_spreadsheet_formula_prefixes(self):
         store = DataStore(
             "test.xlsx",
