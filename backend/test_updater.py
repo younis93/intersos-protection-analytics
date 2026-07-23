@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from backend import updater
@@ -30,6 +31,12 @@ class UpdaterTests(unittest.TestCase):
             result = updater.check()
         self.assertFalse(result["available"])
         self.assertIn("Unable to check", result["message"])
+
+    def test_update_installer_gets_explicit_relaunch_marker(self):
+        command = updater._installer_command(Path("setup.exe"))
+        self.assertIn("/INTERSOSUPDATE", command)
+        self.assertIn("/NORESTART", command)
+        self.assertNotIn("/RESTARTAPPLICATIONS", command)
 
 
 if __name__ == "__main__":

@@ -65,6 +65,17 @@ def _set(**values: Any) -> None:
         _state.update(values)
 
 
+def _installer_command(target: Path) -> list[str]:
+    return [
+        str(target),
+        "/VERYSILENT",
+        "/SUPPRESSMSGBOXES",
+        "/CLOSEAPPLICATIONS",
+        "/NORESTART",
+        "/INTERSOSUPDATE",
+    ]
+
+
 def _download_and_install(manifest: dict[str, Any]) -> None:
     try:
         url = str(manifest["installerUrl"])
@@ -99,10 +110,17 @@ def _download_and_install(manifest: dict[str, Any]) -> None:
                 target.unlink(missing_ok=True)
                 raise ValueError("The update installer does not have a valid trusted signature")
         _set(phase="installing", progress=98)
-        subprocess.Popen([str(target), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"], close_fds=True)
+        creation_flags = 0
+        if os.name == "nt":
+            creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(
+            _installer_command(target),
+            close_fds=True,
+            creationflags=creation_flags,
+        )
         _set(phase="restarting", progress=100)
         if getattr(sys, "frozen", False):
-            time.sleep(2)
+            time.sleep(3)
             os._exit(0)
     except Exception as exc:
         _set(phase="error", error=str(exc))

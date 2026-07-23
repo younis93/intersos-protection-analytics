@@ -40,12 +40,30 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
-Filename: "{app}\{#MyAppExeName}"; Flags: nowait; Check: WizardSilent
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -WindowStyle Hidden -Command ""Start-Sleep -Seconds 3; if (-not (Get-Process -Name '{#MyAppName}' -ErrorAction SilentlyContinue)) {{ Start-Process -FilePath '{app}\{#MyAppExeName}' }}"""; Flags: nowait runhidden; Check: ShouldRestartAfterUpdate
 
 [Code]
 var
   CertificatePage: TWizardPage;
   CertificateConsent: TNewCheckBox;
+
+function IsUpdateInstall: Boolean;
+var
+  Index: Integer;
+begin
+  Result := False;
+  for Index := 1 to ParamCount do
+    if CompareText(ParamStr(Index), '/INTERSOSUPDATE') = 0 then
+    begin
+      Result := True;
+      exit;
+    end;
+end;
+
+function ShouldRestartAfterUpdate: Boolean;
+begin
+  Result := WizardSilent or IsUpdateInstall;
+end;
 
 function CertificateInstalled(const StoreName: String): Boolean;
 var

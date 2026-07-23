@@ -133,7 +133,7 @@ export default function App() {
   const [updateInfo, setUpdateInfo] = useState<UpdateCheck | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateOpen, setUpdateOpen] = useState(false);
-  const [fullscreen, setFullscreen] = useState(Boolean(document.fullscreenElement));
+  const [fullscreen, setFullscreen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const copy = pageCopy[page];
 
@@ -146,8 +146,14 @@ export default function App() {
     return () => document.removeEventListener("fullscreenchange", syncFullscreen);
   }, []);
   const toggleFullscreen = async () => {
-    if (document.fullscreenElement) await document.exitFullscreen();
-    else await document.documentElement.requestFullscreen();
+    const nativeApi = (window as any).pywebview?.api;
+    if (nativeApi?.toggle_fullscreen) {
+      setFullscreen(await nativeApi.toggle_fullscreen());
+    } else if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await document.documentElement.requestFullscreen();
+    }
   };
   useEffect(() => {
     let active = true;
@@ -323,7 +329,7 @@ export default function App() {
           <div className={`header-actions ${headerFiltersVisible ? "header-actions-pinned" : ""}`}>
             {headerFiltersVisible && <div className="header-filter-actions"><button className="primary" onClick={() => setDrawer(true)}><Filter/>Filters {activeCount > 0 && <b>{activeCount}</b>}</button><button className="soft" onClick={clearFilters} disabled={!activeCount}><RotateCcw/>Clear</button></div>}
             <AppSelect label="Theme" value={theme} onChange={(value) => setTheme(value as Theme)} variant="theme" icon={Palette} ariaLabel="Application theme" options={[["glass-light", "Liquid Glass Light"], ["glass-dark", "Liquid Glass Dark"], ["unhcr", "INTERSOS"], ["multicolor", "Chromatic Executive"], ["executive", "Executive Minimal"]]} />
-            <button className="soft fullscreen-button" onClick={toggleFullscreen} title={fullscreen ? "Exit full screen" : "Enter full screen"} aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}>{fullscreen ? <Minimize2/> : <Maximize2/>}<span>{fullscreen ? "Exit full screen" : "Full screen"}</span></button>
+            <button className="soft fullscreen-button" onClick={toggleFullscreen} title={fullscreen ? "Exit full screen" : "Enter full screen"} aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}>{fullscreen ? <Minimize2/> : <Maximize2/>}</button>
             <button className={`soft update-button ${updateInfo?.available ? "update-available" : ""}`} onClick={checkUpdates} title={updateInfo?.available ? `Version ${updateInfo.latestVersion} is available` : "Check for updates"}><RefreshCw/><span>{updateInfo?.available ? "Update available" : "Updates"}</span>{updateInfo?.available&&<b aria-label="New update available">New</b>}</button>
             <button className="soft upload-button" onClick={() => input.current?.click()} disabled={uploading} aria-busy={uploading}>
               {uploading ? <span className="button-spinner"/> : <Upload />}

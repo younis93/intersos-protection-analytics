@@ -55,6 +55,26 @@ class LocalServer:
             self.thread.join(timeout=5)
 
 
+class DesktopApi:
+    def __init__(self) -> None:
+        self.window: Any | None = None
+        self.fullscreen = False
+
+    def attach(self, window: Any) -> None:
+        self.window = window
+
+    def toggle_fullscreen(self) -> bool:
+        if self.window is None:
+            raise RuntimeError("The application window is not ready.")
+        self.fullscreen = not self.fullscreen
+        threading.Thread(
+            target=self.window.toggle_fullscreen,
+            name="intersos-fullscreen-toggle",
+            daemon=True,
+        ).start()
+        return self.fullscreen
+
+
 def main() -> None:
     os.environ["UNHCR_UPLOAD_ONLY"] = "1"
     os.environ["UNHCR_STATIC_DIR"] = str(resource_path("frontend", "dist"))
@@ -73,7 +93,8 @@ def main() -> None:
     webview.settings["ALLOW_DOWNLOADS"] = True
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     try:
-        webview.create_window(
+        desktop_api = DesktopApi()
+        window = webview.create_window(
             f"{APP_TITLE} {APP_VERSION}",
             url,
             width=1440,
@@ -82,7 +103,9 @@ def main() -> None:
             resizable=True,
             maximized=True,
             background_color="#f4f7fb",
+            js_api=desktop_api,
         )
+        desktop_api.attach(window)
         webview.start(gui="edgechromium", debug=False, private_mode=True)
     except Exception as exc:
         show_error(
