@@ -93,10 +93,16 @@ if errorlevel 1 goto :failed
 
 echo.
 echo SUCCESS: %TAG% was submitted to GitHub Actions.
-echo The signed installer and update.json will appear after the workflow finishes.
+echo Waiting for the signed installer and update.json...
 echo https://github.com/younis93/intersos-protection-analytics/actions
 echo.
 start "" "https://github.com/younis93/intersos-protection-analytics/actions"
+
+call "%~dp0sync-latest-release.cmd" "%VERSION%" --no-pause
+if errorlevel 1 goto :failed
+
+echo.
+echo GitHub release %TAG% is published and the local release folder is synchronized.
 pause
 exit /b 0
 
