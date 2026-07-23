@@ -38,7 +38,7 @@ jobs:
         run: |
           python -m unittest discover backend
           npm run build --prefix frontend
-          python -m PyInstaller --noconfirm --clean --onedir --name "INTERSOS Protection Analytics" --icon intersos-protection-analytics.ico --distpath packaging-temp/dist --workpath packaging-temp/work --specpath packaging-temp/spec --add-data "frontend/dist;frontend/dist" --collect-all polars --collect-all pyarrow --collect-all pandas --collect-all openpyxl desktop_launcher.py
+          python -m PyInstaller --noconfirm --clean --onedir --name "INTERSOS Protection Analytics" --icon "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico" --distpath packaging-temp/dist --workpath packaging-temp/work --specpath packaging-temp/spec --add-data "$env:GITHUB_WORKSPACE\frontend\dist;frontend\dist" --collect-all polars "$env:GITHUB_WORKSPACE\desktop_launcher.py"
       - name: Sign application and build signed installer
         shell: pwsh
         env:

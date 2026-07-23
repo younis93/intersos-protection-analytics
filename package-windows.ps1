@@ -21,7 +21,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'frontend\node_modules'
 if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
 & $VenvPython -m pip install pyinstaller
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller installation failed.' }
-& $VenvPython -m PyInstaller --noconfirm --clean --onedir --name 'INTERSOS Protection Analytics' --icon (Join-Path $ProjectRoot 'intersos-protection-analytics.ico') --distpath $BuildDist --workpath $BuildWork --specpath $BuildSpec --add-data "$ProjectRoot\frontend\dist;frontend\dist" --collect-all polars --collect-all pyarrow --collect-all pandas --collect-all openpyxl (Join-Path $ProjectRoot 'desktop_launcher.py')
+& $VenvPython -m PyInstaller --noconfirm --clean --onedir --name 'INTERSOS Protection Analytics' --icon (Join-Path $ProjectRoot 'intersos-protection-analytics.ico') --distpath $BuildDist --workpath $BuildWork --specpath $BuildSpec --add-data "$ProjectRoot\frontend\dist;frontend\dist" --collect-all polars (Join-Path $ProjectRoot 'desktop_launcher.py')
 if ($LASTEXITCODE -ne 0) { throw 'Portable application build failed.' }
 
 if (Test-Path -LiteralPath $StagingReleaseRoot) { Remove-Item -LiteralPath $StagingReleaseRoot -Recurse -Force }
