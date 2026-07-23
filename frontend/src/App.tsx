@@ -57,6 +57,7 @@ const nav: { id: Page; label: string; icon: any }[] = [
   { id: "quality", label: "Data Quality", icon: Database },
 ];
 const pageIds = new Set<Page>(nav.map(({ id }) => id));
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const pageFromUrl = (): Page => {
   const candidate = window.location.hash.replace(/^#\/?/, "") as Page;
   return pageIds.has(candidate) ? candidate : "executive";
@@ -137,7 +138,20 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
   useEffect(() => {
-    checkForUpdates().then((info) => { setUpdateInfo(info); if (info.available) setUpdateOpen(true); }).catch(() => {});
+    let active = true;
+    const refreshUpdateInfo = (openWhenAvailable: boolean) => {
+      checkForUpdates().then((info) => {
+        if (!active) return;
+        setUpdateInfo(info);
+        if (openWhenAvailable && info.available) setUpdateOpen(true);
+      }).catch(() => {});
+    };
+    refreshUpdateInfo(true);
+    const timer = window.setInterval(() => refreshUpdateInfo(false), UPDATE_CHECK_INTERVAL_MS);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, []);
   useEffect(() => {
     if (!updateStatus || !["downloading","verifying","installing","restarting"].includes(updateStatus.phase)) return;

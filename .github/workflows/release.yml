@@ -47,10 +47,22 @@ jobs:
         run: |
           if (-not $env:SIGNING_CERTIFICATE_BASE64 -or -not $env:SIGNING_CERTIFICATE_PASSWORD) { throw "Official releases require signing secrets." }
           [IO.File]::WriteAllBytes("certificate.pfx", [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_BASE64))
+          $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+          $pfxCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new((Resolve-Path "certificate.pfx").Path, $env:SIGNING_CERTIFICATE_PASSWORD, $flags)
+          $installerCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new((Resolve-Path "installer/INTERSOS-Code-Signing.cer").Path)
+          $expectedThumbprint = "C4F1B12A3BCCC73BEF903FA3796304CF0E67670D"
+          if ($pfxCertificate.Thumbprint -ne $expectedThumbprint) { throw "The PFX signing certificate does not match the approved INTERSOS thumbprint." }
+          if ($installerCertificate.Thumbprint -ne $expectedThumbprint) { throw "The installer CER does not match the approved INTERSOS thumbprint." }
+          if ($pfxCertificate.Thumbprint -ne $installerCertificate.Thumbprint) { throw "The installer CER and PFX signing certificate do not match." }
+          $pfxCertificate.Dispose()
+          $installerCertificate.Dispose()
           $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Filter signtool.exe -Recurse | Sort-Object FullName -Descending | Select-Object -First 1).FullName
           & $signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f certificate.pfx /p $env:SIGNING_CERTIFICATE_PASSWORD "packaging-temp/dist/INTERSOS Protection Analytics/INTERSOS Protection Analytics.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Application signing failed." }
           iscc "/DMyAppVersion=$env:APP_VERSION" "installer/INTERSOS Protection Analytics.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Installer build failed." }
           & $signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f certificate.pfx /p $env:SIGNING_CERTIFICATE_PASSWORD "release/INTERSOS-Protection-Analytics-Setup-$env:APP_VERSION.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Installer signing failed." }
           Remove-Item certificate.pfx -Force
       - name: Generate update manifest
         run: python scripts/generate_update_manifest.py "$env:APP_VERSION" "${{ github.repository }}" "release/INTERSOS-Protection-Analytics-Setup-$env:APP_VERSION.exe" "release/update.json"

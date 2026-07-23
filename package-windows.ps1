@@ -31,9 +31,16 @@ Copy-Item -Force (Join-Path $ProjectRoot 'PORTABLE-README.txt') $StagingReleaseR
 Compress-Archive -Path (Join-Path $StagingReleaseRoot '*') -DestinationPath (Join-Path $ProjectRoot 'release\INTERSOS-Protection-Analytics-Windows.zip') -Force
 Write-Host "Portable package created in $ProjectRoot\release"
 
-$InnoCompiler = Get-Command iscc.exe -ErrorAction SilentlyContinue
+$InnoCompiler = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source
+if (-not $InnoCompiler) {
+    $InnoCompiler = @(
+        (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe')
+        (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
+        (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe')
+    ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+}
 if ($InnoCompiler) {
-    & $InnoCompiler.Source "/DMyAppVersion=1.0.0" (Join-Path $ProjectRoot 'installer\INTERSOS Protection Analytics.iss')
+    & $InnoCompiler "/DMyAppVersion=1.0.0" (Join-Path $ProjectRoot 'installer\INTERSOS Protection Analytics.iss')
     if ($LASTEXITCODE -ne 0) { throw 'Windows installer build failed.' }
     Write-Host "Per-user installer created in $ProjectRoot\release"
 } else {
