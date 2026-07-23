@@ -33,19 +33,18 @@ Source: "MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
-
-[Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Check: ShouldCreateDesktopShortcut
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait; Check: ShouldLaunchAfterInstall
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -WindowStyle Hidden -Command ""$deadline = (Get-Date).AddSeconds(30); do {{ $running = Get-Process -Name '{#MyAppName}' -ErrorAction SilentlyContinue; if (-not $running) {{ break }}; Start-Sleep -Seconds 1 }} while ((Get-Date) -lt $deadline); if (-not (Get-Process -Name '{#MyAppName}' -ErrorAction SilentlyContinue)) {{ Start-Process -FilePath '{app}\{#MyAppExeName}' }}"""; Flags: nowait runhidden; Check: ShouldRestartAfterUpdate
 
 [Code]
 var
   CertificatePage: TWizardPage;
   CertificateConsent: TNewCheckBox;
+  DesktopShortcutConsent: TNewCheckBox;
+  LaunchAfterInstallConsent: TNewCheckBox;
 
 function IsUpdateInstall: Boolean;
 var
@@ -63,6 +62,16 @@ end;
 function ShouldRestartAfterUpdate: Boolean;
 begin
   Result := WizardSilent or IsUpdateInstall;
+end;
+
+function ShouldCreateDesktopShortcut: Boolean;
+begin
+  Result := (not WizardSilent) and DesktopShortcutConsent.Checked;
+end;
+
+function ShouldLaunchAfterInstall: Boolean;
+begin
+  Result := (not WizardSilent) and LaunchAfterInstallConsent.Checked;
 end;
 
 function CertificateInstalled(const StoreName: String): Boolean;
@@ -148,16 +157,16 @@ procedure InitializeWizard;
 var
   Details: TNewStaticText;
 begin
-  CertificatePage := CreateCustomPage(wpSelectTasks,
-    'Enable trusted application updates',
-    'Confirm the INTERSOS code-signing certificate');
+  CertificatePage := CreateCustomPage(wpSelectDir,
+    'Installation options',
+    'Confirm the publisher and choose application shortcuts');
 
   Details := TNewStaticText.Create(CertificatePage);
   Details.Parent := CertificatePage.Surface;
   Details.Left := 0;
   Details.Top := 0;
   Details.Width := CertificatePage.SurfaceWidth;
-  Details.Height := ScaleY(150);
+  Details.Height := ScaleY(125);
   Details.AutoSize := False;
   Details.WordWrap := True;
   Details.Caption :=
@@ -175,7 +184,26 @@ begin
   CertificateConsent.Height := ScaleY(24);
   CertificateConsent.Caption :=
     'I confirm the publisher and allow trusted automatic updates.';
-  CertificateConsent.Checked := False;
+  CertificateConsent.Checked := UpdateTrustReady;
+  CertificateConsent.Enabled := not UpdateTrustReady;
+
+  DesktopShortcutConsent := TNewCheckBox.Create(CertificatePage);
+  DesktopShortcutConsent.Parent := CertificatePage.Surface;
+  DesktopShortcutConsent.Left := 0;
+  DesktopShortcutConsent.Top := CertificateConsent.Top + CertificateConsent.Height + ScaleY(8);
+  DesktopShortcutConsent.Width := CertificatePage.SurfaceWidth;
+  DesktopShortcutConsent.Height := ScaleY(24);
+  DesktopShortcutConsent.Caption := 'Create a desktop shortcut.';
+  DesktopShortcutConsent.Checked := True;
+
+  LaunchAfterInstallConsent := TNewCheckBox.Create(CertificatePage);
+  LaunchAfterInstallConsent.Parent := CertificatePage.Surface;
+  LaunchAfterInstallConsent.Left := 0;
+  LaunchAfterInstallConsent.Top := DesktopShortcutConsent.Top + DesktopShortcutConsent.Height + ScaleY(8);
+  LaunchAfterInstallConsent.Width := CertificatePage.SurfaceWidth;
+  LaunchAfterInstallConsent.Height := ScaleY(24);
+  LaunchAfterInstallConsent.Caption := 'Launch INTERSOS Protection Analytics after installation.';
+  LaunchAfterInstallConsent.Checked := True;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
