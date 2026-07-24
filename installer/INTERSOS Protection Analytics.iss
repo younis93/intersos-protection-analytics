@@ -27,9 +27,10 @@ ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
 WizardStyle=modern
 WizardSizePercent=110
-WizardImageFile=wizard-sidebar.bmp
-WizardSmallImageFile=wizard-header.bmp
-DisableWelcomePage=no
+DisableWelcomePage=yes
+DisableDirPage=no
+DisableReadyPage=yes
+DisableProgramGroupPage=yes
 SetupLogging=yes
 
 [Files]
@@ -39,48 +40,13 @@ Source: "MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Check: ShouldCreateDesktopShortcut
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Flags: nowait; Check: ShouldLaunchAfterInstall
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -WindowStyle Hidden -Command ""$deadline = (Get-Date).AddSeconds(30); do {{ $running = Get-Process -Name '{#MyAppName}' -ErrorAction SilentlyContinue; if (-not $running) {{ break }}; Start-Sleep -Seconds 1 }} while ((Get-Date) -lt $deadline); if (-not (Get-Process -Name '{#MyAppName}' -ErrorAction SilentlyContinue)) {{ Start-Process -FilePath '{app}\{#MyAppExeName}' }}"""; Flags: nowait runhidden; Check: ShouldRestartAfterUpdate
 
 [Code]
-var
-  CertificatePage: TWizardPage;
-  CertificateConsent: TNewCheckBox;
-  DesktopShortcutConsent: TNewCheckBox;
-  LaunchAfterInstallConsent: TNewCheckBox;
-
-procedure AddSectionHeading(Page: TWizardPage; const Caption: String; Top: Integer);
-var
-  Heading: TNewStaticText;
-begin
-  Heading := TNewStaticText.Create(Page);
-  Heading.Parent := Page.Surface;
-  Heading.Left := 0;
-  Heading.Top := Top;
-  Heading.Width := Page.SurfaceWidth;
-  Heading.Height := ScaleY(22);
-  Heading.AutoSize := False;
-  Heading.Caption := Caption;
-  Heading.Font.Name := 'Segoe UI Semibold';
-  Heading.Font.Size := 10;
-  Heading.Font.Color := $00783F16;
-end;
-
-procedure AddDivider(Page: TWizardPage; Top: Integer);
-var
-  Divider: TBevel;
-begin
-  Divider := TBevel.Create(Page);
-  Divider.Parent := Page.Surface;
-  Divider.Left := 0;
-  Divider.Top := Top;
-  Divider.Width := Page.SurfaceWidth;
-  Divider.Height := 1;
-  Divider.Shape := bsTopLine;
-end;
 
 function HasCommandLineSwitch(const SwitchName: String): Boolean;
 var
@@ -106,14 +72,9 @@ begin
     (not HasCommandLineSwitch('/EXTERNALRELAUNCH'));
 end;
 
-function ShouldCreateDesktopShortcut: Boolean;
-begin
-  Result := (not WizardSilent) and DesktopShortcutConsent.Checked;
-end;
-
 function ShouldLaunchAfterInstall: Boolean;
 begin
-  Result := (not WizardSilent) and LaunchAfterInstallConsent.Checked;
+  Result := (not WizardSilent) and (not IsUpdateInstall);
 end;
 
 function CertificateInstalled(const StoreName: String): Boolean;
@@ -212,13 +173,7 @@ begin
 end;
 
 procedure InitializeWizard;
-var
-  Details: TNewStaticText;
 begin
-  CertificatePage := CreateCustomPage(wpSelectDir,
-    'Configure your installation',
-    'Secure updates and convenient shortcuts');
-
   WizardForm.Caption := '{#MyAppName} Setup';
   WizardForm.Font.Name := 'Segoe UI';
   WizardForm.Font.Size := 9;
@@ -229,54 +184,9 @@ begin
   WizardForm.PageNameLabel.Font.Color := $00783F16;
   WizardForm.PageDescriptionLabel.Font.Name := 'Segoe UI';
   WizardForm.PageDescriptionLabel.Font.Color := $007D6549;
-  WizardForm.NextButton.Caption := '&Continue';
-
-  AddSectionHeading(CertificatePage, 'SECURE AUTOMATIC UPDATES', 0);
-
-  Details := TNewStaticText.Create(CertificatePage);
-  Details.Parent := CertificatePage.Surface;
-  Details.Left := 0;
-  Details.Top := ScaleY(28);
-  Details.Width := CertificatePage.SurfaceWidth;
-  Details.Height := ScaleY(82);
-  Details.AutoSize := False;
-  Details.WordWrap := True;
-  Details.Caption :=
-    'Trust the public INTERSOS certificate for this Windows account so future signed updates can be verified automatically.' + #13#10#13#10 +
-    'Publisher: INTERSOS  |  Certificate: {#SigningCertificateThumbprint}';
-  Details.Font.Color := $007D6549;
-
-  CertificateConsent := TNewCheckBox.Create(CertificatePage);
-  CertificateConsent.Parent := CertificatePage.Surface;
-  CertificateConsent.Left := 0;
-  CertificateConsent.Top := Details.Top + Details.Height + ScaleY(12);
-  CertificateConsent.Width := CertificatePage.SurfaceWidth;
-  CertificateConsent.Height := ScaleY(24);
-  CertificateConsent.Caption :=
-    'Enable trusted, signed automatic updates (required).';
-  CertificateConsent.Checked := UpdateTrustReady;
-  CertificateConsent.Enabled := not UpdateTrustReady;
-
-  AddDivider(CertificatePage, CertificateConsent.Top + CertificateConsent.Height + ScaleY(14));
-  AddSectionHeading(CertificatePage, 'SHORTCUTS AND STARTUP', CertificateConsent.Top + CertificateConsent.Height + ScaleY(28));
-
-  DesktopShortcutConsent := TNewCheckBox.Create(CertificatePage);
-  DesktopShortcutConsent.Parent := CertificatePage.Surface;
-  DesktopShortcutConsent.Left := 0;
-  DesktopShortcutConsent.Top := CertificateConsent.Top + CertificateConsent.Height + ScaleY(58);
-  DesktopShortcutConsent.Width := CertificatePage.SurfaceWidth;
-  DesktopShortcutConsent.Height := ScaleY(24);
-  DesktopShortcutConsent.Caption := 'Create a desktop shortcut.';
-  DesktopShortcutConsent.Checked := True;
-
-  LaunchAfterInstallConsent := TNewCheckBox.Create(CertificatePage);
-  LaunchAfterInstallConsent.Parent := CertificatePage.Surface;
-  LaunchAfterInstallConsent.Left := 0;
-  LaunchAfterInstallConsent.Top := DesktopShortcutConsent.Top + DesktopShortcutConsent.Height + ScaleY(8);
-  LaunchAfterInstallConsent.Width := CertificatePage.SurfaceWidth;
-  LaunchAfterInstallConsent.Height := ScaleY(24);
-  LaunchAfterInstallConsent.Caption := 'Launch INTERSOS Protection Analytics after installation.';
-  LaunchAfterInstallConsent.Checked := True;
+  WizardForm.WizardSmallBitmapImage.Visible := False;
+  WizardForm.PageNameLabel.Width := WizardForm.MainPanel.Width - WizardForm.PageNameLabel.Left - ScaleX(20);
+  WizardForm.PageDescriptionLabel.Width := WizardForm.PageNameLabel.Width;
 end;
 
 function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo,
@@ -284,46 +194,37 @@ function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo,
 var
   FreeBytes: Int64;
   TotalBytes: Int64;
-  TrustStatus: String;
-  ShortcutStatus: String;
-  LaunchStatus: String;
   DiskStatus: String;
 begin
-  if UpdateTrustReady then
-    TrustStatus := 'Already trusted for this Windows account'
-  else
-    TrustStatus := 'Install the verified INTERSOS public certificate';
-  if DesktopShortcutConsent.Checked then ShortcutStatus := 'Create desktop shortcut'
-    else ShortcutStatus := 'Do not create desktop shortcut';
-  if LaunchAfterInstallConsent.Checked then LaunchStatus := 'Launch after installation'
-    else LaunchStatus := 'Do not launch automatically';
   if GetSpaceOnDisk64(WizardDirValue, FreeBytes, TotalBytes) then
-    DiskStatus := Format('Available disk space: %.1n MB', [FreeBytes div 1048576])
+    DiskStatus := Format('Available disk space: %d MB', [FreeBytes div 1048576])
   else
     DiskStatus := 'Available disk space: Windows will verify before installation';
 
   Result :=
     'INTERSOS PROTECTION ANALYTICS  {#MyAppVersion}' + NewLine + NewLine +
-    'Destination' + NewLine + Space + WizardDirValue + NewLine + NewLine +
-    'Secure updates' + NewLine + Space + TrustStatus + NewLine + NewLine +
-    'Preferences' + NewLine + Space + ShortcutStatus + NewLine +
-    Space + LaunchStatus + NewLine + NewLine + DiskStatus + NewLine + NewLine +
+    'A secure desktop workspace for protection analysis, interactive charts, data exploration, and presentation-ready reporting.' + NewLine + NewLine +
+    'Setup will automatically:' + NewLine +
+    Space + '- Install the application for your Windows account' + NewLine +
+    Space + '- Enable verified, signed automatic updates' + NewLine +
+    Space + '- Create Start menu and desktop shortcuts' + NewLine +
+    Space + '- Install Microsoft WebView2 if required' + NewLine +
+    Space + '- Launch the application when setup is complete' + NewLine + NewLine +
+    'Installation folder' + NewLine + Space + WizardDirValue + NewLine + NewLine +
+    DiskStatus + NewLine + NewLine +
     'Select Install to begin.';
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin
-  if CurPageID = wpWelcome then
+  if CurPageID = wpSelectDir then
   begin
-    WizardForm.WelcomeLabel1.Caption := 'Welcome to {#MyAppName}';
-    WizardForm.WelcomeLabel2.Caption :=
-      'A secure desktop workspace for protection analysis and reporting.' + #13#10#13#10 +
-      'Setup will guide you through a few quick choices.';
-  end;
-  if CurPageID = wpReady then
+    WizardForm.PageNameLabel.Caption := 'Install {#MyAppName}';
+    WizardForm.PageDescriptionLabel.Caption := 'Choose where the application will be installed';
+    WizardForm.SelectDirLabel.Caption :=
+      'Select the installation folder below. Setup will configure secure updates and create the required shortcuts automatically.';
     WizardForm.NextButton.Caption := '&Install'
-  else if CurPageID <> wpInstalling then
-    WizardForm.NextButton.Caption := '&Continue';
+  end;
   if CurPageID = wpFinished then
   begin
     WizardForm.FinishedHeadingLabel.Caption := 'Installation complete';
@@ -347,18 +248,6 @@ begin
     WizardForm.StatusLabel.Caption := 'Installation complete.';
 end;
 
-function NextButtonClick(CurPageID: Integer): Boolean;
-begin
-  Result := True;
-  if (CurPageID = CertificatePage.ID) and (not UpdateTrustReady) and
-     (not CertificateConsent.Checked) then
-  begin
-    MsgBox('You must confirm the INTERSOS signing certificate to install the application and enable secure updates.',
-      mbError, MB_OK);
-    Result := False;
-  end;
-end;
-
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   CertificatePath: String;
@@ -374,18 +263,6 @@ begin
 
   if not UpdateTrustReady then
   begin
-    if WizardSilent then
-    begin
-      Result := 'The first installation must be run interactively so the INTERSOS signing certificate can be confirmed.';
-      exit;
-    end;
-
-    if not CertificateConsent.Checked then
-    begin
-      Result := 'The INTERSOS signing certificate was not confirmed.';
-      exit;
-    end;
-
     ExtractTemporaryFile('{#SigningCertificateName}');
     CertificatePath := ExpandConstant('{tmp}\{#SigningCertificateName}');
     RootAdded := False;
