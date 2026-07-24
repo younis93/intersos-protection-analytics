@@ -25,6 +25,12 @@ RestartApplications=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
+WizardStyle=modern
+WizardSizePercent=110
+WizardImageFile=wizard-sidebar.bmp
+WizardSmallImageFile=wizard-header.bmp
+DisableWelcomePage=no
+SetupLogging=yes
 
 [Files]
 Source: "..\packaging-temp\dist\INTERSOS Protection Analytics\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -45,6 +51,36 @@ var
   CertificateConsent: TNewCheckBox;
   DesktopShortcutConsent: TNewCheckBox;
   LaunchAfterInstallConsent: TNewCheckBox;
+
+procedure AddSectionHeading(Page: TWizardPage; const Caption: String; Top: Integer);
+var
+  Heading: TNewStaticText;
+begin
+  Heading := TNewStaticText.Create(Page);
+  Heading.Parent := Page.Surface;
+  Heading.Left := 0;
+  Heading.Top := Top;
+  Heading.Width := Page.SurfaceWidth;
+  Heading.Height := ScaleY(22);
+  Heading.AutoSize := False;
+  Heading.Caption := Caption;
+  Heading.Font.Name := 'Segoe UI Semibold';
+  Heading.Font.Size := 10;
+  Heading.Font.Color := $00783F16;
+end;
+
+procedure AddDivider(Page: TWizardPage; Top: Integer);
+var
+  Divider: TBevel;
+begin
+  Divider := TBevel.Create(Page);
+  Divider.Parent := Page.Surface;
+  Divider.Left := 0;
+  Divider.Top := Top;
+  Divider.Width := Page.SurfaceWidth;
+  Divider.Height := 1;
+  Divider.Shape := bsTopLine;
+end;
 
 function HasCommandLineSwitch(const SwitchName: String): Boolean;
 var
@@ -180,23 +216,35 @@ var
   Details: TNewStaticText;
 begin
   CertificatePage := CreateCustomPage(wpSelectDir,
-    'Installation options',
-    'Confirm the publisher and choose application shortcuts');
+    'Configure your installation',
+    'Secure updates and convenient shortcuts');
+
+  WizardForm.Caption := '{#MyAppName} Setup';
+  WizardForm.Font.Name := 'Segoe UI';
+  WizardForm.Font.Size := 9;
+  WizardForm.Color := clWhite;
+  WizardForm.MainPanel.Color := clWhite;
+  WizardForm.PageNameLabel.Font.Name := 'Segoe UI Semibold';
+  WizardForm.PageNameLabel.Font.Size := 13;
+  WizardForm.PageNameLabel.Font.Color := $00783F16;
+  WizardForm.PageDescriptionLabel.Font.Name := 'Segoe UI';
+  WizardForm.PageDescriptionLabel.Font.Color := $007D6549;
+  WizardForm.NextButton.Caption := '&Continue';
+
+  AddSectionHeading(CertificatePage, 'SECURE AUTOMATIC UPDATES', 0);
 
   Details := TNewStaticText.Create(CertificatePage);
   Details.Parent := CertificatePage.Surface;
   Details.Left := 0;
-  Details.Top := 0;
+  Details.Top := ScaleY(28);
   Details.Width := CertificatePage.SurfaceWidth;
-  Details.Height := ScaleY(125);
+  Details.Height := ScaleY(82);
   Details.AutoSize := False;
   Details.WordWrap := True;
   Details.Caption :=
-    'This setup will trust the public certificate used to verify future INTERSOS Protection Analytics updates for your Windows account.' + #13#10#13#10 +
-    'Publisher: INTERSOS Protection Analytics' + #13#10 +
-    'Certificate thumbprint:' + #13#10 +
-    '{#SigningCertificateThumbprint}' + #13#10#13#10 +
-    'The private signing key is not included in this installer.';
+    'Trust the public INTERSOS certificate for this Windows account so future signed updates can be verified automatically.' + #13#10#13#10 +
+    'Publisher: INTERSOS  |  Certificate: {#SigningCertificateThumbprint}';
+  Details.Font.Color := $007D6549;
 
   CertificateConsent := TNewCheckBox.Create(CertificatePage);
   CertificateConsent.Parent := CertificatePage.Surface;
@@ -205,14 +253,17 @@ begin
   CertificateConsent.Width := CertificatePage.SurfaceWidth;
   CertificateConsent.Height := ScaleY(24);
   CertificateConsent.Caption :=
-    'I confirm the publisher and allow trusted automatic updates.';
+    'Enable trusted, signed automatic updates (required).';
   CertificateConsent.Checked := UpdateTrustReady;
   CertificateConsent.Enabled := not UpdateTrustReady;
+
+  AddDivider(CertificatePage, CertificateConsent.Top + CertificateConsent.Height + ScaleY(14));
+  AddSectionHeading(CertificatePage, 'SHORTCUTS AND STARTUP', CertificateConsent.Top + CertificateConsent.Height + ScaleY(28));
 
   DesktopShortcutConsent := TNewCheckBox.Create(CertificatePage);
   DesktopShortcutConsent.Parent := CertificatePage.Surface;
   DesktopShortcutConsent.Left := 0;
-  DesktopShortcutConsent.Top := CertificateConsent.Top + CertificateConsent.Height + ScaleY(8);
+  DesktopShortcutConsent.Top := CertificateConsent.Top + CertificateConsent.Height + ScaleY(58);
   DesktopShortcutConsent.Width := CertificatePage.SurfaceWidth;
   DesktopShortcutConsent.Height := ScaleY(24);
   DesktopShortcutConsent.Caption := 'Create a desktop shortcut.';
@@ -226,6 +277,74 @@ begin
   LaunchAfterInstallConsent.Height := ScaleY(24);
   LaunchAfterInstallConsent.Caption := 'Launch INTERSOS Protection Analytics after installation.';
   LaunchAfterInstallConsent.Checked := True;
+end;
+
+function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo,
+  MemoTypeInfo, MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
+var
+  FreeBytes: Int64;
+  TotalBytes: Int64;
+  TrustStatus: String;
+  ShortcutStatus: String;
+  LaunchStatus: String;
+  DiskStatus: String;
+begin
+  if UpdateTrustReady then
+    TrustStatus := 'Already trusted for this Windows account'
+  else
+    TrustStatus := 'Install the verified INTERSOS public certificate';
+  if DesktopShortcutConsent.Checked then ShortcutStatus := 'Create desktop shortcut'
+    else ShortcutStatus := 'Do not create desktop shortcut';
+  if LaunchAfterInstallConsent.Checked then LaunchStatus := 'Launch after installation'
+    else LaunchStatus := 'Do not launch automatically';
+  if GetSpaceOnDisk64(WizardDirValue, FreeBytes, TotalBytes) then
+    DiskStatus := Format('Available disk space: %.1n MB', [FreeBytes div 1048576])
+  else
+    DiskStatus := 'Available disk space: Windows will verify before installation';
+
+  Result :=
+    'INTERSOS PROTECTION ANALYTICS  {#MyAppVersion}' + NewLine + NewLine +
+    'Destination' + NewLine + Space + WizardDirValue + NewLine + NewLine +
+    'Secure updates' + NewLine + Space + TrustStatus + NewLine + NewLine +
+    'Preferences' + NewLine + Space + ShortcutStatus + NewLine +
+    Space + LaunchStatus + NewLine + NewLine + DiskStatus + NewLine + NewLine +
+    'Select Install to begin.';
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = wpWelcome then
+  begin
+    WizardForm.WelcomeLabel1.Caption := 'Welcome to {#MyAppName}';
+    WizardForm.WelcomeLabel2.Caption :=
+      'A secure desktop workspace for protection analysis and reporting.' + #13#10#13#10 +
+      'Setup will guide you through a few quick choices.';
+  end;
+  if CurPageID = wpReady then
+    WizardForm.NextButton.Caption := '&Install'
+  else if CurPageID <> wpInstalling then
+    WizardForm.NextButton.Caption := '&Continue';
+  if CurPageID = wpFinished then
+  begin
+    WizardForm.FinishedHeadingLabel.Caption := 'Installation complete';
+    WizardForm.FinishedLabel.Caption :=
+      '{#MyAppName} is ready to use. Your secure update settings and shortcuts have been configured.';
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+  begin
+    if IsUpdateInstall then
+      WizardForm.StatusLabel.Caption := 'Updating {#MyAppName} safely...'
+    else
+      WizardForm.StatusLabel.Caption := 'Installing {#MyAppName}...';
+  end;
+  if CurStep = ssPostInstall then
+    WizardForm.StatusLabel.Caption := 'Finalizing shortcuts and secure update settings...';
+  if CurStep = ssDone then
+    WizardForm.StatusLabel.Caption := 'Installation complete.';
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;

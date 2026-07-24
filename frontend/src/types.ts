@@ -14,5 +14,11 @@ export interface Dashboard {page:string;measure:string;total:number;filteredRows
 export interface QualityRow {page:string;severity:string;check:string;count:number;rate:number;impact:string}
 export interface StudioCell {row:string;column:string;count:number;percent:number}
 export interface StudioResult {page:string;rowDimension:string;columnDimension?:string;measure:string;total:number;cells:StudioCell[]}
+export type StudioSort = 'value-desc'|'value-asc'|'label-asc'|'label-desc'|'source';
+export type StudioTopN = 'all'|5|10|15|20;
+export type StudioValueMode = 'count'|'percent-total'|'percent-series'|'percent-row';
+export type StudioLabelMode = 'auto'|'show'|'hide';
+export type StudioOrientation = 'horizontal'|'vertical';
+export interface StudioChartOptions {sort:StudioSort;topN:StudioTopN;valueMode:StudioValueMode;labelMode:StudioLabelMode;orientation:StudioOrientation}
 export interface UpdateCheck {enabled:boolean;currentVersion:string;available:boolean;latestVersion?:string;notes?:string;publishedAt?:string;message?:string}
 export interface UpdateStatus {phase:'idle'|'downloading'|'verifying'|'installing'|'restarting'|'error';progress:number;error?:string|null;currentVersion:string}
