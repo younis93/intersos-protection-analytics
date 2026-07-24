@@ -14,6 +14,7 @@ import {
   RotateCcw,
   RefreshCw,
   ShieldCheck,
+  TableProperties,
   Upload,
 } from "lucide-react";
 import {
@@ -37,6 +38,7 @@ import {
   TrendCard,
 } from "./components";
 import Studio from "./Studio";
+import DataExplorer from "./DataExplorer";
 import type {
   Dashboard,
   Display,
@@ -56,6 +58,7 @@ const nav: { id: Page; label: string; icon: any }[] = [
   { id: "services", label: "Services", icon: FileCheck2 },
   { id: "deportation", label: "Deportation", icon: ShieldCheck },
   { id: "studio", label: "Analytics Studio", icon: LayoutDashboard },
+  { id: "explorer", label: "Data Explorer", icon: TableProperties },
   { id: "quality", label: "Data Quality", icon: Database },
 ];
 const pageIds = new Set<Page>(nav.map(({ id }) => id));
@@ -97,6 +100,12 @@ const pageCopy: Record<
     title: "Analytics Studio",
     subtitle:
       "Create a professional chart or pivot table from one or two dimensions with connected filters.",
+  },
+  explorer: {
+    eyebrow: "WORKBOOK DATA",
+    title: "Data Explorer",
+    subtitle:
+      "Search, filter, inspect and export every column in the uploaded workbook.",
   },
   quality: {
     eyebrow: "TRUST & METHODOLOGY",
@@ -197,7 +206,7 @@ export default function App() {
       .finally(() => setLoading(false));
   }, []);
   useEffect(() => {
-    if (page === "quality" || page === "studio" || !metadata || !metadata.ready) return;
+    if (page === "quality" || page === "studio" || page === "explorer" || !metadata || !metadata.ready) return;
     if (!dash) setLoading(true);
     else setRefreshing(true);
     getDashboard(page, filters, page === "executive" ? "records" : measure)
@@ -224,7 +233,7 @@ export default function App() {
   }, []);
   const available = metadata?.pages[page]?.filters || {};
   const activeCount = Object.values(filters).reduce((n, v) => n + v.length, 0);
-  const headerFiltersVisible = showHeaderFilters && !["quality", "studio"].includes(page) && Boolean(metadata?.ready);
+  const headerFiltersVisible = showHeaderFilters && !["quality", "studio", "explorer"].includes(page) && Boolean(metadata?.ready);
 
   async function upload(file?: File) {
     if (!file) return;
@@ -362,7 +371,7 @@ export default function App() {
               <button onClick={() => setError("")}>Dismiss</button>
             </div>
           )}
-          {!["quality", "studio"].includes(page) && (
+          {!["quality", "studio", "explorer"].includes(page) && (
             <>
               <div className={`toolbar ${headerFiltersVisible ? "toolbar-header-active" : ""}`}>
                 <button className="primary" onClick={() => setDrawer(true)}>
@@ -403,6 +412,8 @@ export default function App() {
           )}
       {metadata && !metadata.ready ? <UploadRequired onUpload={() => input.current?.click()} uploading={uploading} progress={uploadProgress} phase={uploadPhase} /> : page === "studio" && metadata ? (
             <Studio metadata={metadata} theme={theme} />
+          ) : page === "explorer" && metadata ? (
+            <DataExplorer metadata={metadata} />
           ) : loading ? (
             <div className="loading">
               <div />
@@ -459,7 +470,7 @@ export default function App() {
           )}
         </section>
       </main>
-      {!["studio", "quality"].includes(page) && (
+      {!["studio", "quality", "explorer"].includes(page) && (
         <FilterDrawer
           open={drawer}
           available={available}

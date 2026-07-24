@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import sys
 from pathlib import Path
@@ -67,6 +68,24 @@ class StudioRequest(BaseModel):
     defaultYtd: bool = False
 
 
+class ExplorerFilter(BaseModel):
+    column: str
+    operator: str
+    value: str | float | None = None
+    value2: str | float | None = None
+
+
+class ExplorerRequest(BaseModel):
+    sheetId: str
+    search: str = ""
+    filters: list[ExplorerFilter] = []
+    sortColumn: str | None = None
+    sortDirection: str = "asc"
+    page: int = 1
+    pageSize: int = 100
+    columns: list[str] = []
+
+
 @app.get("/api/health")
 def health(): return {"status": "ready" if store else "awaiting_upload", "source": store.source_name if store else None}
 
@@ -108,6 +127,33 @@ def quality(): return require_store().quality_summary() if store else {"rows": [
 def studio(request: StudioRequest):
     try:
         return require_store().studio(request.page, request.rowDimension, request.columnDimension, request.filters, request.measure, request.defaultYtd)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/data-explorer/query")
+def data_explorer_query(request: ExplorerRequest):
+    if request.page < 1 or request.pageSize < 1 or request.pageSize > 500:
+        raise HTTPException(400, "Invalid pagination")
+    if request.sortDirection not in {"asc", "desc"}:
+        raise HTTPException(400, "Invalid sort direction")
+    try:
+        return require_store().explorer_query(request.sheetId, request.search, [item.model_dump() for item in request.filters], request.sortColumn, request.sortDirection, request.page, request.pageSize, request.columns)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/data-explorer/export/{export_format}")
+def data_explorer_export(export_format: str, request: ExplorerRequest):
+    if export_format not in {"csv", "xlsx"}:
+        raise HTTPException(400, "Unsupported export format")
+    try:
+        active_store = require_store()
+        payload = active_store.explorer_export(request.sheetId, request.search, [item.model_dump() for item in request.filters], request.sortColumn, request.sortDirection, request.columns, export_format)
+        sheet_name = active_store.raw_sheet_names[request.sheetId]
+        safe_name = re.sub(r'[^A-Za-z0-9._-]+', '-', sheet_name).strip('-') or "data"
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if export_format == "xlsx" else "text/csv"
+        return Response(payload, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{safe_name}-filtered.{export_format}"'})
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 

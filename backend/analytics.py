@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import zipfile
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -133,6 +133,10 @@ class DataStore:
     options: dict[str, dict[str, pl.DataFrame]]
     quality: list[dict[str, Any]]
     loaded_at: str
+    raw_sheets: dict[str, pd.DataFrame] = field(default_factory=dict)
+    raw_sheet_names: dict[str, str] = field(default_factory=dict)
+    raw_sheet_warnings: list[str] = field(default_factory=list)
+    raw_metadata_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def from_path(cls, path: Path) -> "DataStore":
@@ -149,9 +153,25 @@ class DataStore:
         quality: list[dict[str, Any]] = []
         today = pd.Timestamp(date.today())
 
+        raw_sheets: dict[str, pd.DataFrame] = {}
+        raw_sheet_names: dict[str, str] = {}
+        raw_sheet_warnings: list[str] = []
+        for index, sheet_name in enumerate(excel.sheet_names):
+            sheet_id = f"sheet-{index}"
+            try:
+                raw_sheet = pd.read_excel(excel, sheet_name=sheet_name, dtype=object)
+                raw_sheet.columns = [str(column).strip() or f"Column {position + 1}" for position, column in enumerate(raw_sheet.columns)]
+                if raw_sheet.empty or not len(raw_sheet.columns):
+                    raw_sheet_warnings.append(f"{sheet_name}: skipped because it is empty.")
+                    continue
+                raw_sheets[sheet_id] = raw_sheet
+                raw_sheet_names[sheet_id] = sheet_name
+            except Exception as exc:
+                raw_sheet_warnings.append(f"{sheet_name}: skipped because it could not be read ({exc}).")
+
         assessment_map: dict[str, list[str]] = {}
         for page, sheet in SHEETS.items():
-            raw_df = pd.read_excel(excel, sheet_name=sheet, dtype=object)
+            raw_df = next(frame for sheet_id, frame in raw_sheets.items() if raw_sheet_names[sheet_id] == sheet).copy()
             mapping = COLS[page]
             absent = [col for col in mapping.values() if col not in raw_df.columns]
             if absent: raise ValueError(f"{sheet} is missing columns: {', '.join(absent)}")
@@ -204,7 +224,7 @@ class DataStore:
                 quality.append({"page": page, "severity": "High" if invalid_completion else "Low", "check": "Invalid or future completion date", "count": invalid_completion, "rate": invalid_completion / max(int(df["completed_date"].notna().sum()), 1), "impact": "Excluded from completion trends."})
                 df["legal_need"] = df["legal_need"].map(lambda x: ",".join(x) if isinstance(x, list) else None)
             frames[page] = pl.from_pandas(df, include_index=False)
-        return cls(source_name, frames, options, quality, pd.Timestamp.now().isoformat(timespec="seconds"))
+        return cls(source_name, frames, options, quality, pd.Timestamp.now().isoformat(timespec="seconds"), raw_sheets, raw_sheet_names, raw_sheet_warnings)
 
     def metadata(self) -> dict[str, Any]:
         result: dict[str, Any] = {"source": self.source_name, "loadedAt": self.loaded_at, "pages": {}}
@@ -221,7 +241,129 @@ class DataStore:
             result["pages"][page] = {"rows": frame.height, "filters": values, "dimensions": dimensions}
         common = ["project", "location", "gender", "age_group", "nationality", "community", "year", "quarter"]
         result["pages"]["executive"] = {"rows": sum(f.height for f in self.frames.values()), "filters": {field: sorted({str(v) for frame in self.frames.values() if field in frame.columns for v in frame.get_column(field).drop_nulls().unique().to_list()}) for field in common}}
+        result["dataExplorer"] = {
+            "sheets": [self._raw_sheet_metadata(sheet_id, frame) for sheet_id, frame in self.raw_sheets.items()],
+            "warnings": self.raw_sheet_warnings,
+        }
         return result
+
+    def _raw_sheet_metadata(self, sheet_id: str, frame: pd.DataFrame) -> dict[str, Any]:
+        if sheet_id in self.raw_metadata_cache:
+            return self.raw_metadata_cache[sheet_id]
+        columns = []
+        for column in frame.columns:
+            series = frame[column]
+            non_null = series.dropna()
+            sample = non_null.head(200)
+            inferred = "text"
+            if not sample.empty:
+                numeric = pd.to_numeric(sample, errors="coerce")
+                if numeric.notna().mean() >= .9:
+                    inferred = "number"
+                elif isinstance(sample.iloc[0], (pd.Timestamp, date)):
+                    inferred = "date"
+                elif re.search(r"\b(date|time|day|month|year)\b", str(column), re.IGNORECASE):
+                    dates = pd.to_datetime(sample, errors="coerce", dayfirst=True)
+                    if dates.notna().mean() >= .9:
+                        inferred = "date"
+            unique_values = non_null.map(self._display_value).drop_duplicates()
+            values = sorted((str(value) for value in unique_values.tolist()), key=str.casefold) if len(unique_values) <= 100 else []
+            columns.append({"name": str(column), "type": inferred, "values": values})
+        result = {"id": sheet_id, "name": self.raw_sheet_names[sheet_id], "rows": len(frame), "columns": columns}
+        self.raw_metadata_cache[sheet_id] = result
+        return result
+
+    @staticmethod
+    def _display_value(value: Any) -> Any:
+        if pd.isna(value):
+            return None
+        if isinstance(value, (pd.Timestamp, date)):
+            return value.isoformat()
+        if hasattr(value, "item"):
+            value = value.item()
+        return value if isinstance(value, (str, int, float, bool)) else str(value)
+
+    def explorer_query(self, sheet_id: str, search: str = "", filters: list[dict[str, Any]] | None = None,
+                       sort_column: str | None = None, sort_direction: str = "asc", page: int = 1,
+                       page_size: int = 100, columns: list[str] | None = None) -> dict[str, Any]:
+        if sheet_id not in self.raw_sheets:
+            raise ValueError("Unknown worksheet")
+        frame = self.raw_sheets[sheet_id]
+        working = frame.copy()
+        if search.strip():
+            needle = search.strip().lower()
+            mask = pd.Series(False, index=working.index)
+            for column in working.columns:
+                mask |= working[column].fillna("").astype(str).str.lower().str.contains(needle, regex=False)
+            working = working[mask]
+        for item in filters or []:
+            column = item.get("column")
+            operator = item.get("operator")
+            value = item.get("value")
+            value2 = item.get("value2")
+            if column not in working.columns:
+                continue
+            series = working[column]
+            if operator == "blank":
+                working = working[series.isna() | series.astype(str).str.strip().eq("")]
+            elif operator == "not_blank":
+                working = working[series.notna() & ~series.astype(str).str.strip().eq("")]
+            elif operator == "equals":
+                working = working[series.fillna("").astype(str).str.lower().eq(str(value or "").lower())]
+            elif operator == "contains":
+                working = working[series.fillna("").astype(str).str.contains(str(value or ""), case=False, regex=False)]
+            elif operator in {"gte", "lte", "between"}:
+                numeric = pd.to_numeric(series, errors="coerce")
+                try:
+                    lower = float(value) if value not in (None, "") else None
+                    upper = float(value2) if value2 not in (None, "") else None
+                except (TypeError, ValueError):
+                    continue
+                if operator == "gte" and lower is not None:
+                    working = working[numeric >= lower]
+                elif operator == "lte" and lower is not None:
+                    working = working[numeric <= lower]
+                elif operator == "between":
+                    if lower is not None: working = working[numeric >= lower]
+                    if upper is not None: working = working[pd.to_numeric(working[column], errors="coerce") <= upper]
+            elif operator in {"date_on", "date_before", "date_after", "date_between"}:
+                parsed = pd.to_datetime(series, errors="coerce").dt.normalize()
+                first = pd.to_datetime(value, errors="coerce")
+                second = pd.to_datetime(value2, errors="coerce")
+                if operator == "date_on" and not pd.isna(first): working = working[parsed == first.normalize()]
+                elif operator == "date_before" and not pd.isna(first): working = working[parsed <= first.normalize()]
+                elif operator == "date_after" and not pd.isna(first): working = working[parsed >= first.normalize()]
+                elif operator == "date_between":
+                    if not pd.isna(first): working = working[parsed >= first.normalize()]
+                    if not pd.isna(second): working = working[pd.to_datetime(working[column], errors="coerce").dt.normalize() <= second.normalize()]
+        if sort_column in working.columns:
+            working = working.sort_values(sort_column, ascending=sort_direction != "desc", na_position="last", kind="stable")
+        selected = [column for column in (columns or list(frame.columns)) if column in frame.columns]
+        if not selected:
+            selected = list(frame.columns)
+        matched = len(working)
+        start = (max(page, 1) - 1) * page_size
+        page_frame = working.iloc[start:start + page_size][selected]
+        rows = [{str(column): self._display_value(value) for column, value in row.items()} for row in page_frame.to_dict("records")]
+        return {"sheetId": sheet_id, "totalRows": len(frame), "matchedRows": matched, "page": max(page, 1),
+                "pageSize": page_size, "columns": selected, "rows": rows}
+
+    def explorer_export(self, sheet_id: str, search: str, filters: list[dict[str, Any]], sort_column: str | None,
+                        sort_direction: str, columns: list[str], export_format: str) -> bytes:
+        if sheet_id not in self.raw_sheets:
+            raise ValueError("Unknown worksheet")
+        result = self.explorer_query(sheet_id, search, filters, sort_column, sort_direction, 1, max(len(self.raw_sheets[sheet_id]), 1), columns)
+        frame = pd.DataFrame(result["rows"], columns=result["columns"])
+        for column in frame.columns:
+            if frame[column].dtype == object:
+                frame[column] = frame[column].map(lambda value: "'" + value if isinstance(value, str) and re.match(r"^[=+\-@]", value) else value)
+        output = io.BytesIO()
+        if export_format == "xlsx":
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                frame.to_excel(writer, index=False, sheet_name="Filtered data")
+        else:
+            return frame.to_csv(index=False).encode("utf-8-sig")
+        return output.getvalue()
 
     def _filtered(self, page: str, filters: dict[str, list[str]], default_ytd: bool) -> pl.DataFrame:
         frame = self.frames[page]

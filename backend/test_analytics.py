@@ -67,12 +67,30 @@ class AnalyticsSecurityTests(unittest.TestCase):
                     else:
                         row[source_column] = f"{key}-1"
                 pd.DataFrame([row]).to_excel(writer, sheet_name=sheet, index=False)
+            pd.DataFrame([
+                {"Name": "Alice", "Amount": 10, "When": "2026-01-10", "Note": "Alpha"},
+                {"Name": "Bob", "Amount": 25, "When": "2026-02-10", "Note": "-danger"},
+                {"Name": None, "Amount": 40, "When": "2026-03-10", "Note": "Beta"},
+            ]).to_excel(writer, sheet_name="Extra Data", index=False)
+            pd.DataFrame().to_excel(writer, sheet_name="Empty", index=False)
 
         store = DataStore.from_bytes(output.getvalue(), "synthetic.xlsx")
         self.assertEqual(
             {page: frame.height for page, frame in store.frames.items()},
             {"assessment": 1, "services": 1, "deportation": 1},
         )
+        explorer = store.metadata()["dataExplorer"]
+        self.assertEqual([sheet["name"] for sheet in explorer["sheets"]], [*SHEETS.values(), "Extra Data"])
+        self.assertTrue(any("Empty" in warning for warning in explorer["warnings"]))
+        extra_id = next(sheet["id"] for sheet in explorer["sheets"] if sheet["name"] == "Extra Data")
+        result = store.explorer_query(extra_id, "beta", [], "Amount", "desc", 1, 100, ["Name", "Amount"])
+        self.assertEqual(result["matchedRows"], 1)
+        self.assertEqual(result["rows"][0]["Amount"], 40)
+        filtered = store.explorer_query(extra_id, "", [{"column": "Amount", "operator": "between", "value": 20, "value2": 30}], None, "asc", 1, 100, [])
+        self.assertEqual(filtered["matchedRows"], 1)
+        csv = store.explorer_export(extra_id, "", [], None, "asc", ["Note"], "csv").decode("utf-8-sig")
+        self.assertIn("'-danger", csv)
+        self.assertTrue(store.explorer_export(extra_id, "", [], None, "asc", ["Name"], "xlsx").startswith(b"PK"))
 
     def test_rejects_extreme_xlsx_compression_ratio(self):
         output = io.BytesIO()

@@ -1,4 +1,4 @@
-import type {Dashboard,Filters,Metadata,QualityRow,StudioResult,UpdateCheck,UpdateStatus} from './types';
+import type {Dashboard,ExplorerFilter,ExplorerResult,Filters,Metadata,QualityRow,StudioResult,UpdateCheck,UpdateStatus} from './types';
 const API=import.meta.env.DEV?'http://127.0.0.1:8000/api':'/api';
 async function parse<T>(r:Response):Promise<T>{if(!r.ok){const x=await r.json().catch(()=>({detail:r.statusText}));throw new Error(x.detail||'Request failed')}return r.json()}
 export const getMetadata=()=>fetch(`${API}/metadata`,{cache:'no-store'}).then(parse<Metadata>);
@@ -7,6 +7,9 @@ export const getDashboard=(page:string,filters:Filters,measure:string)=>fetch(`$
 export const uploadWorkbook=async(file:File,onProgress?:(percent:number)=>void)=>{const body=new FormData();body.append('file',file);let progress=4;onProgress?.(progress);const timer=window.setInterval(()=>{progress=Math.min(progress+(progress<70?7:progress<90?3:1),95);onProgress?.(progress)},450);try{const result=await fetch(`${API}/upload`,{method:'POST',body}).then(parse<Metadata>);onProgress?.(100);return result}finally{window.clearInterval(timer)}};
 export const exportUrl=(page:string,filters:Filters)=>`${API}/export/${page}?filters=${encodeURIComponent(JSON.stringify(filters))}&default_ytd=false`;
 export const getStudio=(page:string,rowDimension:string,columnDimension:string,filters:Filters,measure:string,signal?:AbortSignal)=>fetch(`${API}/studio`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page,rowDimension,columnDimension:columnDimension||null,filters,measure,defaultYtd:false}),signal}).then(parse<StudioResult>);
+export interface ExplorerQuery {sheetId:string;search:string;filters:ExplorerFilter[];sortColumn:string|null;sortDirection:'asc'|'desc';page:number;pageSize:number;columns:string[]}
+export const getExplorer=(query:ExplorerQuery,signal?:AbortSignal)=>fetch(`${API}/data-explorer/query`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(query),signal}).then(parse<ExplorerResult>);
+export const exportExplorer=async(format:'csv'|'xlsx',query:ExplorerQuery)=>{const response=await fetch(`${API}/data-explorer/export/${format}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(query)});if(!response.ok){const issue=await response.json().catch(()=>({detail:response.statusText}));throw new Error(issue.detail||'Export failed')}const blob=await response.blob();const disposition=response.headers.get('Content-Disposition')||'';const match=disposition.match(/filename="?([^";]+)"?/i);const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=match?.[1]||`filtered-data.${format}`;link.click();URL.revokeObjectURL(url)};
 export const checkForUpdates=()=>fetch(`${API}/update/check`,{cache:'no-store'}).then(parse<UpdateCheck>);
 export const getUpdateStatus=()=>fetch(`${API}/update/status`,{cache:'no-store'}).then(parse<UpdateStatus>);
 export const installUpdate=()=>fetch(`${API}/update/install`,{method:'POST'}).then(parse<UpdateStatus>);
