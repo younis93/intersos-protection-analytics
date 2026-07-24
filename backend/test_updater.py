@@ -43,8 +43,10 @@ class UpdaterTests(unittest.TestCase):
         self.assertNotIn("/RESTARTAPPLICATIONS", command)
 
     def test_relaunch_helper_waits_for_installer_then_starts_app(self):
-        command = updater._relaunch_command(Path("setup.exe"), Path("app.exe"))
+        command = updater._relaunch_command(Path("setup.exe"), Path("app.exe"), 4321)
         self.assertEqual(command[0], "powershell.exe")
+        self.assertIn("Get-Process -Id 4321", command[-1])
+        self.assertLess(command[-1].index("Get-Process -Id 4321"), command[-1].index("Start-Process -FilePath 'setup.exe'"))
         self.assertIn("WaitForExit", command[-1])
         self.assertIn("app.exe", command[-1])
         self.assertIn("/EXTERNALRELAUNCH", command[-1])

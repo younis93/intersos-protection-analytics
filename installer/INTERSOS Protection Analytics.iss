@@ -139,6 +139,22 @@ begin
   Result := 'Microsoft Edge WebView2 Runtime installation did not complete. Restart Windows and run setup again.';
 end;
 
+function WaitForPreviousApplicationExit: Boolean;
+var
+  ResultCode: Integer;
+  Parameters: String;
+begin
+  Parameters :=
+    '-NoProfile -NonInteractive -WindowStyle Hidden -Command "' +
+    '$deadline=(Get-Date).AddSeconds(60); while (Get-Process -Name ''' +
+    '{#MyAppName}' + ''' -ErrorAction SilentlyContinue) { ' +
+    'if ((Get-Date) -ge $deadline) { exit 1 }; Start-Sleep -Milliseconds 250 }; exit 0"';
+  Result := Exec(
+    ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and
+    (ResultCode = 0);
+end;
+
 function ChangeCertificateStore(const Operation, StoreName, CertificatePath: String): Boolean;
 var
   Parameters: String;
@@ -231,6 +247,12 @@ var
   PublisherAdded: Boolean;
 begin
   Result := '';
+  if IsUpdateInstall and (not WaitForPreviousApplicationExit) then
+  begin
+    Result := 'The running application did not close in time. Close it and run the update again.';
+    exit;
+  end;
+
   if not UpdateTrustReady then
   begin
     if WizardSilent then

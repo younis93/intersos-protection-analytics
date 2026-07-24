@@ -79,11 +79,14 @@ def _installer_command(target: Path) -> list[str]:
     ]
 
 
-def _relaunch_command(target: Path, application: Path) -> list[str]:
+def _relaunch_command(target: Path, application: Path, process_id: int | None = None) -> list[str]:
     installer = str(target).replace("'", "''")
     app = str(application).replace("'", "''")
+    current_process_id = process_id if process_id is not None else os.getpid()
     arguments = ",".join("'{}'".format(argument.replace("'", "''")) for argument in _installer_command(target)[1:])
     script = (
+        f"$deadline=(Get-Date).AddSeconds(60); while (Get-Process -Id {current_process_id} -ErrorAction SilentlyContinue) {{ "
+        "if ((Get-Date) -ge $deadline) { exit 1 }; Start-Sleep -Milliseconds 250 }; "
         f"$process=Start-Process -FilePath '{installer}' -ArgumentList @({arguments}) -PassThru; "
         "$process.WaitForExit(); "
         f"if ($process.ExitCode -in @(0,5,3010)) {{ Start-Sleep -Seconds 2; Start-Process -FilePath '{app}' }}"
@@ -155,7 +158,7 @@ def _download_and_install(manifest: dict[str, Any]) -> None:
         creation_flags = 0
         if os.name == "nt":
             creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        command = _relaunch_command(target, Path(sys.executable)) if os.name == "nt" and getattr(sys, "frozen", False) else _installer_command(target)
+        command = _relaunch_command(target, Path(sys.executable), os.getpid()) if os.name == "nt" and getattr(sys, "frozen", False) else _installer_command(target)
         subprocess.Popen(
             command,
             close_fds=True,
