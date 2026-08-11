@@ -42,11 +42,7 @@ def check() -> dict[str, Any]:
     if not ENABLED:
         return {**base, "message": "Update repository is not configured."}
     try:
-        release = _json(f"https://api.github.com/repos/{REPOSITORY}/releases/latest")
-        asset = next((item for item in release.get("assets", []) if item.get("name") == "update.json"), None)
-        if not asset:
-            return {**base, "message": "The latest release has no update manifest."}
-        manifest = _json(asset["browser_download_url"])
+        manifest = _json(f"https://github.com/{REPOSITORY}/releases/latest/download/update.json")
         required = {"version", "installerUrl", "sha256", "publishedAt"}
         if not required.issubset(manifest) or len(str(manifest["sha256"])) != 64:
             raise ValueError("Invalid update manifest")

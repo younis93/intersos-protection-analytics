@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "@embedpdf/fonts-arabic": "1.0.0",
+    "@rive-app/react-webgl2": "^4.30.0",
     "@vitejs/plugin-react": "6.0.4",
+    "html2canvas": "^1.4.1",
     "jspdf": "4.2.1",
     "lucide-react": "1.26.0",
     "plotly.js-dist-min": "3.7.0",

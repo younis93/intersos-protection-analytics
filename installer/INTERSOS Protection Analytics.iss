@@ -6,19 +6,29 @@
 #define SigningCertificateName "INTERSOS-Code-Signing.cer"
 #define SigningCertificateThumbprint "C4F1B12A3BCCC73BEF903FA3796304CF0E67670D"
 #define WebView2BootstrapperName "MicrosoftEdgeWebview2Setup.exe"
+#ifndef MyOutputDir
+  #define MyOutputDir "..\release"
+#endif
 
 [Setup]
+#ifdef UiTestBuild
+AppId={{C8D92D64-8962-452B-BDF1-064DD32EF45F}
+DefaultDirName={tmp}\INTERSOS Protection Analytics UI Test
+Uninstallable=no
+CreateUninstallRegKey=no
+#else
 AppId={{D8924146-2D10-43B4-8B98-686B8F208699}
+DefaultDirName={localappdata}\Programs\{#MyAppName}
+#endif
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher=INTERSOS
-DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
-OutputDir=..\release
+OutputDir={#MyOutputDir}
 OutputBaseFilename=INTERSOS-Protection-Analytics-Setup-{#MyAppVersion}
 SetupIconFile=..\intersos-protection-analytics.ico
-Compression=lzma2/max
+Compression=lzma2/fast
 SolidCompression=yes
 CloseApplications=yes
 RestartApplications=yes
@@ -48,6 +58,10 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 
 [Code]
 
+var
+  AppSummaryHeading: TNewStaticText;
+  AppSummaryText: TNewStaticText;
+
 function HasCommandLineSwitch(const SwitchName: String): Boolean;
 var
   Index: Integer;
@@ -74,7 +88,11 @@ end;
 
 function ShouldLaunchAfterInstall: Boolean;
 begin
+#ifdef UiTestBuild
+  Result := False;
+#else
   Result := (not WizardSilent) and (not IsUpdateInstall);
+#endif
 end;
 
 function CertificateInstalled(const StoreName: String): Boolean;
@@ -180,56 +198,94 @@ begin
   WizardForm.Color := clWhite;
   WizardForm.MainPanel.Color := clWhite;
   WizardForm.PageNameLabel.Font.Name := 'Segoe UI Semibold';
-  WizardForm.PageNameLabel.Font.Size := 13;
-  WizardForm.PageNameLabel.Font.Color := $00783F16;
+  WizardForm.PageNameLabel.Font.Size := 11;
+  WizardForm.PageNameLabel.Font.Color := $00784016;
   WizardForm.PageDescriptionLabel.Font.Name := 'Segoe UI';
-  WizardForm.PageDescriptionLabel.Font.Color := $007D6549;
+  WizardForm.PageDescriptionLabel.Font.Color := $00806F60;
   WizardForm.WizardSmallBitmapImage.Visible := False;
-  WizardForm.PageNameLabel.Width := WizardForm.MainPanel.Width - WizardForm.PageNameLabel.Left - ScaleX(20);
+  WizardForm.PageNameLabel.Width := WizardForm.MainPanel.Width -
+    WizardForm.PageNameLabel.Left - ScaleX(12);
+  WizardForm.PageNameLabel.Height := ScaleY(26);
+  WizardForm.PageDescriptionLabel.Top := WizardForm.PageNameLabel.Top + ScaleY(25);
+  WizardForm.PageDescriptionLabel.Height := ScaleY(20);
   WizardForm.PageDescriptionLabel.Width := WizardForm.PageNameLabel.Width;
+  WizardForm.PageDescriptionLabel.Font.Size := 9;
+  WizardForm.BackButton.Caption := 'Back';
+  WizardForm.CancelButton.Caption := 'Cancel';
+  WizardForm.NextButton.Default := True;
+  WizardForm.ReadyMemo.WordWrap := True;
+  WizardForm.ReadyMemo.ScrollBars := ssNone;
+  WizardForm.DiskSpaceLabel.Visible := True;
+
+  AppSummaryHeading := TNewStaticText.Create(WizardForm);
+  AppSummaryHeading.Parent := WizardForm.SelectDirPage;
+  AppSummaryHeading.Left := WizardForm.DirEdit.Left;
+  AppSummaryHeading.Top := WizardForm.DirEdit.Top + WizardForm.DirEdit.Height + ScaleY(34);
+  AppSummaryHeading.Width := WizardForm.DirEdit.Width;
+  AppSummaryHeading.Height := ScaleY(22);
+  AppSummaryHeading.Caption := 'About Protection Analytics';
+  AppSummaryHeading.Font.Name := 'Segoe UI Semibold';
+  AppSummaryHeading.Font.Size := 10;
+  AppSummaryHeading.Font.Color := $00784016;
+
+  AppSummaryText := TNewStaticText.Create(WizardForm);
+  AppSummaryText.Parent := WizardForm.SelectDirPage;
+  AppSummaryText.Left := WizardForm.DirEdit.Left;
+  AppSummaryText.Top := AppSummaryHeading.Top + ScaleY(28);
+  AppSummaryText.Width := WizardForm.DirBrowseButton.Left +
+    WizardForm.DirBrowseButton.Width - AppSummaryText.Left;
+  AppSummaryText.Height := ScaleY(92);
+  AppSummaryText.Caption :=
+    'A secure desktop workspace for protection analysis, interactive charts,' + #13#10 +
+    'data exploration, and presentation-ready reporting.' + #13#10 + #13#10 +
+    'Desktop and Start menu shortcuts and secure updates are configured' + #13#10 +
+    'automatically.';
+  AppSummaryText.Font.Name := 'Segoe UI';
+  AppSummaryText.Font.Size := 9;
+  AppSummaryText.Font.Color := $00806F60;
 end;
 
 function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo,
   MemoTypeInfo, MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
-var
-  FreeBytes: Int64;
-  TotalBytes: Int64;
-  DiskStatus: String;
 begin
-  if GetSpaceOnDisk64(WizardDirValue, FreeBytes, TotalBytes) then
-    DiskStatus := Format('Available disk space: %d MB', [FreeBytes div 1048576])
-  else
-    DiskStatus := 'Available disk space: Windows will verify before installation';
-
   Result :=
-    'INTERSOS PROTECTION ANALYTICS  {#MyAppVersion}' + NewLine + NewLine +
-    'A secure desktop workspace for protection analysis, interactive charts, data exploration, and presentation-ready reporting.' + NewLine + NewLine +
-    'Setup will automatically:' + NewLine +
-    Space + '- Install the application for your Windows account' + NewLine +
-    Space + '- Enable verified, signed automatic updates' + NewLine +
-    Space + '- Create Start menu and desktop shortcuts' + NewLine +
-    Space + '- Install Microsoft WebView2 if required' + NewLine +
-    Space + '- Launch the application when setup is complete' + NewLine + NewLine +
-    'Installation folder' + NewLine + Space + WizardDirValue + NewLine + NewLine +
-    DiskStatus + NewLine + NewLine +
-    'Select Install to begin.';
+    'INTERSOS Protection Analytics' + NewLine + NewLine +
+    'A secure desktop workspace for protection analysis, interactive charts, ' +
+    'data exploration, and presentation-ready reporting.' + NewLine + NewLine +
+    'The installer also creates desktop and Start menu shortcuts and enables ' +
+    'secure application updates.';
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = wpSelectDir then
   begin
-    WizardForm.PageNameLabel.Caption := 'Install {#MyAppName}';
-    WizardForm.PageDescriptionLabel.Caption := 'Choose where the application will be installed';
+    WizardForm.PageNameLabel.Caption := 'Install Protection Analytics';
+    WizardForm.PageDescriptionLabel.Caption := 'Choose a folder and review the application summary';
     WizardForm.SelectDirLabel.Caption :=
-      'Select the installation folder below. Setup will configure secure updates and create the required shortcuts automatically.';
-    WizardForm.NextButton.Caption := '&Install'
+      'Install on the Windows C: drive using the recommended folder, or choose another location.';
+    WizardForm.SelectDirBrowseLabel.Caption :=
+      'Choose a different folder with Browse, then select Install.';
+    WizardForm.NextButton.Caption := 'Install';
+  end;
+  if CurPageID = wpReady then
+  begin
+    WizardForm.PageNameLabel.Caption := 'Install Protection Analytics';
+    WizardForm.PageDescriptionLabel.Caption := 'Ready to install for your Windows account';
+    WizardForm.ReadyLabel.Caption := 'Review the details below, then select Install.';
+    WizardForm.NextButton.Caption := 'Install';
+  end;
+  if CurPageID = wpInstalling then
+  begin
+    WizardForm.PageNameLabel.Caption := 'Installing Protection Analytics';
+    WizardForm.PageDescriptionLabel.Caption := 'This usually takes less than a minute';
   end;
   if CurPageID = wpFinished then
   begin
     WizardForm.FinishedHeadingLabel.Caption := 'Installation complete';
     WizardForm.FinishedLabel.Caption :=
-      '{#MyAppName} is ready to use. Your secure update settings and shortcuts have been configured.';
+      'Protection Analytics was installed successfully.';
+    WizardForm.NextButton.Caption := 'Finish';
   end;
 end;
 
@@ -243,7 +299,7 @@ begin
       WizardForm.StatusLabel.Caption := 'Installing {#MyAppName}...';
   end;
   if CurStep = ssPostInstall then
-    WizardForm.StatusLabel.Caption := 'Finalizing shortcuts and secure update settings...';
+    WizardForm.StatusLabel.Caption := 'Finishing setup...';
   if CurStep = ssDone then
     WizardForm.StatusLabel.Caption := 'Installation complete.';
 end;

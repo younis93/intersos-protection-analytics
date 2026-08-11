@@ -21,6 +21,10 @@ export const formatPercent = (n: number) =>
     maximumFractionDigits: 1,
   }).format(n);
 
+/** Keeps stored project values intact while using the concise name in the UI. */
+export const formatProjectLabel = (value: string) =>
+  value.replace(/^UNHCR\s+2026\s*-\s*/i, "").trim() || value;
+
 export function AppSelect({
   label,
   value,
@@ -43,6 +47,9 @@ export function AppSelect({
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const selected = options.find(([option]) => option === value)?.[1] || value;
+  const isProjectSelect = /^projects?$/i.test(label.trim());
+  const displayCaption = (caption: string) =>
+    isProjectSelect ? formatProjectLabel(caption) : caption;
   useEffect(() => {
     const close = (event: MouseEvent) => {
       if (root.current && !root.current.contains(event.target as Node)) setOpen(false);
@@ -64,19 +71,28 @@ export function AppSelect({
         onClick={() => setOpen((shown) => !shown)}
         onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }}
       >
-        <span>{selected}</span><ChevronDown />
+        <span>{displayCaption(selected)}</span><ChevronDown />
       </button>
       {open && (
         <div className="app-select-menu" role="listbox" aria-label={`${label} options`}>
           {options.map(([option, caption]) => (
             <button key={option} type="button" role="option" aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>
-              <span>{caption}</span>{option === value && <Check />}
+              <span>{displayCaption(caption)}</span>{option === value && <Check />}
             </button>
           ))}
         </div>
       )}
     </div>
   );
+}
+
+export function CheckboxMultiSelect({label,values,selected,onChange,hideLabel=false}:{label:string;values:string[];selected:string[];onChange:(values:string[])=>void;hideLabel?:boolean}) {
+  const [open,setOpen]=useState(false),[search,setSearch]=useState("");
+  const root=useRef<HTMLDivElement>(null);const visible=values.filter((item)=>item.toLowerCase().includes(search.toLowerCase()));
+  const selectedLabel=label.replace(/ies$/i,"y").replace(/s$/i,"").replace(/\b\w/g,(letter)=>letter.toUpperCase());
+  const isProjectFilter=/^projects?$/i.test(label.trim());
+  useEffect(()=>{const close=(event:MouseEvent)=>{if(root.current&&!root.current.contains(event.target as Node))setOpen(false)};window.addEventListener("mousedown",close);return()=>window.removeEventListener("mousedown",close)},[]);
+  return <div ref={root} className={`app-select checkbox-multi-select ${hideLabel?"label-hidden":""} ${open?"open":""} ${selected.length?"has-selection":""}`}>{!hideLabel&&<span className="app-select-label">{label}</span>}<button type="button" className="app-select-trigger" aria-haspopup="listbox" aria-expanded={open} onClick={()=>setOpen((value)=>!value)} onKeyDown={(event)=>{if(event.key==="Escape")setOpen(false)}}><span>{selected.length?`${selectedLabel} (${selected.length})`:`All ${label.toLowerCase()}`}</span><ChevronDown/></button>{open&&<div className="app-select-menu checkbox-multi-menu" role="listbox" aria-label={`${label} filters`}><label className="multi-select-search"><Search/><input autoFocus value={search} onChange={(event)=>setSearch(event.target.value)} placeholder={`Search ${label.toLowerCase()}`}/></label><div>{visible.map((item)=><label className={selected.includes(item)?"selected":""} key={item}><input type="checkbox" checked={selected.includes(item)} onChange={()=>onChange(selected.includes(item)?selected.filter((value)=>value!==item):[...selected,item])}/><span>{isProjectFilter?formatProjectLabel(item):item}</span></label>)}</div>{!visible.length&&<p>No matching options</p>}<footer><button type="button" disabled={!selected.length} onClick={()=>onChange([])}>Clear</button><button type="button" onClick={()=>setOpen(false)}>Done</button></footer></div>}</div>
 }
 
 export function KpiCard({
@@ -229,6 +245,7 @@ export function TrendCard({
   title = "Activity over time",
   subtitle = "Monthly, valid reporting dates only",
   onSelect,
+  onRemove,
   theme,
   selected = [],
 }: {
@@ -240,6 +257,7 @@ export function TrendCard({
   title?: string;
   subtitle?: string;
   onSelect?: (months: string[], replace?: boolean) => void;
+  onRemove?: (month: string) => void;
   theme: Theme;
   selected?: string[];
 }) {
@@ -267,7 +285,7 @@ export function TrendCard({
       <div className="card-title">
         <div>
           <h3>{title}</h3>
-          <p>{subtitle} · Click a month or drag across months to select a range</p>
+          <p>{subtitle}{onSelect ? " · Click a month or drag across months to select a range" : ""}</p>
         </div>
         <div className="chart-actions">
           <ExportButtons graph={graph} title={title} />
@@ -290,11 +308,11 @@ export function TrendCard({
               name: primaryLabel || (comparisonRows ? "Started" : title),
               x: rows.map((r) => r.label),
               y: vals,
-              selectedpoints: rows
+              selectedpoints: selected.length ? rows
                 .map((r, i) => (selected.includes(r.label) ? i : -1))
-                .filter((i) => i >= 0),
+                .filter((i) => i >= 0) : undefined,
               selected: { marker: { color: "#1683d8", size: 11 } },
-              unselected: { marker: { opacity: 0.58 } },
+              unselected: selected.length ? { marker: { opacity: 0.58 } } : undefined,
               line: { color: "#1683d8", width: 3, shape: "spline" },
               marker: {
                 size: 9,
@@ -303,9 +321,11 @@ export function TrendCard({
               },
               fill: "tozeroy",
               fillcolor: "rgba(22,131,216,.10)",
-              hovertemplate: "%{x}<br>%{y:,.0f}<extra></extra>",
+              hovertemplate: `<b>${primaryLabel || (comparisonRows ? "Started" : title)}</b><br>%{y:,.0f}<extra></extra>`,
               text: vals.map((value) => display === "percent" ? formatPercent(value) : formatNumber(value)),
               textposition: "top center",
+              textfont: { color: chartInk(theme), size: 12 },
+              cliponaxis: false,
             },
             ...(comparisonRows ? [{
               type: "scatter" as const,
@@ -317,23 +337,60 @@ export function TrendCard({
               marker: { size: 8, color: "#fff", line: { color: "#2f9e68", width: 3 } },
               text: comparisonVals.map((value) => display === "percent" ? formatPercent(value) : formatNumber(value)),
               textposition: "bottom center" as const,
+              hovertemplate: `<b>${comparisonLabel}</b><br>%{y:,.0f}<extra></extra>`,
+              textfont: { color: chartInk(theme), size: 12 },
+              cliponaxis: false,
+            }] : []),
+            ...(selected.length ? [{
+              type: "scatter" as const,
+              mode: "markers" as const,
+              name: "Selected detained month",
+              x: rows.filter((row)=>selected.includes(row.label)).map((row)=>row.label),
+              y: rows.map((row,index)=>({row,value:vals[index]})).filter(({row})=>selected.includes(row.label)).map(({value})=>value),
+              marker: {size:16,color:"#1683d8",line:{color:"#fff",width:3}},
+              hovertemplate: `%{x}<br>${primaryLabel||title}: %{y:,.0f}<extra></extra>`,
+              showlegend: false,
+            }] : []),
+            ...(selected.length&&comparisonRows ? [{
+              type: "scatter" as const,
+              mode: "markers" as const,
+              name: "Selected released month",
+              x: rows.filter((row)=>selected.includes(row.label)).map((row)=>row.label),
+              y: rows.map((row,index)=>({row,value:comparisonVals[index]})).filter(({row})=>selected.includes(row.label)).map(({value})=>value),
+              marker: {size:14,color:"#2f9e68",symbol:"diamond" as const,line:{color:"#fff",width:3}},
               hovertemplate: `%{x}<br>${comparisonLabel}: %{y:,.0f}<extra></extra>`,
+              showlegend: false,
             }] : []),
           ]}
           layout={{
             autosize: true,
             height: 330,
-            margin: { l: 50, r: 20, t: 15, b: 45 },
+            margin: { l: 50, r: 20, t: 15, b: 82 },
             paper_bgcolor: "rgba(0,0,0,0)",
             plot_bgcolor: "rgba(0,0,0,0)",
             font: {
               family: "DM Sans,Segoe UI,sans-serif",
               color: chartInk(theme),
             },
-            dragmode: "select",
+            dragmode: onSelect ? "select" : false,
             selectdirection: "h",
             uirevision: "locked",
-            xaxis: { gridcolor: chartGrid(theme), fixedrange: false, type: "category" },
+            hovermode: "x unified",
+            hoverlabel: {
+              bgcolor: theme === "glass-dark" ? "#102737" : "#ffffff",
+              bordercolor: theme === "glass-dark" ? "#3c7798" : "#9bb9ca",
+              font: { family: "DM Sans,Segoe UI,sans-serif", color: chartInk(theme), size: 13 },
+              align: "left",
+            },
+            shapes: selected.map((month)=>({type:"line" as const,xref:"x" as const,yref:"paper" as const,x0:month,x1:month,y0:0,y1:1,line:{color:"rgba(22,131,216,.38)",width:2,dash:"dot" as const}})),
+            xaxis: {
+              gridcolor: chartGrid(theme), fixedrange: false, type: "category",
+              tickmode: "array",
+              tickvals: rows.map((r) => r.label),
+              ticktext: rows.map((r) => new Intl.DateTimeFormat("en", {month:"short",year:"2-digit",timeZone:"UTC"}).format(new Date(`${r.label}-01T00:00:00Z`))),
+              tickangle: -45,
+              automargin: true,
+            },
             yaxis: {
               gridcolor: chartGrid(theme),
               rangemode: "tozero",
@@ -356,7 +413,7 @@ export function TrendCard({
           }}
         />
       </div>
-      <div className="timeline-chips" aria-label="Month range selector">
+      {onSelect && <div className="timeline-chips" aria-label="Month range selector">
         {rows.map((r, i) => (
           <button
             key={r.label}
@@ -367,10 +424,11 @@ export function TrendCard({
             }}
             onClick={() => { if (dragAnchor.current === null) onSelect?.([r.label]); }}
           >
-            {new Intl.DateTimeFormat("en", {month: "short", year: "numeric", timeZone: "UTC"}).format(new Date(`${r.label}-01T00:00:00Z`))}
+            <span>{new Intl.DateTimeFormat("en", {month: "short", year: "numeric", timeZone: "UTC"}).format(new Date(`${r.label}-01T00:00:00Z`))}</span>
+            {selected.includes(r.label) && onRemove && <X className="timeline-chip-remove" role="button" aria-label={`Remove ${r.label} filter`} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => {event.stopPropagation();onRemove(r.label)}}/>}
           </button>
         ))}
-      </div>
+      </div>}
       {modal && (
         <PivotModal title={title} rows={rows} onClose={() => setModal(false)} />
       )}
@@ -418,7 +476,13 @@ export function ExportButtons({ graph, title }: { graph: any; title: string }) {
   );
 }
 
+function pivotRows(rows: Row[]) {
+  const total=rows.reduce((sum,row)=>sum+row.count,0);
+  return rows.map((row)=>({...row,percent:row.percent || (total?row.count/total:0)}));
+}
+
 function DataTable({ rows }: { rows: Row[] }) {
+  const displayRows=pivotRows(rows);
   return (
     <div className="table-wrap">
       <table>
@@ -430,7 +494,7 @@ function DataTable({ rows }: { rows: Row[] }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {displayRows.map((r) => (
             <tr key={r.label}>
               <td>{r.label}</td>
               <td>{formatNumber(r.count)}</td>
@@ -452,6 +516,12 @@ function PivotModal({
   rows: Row[];
   onClose: () => void;
 }) {
+  const downloadCsv=()=>{
+    const safe=(value:string|number)=>`"${String(value).replaceAll('"','""')}"`;
+    const content=["Category,Count,Percent",...pivotRows(rows).map((row)=>[safe(row.label),row.count,`${(row.percent*100).toFixed(1)}%`].join(","))].join("\r\n");
+    const blob=new Blob([content],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),link=document.createElement("a");
+    link.href=url;link.download=`${title.replace(/[^a-z0-9]+/gi,"-").replace(/^-|-$/g,"").toLowerCase()||"interactive-detail"}.csv`;link.click();URL.revokeObjectURL(url);
+  };
   useEffect(() => {
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -459,20 +529,6 @@ function PivotModal({
       document.body.style.overflow = previous;
     };
   }, []);
-  const downloadCsv = () => {
-    const escape = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
-    const csv = [["Category", "Count", "Percentage"], ...rows.map((row) => [row.label, row.count, row.percent])]
-      .map((row) => row.map(escape).join(","))
-      .join("\r\n");
-    const url = URL.createObjectURL(new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "pivot-table"}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
   return createPortal(
     <div
       className="modal-backdrop"
@@ -493,9 +549,7 @@ function PivotModal({
             <p>Counts and percentages use the active dashboard filters.</p>
           </div>
           <div className="pivot-actions">
-            <button className="soft pivot-download" onClick={downloadCsv} title="Download filtered pivot table as CSV">
-              <Download /> Download CSV
-            </button>
+            <button className="soft pivot-download" onClick={downloadCsv}><Download/>CSV</button>
             <button className="icon" onClick={onClose} aria-label="Close pivot table">
               <X />
             </button>

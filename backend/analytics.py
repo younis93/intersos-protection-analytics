@@ -3,6 +3,9 @@ from __future__ import annotations
 import io
 import zipfile
 import re
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -496,3 +499,13 @@ class DataStore:
             for column in text_columns
         ])
         return escaped.write_csv().encode("utf-8-sig")
+
+    def export_xlsx(self, page: str, filters: dict[str, list[str]], default_ytd: bool = True) -> bytes:
+        df=self._filtered(page,filters,default_ytd);columns=[column for column in df.columns if column!="invalid_date"]
+        workbook=Workbook();sheet=workbook.active;sheet.title="Filtered data";sheet.append(columns)
+        for record in df.select(columns).to_dicts():
+            sheet.append([("'"+value if isinstance(value,str) and re.match(r"^[=+\-@]",value) else value) for value in (record.get(column) for column in columns)])
+        sheet.freeze_panes="A2";sheet.auto_filter.ref=sheet.dimensions;sheet.row_dimensions[1].height=32
+        for cell in sheet[1]:cell.font=Font(bold=True,color="FFFFFF");cell.fill=PatternFill("solid",fgColor="2563EB");cell.alignment=Alignment(wrap_text=True,vertical="center")
+        for index,column in enumerate(columns,1):sheet.column_dimensions[get_column_letter(index)].width=min(38,max(12,len(column)+2))
+        output=io.BytesIO();workbook.save(output);return output.getvalue()

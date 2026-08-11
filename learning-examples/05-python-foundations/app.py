@@ -1,0 +1,1 @@
+print('Synthetic learning example')

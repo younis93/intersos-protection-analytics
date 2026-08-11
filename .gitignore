@@ -4,6 +4,7 @@ frontend/dist/
 build/
 dist/
 release/
+output-test/
 packaging-temp/
 __pycache__/
 *.pyc
