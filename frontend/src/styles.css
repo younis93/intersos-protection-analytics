@@ -538,3 +538,34 @@ path.detention-map-region{stroke:color-mix(in srgb,var(--muted) 32%,var(--line))
 .lawyer-overview-page .lawyer-section:not(.lawyer-workload) .legal-table-wrap th:first-child,.lawyer-overview-page .lawyer-section:not(.lawyer-workload) .legal-table-wrap td:first-child{position:sticky;left:0;z-index:3;width:130px;min-width:130px;background:var(--panel-strong)}
 .lawyer-overview-page .lawyer-section:not(.lawyer-workload) .legal-table-wrap th:nth-child(2),.lawyer-overview-page .lawyer-section:not(.lawyer-workload) .legal-table-wrap td:nth-child(2){position:sticky;left:130px;z-index:3;background:var(--panel-strong)}
 .lawyer-overview-page .lawyer-section .legal-table-wrap th:first-child,.lawyer-overview-page .lawyer-section .legal-table-wrap th:nth-child(2){z-index:4}
+
+/* Legal Platform design system: a shared, quiet rhythm across every workspace page. */
+.legal-shell{--lp-gap:16px;--lp-panel-padding:18px;--lp-radius:18px;--lp-control-height:48px;--lp-table-row:44px;--lp-heading-size:16px}
+.legal-shell .legal-content{display:grid;align-content:start;gap:var(--lp-gap)}
+.legal-shell .legal-content>.legal-scroll-source,.legal-shell .legal-content>.legal-scroll-sentinel{margin:0}
+.legal-shell .legal-content>:not(.legal-scroll-sentinel){min-width:0}
+.legal-shell :is(.professional-overview,.explorer-page,.detention-page,.detention-analysis-view,.indicator-reporting,.intelligence-page,.lawyer-overview-page,.indicator-groups,.indicator-analysis-list,.overview-grid,.overview-analysis-grid,.overview-detention-grid,.dashboard-grid,.detention-breakdown-grid,.lawyer-chart-grid,.lawyer-dashboard-sections){gap:var(--lp-gap)}
+.legal-shell :is(.legal-kpis,.kpi-grid,.intelligence-kpis,.overview-primary-kpis,.reconciliation-summary){gap:var(--lp-gap);margin:0}
+.legal-shell :is(.legal-kpi,.kpi-card,.executive-kpi,.intelligence-kpis article){border-radius:var(--lp-radius);padding:var(--lp-panel-padding)}
+.legal-shell :is(.chart-card,.quality-card,.overview-panel,.legal-table-card,.detention-map,.detention-trend,.detention-breakdown,.intelligence-panel,.lawyer-section,.lawyer-chart,.indicator-analysis-card){border-radius:var(--lp-radius)}
+.legal-shell :is(.chart-card,.quality-card,.overview-panel,.detention-map,.detention-trend,.detention-breakdown){padding:var(--lp-panel-padding)}
+.legal-shell :is(.legal-toolbar,.detention-toolbar,.explorer-sticky-controls){gap:10px;margin:0;padding:10px 12px;border-radius:var(--lp-radius)}
+.legal-shell :is(.legal-toolbar label,.detention-toolbar label,.legal-toolbar>.app-select,.detention-toolbar>.app-select){min-height:var(--lp-control-height);border-radius:13px}
+.legal-shell :is(.legal-toolbar input,.legal-toolbar select,.legal-toolbar>select,.detention-toolbar input,.detention-toolbar select){min-height:var(--lp-control-height);padding-block:0}
+.legal-shell :is(.legal-toolbar>.primary,.legal-toolbar>.soft,.detention-toolbar>.primary,.detention-toolbar>.soft,.indicator-filter-bar>.primary,.indicator-filter-bar>.soft,.lawyer-overview-filter-bar>.primary,.lawyer-overview-filter-bar>.soft){min-height:var(--lp-control-height);border-radius:13px}
+.legal-shell :is(.indicator-filter-bar,.lawyer-overview-filter-bar){gap:10px;padding:10px 12px;border-radius:var(--lp-radius)}
+.legal-shell :is(.indicator-filter-bar .checkbox-multi-select,.lawyer-overview-filter-bar .checkbox-multi-select){min-height:var(--lp-control-height);border-radius:13px}
+.legal-shell :is(.indicator-filter-bar .app-select-trigger,.lawyer-overview-filter-bar .app-select-trigger){min-height:calc(var(--lp-control-height) - 2px)}
+.legal-shell :is(.case-filter-drawer,.indicator-filter-drawer){border-radius:24px 0 0 24px}
+.legal-shell :is(.case-filter-drawer>header,.indicator-filter-drawer header){padding:20px 22px}
+.legal-shell :is(.case-filter-drawer footer,.indicator-filter-drawer footer){padding:14px 20px}
+.legal-shell .legal-card-heading{min-height:72px;padding:16px var(--lp-panel-padding);border-bottom:1px solid var(--line)}
+.legal-shell :is(.legal-table-wrap,.indicator-table-wrap,.indicator-analysis-table-wrap){border-radius:0 0 var(--lp-radius) var(--lp-radius)}
+.legal-shell .legal-table-wrap th{height:44px;padding:10px 13px;background:color-mix(in srgb,var(--blue) 5%,var(--panel-strong))}
+.legal-shell .legal-table-wrap td{height:var(--lp-table-row);padding:10px 13px}
+.legal-shell .legal-pager,.legal-shell .explorer-pager .legal-pager{min-height:58px;padding:10px var(--lp-panel-padding)}
+.legal-shell .legal-empty{min-height:240px;border-radius:var(--lp-radius);padding:var(--lp-panel-padding)}
+.legal-shell .legal-skeleton{gap:var(--lp-gap);margin:0;padding:var(--lp-panel-padding);border-radius:var(--lp-radius)}
+.legal-shell .legal-skeleton :is(.skeleton-card,.skeleton-chart,.skeleton-case-card){border-radius:var(--lp-radius)}
+.legal-shell .skeleton-kpis,.legal-shell .skeleton-chart-grid,.legal-shell .skeleton-case-grid{gap:var(--lp-gap)}
+@media(max-width:900px){.legal-shell .legal-content{gap:14px}.legal-shell :is(.legal-toolbar,.detention-toolbar,.explorer-sticky-controls,.indicator-filter-bar,.lawyer-overview-filter-bar){padding:9px}.legal-shell .legal-card-heading{min-height:64px;padding:14px}.legal-shell :is(.chart-card,.quality-card,.overview-panel,.detention-map,.detention-trend,.detention-breakdown){padding:14px}}
