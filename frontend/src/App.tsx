@@ -77,7 +77,10 @@ function AnalyticsUnavailable(){
 
 export default function App() {
   const [page, setPage] = useState<Page>(pageFromUrl);
-  const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("app-theme") as Theme) || "glass-light");
+  const [theme, setTheme] = useState<Theme>(() => {
+    const startupTheme = new URLSearchParams(window.location.search).get("appTheme") as Theme | null;
+    return startupTheme || (localStorage.getItem("app-theme") as Theme) || "glass-light";
+  });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("analytics-sidebar-collapsed") === "true");
   const [metadata, setMetadata] = useState<Metadata | null>(null);
   const [dash, setDash] = useState<Dashboard | null>(null);
@@ -100,10 +103,18 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("app-theme",theme);
-    const syncNativeTitleBar=()=>{void (window as any).pywebview?.api?.set_title_bar_theme?.(theme)};
-    syncNativeTitleBar();
-    window.addEventListener("pywebviewready",syncNativeTitleBar,{once:true});
-    return()=>window.removeEventListener("pywebviewready",syncNativeTitleBar);
+    let attempts=0, timer:number|undefined, cancelled=false;
+    const syncNativeTitleBar=async()=>{
+      try{
+        const nativeApi=(window as any).pywebview?.api;
+        if(nativeApi?.set_title_bar_theme && await nativeApi.set_title_bar_theme(theme))return;
+      }catch{/* The window can reject DWM updates while it is still being created. */}
+      if(!cancelled&&attempts++<50)timer=window.setTimeout(()=>void syncNativeTitleBar(),100);
+    };
+    void syncNativeTitleBar();
+    const onNativeReady=()=>void syncNativeTitleBar();
+    window.addEventListener("pywebviewready",onNativeReady,{once:true});
+    return()=>{cancelled=true;window.removeEventListener("pywebviewready",onNativeReady);if(timer)window.clearTimeout(timer)};
   }, [theme]);
   useEffect(() => {
     const syncFullscreen = () => setFullscreen(Boolean(document.fullscreenElement));
@@ -129,14 +140,20 @@ export default function App() {
     document.title = `${nav.find(({id}) => id === page)?.label || "Executive"} · Protection Analytics`;
   }, [page]);
   useEffect(() => {
-    Promise.all([getMetadata(), getQuality()])
-      .then(([m, q]) => {
-        setMetadata(m);
-        setQuality(q.rows);
-      })
+    getMetadata()
+      .then(setMetadata)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
+  useEffect(()=>{
+    if(!metadata?.loading||metadata.ready)return;
+    const timer=window.setInterval(()=>getMetadata().then(setMetadata).catch(()=>{}),1000);
+    return()=>window.clearInterval(timer);
+  },[metadata?.loading,metadata?.ready]);
+  useEffect(()=>{
+    if(!metadata?.ready)return;
+    getQuality().then((result)=>setQuality(result.rows)).catch((e)=>setError(e.message));
+  },[metadata?.ready,metadata?.source]);
   useEffect(() => {
     if (page === "quality" || page === "studio" || page === "explorer" || !metadata || !metadata.ready) return;
     if (!dash) setLoading(true);
@@ -325,7 +342,7 @@ export default function App() {
               />
             </>
           )}
-      {metadata && !metadata.ready ? <UploadRequired onUpload={selectWorkbook} uploading={uploading} progress={uploadProgress} phase={uploadPhase} /> : !metadata && !loading ? <AnalyticsUnavailable/> : page === "studio" && metadata ? (
+      {metadata && !metadata.ready && metadata.loading ? <div className="loading"><div/><span>Restoring local analytics data…</span></div> : metadata && !metadata.ready ? <UploadRequired onUpload={selectWorkbook} uploading={uploading} progress={uploadProgress} phase={uploadPhase} /> : !metadata && !loading ? <AnalyticsUnavailable/> : page === "studio" && metadata ? (
             <Studio metadata={metadata} theme={theme} />
           ) : page === "explorer" && metadata ? (
             <DataExplorer metadata={metadata} />

@@ -114,16 +114,8 @@ def test_indicator_filters_hide_rows_and_validate_dates():
     assert sheet.cell(mosul_row, 1).alignment.shrink_to_fit is True
     zero_cells = [cell for row in sheet.iter_rows() for cell in row if cell.value == 0]
     assert zero_cells and all(cell.column == sheet.max_column for cell in zero_cells)
-    idp_sheet = workbook["IDP"]
-    assert idp_sheet.max_column == 16
-    idp_total_header = next(cell for cell in idp_sheet[4] if cell.value == "Total")
-    assert idp_total_header.column == 16
-    assert idp_total_header.fill.fgColor.rgb == "00E7EEF4"
-    assert idp_sheet.cell(5, idp_total_header.column).fill.fgColor.rgb == "00E7EEF4"
-    assert not any(cell.value == "All selected locations" for row in idp_sheet.iter_rows() for cell in row)
-
     amal_workbook = load_workbook(BytesIO(build_indicator_workbook(amal)))
-    assert amal_workbook.sheetnames == ["Refugee", "IDP", "Individual Beneficiaries"]
+    assert amal_workbook.sheetnames == ["IDP", "Individual Beneficiaries"]
 
     analysis_workbook = load_workbook(BytesIO(build_indicator_workbook(january, [("2026-01", january)])))
     assert "Analysis" in analysis_workbook.sheetnames
@@ -203,7 +195,7 @@ def test_representation_uses_unique_assessment_and_monthly_beneficiary_ids():
     assert [item["id"] for item in report["groups"][1]["indicators"]] == ["civil-counselling", "secured-civil-documentation", "uid-secured", "civil-representation"]
     assert [item["id"] for item in report["groups"][2]["indicators"]] == ["individuals-reached"]
     amal_report = build_indicator_report({"assessments": pd.DataFrame(assessment_rows), "legalservices": services, "deportationrecords": deportation, "awareness": awareness}, "2026-01-01", "2026-01-31", projects=["UNHCR 2026 - AMAL CAMP"])
-    assert [item["id"] for item in amal_report["groups"][1]["indicators"]] == ["civil-counselling", "secured-civil-documentation", "uid-secured", "civil-representation"]
+    assert [item["id"] for item in amal_report["groups"][0]["indicators"]] == ["civil-counselling", "secured-civil-documentation", "uid-secured", "civil-representation"]
     amal_indicators = {item["id"]: item for group in amal_report["groups"] for item in group["indicators"]}
     assert indicators["detention-immigration"]["total"] == 3
     assert indicators["released-immigration"]["total"] == 1

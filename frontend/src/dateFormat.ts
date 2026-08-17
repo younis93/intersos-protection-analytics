@@ -10,7 +10,7 @@ export function formatDisplayDate(value: unknown): string | null {
   if (!parts) return null;
   const [day, month, year] = parts;
   if (month < 1 || month > 12 || day < 1 || day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return null;
-  return `${String(day).padStart(2, "0")}-${MONTHS[month - 1]}-${year}`;
+  return `${year}-${MONTHS[month - 1]}-${String(day).padStart(2, "0")}`;
 }
 
 export function formatTableValue(value: unknown, isDateColumn = false): string {

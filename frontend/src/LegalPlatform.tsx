@@ -4,15 +4,20 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  Ban,
   Backpack,
   BarChart3,
   ChartColumnIncreasing,
   BriefcaseBusiness,
   CheckCircle2,
+  CheckCheck,
   ChevronDown,
+  CircleHelp,
   Copy,
   Database,
   Download,
+  Eraser,
+  FileText,
   FileQuestion,
   FolderOpen,
   Home,
@@ -38,6 +43,7 @@ import {
   exportLegalExplorer,
   exportLegalIndicators,
   exportLegalNarrative,
+  exportTableWorkbook,
   getLegalCase,
   getLegalCaseFilters,
   getLegalExplorer,
@@ -46,19 +52,30 @@ import {
   getDetentionWorkbookSheets,
   getLegalLawyers,
   getLegalMetadata,
+  getLegalDeportationDashboard,
+  getLegalStudio,
+  getLegalAnalyticsDashboard,
   getLegalIndicators,
   getLegalIntelligence,
   getLegalReview,
+  getDuplicateExclusions,
+  createDuplicateExclusion,
+  importDuplicateExclusions,
+  restoreDuplicateExclusion,
+  duplicateExclusionsExportUrl,
+  legalAttachmentDownloadUrl,
   legalExportUrl,
   legalReviewExportUrl,
   reconcileLegalDetention,
   uploadLegalFolder,
 } from "./api";
+import Studio from "./Studio";
 import type { LegalIntelligence } from "./api";
-import type { IndicatorReport, IndicatorReportGroup, IndicatorReportItem, IndicatorSection, LegalExplorerResult, LegalMetadata, LegalReview, Theme } from "./types";
-import { AppSelect, ChartCard, CheckboxMultiSelect, formatProjectLabel, TrendCard } from "./components";
+import type { Dashboard, DuplicateExclusion, IndicatorReport, IndicatorReportGroup, IndicatorReportItem, IndicatorSection, LegalAnalyticsDashboard, LegalExplorerResult, LegalFlag, LegalMetadata, LegalReview, Metadata, Theme } from "./types";
+import { ActiveFilters, AppSelect, ChartCard, CheckboxMultiSelect, FilterDrawer, formatProjectLabel, KpiCard, TrendCard } from "./components";
 import {formatTableValue} from "./dateFormat";
 import {mapIntensity,projectGovernorates,type MapFeature} from "./iraqMap";
+import { exportSvgChart } from "./chartExport";
 
 type LegalPage =
   | "overview"
@@ -66,17 +83,34 @@ type LegalPage =
   | "assessments"
   | "legalservices"
   | "awareness"
+  | "deportation"
+  | "studio"
   | "detention"
   | "explorer"
   | "cases"
   | "lawyer-intelligence"
   | "indicators";
+const EXCLUDABLE_BENEFICIARY_RULES = new Set([
+  "Possible duplicate name",
+  "Invalid contact number",
+  "Marital status below 18",
+  "Spouse below 18",
+]);
+const EXCLUSION_RULE_OPTIONS = [
+  "Possible duplicate name",
+  "Invalid contact number",
+  "Marital status below 18",
+  "Spouse below 18",
+];
+const exclusionRuleClass = (rule: string) => rule === "Possible duplicate name" ? "duplicates" : rule === "Invalid contact number" ? "contacts" : rule === "Marital status below 18" ? "marital" : "spouse";
 const labels: Record<LegalPage, string> = {
   overview: "Overview",
   beneficiaries: "Beneficiaries Review",
   assessments: "Assessments Review",
   legalservices: "Legal Services Review",
   awareness: "Awareness Review",
+  deportation: "Deportation",
+  studio: "Analytics Studio",
   detention: "Detention Cases",
   explorer: "Data Explorer",
   cases: "Beneficiary Cases",
@@ -93,6 +127,8 @@ const descriptions: Record<LegalPage, string> = {
   legalservices:
     "Find duplicate services and broken assessment relationships before reporting.",
   awareness: "Review duplicate participants and invalid contact information.",
+  deportation: "Deportation analysis from the Legal Platform deportation CSV.",
+  studio: "Visual analysis based on Legal Platform source files.",
   detention:
     "Review detention circumstances, locations, authorities, charges and current case status from Assessments.",
   explorer:
@@ -102,8 +138,33 @@ const descriptions: Record<LegalPage, string> = {
   "lawyer-intelligence": "A combined view of lawyer workload, service delivery and case complexity across legal teams.",
   indicators: "Reserved for the indicator reporting framework and definitions.",
 };
+const REVIEW_CHECK_METHODS: Record<string, { columns: string[]; logic: string }> = {
+  "Possible duplicate name": { columns: ["Name (Filter Color Red)", "Project"], logic: "Normalizes names, groups them within the permitted project group, then compares the configured leading characters (or exact names when Exact matches is enabled)." },
+  "Invalid contact number": { columns: ["Contact Number / Phone Number"], logic: "Keeps normalized phone numbers that are not blank, one digit, or 11 digits, after excluding configured system prefixes." },
+  "Case without assessment": { columns: ["Case ID", "# total assessments"], logic: "Flags beneficiaries whose total assessment count is zero." },
+  "Invalid age": { columns: ["Age", "Date of Birth"], logic: "Flags missing, non-numeric, negative, or implausible age values." },
+  "Marital status below 18": { columns: ["Marital Status", "Date of Birth"], logic: "Flags married beneficiaries whose current age calculated from date of birth is below 18." },
+  "Spouse below 18": { columns: ["Marital Status", "Spouse DoB"], logic: "Flags partnered beneficiaries whose spouse current age calculated from Spouse DoB is below 18." },
+  "Check Community Type vs Nationality": { columns: ["Community Type", "Nationality", "Project"], logic: "Checks permitted Community Type/Nationality combinations and the IDP AMAL Camp project requirement." },
+  "Beneficiary has multiple assessments": { columns: ["Beneficiary ID"], logic: "Counts non-empty Beneficiary IDs and flags IDs appearing in two or more assessment records." },
+  "Selected month with previous assessment": { columns: ["Beneficiary ID", "Date of Assessment"], logic: "For the selected comparison month, flags beneficiaries that have an assessment in an earlier month." },
+  "Assessment without services": { columns: ["# Total Services", "Assessment ID", "Legal Services: Assessment ID"], logic: "Flags zero Total Services; when that column is unavailable, flags assessments with no linked service." },
+  "Pending assessment": { columns: ["Assessment Status"], logic: "Filters Assessment Status values containing Pending." },
+  "Open counselling-only assessment": { columns: ["Assessment Status", "Type of Legal Service Needed"], logic: "Filters Open assessments whose requested service includes counselling but not assistance or representation." },
+  "Detention/immigration inconsistency": { columns: ["Community Type", "Date of Assessment", "Is the beneficiary detained", "Is it an immigration related charge"], logic: "Applies to 2026+ refugee assessments and flags inconsistent detention and immigration-charge responses." },
+  "Blank legal service need": { columns: ["Type of Legal Service Needed"], logic: "Flags blank or whitespace-only legal-service-need values." },
+  "Detained beneficiary has counselling only": { columns: ["Assessment ID", "Is the beneficiary detained", "Is it an immigration related charge", "Legal Services: Type of Service Provided"], logic: "Flags detained immigration cases with linked services containing counselling only." },
+  "Adult representation without counselling": { columns: ["Age", "Type of Legal Service Needed", "Legal Services: Type of Service Provided"], logic: "Flags adults requesting representation when linked delivered services lack counselling." },
+  "Representation while not detained": { columns: ["Community Type", "Date of Assessment", "Is the beneficiary detained", "Legal Services: Type of Service Provided"], logic: "Flags 2026+ non-IDP, not-detained assessments with linked assistance or representation services." },
+  "Duplicate service": { columns: ["Service ID"], logic: "Counts non-empty Service IDs and flags IDs appearing in two or more service records." },
+  "Current and previous month duplicate": { columns: ["Service ID", "Date of Service Provision"], logic: "Uses the latest service month and flags Service IDs also found in an earlier month." },
+  "Orphaned assessment relationship": { columns: ["Legal Services: Assessment ID", "Assessments: Assessment ID"], logic: "Flags service Assessment IDs that do not exist in the imported Assessments file." },
+  "Missing Type of Document": { columns: ["Type of Document"], logic: "Flags blank or whitespace-only Type of Document values." },
+  "Duplicate participant in session": { columns: ["Participant Name", "Session Topic"], logic: "Normalizes participant names and flags duplicate name/session-topic pairs." },
+  "Possible duplicate participant name": { columns: ["Participant Name", "Session Topic"], logic: "Normalizes names and flags repeated participants only when their duplicate records are in different session topics." },
+};
 
-function LegalScrollControls({children,search,onSearch,onSearchSubmit,onFilters,activeCount,onClear,compactFilters,searchPlaceholder="Search"}:{children:ReactNode;search?:string;onSearch?:(value:string)=>void;onSearchSubmit?:()=>void;onFilters:()=>void;activeCount:number;onClear:()=>void;compactFilters?:ReactNode;searchPlaceholder?:string}) {
+function LegalScrollControls({children,search,onSearch,onSearchSubmit,onFilters,activeCount,onClear,compactFilters,searchPlaceholder="Search",filterLabel="Filters"}:{children:ReactNode;search?:string;onSearch?:(value:string)=>void;onSearchSubmit?:()=>void;onFilters:()=>void;activeCount:number;onClear:()=>void;compactFilters?:ReactNode;searchPlaceholder?:string;filterLabel?:string}) {
   const sentinel=useRef<HTMLSpanElement>(null),[pinned,setPinned]=useState(false),[target,setTarget]=useState<HTMLElement|null>(null);
   useEffect(()=>{setTarget(document.getElementById("legal-header-scroll-controls"))},[]);
   useEffect(()=>{
@@ -116,7 +177,7 @@ function LegalScrollControls({children,search,onSearch,onSearchSubmit,onFilters,
   const compact=<div className="legal-header-scroll-controls header-filter-actions">
     {onSearch&&<label className="legal-header-search"><Search/><input value={search||""} onChange={(event)=>onSearch(event.target.value)} onKeyDown={(event)=>{if(event.key==="Enter")onSearchSubmit?.()}} placeholder={searchPlaceholder}/></label>}
     {compactFilters}
-    <button className="primary" onClick={onFilters}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button>
+    <button className="primary" onClick={onFilters}><SlidersHorizontal/>{filterLabel} {activeCount>0&&<b>{activeCount}</b>}</button>
     <button className="soft" onClick={onClear} disabled={!activeCount}><RotateCcw/>Clear</button>
   </div>;
   return <><span ref={sentinel} className="legal-scroll-sentinel" aria-hidden="true"/><div className={pinned?"legal-scroll-source legal-scroll-source-pinned":"legal-scroll-source"}>{children}</div>{pinned&&target&&createPortal(compact,target)}</>;
@@ -143,11 +204,17 @@ const nav: [LegalPage, any][] = [
   ["legalservices", BriefcaseBusiness],
   ["awareness", Megaphone],
   ["detention", LockKeyhole],
+  ["deportation", ShieldAlert],
   ["lawyer-intelligence", BriefcaseBusiness],
+  ["studio", ChartColumnIncreasing],
   ["explorer", TableProperties],
   ["cases", Search],
 ];
 const value = (input: unknown) => formatTableValue(input);
+function TableSelectionActions({selected,filename,onClear,showActions=true}:{selected:Map<string,Record<string,unknown>>;filename:string;onClear:()=>void;showActions?:boolean}){
+  const [busy,setBusy]=useState(false);const rows=Array.from(selected.values()).map((row)=>Object.fromEntries(Object.entries(row).filter(([key])=>!key.startsWith("__")))),columns=Array.from(new Set(rows.flatMap((row)=>Object.keys(row))));
+  return <div className="table-selection-actions"><span>{rows.length} selected</span>{showActions&&<><button className="soft" disabled={!rows.length} onClick={onClear}>Clear selection</button><button className="primary" disabled={!rows.length||busy} onClick={async()=>{setBusy(true);try{await exportTableWorkbook(filename,columns,rows)}finally{setBusy(false)}}}><Download/>{busy?"Preparing…":"Download selected"}</button></>}</div>;
+}
 
 const duplicatePalette = ["#FCE8E6", "#FFF4D6", "#E7F0FF", "#E5F5EA", "#F0E8FA", "#FFECDD", "#E3F4F4", "#F7E8F1"];
 const duplicateColor = (key = "") => duplicatePalette[[...key].reduce((total, char) => total + char.charCodeAt(0), 0) % duplicatePalette.length];
@@ -221,6 +288,8 @@ type SkeletonVariant =
   | "review"
   | "explorer"
   | "detention"
+  | "deportation"
+  | "studio"
   | "cases"
   | "lawyers"
   | "indicator"
@@ -235,10 +304,28 @@ function LegalSkeleton({
   compact?: boolean;
   embedded?: boolean;
 }) {
-  const cards = variant === "lawyers" ? 5 : variant === "overview" ? 4 : 3;
-  const rows = compact ? 3 : variant === "cases" ? 4 : 6;
-  const chartLayout = variant === "overview" || variant === "detention" || variant === "lawyers";
-  const caseLayout = variant === "cases";
+  const rows = embedded && variant === "explorer" ? 14 : compact ? 3 : variant === "cases" ? 4 : 6;
+  const table = (count = rows) => <div className="skeleton-table"><div className="skeleton-table-head" />{Array.from({ length: count }, (_, i) => <div className="skeleton-table-row" key={i}><i/><i/><i/><i/></div>)}</div>;
+  const toolbar = (kind = "") => <div className={`skeleton-toolbar ${kind}`} aria-hidden="true"><i/><i/><i/><i/></div>;
+  const kpis = (count: number) => <div className="skeleton-kpis">{Array.from({ length: count }, (_, i) => <div className="skeleton-card" key={i}><i/><i/><i/></div>)}</div>;
+  const charts = (count: number, wide = true) => <div className="skeleton-chart-grid">{Array.from({ length: count }, (_, i) => <div className={`skeleton-chart ${wide && i === 0 ? "wide" : ""}`} key={i}><i/><i/><b/></div>)}</div>;
+  const dashboard = (cardCount: number, chartCount: number, kind = "") => <><>{toolbar(kind)}</>{kpis(cardCount)}{charts(chartCount)}</>;
+  const pageContent = (() => {
+    if (embedded) return <>{variant === "explorer" && <div className="skeleton-explorer-heading"><i/><i/></div>}{table()}</>;
+    if (compact) return table();
+    switch (variant) {
+      case "overview": return <><div className="skeleton-banner" />{dashboard(4, 3, "dashboard")}</>;
+      case "deportation": return dashboard(4, 3, "deportation");
+      case "detention": return dashboard(4, 3, "detention");
+      case "lawyers": return dashboard(4, 3, "lawyers");
+      case "studio": return <><div className="skeleton-tabs"><i/><i/><i/><i/><i/></div>{dashboard(4, 3, "studio")}{table(7)}</>;
+      case "review": return <>{toolbar("review")}<div className="skeleton-review-tables">{Array.from({length:3},(_,i)=><div className="skeleton-review-table" key={i}>{table(4)}</div>)}</div></>;
+      case "explorer": return <>{toolbar("explorer")}{table(10)}<div className="skeleton-pager"><i/><i/></div></>;
+      case "cases": return <><div className="skeleton-case-search">{toolbar("cases")}</div><div className="skeleton-case-grid">{Array.from({length:rows},(_,i)=><div className="skeleton-case-card" key={i}><i/><i/><i/><i/></div>)}</div></>;
+      case "indicator": return <>{toolbar("indicator")}<div className="skeleton-indicator-groups">{Array.from({length:3},(_,i)=><div className="skeleton-indicator-group" key={i}><i/><i/>{table(3)}</div>)}</div></>;
+      default: return table();
+    }
+  })();
   return (
     <section
       className={`legal-skeleton legal-skeleton-${variant}${compact ? " compact" : ""}${embedded ? " embedded" : ""}`}
@@ -246,23 +333,7 @@ function LegalSkeleton({
       aria-label="Loading page content"
       aria-busy="true"
     >
-      {!compact && !embedded && <div className="skeleton-banner" />}
-      {!embedded && (variant === "overview" || variant === "lawyers" || variant === "explorer" || variant === "detention") && (
-        <div className="skeleton-kpis">
-          {Array.from({ length: cards }, (_, i) => <div className="skeleton-card" key={i}><i /><i /><i /></div>)}
-        </div>
-      )}
-      {(variant === "review" || variant === "cases" || variant === "indicator") && !compact && !embedded && (
-        <div className="skeleton-controls"><i /><i /><i /></div>
-      )}
-      {chartLayout ? <div className="skeleton-chart-grid">{Array.from({ length: variant === "detention" ? 3 : 2 }, (_, i) => <div className={`skeleton-chart ${i === 0 ? "wide" : ""}`} key={i}><i/><i/><b/></div>)}</div> : caseLayout ? <div className="skeleton-case-grid">{Array.from({ length: rows }, (_, i) => <div className="skeleton-case-card" key={i}><i/><i/><i/><i/></div>)}</div> : <div className="skeleton-table">
-        <div className="skeleton-table-head" />
-        {Array.from({ length: rows }, (_, i) => (
-          <div className="skeleton-table-row" key={i}>
-            <i /><i /><i /><i />
-          </div>
-        ))}
-      </div>}
+      {pageContent}
       <span className="sr-only">Loading content</span>
     </section>
   );
@@ -290,25 +361,36 @@ function FindingTable({
   search,
   nameCompareChars,
   allowNameVariations,
+  exactMatchesOnly,
+  onExactMatchesOnlyChange,
   filters,
   comparisonMonth,
   onOpenCase,
+  findingRevision,
+  onFindingCountChange,
+  onFindingContextMenu,
 }: {
   dataset: string;
   rule: string;
   search: string;
   nameCompareChars: number;
   allowNameVariations: boolean;
+  exactMatchesOnly: boolean;
+  onExactMatchesOnlyChange: (value: boolean) => void;
   filters: Record<string, string>;
   comparisonMonth: string;
   onOpenCase: (caseId: string) => void;
+  findingRevision: number;
+  onFindingCountChange: (rule: string, count: number) => void;
+  onFindingContextMenu: (event: React.MouseEvent, row: LegalFlag) => void;
 }) {
   const [result, setResult] = useState<LegalReview | null>(null),
     [page, setPage] = useState(1),
+    [helpOpen, setHelpOpen] = useState(false),
     [error, setError] = useState("");
   useEffect(() => {
     setPage(1);
-  }, [dataset, rule, search, filters, comparisonMonth, nameCompareChars, allowNameVariations]);
+  }, [dataset, rule, search, filters, comparisonMonth, nameCompareChars, allowNameVariations, exactMatchesOnly, findingRevision]);
   useEffect(() => {
     const controller = new AbortController();
     setResult(null);
@@ -322,26 +404,35 @@ function FindingTable({
       comparisonMonth,
       nameCompareChars,
       allowNameVariations,
+      exactMatchesOnly,
       controller.signal,
     )
       .then((x) => {
         setResult(x);
         setError("");
+        if (EXCLUDABLE_BENEFICIARY_RULES.has(rule)) onFindingCountChange(rule, x.total);
       })
       .catch((e) => {
         if (e.name !== "AbortError") setError(e.message);
       });
     return () => controller.abort();
-  }, [dataset, rule, search, page, filters, comparisonMonth, nameCompareChars, allowNameVariations]);
+  }, [dataset, rule, search, page, filters, comparisonMonth, nameCompareChars, allowNameVariations, exactMatchesOnly, findingRevision]);
   return (
     <section className="glass finding-table-section">
       <header>
-        <div>
-          <span className="eyebrow">REVIEW FINDING</span>
-          <h3>{rule}</h3>
+        <div className="finding-title-wrap">
+          <button className="finding-help-button" type="button" aria-label={`How to check ${rule}`} title="How to check" aria-expanded={helpOpen} onClick={() => setHelpOpen((current) => !current)}><CircleHelp /></button>
+          <div><span className="eyebrow">REVIEW FINDING</span><h3>{rule}</h3></div>
         </div>
+        {rule === "Possible duplicate name" && (
+          <label className="exact-match-filter">
+            <input type="checkbox" checked={exactMatchesOnly} onChange={(event) => onExactMatchesOnlyChange(event.target.checked)} />
+            <span>Only 100% matches</span>
+          </label>
+        )}
         <strong>{result?.total.toLocaleString() || 0} records</strong>
       </header>
+      {helpOpen && (() => { const method=REVIEW_CHECK_METHODS[rule] || {columns:["Imported source record"],logic:"Flags records matching this review rule."}; return <aside className="finding-check-guidance" role="note"><CircleHelp /><div><strong>Detection methodology</strong><p>{method.logic}</p><div className="finding-method-columns"><span>Columns checked</span>{method.columns.map((column) => <b key={column}>{column}</b>)}</div></div></aside>; })()}
       {error && <div className="error">{error}</div>}
       {!result ? (
         <LegalSkeleton variant="table" compact />
@@ -359,6 +450,8 @@ function FindingTable({
             <table>
               <thead>
                 <tr>
+                  <th>Finding detail</th>
+                  <th>Recommended action</th>
                   <th>Lawyer</th>
                   <th>Priority</th>
                   <th>Project</th>
@@ -373,14 +466,16 @@ function FindingTable({
                   ) : (
                     <><th>Case ID</th><th>Assessment</th><th>Service</th></>
                   )}
-                  <th>Finding detail</th>
-                  <th>Recommended action</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
                 {result?.rows.map((r, i) => (
-                  <tr key={`${r.row}-${i}`}>
+                  <tr key={`${r.row}-${i}`} onContextMenu={(event) => {
+                    if ((dataset === "assessments" && r.assessmentId) || (dataset === "legalservices" && r.serviceId) || (dataset === "awareness" && (r.awarenessId || r.name)) || (dataset === "beneficiaries" && r.caseId)) onFindingContextMenu(event, r);
+                  }}>
+                    <td>{r.detail}</td>
+                    <td className="action-cell">{r.action}</td>
                     <td>
                       <strong>{r.lawyer || "Unassigned"}</strong>
                     </td>
@@ -393,25 +488,27 @@ function FindingTable({
                     </td>
                     <td>{r.project ? formatProjectLabel(r.project) : "—"}</td>
                     <td>{r.location || "—"}</td>
-                    <td className={r.duplicateGroup ? `duplicate-name-cell ${r.nameMatchMode === "exact" ? "exact-duplicate-name" : "variation-duplicate-name"}` : ""} style={r.duplicateGroup && r.nameMatchMode !== "exact" ? { background: `linear-gradient(90deg, ${duplicateColor(r.duplicateGroup)} 0%, ${duplicateColor(r.duplicateGroup)} ${r.duplicateSimilarity ?? 90}%, color-mix(in srgb,var(--panel-strong) 42%,transparent) ${r.duplicateSimilarity ?? 90}%, transparent 100%)` } : undefined}>
+                    <td
+                      className={r.duplicateGroup ? `duplicate-name-cell ${r.nameMatchMode === "exact" ? "exact-duplicate-name" : "variation-duplicate-name"}` : ""}
+                      style={r.duplicateGroup && r.nameMatchMode !== "exact" ? { background: `linear-gradient(90deg, ${duplicateColor(r.duplicateGroup)} 0%, ${duplicateColor(r.duplicateGroup)} ${r.duplicateSimilarity ?? 90}%, color-mix(in srgb,var(--panel-strong) 42%,transparent) ${r.duplicateSimilarity ?? 90}%, transparent 100%)` } : undefined}
+                      onCopy={(event) => {
+                        event.preventDefault();
+                        event.clipboardData.setData("text/plain", r.name || "");
+                      }}
+                    >
                       <strong>{r.name || "Not provided"}</strong>
                       {r.duplicateSimilarity !== undefined && <span className="duplicate-match-badge">{r.duplicateSimilarity}% match</span>}
                       {r.nameMatchMode === "exact" && <span className="exact-duplicate-badge">Exact duplicate</span>}
-                      <small className="row-reference">
-                        Source row {r.row}
-                      </small>
                     </td>
                     {(rule === "Marital status below 18" || rule === "Spouse below 18") && <td>{r.maritalStatus || "—"}</td>}
                     {rule === "Spouse below 18" && <><td><strong>{r.spouseName || "Not provided"}</strong></td><td>{r.spouseDateOfBirth || "—"}</td><td>{r.spouseAge ?? "—"}</td></>}
                     <td>{r.phone || "—"}</td>
-                    {dataset === "beneficiaries" && <td>{r.dateOfBirth || "—"}</td>}
+                    {dataset === "beneficiaries" && <td>{r.dateOfBirth || "—"}{rule === "Marital status below 18" && r.beneficiaryAge !== null && r.beneficiaryAge !== undefined ? ` (${r.beneficiaryAge})` : ""}</td>}
                     {dataset === "awareness" ? (
                       <><td>{r.awarenessId || r.recordId || "—"}</td><td>{r.sessionTopic || "—"}</td></>
                     ) : (
                       <><td>{r.caseId || "—"}</td><td>{r.assessmentId || "—"}</td><td>{r.serviceId || "—"}</td></>
                     )}
-                    <td>{r.detail}</td>
-                    <td className="action-cell">{r.action}</td>
                     <td>
                       {r.caseId && (
                         <button
@@ -452,9 +549,26 @@ function ReviewPageBody({
     [nameCompareChars, setNameCompareChars] = useState(15),
     [appliedNameCompareChars, setAppliedNameCompareChars] = useState(15),
     [allowNameVariations, setAllowNameVariations] = useState(false),
+    [exactMatchesOnly, setExactMatchesOnly] = useState(false),
     [selectedRules, setSelectedRules] = useState<string[]>([]),
     [filters, setFilters] = useState<Record<string, string>>({}),
     [drawer, setDrawer] = useState(false),
+    [excludedDuplicates, setExcludedDuplicates] = useState<DuplicateExclusion[]>([]),
+    [excludedManagerOpen, setExcludedManagerOpen] = useState(false),
+    [exclusionCandidate, setExclusionCandidate] = useState<LegalFlag | null>(null),
+    [exclusionImportOpen, setExclusionImportOpen] = useState(false),
+    [exclusionFile, setExclusionFile] = useState<File | null>(null),
+    [exclusionImportRules, setExclusionImportRules] = useState<string[]>([]),
+    [exclusionImportResult, setExclusionImportResult] = useState(""),
+    [duplicateMenu, setDuplicateMenu] = useState<{x:number;y:number;row:LegalFlag} | null>(null),
+    [findingRevisions, setFindingRevisions] = useState<Record<string, number>>({}),
+    [findingCounts, setFindingCounts] = useState<Record<string, number>>({}),
+    [reviewActionsOpen, setReviewActionsOpen] = useState(false),
+    [exclusionRuleFilter, setExclusionRuleFilter] = useState(""),
+    [selectedExcludedFindings, setSelectedExcludedFindings] = useState<string[]>([]),
+    [restoreConfirmation, setRestoreConfirmation] = useState<DuplicateExclusion[] | null>(null),
+    [exclusionSort, setExclusionSort] = useState<{key:string;direction:"asc"|"desc"}>({key:"rule",direction:"asc"}),
+    [exclusionBusy, setExclusionBusy] = useState(false),
     [initialized, setInitialized] = useState(false),
     [busy, setBusy] = useState(true),
     [error, setError] = useState("");
@@ -471,6 +585,10 @@ function ReviewPageBody({
     const timer = window.setTimeout(() => setAppliedNameCompareChars(nameCompareChars), 250);
     return () => window.clearTimeout(timer);
   }, [nameCompareChars]);
+  const loadExcludedDuplicates = () => getDuplicateExclusions().then((result) => setExcludedDuplicates(result.rows)).catch(() => setExcludedDuplicates([]));
+  useEffect(() => {
+    void loadExcludedDuplicates();
+  }, [dataset]);
   useEffect(() => {
     const controller = new AbortController();
     setBusy(true);
@@ -484,16 +602,16 @@ function ReviewPageBody({
       comparisonMonth,
       appliedNameCompareChars,
       allowNameVariations,
+      false,
       controller.signal,
     )
       .then((result) => {
         if (controller.signal.aborted) return;
         setSummary(result);
         if (!initialized) {
-          const leading = Object.entries(result.ruleCounts)
-            .filter(([, count]) => count > 0)
-            .sort((a, b) => b[1] - a[1])[0];
-          setSelectedRules(leading ? [leading[0]] : []);
+          const beneficiaryDefaults = ["Possible duplicate name", "Invalid contact number", "Case without assessment", "Invalid age"];
+          const defaults = dataset === "beneficiaries" ? beneficiaryDefaults : Object.entries(result.ruleCounts).filter(([, count]) => count > 0).map(([rule]) => rule);
+          setSelectedRules(defaults);
           setInitialized(true);
         }
       })
@@ -505,8 +623,27 @@ function ReviewPageBody({
       });
     return () => controller.abort();
   }, [dataset, debouncedSearch, filters, comparisonMonth, appliedNameCompareChars, allowNameVariations]);
-  const rules = Object.entries(summary?.ruleCounts || {}),
-    activeFilters = Object.values(filters).filter(Boolean).length;
+  const rules = Object.entries(summary?.ruleCounts || {}).map(([rule, count]) => [rule, EXCLUDABLE_BENEFICIARY_RULES.has(rule) && findingCounts[rule] !== undefined ? findingCounts[rule] : count] as const),
+    activeFilters = Object.values(filters).filter(Boolean).length,
+    visibleExcludedFindings = excludedDuplicates.filter((entry) => (entry.dataset || "beneficiaries") === dataset && (!exclusionRuleFilter || entry.rule === exclusionRuleFilter));
+  const sortedExcludedFindings = [...visibleExcludedFindings].sort((left,right) => {
+    const value=(entry:DuplicateExclusion) => exclusionSort.key === "identifier" ? entry.identifierValue || entry.caseId : exclusionSort.key === "page" ? entry.dataset || "beneficiaries" : String(entry[exclusionSort.key as keyof DuplicateExclusion] || "");
+    const result=value(left).localeCompare(value(right),undefined,{numeric:true,sensitivity:"base"}); return exclusionSort.direction === "asc" ? result : -result;
+  });
+  const toggleExclusionSort = (key:string) => setExclusionSort((current) => ({key,direction:current.key === key && current.direction === "asc" ? "desc" : "asc"}));
+  const exclusionKey = (entry: DuplicateExclusion) => `${entry.dataset || "beneficiaries"}|${entry.rule}|${entry.identifierType || "caseId"}|${entry.identifierValue || entry.caseId}`;
+  const restoreExcludedEntries = async (selected: DuplicateExclusion[]) => {
+    if (!selected.length) return;
+    setExclusionBusy(true);
+    try {
+      let latest:{rows:DuplicateExclusion[];count:number}|null=null;
+      for (const entry of selected) latest=await restoreDuplicateExclusion(entry.identifierValue || entry.caseId,entry.rule,entry.dataset || "",entry.identifierType || "");
+      if (latest) setExcludedDuplicates(latest.rows);
+      setSelectedExcludedFindings([]);
+      setFindingRevisions((current)=>Object.fromEntries(selected.map((entry)=>[entry.rule,(current[entry.rule]||0)+1])));
+      setRestoreConfirmation(null);
+    } finally { setExclusionBusy(false); }
+  };
   const toggleRule = (rule: string) =>
     setSelectedRules((current) =>
       current.includes(rule)
@@ -518,6 +655,26 @@ function ReviewPageBody({
       ...current,
       [key]: current[key] === item ? "" : item,
     }));
+  const exclusionIdentity = (row: LegalFlag) => dataset === "assessments" ? ["assessmentId",row.assessmentId] : dataset === "legalservices" ? ["serviceId",row.serviceId] : dataset === "awareness" ? ["awarenessId",row.awarenessId || row.name] : ["caseId",row.caseId];
+  const excludeFinding = async () => {
+    if (!exclusionCandidate) return;
+    setExclusionBusy(true);
+    try {
+      const [identifierType,identifierValue]=exclusionIdentity(exclusionCandidate);
+      const result = await createDuplicateExclusion({ caseId: exclusionCandidate.caseId, dataset, identifierType, identifierValue, rule: exclusionCandidate.rule, name: exclusionCandidate.name, project: exclusionCandidate.project, source: `${labels[dataset as LegalPage]} Review` });
+      setExcludedDuplicates(result.rows);
+      setFindingRevisions((current) => ({ ...current, [exclusionCandidate.rule]: (current[exclusionCandidate.rule] || 0) + 1 }));
+      setExclusionCandidate(null);
+    } finally { setExclusionBusy(false); }
+  };
+  const restoreExcludedFinding = async (caseId: string, rule: string, item?: DuplicateExclusion) => {
+    setExclusionBusy(true);
+    try {
+      const result = await restoreDuplicateExclusion(caseId, rule, item?.dataset || "", item?.identifierType || "");
+      setExcludedDuplicates(result.rows);
+      setFindingRevisions((current) => ({ ...current, [rule]: (current[rule] || 0) + 1 }));
+    } finally { setExclusionBusy(false); }
+  };
   return (
     <>
       {busy && !summary && (
@@ -533,20 +690,31 @@ function ReviewPageBody({
       )}
       <div className="glass review-finding-selector">
         <header>
-          <div>
+          <div className="review-selector-actions">
             <span className="eyebrow">FINDINGS TO DISPLAY</span>
             <h3>Choose review tables</h3>
           </div>
-          <div>
+          <div className="review-selector-buttons">
             <button
-              className="soft"
+              className="soft review-selector-button select-all-button"
               onClick={() => setSelectedRules(rules.map(([rule]) => rule))}
             >
-              Select all
+              <CheckCheck /> Select all
             </button>
-            <button className="soft" onClick={() => setSelectedRules([])}>
-              Clear
+            <button className="soft review-selector-button clear-selection-button" onClick={() => setSelectedRules([])}>
+              <Eraser /> Clear
             </button>
+            {true && (
+              <div className="review-actions-wrap review-selector-exclude-actions">
+                <button className="soft review-selector-button review-actions-toggle" aria-expanded={reviewActionsOpen} aria-haspopup="menu" onClick={() => setReviewActionsOpen((value) => !value)}>
+                  <Ban /> Exclude
+                </button>
+                {reviewActionsOpen && <div className="review-actions-menu finding-exclusion-menu" role="menu">
+                  <button className="all-findings" role="menuitem" onClick={() => { setExclusionRuleFilter(""); setSelectedExcludedFindings([]); setReviewActionsOpen(false); setExcludedManagerOpen(true); void loadExcludedDuplicates(); }}>Excluded findings for this page <b>{visibleExcludedFindings.length}</b></button>
+                  <button className="all-findings" role="menuitem" onClick={() => { setExclusionImportRules(selectedRules); setReviewActionsOpen(false); setExclusionImportOpen(true); }}>Import exclusions</button>
+                </div>}
+              </div>
+            )}
           </div>
         </header>
         <div>
@@ -573,27 +741,20 @@ function ReviewPageBody({
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
-        <button
-          className="soft case-filter-button"
-          onClick={() => setDrawer(true)}
-        >
-          <SlidersHorizontal />
-          All filters{activeFilters > 0 && <b>{activeFilters}</b>}
-        </button>
         {dataset === "beneficiaries" && (
-          <section className="name-sensitivity-panel">
-            <header>
-              <div><span>NAME MATCHING</span><strong>Duplicate-name comparison</strong></div>
-              <b>{nameCompareChars} chars</b>
-            </header>
+          <section className={`name-sensitivity-panel${exactMatchesOnly ? " disabled" : ""}`} title={exactMatchesOnly ? "Name matching controls are ignored while only 100% matches is selected." : undefined}>
+            <div className="name-match-title">
+              <span>NAME MATCHING</span>
+              <strong>Duplicate names</strong>
+            </div>
             <label className="name-similarity-slider">
-              <span>Characters compared</span>
-              <input type="range" min="10" max="30" step="1" value={nameCompareChars} onChange={(e) => setNameCompareChars(Number(e.target.value))} />
+              <span className="sr-only">Characters compared</span>
+              <input aria-label="Characters compared" type="range" min="10" max="30" step="1" value={nameCompareChars} disabled={exactMatchesOnly} style={{background:`linear-gradient(90deg, var(--blue) 0%, var(--blue) ${((nameCompareChars - 10) / 20) * 100}%, color-mix(in srgb,var(--blue) 14%,var(--line)) ${((nameCompareChars - 10) / 20) * 100}%, color-mix(in srgb,var(--blue) 14%,var(--line)) 100%)`}} onChange={(e) => setNameCompareChars(Number(e.target.value))} />
             </label>
-            <div className="name-slider-scale"><span>10</span><span>15</span><span>20</span><span>25</span><span>30</span></div>
+            <b className="name-character-value" key={nameCompareChars}>{nameCompareChars} chars</b>
             <label className="name-variation-option">
-              <input type="checkbox" checked={allowNameVariations} onChange={(e) => setAllowNameVariations(e.target.checked)} />
-              <span><strong>Allow small spelling differences</strong><small>{allowNameVariations ? "Finds close spellings within the selected characters." : "Only exact normalized characters are matched."}</small></span>
+              <input type="checkbox" checked={allowNameVariations} disabled={exactMatchesOnly} onChange={(e) => setAllowNameVariations(e.target.checked)} />
+              <span>Spelling variations</span>
             </label>
             {summary?.nameRecordCount === 0 ? (
               <small className="name-empty-message">No beneficiary names are loaded. Choose a folder containing beneficiary names to use duplicate-name matching.</small>
@@ -602,9 +763,18 @@ function ReviewPageBody({
             ) : null}
           </section>
         )}
+        <button
+          className="soft case-filter-button"
+          onClick={() => setDrawer(true)}
+        >
+          <SlidersHorizontal />
+          All filters{activeFilters > 0 && <b>{activeFilters}</b>}
+        </button>
         <a
           className="primary link"
-          href={legalReviewExportUrl(dataset, comparisonMonth, appliedNameCompareChars, allowNameVariations)}
+          href={legalReviewExportUrl(dataset, comparisonMonth, appliedNameCompareChars, allowNameVariations, exactMatchesOnly, selectedRules)}
+          aria-disabled={selectedRules.length === 0}
+          onClick={(event) => { if (!selectedRules.length) event.preventDefault(); }}
         >
           <Download />
           Excel
@@ -627,12 +797,76 @@ function ReviewPageBody({
               search={debouncedSearch}
               nameCompareChars={appliedNameCompareChars}
               allowNameVariations={allowNameVariations}
+              exactMatchesOnly={exactMatchesOnly}
+              onExactMatchesOnlyChange={setExactMatchesOnly}
               filters={filters}
               comparisonMonth={comparisonMonth}
               onOpenCase={onOpenCase}
+              findingRevision={findingRevisions[rule] || 0}
+              onFindingCountChange={(findingRule, count) => setFindingCounts((current) => ({ ...current, [findingRule]: count }))}
+              onFindingContextMenu={(event, row) => { event.preventDefault(); setDuplicateMenu({ x: event.clientX, y: event.clientY, row }); }}
             />
           ))}
         </div>
+      )}
+      {duplicateMenu && (
+        <>
+          <button className="duplicate-context-backdrop" aria-label="Close duplicate actions" onClick={() => setDuplicateMenu(null)} />
+          <div className="duplicate-context-menu" style={{ left: duplicateMenu.x, top: duplicateMenu.y }} role="menu">
+            <button role="menuitem" onClick={() => { setExclusionCandidate(duplicateMenu.row); setDuplicateMenu(null); }}>
+              Exclude this record from this finding
+            </button>
+          </div>
+        </>
+      )}
+      {exclusionCandidate && (
+        <div className="duplicate-exclusion-modal">
+          <button className="case-modal-backdrop" aria-label="Cancel exclusion" onClick={() => setExclusionCandidate(null)} />
+          <section className="duplicate-exclusion-panel">
+            <span className="eyebrow">REVIEW FINDING</span>
+            <h2>Exclude this record?</h2>
+            <p>This record will be hidden only from <strong>{exclusionCandidate.rule}</strong> and its related Excel rows. The source CSV remains unchanged.</p>
+            <dl><div><dt>Finding</dt><dd>{exclusionCandidate.rule}</dd></div><div><dt>Case ID</dt><dd>{exclusionCandidate.caseId}</dd></div><div><dt>Name</dt><dd>{exclusionCandidate.name || "Not provided"}</dd></div><div><dt>Project</dt><dd>{exclusionCandidate.project || "Not provided"}</dd></div></dl>
+            <footer><button className="soft" onClick={() => setExclusionCandidate(null)} disabled={exclusionBusy}>Cancel</button><button className="primary" onClick={excludeFinding} disabled={exclusionBusy}>{exclusionBusy ? "Saving…" : "Exclude record"}</button></footer>
+          </section>
+        </div>
+      )}
+      {excludedManagerOpen && createPortal(
+        <div className="duplicate-exclusion-modal" role="dialog" aria-modal="true" aria-label="Local exclusion register">
+          <button className="case-modal-backdrop" aria-label="Close excluded findings" onClick={() => setExcludedManagerOpen(false)} />
+          <section className="duplicate-exclusion-panel duplicate-exclusion-manager">
+            <header><div><span className="eyebrow">LOCAL EXCLUSION REGISTER</span><h2>{labels[dataset as LegalPage]} — {exclusionRuleFilter || "Excluded findings"} ({visibleExcludedFindings.length})</h2></div><button onClick={() => setExcludedManagerOpen(false)}><X /></button></header>
+            <p>Only exclusions for this review page are shown. Restoring a record returns it only to its selected finding when it still meets that finding’s rule.</p>
+            <div className="excluded-findings-actions"><a className="soft link" href={duplicateExclusionsExportUrl()}><Download /> Export Excel</a><button className="soft" disabled={!selectedExcludedFindings.length || exclusionBusy} onClick={() => setRestoreConfirmation(sortedExcludedFindings.filter((entry) => selectedExcludedFindings.includes(exclusionKey(entry))))}>Restore selected ({selectedExcludedFindings.length})</button></div>
+            <div className="legal-table-wrap"><table className="excluded-findings-table"><thead><tr><th><input aria-label="Select all excluded findings" type="checkbox" checked={sortedExcludedFindings.length>0 && sortedExcludedFindings.every((entry)=>selectedExcludedFindings.includes(exclusionKey(entry)))} onChange={(event) => setSelectedExcludedFindings(event.target.checked ? sortedExcludedFindings.map(exclusionKey) : [])} /></th>{[["rule","Finding"],["identifier","Identifier"],["name","Name"],["project","Project"],["excludedAt","Date excluded"],["source","Source context"]].map(([key,label]) => <th key={key}><button onClick={() => toggleExclusionSort(key)}>{label}{exclusionSort.key === key ? exclusionSort.direction === "asc" ? " ▲" : " ▼" : " ↕"}</button></th>)}<th></th></tr></thead><tbody>{sortedExcludedFindings.length ? sortedExcludedFindings.map((entry) => <tr key={exclusionKey(entry)}><td><input aria-label={`Select ${entry.identifierValue || entry.caseId}`} type="checkbox" checked={selectedExcludedFindings.includes(exclusionKey(entry))} onChange={() => setSelectedExcludedFindings((current) => current.includes(exclusionKey(entry)) ? current.filter((key) => key !== exclusionKey(entry)) : [...current,exclusionKey(entry)])} /></td><td><span className={`excluded-finding-tag ${exclusionRuleClass(entry.rule)}`}>{entry.rule}</span></td><td>{entry.identifierValue || entry.caseId}</td><td>{entry.name || "—"}</td><td>{entry.project ? formatProjectLabel(entry.project) : "—"}</td><td>{entry.excludedAt ? new Date(entry.excludedAt).toLocaleString() : "—"}</td><td>{entry.source || "—"}</td><td><button className="soft" onClick={() => setRestoreConfirmation([entry])} disabled={exclusionBusy}>Restore</button></td></tr>) : <tr><td colSpan={8}>No records are excluded on this review page.</td></tr>}</tbody></table></div>
+          </section>
+        </div>,
+        document.body,
+      )}
+      {restoreConfirmation && createPortal(
+        <div className="duplicate-exclusion-modal" role="dialog" aria-modal="true" aria-label="Confirm restore exclusions">
+          <button className="case-modal-backdrop" aria-label="Cancel restore" onClick={() => !exclusionBusy && setRestoreConfirmation(null)} />
+          <section className="duplicate-exclusion-panel restore-confirmation-panel">
+            <span className="eyebrow">CONFIRM RESTORE</span>
+            <h2>Restore {restoreConfirmation.length === 1 ? "this exclusion" : `${restoreConfirmation.length} exclusions`}?</h2>
+            <p>The restored record{restoreConfirmation.length === 1 ? "" : "s"} will appear again only when it still matches the relevant review finding. Source files will not be changed.</p>
+            <footer><button className="soft" disabled={exclusionBusy} onClick={() => setRestoreConfirmation(null)}>Cancel</button><button className="primary" disabled={exclusionBusy} onClick={() => void restoreExcludedEntries(restoreConfirmation)}>{exclusionBusy ? "Restoring…" : "Confirm restore"}</button></footer>
+          </section>
+        </div>, document.body,
+      )}
+      {exclusionImportOpen && createPortal(
+        <div className="duplicate-exclusion-modal" role="dialog" aria-modal="true" aria-label="Import exclusions">
+          <button className="case-modal-backdrop" aria-label="Close exclusion import" onClick={() => setExclusionImportOpen(false)} />
+          <section className="duplicate-exclusion-panel exclusion-import-panel">
+            <header className="exclusion-import-header"><div><span className="eyebrow">BULK EXCLUSIONS</span><h2>Import IDs for selected findings</h2></div><button className="exclusion-modal-close" aria-label="Close import exclusions" title="Close" onClick={() => setExclusionImportOpen(false)}><X /></button></header>
+            <p>Choose the finding tables to exclude from, then upload CSV or Excel. The app automatically uses {dataset === "beneficiaries" ? "Case ID or Beneficiary ID" : dataset === "assessments" ? "Assessment ID" : dataset === "legalservices" ? "Service ID" : "Awareness ID"} from the file.</p>
+            <div className="exclusion-import-rules"><span>Exclude from these tables</span>{rules.map(([rule]) => <label key={rule}><input type="checkbox" checked={exclusionImportRules.includes(rule)} onChange={() => setExclusionImportRules((current) => current.includes(rule) ? current.filter((item) => item !== rule) : [...current, rule])} /><span>{rule}</span></label>)}</div>
+            <label className="exclusion-file-picker" htmlFor="exclusion-import-file"><span>Choose file</span><small>{exclusionFile?.name || "CSV, XLSX, or XLS"}</small></label>
+            <input id="exclusion-import-file" className="exclusion-file-input" type="file" accept=".csv,.xlsx,.xls" onChange={(event) => { setExclusionFile(event.target.files?.[0] || null); setExclusionImportResult(""); }} />
+            {exclusionImportResult && <p>{exclusionImportResult}</p>}
+            <footer><button className="soft" onClick={() => setExclusionImportOpen(false)}>Cancel</button><button className="primary" disabled={!exclusionFile || !exclusionImportRules.length || exclusionBusy} onClick={async () => { if (!exclusionFile) return; setExclusionBusy(true); try { const type=dataset === "assessments" ? "assessmentId" : dataset === "legalservices" ? "serviceId" : dataset === "awareness" ? "awarenessId" : "caseId"; const result=await importDuplicateExclusions(exclusionFile,dataset,type,exclusionImportRules); setExcludedDuplicates(result.rows); setExclusionImportResult(`${result.imported} imported from ${result.column}; ${result.duplicates} already existed; ${result.invalid} invalid.`); setFindingRevisions((current)=>Object.fromEntries(exclusionImportRules.map((rule)=>[rule,(current[rule]||0)+1]))); } finally { setExclusionBusy(false); } }}>{exclusionBusy ? "Importing…" : "Import exclusions"}</button></footer>
+          </section>
+        </div>, document.body,
       )}
       {drawer && (
         <>
@@ -851,11 +1085,11 @@ function LegacyReviewPageBody({
                       </td>
                       <td>{r.project ? formatProjectLabel(r.project) : "—"}</td>
                       <td>{r.location || "—"}</td>
-                      <td>
+                      <td onCopy={(event) => {
+                        event.preventDefault();
+                        event.clipboardData.setData("text/plain", r.name || "");
+                      }}>
                         <strong>{r.name || "Not provided in source"}</strong>
-                        <small className="row-reference">
-                          Source row {r.row}
-                        </small>
                       </td>
                       <td>{r.phone || "—"}</td>
                       <td>{r.caseId || "—"}</td>
@@ -892,16 +1126,78 @@ function LegacyReviewPageBody({
   );
 }
 
+function LegalDeportationDashboard({metadata,theme}:{metadata:LegalMetadata;theme:Theme}){
+  const [dash,setDash]=useState<Dashboard|null>(null),[error,setError]=useState(""),[filters,setFilters]=useState<Record<string,string[]>>({}),[drawer,setDrawer]=useState(false),[display,setDisplay]=useState<"both"|"count"|"percent">("both"),[refreshing,setRefreshing]=useState(false);
+  useEffect(()=>{let active=true;setError("");setRefreshing(true);getLegalDeportationDashboard(filters).then((data)=>{if(active)setDash(data)}).catch((reason)=>{if(active)setError(reason.message||"Unable to load deportation data.")}).finally(()=>{if(active)setRefreshing(false)});return()=>{active=false}},[metadata.source,filters]);
+  const activeCount=Object.values(filters).reduce((count,values)=>count+values.length,0),clear=()=>setFilters({});
+  if(error)return <section className="glass legal-empty"><ShieldAlert/><h2>Unable to load Deportation</h2><p>{error}</p><button className="primary" onClick={()=>window.location.reload()}><RefreshCw/>Retry</button></section>;
+  if(!dash)return <LegalSkeleton variant="deportation"/>;
+  const selectChart=(field:string,value:string)=>setFilters((current)=>({...current,[field]:current[field]?.includes(value)?current[field].filter((item)=>item!==value):[...(current[field]||[]),value]}));
+  return <section className={`legal-deportation-dashboard dashboard-content ${refreshing?"refreshing":""}`}><div className="toolbar"><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft clear-button" onClick={clear} disabled={!activeCount}><RotateCcw/>Clear all filters</button><button className="soft" onClick={()=>void exportLegalExplorer("xlsx","deportationrecords","",filters)}><Download/>Excel</button><div className="toolbar-metrics"><AppSelect label="Measure" value="records" onChange={()=>{}} disabled options={[["records","PN IDs"]]}/><AppSelect label="Display" value={display} onChange={(value)=>setDisplay(value as "both"|"count"|"percent")} options={[["both","# + %"],["count","Count #"],["percent","Percentage %"]]}/></div></div><ActiveFilters filters={filters} onRemove={(field,value)=>setFilters((current)=>({...current,[field]:current[field].filter((item)=>item!==value)}))}/><div className="refresh-indicator">Updating filters…</div><div className="kpi-grid">{dash.kpis.map((item)=><KpiCard key={item.label} {...item}/>)}</div><div className="dashboard-grid"><TrendCard rows={dash.trend} display={display} theme={theme} selected={filters.Month||[]} onSelect={(months,replace)=>setFilters((current)=>({...current,Month:replace?months:Array.from(new Set([...(current.Month||[]),...months]))}))} onRemove={(month)=>setFilters((current)=>({...current,Month:(current.Month||[]).filter((item)=>item!==month)}))} title="Activity over time" subtitle="Date of deportation"/>{dash.charts.map((chart)=><ChartCard key={chart.id} chart={chart} display={display} theme={theme} onSelect={selectChart}/>)}</div><DeportationRecordsTable filters={filters}/><FilterDrawer open={drawer} available={dash.filterOptions||{}} filters={filters} onClose={()=>setDrawer(false)} onChange={setFilters} onReset={clear}/></section>;
+}
+
+function DeportationRecordsTable({filters}:{filters:Record<string,string[]>}){
+  const [result,setResult]=useState<LegalExplorerResult|null>(null),[search,setSearch]=useState(""),[page,setPage]=useState(1),[sortColumn,setSortColumn]=useState(""),[sortDirection,setSortDirection]=useState<"asc"|"desc">("asc"),[selected,setSelected]=useState<Map<string,Record<string,unknown>>>(new Map());
+  useEffect(()=>{getLegalExplorer("deportationrecords",search,page,filters,sortColumn,sortDirection).then(setResult).catch(()=>setResult(null))},[filters,search,page,sortColumn,sortDirection]);
+  return <section className="glass legal-table-card deportation-records-table"><div className="legal-card-heading"><div><strong>{result?.total.toLocaleString()||0}</strong><span> deportation source records</span></div><TableSelectionActions selected={selected} filename="selected-deportation-records.xlsx" onClear={()=>setSelected(new Map())}/><label className="studio-table-search"><Search/><input value={search} onChange={(event)=>{setSearch(event.target.value);setPage(1)}} placeholder="Search deportation records"/></label></div><div className="legal-table-wrap"><table><thead><tr><th><input aria-label="Select visible deportation records" type="checkbox" checked={Boolean(result?.rows.length)&&result!.rows.every((row:any)=>selected.has(String(row.__rowKey)))} onChange={(event)=>setSelected((current)=>{const next=new Map(current);result?.rows.forEach((row:any)=>{const key=String(row.__rowKey);if(event.target.checked)next.set(key,row);else next.delete(key)});return next})}/></th>{result?.columns.map((column)=><th key={column}><button onClick={()=>{setSortColumn(column);setSortDirection(sortColumn===column&&sortDirection==="asc"?"desc":"asc");setPage(1)}}>{column}</button></th>)}</tr></thead><tbody>{result?.rows.map((row:any,index)=><tr key={index}><td><input aria-label="Select deportation record" type="checkbox" checked={selected.has(String(row.__rowKey))} onChange={()=>setSelected((current)=>{const next=new Map(current),key=String(row.__rowKey);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td>{result.columns.map((column)=><td key={column}>{value(row[column])}</td>)}</tr>)}</tbody></table></div>{result&&<Pager page={page} total={result.total} onChange={setPage}/>}</section>;
+}
+
+function LegalAnalyticsStudio({metadata,theme}:{metadata:LegalMetadata;theme:Theme}){
+  const sectionIcons:Record<string,ReactNode>={assessments:<CheckCheck/>,legalservices:<BriefcaseBusiness/>,beneficiaries:<Users/>,awareness:<Megaphone/>,builder:<BarChart3/>};
+  const sections=[...["assessments","legalservices","beneficiaries"].map((id)=>[id,labels[id as LegalPage].replace(" Review","")] as [string,string]),...(metadata.availability.awareness?[["awareness","Awareness"] as [string,string]]:[]),["builder","Custom Builder"] as [string,string]];
+  const [section,setSection]=useState("assessments"),[sectionState,setSectionState]=useState<Record<string,{filters:Record<string,string[]>;search:string;page:number;sortColumn:string;sortDirection:"asc"|"desc"}>>({});
+  const sheets=metadata.sheets;
+  const studioMetadata:Metadata={ready:true,source:metadata.source,loadedAt:null,pages:Object.fromEntries(sheets.map((sheet)=>[sheet.id,{rows:sheet.rows,filters:Object.fromEntries(sheet.columns.map((column)=>[column,[]])),dimensions:sheet.columns}]))};
+  const state=sectionState[section]||{filters:{},search:"",page:1,sortColumn:"",sortDirection:"asc" as const};
+  const update=(patch:Partial<typeof state>)=>setSectionState((current)=>({...current,[section]:{...state,...patch}}));
+  return <div className="legal-analytics-studio"><nav className="glass studio-section-tabs" aria-label="Analytics Studio sections">{sections.map(([id,label])=><button className={section===id?"active":""} key={id} onClick={()=>setSection(id)}>{sectionIcons[id]}<span>{label}</span></button>)}</nav>{section==="builder"?<Studio metadata={studioMetadata} theme={theme} sourceOptions={sheets.map((sheet)=>[sheet.id,sheet.name])} studioLoader={getLegalStudio}/>:<LegalAnalyticsSection dataset={section} theme={theme} state={state} update={update}/>}</div>;
+}
+
+function LegacyLegalAnalyticsSection({dataset,theme,state,update}:{dataset:string;theme:Theme;state:{filters:Record<string,string[]>;search:string;page:number;sortColumn:string;sortDirection:"asc"|"desc"};update:(patch:Partial<typeof state>)=>void}){
+  const [data,setData]=useState<LegalAnalyticsDashboard|null>(null),[busy,setBusy]=useState(true),[drawer,setDrawer]=useState(false),[error,setError]=useState(""),[selectedRows,setSelectedRows]=useState<Map<string,Record<string,unknown>>>(new Map());
+  useEffect(()=>{const controller=new AbortController();setBusy(true);setError("");getLegalAnalyticsDashboard({dataset,...state,pageSize:100},controller.signal).then(setData).catch((reason)=>{if(reason.name!=="AbortError")setError(reason.message)}).finally(()=>{if(!controller.signal.aborted)setBusy(false)});return()=>controller.abort()},[dataset,state.filters,state.search,state.page,state.sortColumn,state.sortDirection]);
+  const active=Object.values(state.filters).reduce((sum,values)=>sum+values.length,0),toggle=(column:string,value:string)=>update({page:1,filters:{...state.filters,[column]:state.filters[column]?.includes(value)?state.filters[column].filter((item)=>item!==value):[...(state.filters[column]||[]),value]}});
+  const formatKpi=(item:{value:number;format:string})=>item.format==="percent"?`${(item.value*100).toFixed(1)}%`:item.value.toLocaleString();
+  const quickHints:Record<string,string[]>={assessments:["project","project location","assessment status","month"],legalservices:["project","project location","service status","month"],beneficiaries:["project","project location","nationality","month"],awareness:["project","project location","community type","month"]};
+  const quickColumns=(quickHints[dataset]||[]).map((hint)=>Object.keys(data?.filterOptions||{}).find((column)=>column.trim().toLowerCase()===hint||column.trim().toLowerCase().includes(hint))).filter((column):column is string=>Boolean(column));
+  const setQuick=(column:string,values:string[])=>update({page:1,filters:{...state.filters,[column]:values}});
+  return <section className={`studio-fixed-section ${busy?"refreshing":""}`}><LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={active} onClear={()=>update({filters:{},page:1})}><div className="glass studio-fixed-toolbar"><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {active>0&&<b>{active}</b>}</button><button className="soft" disabled={!active} onClick={()=>update({filters:{},page:1})}><RotateCcw/>Clear</button><button className="soft" onClick={()=>void exportLegalExplorer("xlsx",dataset,state.search,state.filters)}><Download/>Excel</button></div></LegalScrollControls>{error&&<div className="error glass">{error}</div>}{data?.warnings.length?<details className="glass studio-source-warnings"><summary>{data.warnings.length} unavailable source field{data.warnings.length===1?"":"s"}</summary>{data.warnings.map((warning)=><p key={warning}>{warning}</p>)}</details>:null}<div className="legal-kpis">{(data?.kpis||[]).map((item)=><div className="glass legal-kpi" key={item.label}><span>{item.label}</span><strong>{formatKpi(item)}</strong><small>Active filters</small></div>)}</div><div className="dashboard-grid"><TrendCard rows={data?.trend||[]} display="both" theme={theme} selected={state.filters.Month||[]} onSelect={(months,replace)=>update({page:1,filters:{...state.filters,Month:replace?months:Array.from(new Set([...(state.filters.Month||[]),...months]))}})} title="Activity over time" subtitle="Based on the section source date"/>{(data?.charts||[]).map((chart)=><ChartCard key={chart.id} chart={chart} display="both" theme={theme} onSelect={(field,value)=>toggle(field,value)}/>)}</div><div className="glass legal-table-card studio-records-table"><div className="legal-card-heading"><div><strong>{data?.matchedRows.toLocaleString()||0}</strong><span> filtered records</span></div><TableSelectionActions selected={selectedRows} filename={`${dataset}-selected.xlsx`} onClear={()=>setSelectedRows(new Map())}/><label className="studio-table-search"><Search/><input value={state.search} placeholder={`Search ${dataset} data`} onChange={(event)=>update({search:event.target.value,page:1})}/></label></div><div className="legal-table-wrap"><table><thead><tr><th><input aria-label="Select visible records" type="checkbox" checked={Boolean(data?.rows.length)&&data!.rows.every((row:any)=>selectedRows.has(String(row.__rowKey)))} onChange={(event)=>setSelectedRows((current)=>{const next=new Map(current);data?.rows.forEach((row:any)=>{const key=String(row.__rowKey);if(event.target.checked)next.set(key,row);else next.delete(key)});return next})}/></th>{data?.columns.map((column)=><th key={column}><button onClick={()=>update({page:1,sortColumn:column,sortDirection:state.sortColumn===column&&state.sortDirection==="asc"?"desc":"asc"})}>{column} {state.sortColumn===column?(state.sortDirection==="asc"?"▲":"▼"):"↕"}</button></th>)}</tr></thead><tbody>{data?.rows.map((row:any,index)=><tr key={index}><td><input aria-label="Select record" type="checkbox" checked={selectedRows.has(String(row.__rowKey))} onChange={()=>setSelectedRows((current)=>{const next=new Map(current),key=String(row.__rowKey);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td>{data.columns.map((column)=><td key={column}>{value(row[column])}</td>)}</tr>)}</tbody></table></div>{data&&<Pager page={state.page} total={data.matchedRows} onChange={(page)=>update({page})}/>}</div>{drawer&&<><button className="filter-backdrop" aria-label="Close filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer"><header><div><span className="eyebrow">ANALYTICS FILTERS</span><h2>Filter this section</h2></div><button onClick={()=>setDrawer(false)}><X/></button></header><div className="case-filter-scroll review-checkbox-filters">{Object.entries(data?.filterOptions||{}).map(([column,values])=><details key={column} open={Boolean(state.filters[column]?.length)}><summary><span>{column}</span>{state.filters[column]?.length>0&&<b>{state.filters[column].length}</b>}<ChevronDown/></summary><div>{values.map((item)=><label key={item}><input type="checkbox" checked={state.filters[column]?.includes(item)||false} onChange={()=>toggle(column,item)}/><span>{item}</span></label>)}</div></details>)}</div><footer><button className="soft" onClick={()=>update({filters:{},page:1})}>Clear all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters</button></footer></aside></>}</section>;
+}
+
+function LegalAnalyticsSection({dataset,theme,state,update}:{dataset:string;theme:Theme;state:{filters:Record<string,string[]>;search:string;page:number;sortColumn:string;sortDirection:"asc"|"desc"};update:(patch:Partial<typeof state>)=>void}){
+  const [data,setData]=useState<LegalAnalyticsDashboard|null>(null),[busy,setBusy]=useState(true),[drawer,setDrawer]=useState(false),[filterSearch,setFilterSearch]=useState(""),[error,setError]=useState(""),[selected,setSelected]=useState<Map<string,Record<string,unknown>>>(new Map());
+  useEffect(()=>{const controller=new AbortController();setBusy(true);setError("");getLegalAnalyticsDashboard({dataset,...state,pageSize:100},controller.signal).then(setData).catch((reason)=>{if(reason.name!=="AbortError")setError(reason.message||"Unable to load this section.")}).finally(()=>{if(!controller.signal.aborted)setBusy(false)});return()=>controller.abort()},[dataset,state.filters,state.search,state.page,state.sortColumn,state.sortDirection]);
+  const active=Object.values(state.filters).reduce((sum,values)=>sum+values.length,0),setFilter=(column:string,values:string[])=>update({page:1,filters:{...state.filters,[column]:values}}),clear=()=>update({page:1,filters:{}});
+  const hints:Record<string,string[]>={assessments:["project","project location","assessment status","month"],legalservices:["project","project location","service status","month"],beneficiaries:["project","project location","nationality","month"],awareness:["project","project location","community type","month"]};
+  const optionKeys=Object.keys(data?.filterOptions||{}),quick=(hints[dataset]||[]).map((hint)=>optionKeys.find((key)=>key.trim().toLowerCase()===hint||key.trim().toLowerCase().includes(hint))).filter((key):key is string=>Boolean(key));
+  const kpi=(item:{value:number;format:string})=>item.format==="percent"?`${(item.value*100).toFixed(1)}%`:item.value.toLocaleString();
+  return <section className={`studio-fixed-section ${busy?"refreshing":""}`}>
+    <LegalScrollControls filterLabel="All filters" onFilters={()=>setDrawer(true)} activeCount={active} onClear={clear}>
+    <div className="glass studio-quick-toolbar">
+      <div className="studio-quick-fields">{quick.map((column)=><CheckboxMultiSelect key={column} hideLabel label={column} values={data?.filterOptions[column]||[]} selected={state.filters[column]||[]} onChange={(values)=>setFilter(column,values)}/>)}</div>
+      <div className="studio-quick-actions"><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>All filters {active>0&&<b>{active}</b>}</button><button className="soft" disabled={!active} onClick={clear}><RotateCcw/>Clear</button><button className="primary studio-excel" onClick={()=>void exportLegalExplorer("xlsx",dataset,state.search,state.filters)}><Download/>Excel</button></div>
+    </div>
+    </LegalScrollControls>
+    {error&&<div className="error glass">{error}</div>}
+    <div className="legal-kpis">{(data?.kpis||[]).map((item)=><div className="glass legal-kpi" key={item.label}><span>{item.label}</span><strong>{kpi(item)}</strong><small>Active filters</small></div>)}</div>
+    <div className="dashboard-grid"><TrendCard rows={data?.trend||[]} display="both" theme={theme} selected={state.filters.Month||[]} onSelect={(months,replace)=>setFilter("Month",replace?months:Array.from(new Set([...(state.filters.Month||[]),...months])))} title="Activity over time" subtitle="Based on the section source date"/>{(data?.charts||[]).map((chart)=><ChartCard key={chart.id} chart={chart} display="both" theme={theme} onSelect={(field,item)=>setFilter(field,state.filters[field]?.includes(item)?state.filters[field].filter((value)=>value!==item):[...(state.filters[field]||[]),item])}/>)}</div>
+    <div className="glass legal-table-card studio-records-table"><div className="legal-card-heading"><div><strong>{data?.matchedRows.toLocaleString()||0}</strong><span> filtered records</span></div><TableSelectionActions selected={selected} filename={`${dataset}-selected.xlsx`} onClear={()=>setSelected(new Map())}/><label className="studio-table-search"><Search/><input value={state.search} placeholder={`Search ${dataset} data`} onChange={(event)=>update({search:event.target.value,page:1})}/></label></div><div className="legal-table-wrap"><table><thead><tr><th><input type="checkbox" aria-label="Select visible records" checked={Boolean(data?.rows.length)&&data!.rows.every((row:any)=>selected.has(String(row.__rowKey)))} onChange={(event)=>setSelected((current)=>{const next=new Map(current);data?.rows.forEach((row:any)=>{const key=String(row.__rowKey);if(event.target.checked)next.set(key,row);else next.delete(key)});return next})}/></th>{data?.columns.map((column)=><th key={column}><button onClick={()=>update({page:1,sortColumn:column,sortDirection:state.sortColumn===column&&state.sortDirection==="asc"?"desc":"asc"})}>{column} {state.sortColumn===column?(state.sortDirection==="asc"?"▲":"▼"):"↕"}</button></th>)}</tr></thead><tbody>{data?.rows.map((row:any,index)=><tr key={index}><td><input type="checkbox" aria-label="Select record" checked={selected.has(String(row.__rowKey))} onChange={()=>setSelected((current)=>{const next=new Map(current),key=String(row.__rowKey);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td>{data.columns.map((column)=><td key={column}>{value(row[column])}</td>)}</tr>)}</tbody></table></div>{data&&<Pager page={state.page} total={data.matchedRows} onChange={(page)=>update({page})}/>}</div>
+    {drawer&&<><button className="filter-backdrop" aria-label="Close Analytics Studio filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer analytics-filter-drawer"><header><div><span className="eyebrow">ANALYTICS STUDIO FILTERS</span><h2>Filter {dataset==="legalservices"?"Legal Services":dataset[0].toUpperCase()+dataset.slice(1)}</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header><label className="filter-search"><Search/><input value={filterSearch} onChange={(event)=>setFilterSearch(event.target.value)} placeholder="Search filters"/></label><div className="case-filter-scroll">{Object.entries(data?.filterOptions||{}).filter(([column])=>column.toLowerCase().includes(filterSearch.toLowerCase())).map(([column,values])=><details key={column} open={Boolean(state.filters[column]?.length)}><summary><span>{column}</span>{state.filters[column]?.length>0&&<b>{state.filters[column].length}</b>}<ChevronDown/></summary><div>{values.map((item)=><label key={item}><input type="checkbox" checked={state.filters[column]?.includes(item)||false} onChange={()=>setFilter(column,state.filters[column]?.includes(item)?state.filters[column].filter((value)=>value!==item):[...(state.filters[column]||[]),item])}/><span>{item}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!active} onClick={clear}>Clear all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {active>0&&`(${active})`}</button></footer></aside></>}
+  </section>;
+}
+
 function Explorer({
   metadata,
+  initialDataset,
   onOpenCase = (id: string) => {
     window.location.hash = `/legal/cases/${encodeURIComponent(id)}`;
   },
 }: {
   metadata: LegalMetadata;
+  initialDataset?: string;
   onOpenCase?: (id: string) => void;
 }) {
-  const [dataset, setDataset] = useState(metadata.sheets[0]?.id || ""),
+  const [dataset, setDataset] = useState(initialDataset || metadata.sheets[0]?.id || ""),
     [search, setSearch] = useState(""),
     [debouncedSearch, setDebouncedSearch] = useState(""),
     [page, setPage] = useState(1),
@@ -912,6 +1208,7 @@ function Explorer({
     [filters, setFilters] = useState<Record<string, string[]>>({}),
     [options, setOptions] = useState<{ name: string; values: string[] }[]>([]),
     [result, setResult] = useState<LegalExplorerResult | null>(null),
+    [selectedRows,setSelectedRows]=useState<Map<string,Record<string,unknown>>>(new Map()),
     [exporting, setExporting] = useState(false),
     [busy, setBusy] = useState(true),
     [error, setError] = useState("");
@@ -1007,18 +1304,19 @@ function Explorer({
         </div>
       )}
       {busy && !result && <LegalSkeleton variant="explorer" embedded />}
-      <div className="glass legal-table-card compact-explorer">
+      {!(busy && !result) && <div className="glass legal-table-card compact-explorer">
         <div className="legal-card-heading">
           <div>
             <strong>{result?.total.toLocaleString() || 0}</strong>
             <span> filtered records</span>
           </div>
-          <small>Excel export uses this search and these filters</small>
+          <TableSelectionActions selected={selectedRows} filename={`${dataset}-selected.xlsx`} onClear={()=>setSelectedRows(new Map())}/>
+          {result && <div className="explorer-card-pager"><Pager page={page} total={result.total} onChange={setPage}/></div>}
         </div>
         <div className="legal-table-wrap">
           <table>
             <thead>
-              <tr>
+              <tr><th><input aria-label="Select all filtered records" type="checkbox" checked={Boolean(result?.total)&&selectedRows.size===result!.total} onChange={async(event)=>{if(!event.target.checked){setSelectedRows(new Map());return;}const all=await getLegalExplorer(dataset,debouncedSearch,1,filters,sortColumn,sortDirection,result?.total||100,);setSelectedRows(new Map(all.rows.map((row:any)=>[String(row.__rowKey),row])));}}/></th>
                 {result?.columns.map((c) => (
                   <th key={c}><button className={sortColumn===c?"active":""} onClick={()=>{const direction=sortColumn===c&&sortDirection==="asc"?"desc":"asc";setSortColumn(c);setSortDirection(direction);setPage(1)}}><span>{c}</span><b>{sortColumn===c?(sortDirection==="asc"?"▲":"▼"):"↕"}</b></button></th>
                 ))}
@@ -1026,7 +1324,7 @@ function Explorer({
             </thead>
             <tbody>
               {result?.rows.map((row, i) => (
-                <tr key={i}>
+                <tr key={i}><td><input aria-label="Select record" type="checkbox" checked={selectedRows.has(String((row as any).__rowKey))} onChange={()=>setSelectedRows((current)=>{const next=new Map(current),key=String((row as any).__rowKey);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td>
                   {result.columns.map((c) => (
                     <td key={c}>
                       {(dataset === "beneficiaries" && c === "Case ID") || (["assessments","legalservices","followupslogbooks","legalfees"].includes(dataset) && c === "Beneficiary ID") ? (
@@ -1047,12 +1345,7 @@ function Explorer({
             </tbody>
           </table>
         </div>
-      </div>
-      {result && (
-        <div className="explorer-pager">
-          <Pager page={page} total={result.total} onChange={setPage} />
-        </div>
-      )}
+      </div>}
       {drawer && (
         <>
           <button
@@ -1324,6 +1617,103 @@ function LegacyExplorer({
   );
 }
 
+function SecuredDocumentActions({ url }: { url: string }) {
+  const [downloadState, setDownloadState] = useState<
+    "idle" | "downloading" | "failed"
+  >("idle");
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const pdf = /\.pdf(?:\?|$)/i.test(url);
+  const filename = decodeURIComponent(url.split("?")[0].split("/").pop() || "Secured document");
+
+  const download = async () => {
+    if (downloadState === "downloading") return;
+    setDownloadState("downloading");
+    try {
+      const response = await fetch(legalAttachmentDownloadUrl(url));
+      if (!response.ok) throw new Error("The document could not be downloaded.");
+      const attachment = await response.blob();
+      const disposition = response.headers.get("content-disposition") || "";
+      const filename =
+        disposition.match(/filename="?([^";]+)"?/i)?.[1] ||
+        "secured-document";
+      const objectUrl = URL.createObjectURL(attachment);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
+      setDownloadState("idle");
+    } catch {
+      setDownloadState("failed");
+    }
+  };
+
+  return (
+    <>
+      <span className="attachment-actions">
+        <button
+          className="attachment-preview-trigger"
+          type="button"
+          onClick={() => setViewerOpen(true)}
+          aria-label={`Preview ${filename}`}
+        >
+          {pdf ? (
+            <iframe src={url} title="PDF thumbnail" loading="lazy" />
+          ) : (
+            <img src={url} alt="Document thumbnail" loading="lazy" />
+          )}
+          <span>Preview</span>
+        </button>
+        <button type="button" onClick={() => setViewerOpen(true)}>
+          View
+        </button>
+        <button
+          type="button"
+          onClick={download}
+          disabled={downloadState === "downloading"}
+          aria-busy={downloadState === "downloading"}
+        >
+          {downloadState === "downloading" ? (
+            <>
+              <span className="attachment-download-spinner" aria-hidden="true" />
+              Downloading…
+            </>
+          ) : downloadState === "failed" ? (
+            "Try again"
+          ) : (
+            "Download"
+          )}
+        </button>
+      </span>
+      {viewerOpen &&
+        createPortal(
+          <div className="attachment-viewer-modal" role="dialog" aria-modal="true" aria-label={`Preview ${filename}`}>
+            <button className="case-modal-backdrop" aria-label="Close document preview" onClick={() => setViewerOpen(false)} />
+            <section className="attachment-viewer-panel">
+              <header>
+                <div>
+                  <span>SECURED DOCUMENT</span>
+                  <h2>{filename}</h2>
+                  <p>{pdf ? "PDF preview" : "Image preview"}</p>
+                </div>
+                <div className="attachment-viewer-actions">
+                  <a href={url} target="_blank" rel="noreferrer">Open in browser</a>
+                  <button className="icon" type="button" onClick={() => setViewerOpen(false)} aria-label="Close document preview"><X /></button>
+                </div>
+              </header>
+              <div className="attachment-viewer-content">
+                {pdf ? <iframe src={url} title={filename} /> : <img src={url} alt={filename} />}
+              </div>
+            </section>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 function renderCell(input: unknown, column = "") {
   const text = value(input);
   if (/^https?:\/\//i.test(text)) {
@@ -1334,23 +1724,8 @@ function renderCell(input: unknown, column = "") {
       <span
         className={`legal-link-cell ${image || pdf ? "image-attachment" : ""}`}
       >
-        {pdf && (
-          <iframe src={text} title="Secured document PDF" loading="lazy" />
-        )}
-        {image && (
-          <a href={text} target="_blank" rel="noreferrer">
-            <img src={text} alt="Secured document" loading="lazy" />
-          </a>
-        )}
         {secured ? (
-          <span className="attachment-actions">
-            <a href={text} target="_blank" rel="noreferrer">
-              View
-            </a>
-            <a href={text} download target="_blank" rel="noreferrer">
-              Download
-            </a>
-          </span>
+          <SecuredDocumentActions url={text} />
         ) : (
           <a href={text} target="_blank" rel="noreferrer">
             Open attachment
@@ -1383,6 +1758,7 @@ function DetentionCases({
     [recordSearch,setRecordSearch]=useState(""),
     [recordSortColumn,setRecordSortColumn]=useState(""),
     [recordSortDirection,setRecordSortDirection]=useState<"asc"|"desc">("asc"),
+    [selectedRecords,setSelectedRecords]=useState<Map<string,Record<string,unknown>>>(new Map()),
     [filters, setFilters] = useState<Record<string, string[]>>({}),
     [tab, setTab] = useState<"analysis" | "records" | "reconcile">("analysis"),
     [drawer, setDrawer] = useState(false),
@@ -1510,13 +1886,13 @@ function DetentionCases({
             <strong>{data?.total.toLocaleString() || 0}</strong>
             <span> detention assessments</span>
           </div>
-          <small>Detention information is read directly from Assessments</small>
+          <small>Detention information is read directly from Assessments</small><TableSelectionActions selected={selectedRecords} filename="selected-detention-records.xlsx" onClear={()=>setSelectedRecords(new Map())}/>
         </div>
         <label className="detention-table-search"><Search/><input value={recordSearch} onChange={(event)=>{setRecordSearch(event.target.value);setPage(1)}} placeholder="Search detention cases"/></label>
         <div className="legal-table-wrap">
           <table>
             <thead>
-              <tr>
+              <tr><th><input aria-label="Select visible detention records" type="checkbox" checked={Boolean(data?.rows.length)&&data!.rows.every((row:any)=>selectedRecords.has(String(row.__rowKey)))} onChange={(event)=>setSelectedRecords((current)=>{const next=new Map(current);data?.rows.forEach((row:any)=>{const key=String(row.__rowKey);if(event.target.checked)next.set(key,row);else next.delete(key)});return next})}/></th>
                 {data?.columns.map((column) => (
                   <th key={column}><button className={recordSortColumn===column?"active":""} onClick={()=>{const direction=recordSortColumn===column&&recordSortDirection==="asc"?"desc":"asc";setRecordSortColumn(column);setRecordSortDirection(direction);setPage(1)}}><span>{column}</span><b>{recordSortColumn===column?(recordSortDirection==="asc"?"▲":"▼"):"↕"}</b></button></th>
                 ))}
@@ -1525,7 +1901,7 @@ function DetentionCases({
             </thead>
             <tbody>
               {data?.rows.map((row, index) => (
-                <tr key={`${row.caseId || "case"}-${index}`}>
+                <tr key={`${row.caseId || "case"}-${index}`}><td><input aria-label="Select detention record" type="checkbox" checked={selectedRecords.has(String((row as any).__rowKey))} onChange={()=>setSelectedRecords((current)=>{const next=new Map(current),key=String((row as any).__rowKey);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td>
                   {data.columns.map((column) => (
                     <td key={column}>{value(row[column])}</td>
                   ))}
@@ -1605,7 +1981,7 @@ function IraqDetentionMapMetrics({items,selected,onSelect,showFooter=true,expand
   const showKeyboard=(name:string,label:[number,number])=>{const bounds=stageRef.current?.getBoundingClientRect();if(!bounds)return;const rawY=bounds.height*label[1]/700;setHover({name,x:Math.max(112,Math.min(bounds.width-112,bounds.width*label[0]/760)),y:Math.max(28,rawY),below:rawY<190})};
   const hoveredItem=hover?byName.get(hover.name):undefined;
   return <><section className="glass detention-map">
-    {showHeader&&<header><div><h3>Detention cases by governorate</h3><p>2026 only · Detained uses assessment date; Released uses release date and a current status containing Released</p></div><div className="detention-map-header-actions"><strong>{items.reduce((sum,item)=>sum+item.detained,0).toLocaleString()}</strong>{expandable&&<button className="soft" onClick={()=>setExpanded(true)}><Maximize2/>Expand</button>}</div></header>}
+    {showHeader&&<header><div><h3>Detention cases by governorate</h3><p>2026 only · Detained uses assessment date; Released uses release date and a current status containing Released</p></div><div className="detention-map-header-actions"><strong>{items.reduce((sum,item)=>sum+item.detained,0).toLocaleString()}</strong><button className="soft" onClick={()=>{const svg=stageRef.current?.querySelector("svg");if(svg)void exportSvgChart(svg,"detention-cases-by-governorate","png")}}><Download/>PNG</button><button className="soft" onClick={()=>{const svg=stageRef.current?.querySelector("svg");if(svg)void exportSvgChart(svg,"detention-cases-by-governorate","pdf")}}><FileText/>PDF</button><button className="soft" onClick={()=>void exportTableWorkbook("detention-governorate-pivot.xlsx",["Governorate","Detained assessments","Released"],items.map((item)=>({Governorate:item.label,"Detained assessments":item.detained,Released:item.released})))}><TableProperties/>Pivot table</button>{expandable&&<button className="soft" onClick={()=>setExpanded(true)}><Maximize2/>Expand</button>}</div></header>}
     <div className="detention-map-stage" ref={stageRef}>
       <svg className="detention-map-svg" viewBox="0 0 760 700" role="img" aria-label="Detained assessments and qualifying releases by Iraq governorate">
         <g className="detention-map-paths">{shapes.map((shape)=>{const item=byName.get(shape.name),detained=item?.detained||0,released=item?.released||0,interactive=Boolean(item?.values?.length),active=Boolean(item?.values?.some((value)=>selected.includes(value)));return <path key={shape.name} className={`detention-map-region map-intensity-${mapIntensity(detained,max)} ${interactive?"interactive":""} ${active?"selected":""}`} d={shape.path} fillRule="evenodd" role={interactive?"button":undefined} tabIndex={interactive?0:undefined} aria-label={`${shape.name}: ${detained} detained assessments and ${released} released${active?", selected":""}`} aria-pressed={interactive?active:undefined} onPointerEnter={(event)=>showPointer(shape.name,event)} onPointerMove={(event)=>showPointer(shape.name,event)} onPointerLeave={()=>setHover(null)} onFocus={()=>showKeyboard(shape.name,shape.label)} onBlur={()=>setHover(null)} onClick={()=>interactive&&activate(shape.name)} onKeyDown={(event)=>{if(interactive&&(event.key==="Enter"||event.key===" ")){event.preventDefault();activate(shape.name)}}}><title>{shape.name}: {detained.toLocaleString()} detained assessments; {released.toLocaleString()} released</title></path>})}</g>
@@ -1686,10 +2062,12 @@ function Cases({
   metadata,
   initialQuery,
   onQueryUsed,
+  onOpenCase,
 }: {
   metadata: LegalMetadata;
   initialQuery: string;
   onQueryUsed: () => void;
+  onOpenCase: (id: string) => void;
 }) {
   const [query, setQuery] = useState(initialQuery),
     [data, setData] = useState<any>(null),
@@ -1831,7 +2209,7 @@ function Cases({
         ))
       ) : (
         <div className={`case-table-refresh ${busy ? "refreshing" : ""}`}><HierarchicalCaseTable
-          cases={data?.cases || []}
+          cases={data?.cases || []} onOpenCase={onOpenCase}
           sortColumn={sortColumn}
           sortDirection={sortDirection}
           onSort={(column) => {const direction=sortColumn===column&&sortDirection==="asc"?"desc":"asc";setSortColumn(column);setSortDirection(direction);setTablePage(1);run(query,filters,"table",1,column,direction)}}
@@ -1913,9 +2291,12 @@ function Cases({
     </>
   );
 }
-function HierarchicalCaseTable({cases,sortColumn,sortDirection,onSort}:{cases:any[];sortColumn:string;sortDirection:"asc"|"desc";onSort:(column:string)=>void}) {
+function HierarchicalCaseTable({cases,sortColumn,sortDirection,onSort,onOpenCase}:{cases:any[];sortColumn:string;sortDirection:"asc"|"desc";onSort:(column:string)=>void;onOpenCase:(id:string)=>void}) {
+  const [selected,setSelected]=useState<Map<string,Record<string,unknown>>>(new Map());
   const summaryColumns=[["Lawyer","Lawyer"],["beneficiaries::Case ID","Case ID"],["beneficiaries::Name (Filter Color Red)","Name"],["beneficiaries::Project","Project"],["beneficiaries::Project Location","Location"],["beneficiaries::DoB","Date of birth"]] as [string,string][];
-  return <div className="glass case-table hierarchical-case-table"><table><thead><tr><th aria-label="Expand case"/>{summaryColumns.map(([key,label])=><th key={key}><button className={sortColumn===key?"active":""} onClick={()=>onSort(key)}><span>{label}</span><b>{sortColumn===key?(sortDirection==="asc"?"▲":"▼"):"↕"}</b></button></th>)}<th>Connected records</th></tr></thead><tbody>{cases.map((item,index)=><ExpandableCaseRow key={String(getField(item.beneficiary,"Case ID")||index)} item={item}/>)}</tbody></table></div>;
+  const rowFor=(item:any)=>({"Case ID":String(getField(item.beneficiary,"Case ID")||""),Name:String(getField(item.beneficiary,"Name (Filter Color Red)")||""),Project:String(getField(item.beneficiary,"Project")||""),Location:String(getField(item.beneficiary,"Project Location")||""),Lawyer:String((item.lawyers||[]).join(", ")||"Unassigned")});
+  const displayedCases=[...cases].sort((left,right)=>Number(selected.has(String(getField(right.beneficiary,"Case ID")||"")))-Number(selected.has(String(getField(left.beneficiary,"Case ID")||""))));
+  return <div className="glass case-table hierarchical-case-table"><div className="legal-card-heading"><TableSelectionActions selected={selected} filename="selected-beneficiary-cases.xlsx" onClear={()=>setSelected(new Map())} showActions={false}/></div><table><thead><tr><th><input aria-label="Select visible cases" type="checkbox" checked={Boolean(cases.length)&&cases.every((item)=>selected.has(String(getField(item.beneficiary,"Case ID")||"")))} onChange={(event)=>setSelected((current)=>{const next=new Map(current);cases.forEach((item)=>{const row=rowFor(item),key=row["Case ID"];if(event.target.checked)next.set(key,row);else next.delete(key)});return next})}/></th><th>Open case</th>{summaryColumns.map(([key,label])=><th key={key}><button className={sortColumn===key?"active":""} onClick={()=>onSort(key)}><span>{label}</span><b>{sortColumn===key?(sortDirection==="asc"?"▲":"▼"):"↕"}</b></button></th>)}<th>Connected records</th></tr></thead><tbody>{displayedCases.map((item,index)=>{const row=rowFor(item),key=row["Case ID"],counts=item.counts||{};return <tr className={selected.has(key)?"case-row-selected":""} key={key||index}><td><input aria-label="Select case" type="checkbox" checked={selected.has(key)} onChange={()=>setSelected((current)=>{const next=new Map(current);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td><td><button className="table-action" onClick={()=>onOpenCase(key)}>Open case</button></td><td>{value(row.Lawyer)}</td><td>{value(key)}</td><td>{value(row.Name)}</td><td>{value(row.Project)}</td><td>{value(row.Location)}</td><td>{value(getField(item.beneficiary,"DoB"))}</td><td><div className="case-connected-summary"><span><b>{counts.assessments||0}</b><small>Assessments</small></span><span><b>{counts.services||0}</b><small>Services</small></span>{counts.followups>0&&<span><b>{counts.followups}</b><small>Follow-ups</small></span>}{counts.fees>0&&<span><b>{counts.fees}</b><small>Legal fees</small></span>}</div></td></tr>})}</tbody></table></div>;
   /* legacy flat renderer retained below only as unreachable migration reference */
   const rows:Record<string,unknown>[]=[];const columns:{key:string;label:string;dataset:string}[]=[];
   const groups:{label:string;count:number}[]=[];
@@ -2097,7 +2478,7 @@ function AssessmentNode({
       getField(node.assessment, "Type of Legal Service Needed"),
     );
   return (
-    <details className="assessment-node" open={index === 1}>
+    <details className="assessment-node">
       <summary>
         <div className="node-title">
           <span>Assessment {index}</span>
@@ -2560,6 +2941,20 @@ function PopulationIndicatorMatrix({sections,ageGroups,onOpenIds}:{sections:Indi
   return <section className="indicator-population-block horizontal-population-matrix"><div className="indicator-table-wrap"><table className="indicator-matrix"><thead><tr><th rowSpan={3} className="no-sort fixed-dimension">Project</th><th rowSpan={3} className="no-sort fixed-dimension">Project location</th>{sections.map((section)=><th colSpan={13} className={`no-sort population-band population-${section.id}`} key={section.id}>{section.label}</th>)}<th rowSpan={3} className="no-sort indicator-total overall-total">Total</th></tr><tr>{sections.flatMap((section)=>[<th colSpan={6} className="no-sort indicator-male" key={`${section.id}-male`}>Male</th>,<th colSpan={6} className="no-sort indicator-female" key={`${section.id}-female`}>Female</th>,<th rowSpan={2} className="no-sort indicator-total" key={`${section.id}-activity`}>Activity</th>])}</tr><tr>{sections.flatMap((section)=>[...ageGroups.map((age)=><th className="no-sort indicator-male" key={`${section.id}-m-${age}`}>{age}</th>),...ageGroups.map((age)=><th className="no-sort indicator-female" key={`${section.id}-f-${age}`}>{age}</th>)])}</tr></thead><tbody>{rows.map((row,index)=>{const total=sections.reduce((sum,section)=>sum+(section.rows[index]?.values[12]||0),0);const totalIds=sections.flatMap((section)=>section.rows[index]?.beneficiaryIds?.[12]||[]);return <tr key={`${row.project}-${row.location}`}><td>{formatProjectLabel(row.project)}</td><td>{row.location}</td>{sections.flatMap((section)=>section.rows[index]?.values||Array(13).fill(0)).map((number,valueIndex)=>{const section=sections[Math.floor(valueIndex/13)],cellIndex=valueIndex%13;return <td className={cellIndex<6?"indicator-male":cellIndex<12?"indicator-female":"indicator-total"} key={valueIndex}>{cellIndex===12?<span className="indicator-value-empty" aria-label="Zero"> </span>:<IndicatorValue value={number} ids={section.rows[index]?.beneficiaryIds?.[cellIndex]||[]} onOpen={onOpenIds}/>}</td>})}<td className="indicator-total overall-total"><IndicatorValue value={total} ids={totalIds} onOpen={onOpenIds}/></td></tr>})}<tr className="indicator-grand-total"><td>Total</td><td>All selected locations</td>{sections.flatMap((section)=>section.totals).map((number,index)=>{const cellIndex=index%13;return <td className={cellIndex<6?"indicator-male":cellIndex<12?"indicator-female":"indicator-total"} key={index}>{cellIndex===12?<span className="indicator-value-empty" aria-label="Zero"> </span>:<IndicatorValue value={number} ids={sections[Math.floor(index/13)].totalBeneficiaryIds?.[cellIndex]||[]} onOpen={onOpenIds}/>}</td>})}<td className="indicator-total overall-total"><IndicatorValue value={sections.reduce((sum,section)=>sum+section.total,0)} ids={sections.flatMap((section)=>section.totalBeneficiaryIds?.[12]||[])} onOpen={onOpenIds}/></td></tr></tbody></table></div><footer className="population-matrix-summary">{sections.map((section)=><span key={section.id}><strong>{section.label}</strong>{section.total.toLocaleString()}{(section.warnings.unclassified>0||section.warnings.unknownLocation>0)&&<small><AlertTriangle/>{section.warnings.unclassified+section.warnings.unknownLocation} excluded</small>}</span>)}</footer></section>;
 }
 
+function GenderGroupIndicatorMatrix({sections,onOpenIds}:{sections:IndicatorSection[];onOpenIds:(ids:string[],value:number)=>void}){
+  const rows=sections[0]?.rows||[];
+  const groups=[
+    {label:"Girls", indexes:[6,7,8], className:"indicator-female"},
+    {label:"Women", indexes:[9,10,11], className:"indicator-female"},
+    {label:"Boys", indexes:[0,1,2], className:"indicator-male"},
+    {label:"Men", indexes:[3,4,5], className:"indicator-male"},
+  ];
+  const valueFor=(values:number[],indexes:number[])=>indexes.reduce((sum,index)=>sum+(values[index]||0),0);
+  const idsFor=(ids:string[][]|undefined,indexes:number[])=>indexes.flatMap((index)=>ids?.[index]||[]);
+  const dataColumnCount=sections.length*groups.length+groups.length+1;
+  return <section className="indicator-population-block indicator-gender-group"><header><div><strong>Gender group disaggregation</strong><span>Girls, Women, Boys, and Men</span></div></header><div className="indicator-table-wrap"><table className="indicator-matrix"><colgroup><col className="gender-project-column"/><col className="gender-location-column"/>{Array.from({length:dataColumnCount},(_,index)=><col className="gender-data-column" key={index}/>)}</colgroup><thead><tr><th rowSpan={2} className="no-sort fixed-dimension">Project</th><th rowSpan={2} className="no-sort fixed-dimension">Project location</th>{sections.map((section)=><th colSpan={4} className={`no-sort population-band population-${section.id}`} key={section.id}>{section.label}</th>)}<th colSpan={4} className="no-sort indicator-total">Total</th><th rowSpan={2} className="no-sort indicator-total overall-total">Grand total</th></tr><tr>{sections.flatMap((section)=>groups.map((group)=><th className={`no-sort ${group.className}`} key={`${section.id}-${group.label}`}>{group.label}</th>))}{groups.map((group)=><th className={`no-sort ${group.className}`} key={`total-${group.label}`}>{group.label}</th>)}</tr></thead><tbody>{rows.map((row,rowIndex)=>{const total=sections.reduce((sum,section)=>sum+(section.rows[rowIndex]?.values[12]||0),0);const totalIds=sections.flatMap((section)=>section.rows[rowIndex]?.beneficiaryIds?.[12]||[]);return <tr key={`${row.project}-${row.location}`}><td>{formatProjectLabel(row.project)}</td><td>{row.location}</td>{sections.flatMap((section)=>groups.map((group)=>{const values=section.rows[rowIndex]?.values||[];const ids=section.rows[rowIndex]?.beneficiaryIds;const value=valueFor(values,group.indexes);return <td className={group.className} key={`${section.id}-${group.label}`}><IndicatorValue value={value} ids={idsFor(ids,group.indexes)} onOpen={onOpenIds}/></td>}))}{groups.map((group)=>{const value=sections.reduce((sum,section)=>sum+valueFor(section.rows[rowIndex]?.values||[],group.indexes),0);const ids=sections.flatMap((section)=>idsFor(section.rows[rowIndex]?.beneficiaryIds,group.indexes));return <td className={group.className} key={`total-${group.label}`}><IndicatorValue value={value} ids={ids} onOpen={onOpenIds}/></td>})}<td className="indicator-total overall-total"><IndicatorValue value={total} ids={totalIds} onOpen={onOpenIds}/></td></tr>})}<tr className="indicator-grand-total"><td>Total</td><td>All selected locations</td>{sections.flatMap((section)=>groups.map((group)=>{const value=valueFor(section.totals,group.indexes);return <td className={group.className} key={`${section.id}-${group.label}`}><IndicatorValue value={value} ids={idsFor(section.totalBeneficiaryIds,group.indexes)} onOpen={onOpenIds}/></td>}))}{groups.map((group)=>{const value=sections.reduce((sum,section)=>sum+valueFor(section.totals,group.indexes),0);const ids=sections.flatMap((section)=>idsFor(section.totalBeneficiaryIds,group.indexes));return <td className={group.className} key={`total-${group.label}`}><IndicatorValue value={value} ids={ids} onOpen={onOpenIds}/></td>})}<td className="indicator-total overall-total"><IndicatorValue value={sections.reduce((sum,section)=>sum+section.total,0)} ids={sections.flatMap((section)=>section.totalBeneficiaryIds?.[12]||[])} onOpen={onOpenIds}/></td></tr></tbody></table></div></section>;
+}
+
 function NarrativeRemark({item,achievementLabel}:{item:IndicatorReportItem;achievementLabel:string}){
   const [expanded,setExpanded]=useState(false),[copied,setCopied]=useState(false),[remarkCopied,setRemarkCopied]=useState(false),[cellCopied,setCellCopied]=useState(""),narrative=item.narrative;
   if(!narrative)return null;
@@ -2577,12 +2972,12 @@ function NarrativeRemark({item,achievementLabel}:{item:IndicatorReportItem;achie
     setCellCopied(key);window.setTimeout(()=>setCellCopied((current)=>current===key?"":current),1200);
   };
   const copyCellKey=(event:React.KeyboardEvent<HTMLTableCellElement>,value:string,key:string)=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();void copyCell(value,key)}};
-  return <><section className={`indicator-narrative${remarkCopied?" copied":""}`}><header><div><span>REMARK</span><strong>Narrative report</strong></div><button className="soft" onClick={()=>setExpanded(true)}><Maximize2/>Expand</button></header>{narrative.remark?<button type="button" className="narrative-copy-text" onClick={copyRemark} title="Copy narrative as plain text"><span>{narrative.remark}</span>{remarkCopied&&<small className="narrative-cell-confirm"><CheckCircle2/>Copied</small>}</button>:<div className="narrative-blank"/>}</section>{expanded&&createPortal(<div className="indicator-modal narrative-modal" role="dialog" aria-modal="true"><button className="case-modal-backdrop" aria-label="Close narrative" onClick={()=>setExpanded(false)}/><section className="indicator-modal-panel"><header><div><span>NARRATIVE REPORT</span><h2>{item.title}</h2><p>Click any table cell to copy its plain value</p></div><div className="indicator-modal-actions"><button className="soft" onClick={copyData}>{copied?<CheckCircle2/>:<Copy/>}{copied?"Copied":"Copy data"}</button><button className="icon" onClick={()=>setExpanded(false)} aria-label="Close narrative"><X/></button></div></header><div className="indicator-modal-scroll"><table className="narrative-table"><thead><tr><th>Indicators</th><th>Population</th><th>{achievementLabel}</th><th>Remarks</th></tr></thead><tbody>{narrative.rows.map((row,rowIndex)=>{const values=[row.indicator,row.population,String(row.totalAchievement),row.remarks];return <tr key={`${row.indicator}-${row.population}`}>{values.map((value,columnIndex)=>{const key=`${rowIndex}-${columnIndex}`;return <td key={key} tabIndex={0} role="button" title="Click to copy this value" className={cellCopied===key?"narrative-cell-copied":""} onClick={()=>void copyCell(value,key)} onKeyDown={(event)=>copyCellKey(event,value,key)}>{columnIndex===3?<><p>{row.remarks}</p>{row.locations.length>0&&<div className="narrative-location-list">{row.locations.map((location)=><span key={`${location.project}-${location.location}`}><b>{location.location}</b>{location.total.toLocaleString()}</span>)}</div>}</>:columnIndex===2?row.totalAchievement.toLocaleString():value}{cellCopied===key&&<small className="narrative-cell-confirm"><CheckCircle2/>Copied</small>}</td>})}</tr>})}</tbody></table></div></section></div>,document.body)}</>;
+  return <><section className={`indicator-narrative${remarkCopied?" copied":""}`}><header><div><strong>Narrative report</strong></div><button className="soft" onClick={()=>setExpanded(true)}><Maximize2/>Expand</button></header>{narrative.remark?<button type="button" className="narrative-copy-text" onClick={copyRemark} title="Copy narrative as plain text"><span>{narrative.remark}</span>{remarkCopied&&<small className="narrative-cell-confirm"><CheckCircle2/>Copied</small>}</button>:<div className="narrative-blank"/>}</section>{expanded&&createPortal(<div className="indicator-modal narrative-modal" role="dialog" aria-modal="true"><button className="case-modal-backdrop" aria-label="Close narrative" onClick={()=>setExpanded(false)}/><section className="indicator-modal-panel"><header><div><span>NARRATIVE REPORT</span><h2>{item.title}</h2><p>Click any table cell to copy its plain value</p></div><div className="indicator-modal-actions"><button className="soft" onClick={copyData}>{copied?<CheckCircle2/>:<Copy/>}{copied?"Copied":"Copy data"}</button><button className="icon" onClick={()=>setExpanded(false)} aria-label="Close narrative"><X/></button></div></header><div className="indicator-modal-scroll"><table className="narrative-table"><thead><tr><th>Indicators</th><th>Population</th><th>{achievementLabel}</th><th>Remarks</th></tr></thead><tbody>{narrative.rows.map((row,rowIndex)=>{const values=[row.indicator,row.population,String(row.totalAchievement),row.remarks];return <tr key={`${row.indicator}-${row.population}`}>{values.map((value,columnIndex)=>{const key=`${rowIndex}-${columnIndex}`;return <td key={key} tabIndex={0} role="button" title="Click to copy this value" className={cellCopied===key?"narrative-cell-copied":""} onClick={()=>void copyCell(value,key)} onKeyDown={(event)=>copyCellKey(event,value,key)}>{columnIndex===3?<><p>{row.remarks}</p>{row.locations.length>0&&<div className="narrative-location-list">{row.locations.map((location)=><span key={`${location.project}-${location.location}`}><b>{location.location}</b>{location.total.toLocaleString()}</span>)}</div>}</>:columnIndex===2?row.totalAchievement.toLocaleString():value}{cellCopied===key&&<small className="narrative-cell-confirm"><CheckCircle2/>Copied</small>}</td>})}</tr>})}</tbody></table></div></section></div>,document.body)}</>;
 }
 
 function ExpandedIndicatorCard({item,ageGroups,achievementLabel,onCopy,onCopyTitle,onView,onOpenIds}:{item:IndicatorReportItem;ageGroups:string[];achievementLabel:string;onCopy:(item:IndicatorReportItem)=>void;onCopyTitle:(title:string)=>void;onView:(item:IndicatorReportItem)=>void;onOpenIds:(ids:string[],count:number,title:string)=>void}){
   const main=item.id==="individuals-reached";
-  return <article className={`indicator-card indicator-card-${item.id} glass${main?" indicator-card-main":""}`}><header className="indicator-card-header"><div className="indicator-card-title"><div className="indicator-card-badges"><span>{item.source}</span>{main&&<em>Main indicator</em>}</div><button type="button" className="indicator-title-copy" onClick={()=>onCopyTitle(item.title)} title="Copy indicator name"><h3>{item.title}</h3></button><small>{item.dateField}</small></div><div className="indicator-card-summary"><strong>{item.total?item.total.toLocaleString():""}</strong><span>Total</span><button className="soft indicator-view-button" onClick={()=>onView(item)}><Maximize2/>View</button></div></header><div className="indicator-card-body"><div className="indicator-rule"><p><b>How it is counted</b>{item.rule}</p>{typeof item.contributions.assessmentPeriod==="number"&&<div><span>Assessment period <b>{Number(item.contributions.assessmentPeriod).toLocaleString()}</b></span><span>Carry-over <b>{Number(item.contributions.carryOver||0).toLocaleString()}</b></span></div>}<button className="soft" onClick={()=>onCopy(item)}><Copy/>Copy numbers</button></div><PopulationIndicatorMatrix sections={item.sections} ageGroups={ageGroups} onOpenIds={(ids,value)=>onOpenIds(ids,value,item.title)}/><NarrativeRemark item={item} achievementLabel={achievementLabel}/>{item.children.length>0&&<div className="indicator-subindicators"><h4>Subindicators</h4>{item.children.map((child)=><article key={child.id} className={`indicator-child indicator-child-${child.id.endsWith("detainee")?"detainee":"other"}`}><header><div><button type="button" className="indicator-title-copy" onClick={()=>onCopyTitle(child.title)} title="Copy indicator name"><strong>{child.title}</strong></button><small>{child.rule}</small></div><b>{child.total?child.total.toLocaleString():""}</b><div className="indicator-child-actions">{typeof child.contributions.assessmentPeriod==="number"&&<><span>Assessment period <strong>{Number(child.contributions.assessmentPeriod).toLocaleString()}</strong></span><span>Carry-over <strong>{Number(child.contributions.carryOver||0).toLocaleString()}</strong></span></>}<button className="soft" onClick={()=>onView(child)} title="View full disaggregation"><Maximize2/></button><button className="soft" onClick={()=>onCopy(child)} title="Copy numbers"><Copy/></button></div></header><div><PopulationIndicatorMatrix sections={child.sections} ageGroups={ageGroups} onOpenIds={(ids,value)=>onOpenIds(ids,value,child.title)}/><NarrativeRemark item={child} achievementLabel={achievementLabel}/></div></article>)}</div>}</div></article>;
+  return <article className={`indicator-card indicator-card-${item.id} glass${main?" indicator-card-main":""}`}><header className="indicator-card-header"><div className="indicator-card-title"><div className="indicator-card-badges"><span>{item.source}</span>{main&&<em>Main indicator</em>}</div><button type="button" className="indicator-title-copy" onClick={()=>onCopyTitle(item.title)} title="Copy indicator name"><h3>{item.title}</h3></button><small>{item.dateField}</small></div><div className="indicator-card-summary"><div className="indicator-total-block"><strong>{item.total?item.total.toLocaleString():""}</strong><span>Total</span></div>{typeof item.contributions.assessmentPeriod==="number"&&<div className="indicator-summary-contributions"><span>Assessment period <b>{Number(item.contributions.assessmentPeriod).toLocaleString()}</b></span><span>Carry-over <b>{Number(item.contributions.carryOver||0).toLocaleString()}</b></span></div>}<div className="indicator-summary-actions"><button className="soft indicator-copy-button" onClick={()=>onCopy(item)} title="Copy numbers" aria-label="Copy numbers"><Copy/></button><button className="soft indicator-view-button" onClick={()=>onView(item)} title="View full disaggregation" aria-label="View full disaggregation"><Maximize2/></button></div></div></header><div className="indicator-card-body"><div className="indicator-rule"><p><b>How it is counted</b>{item.rule}</p></div><PopulationIndicatorMatrix sections={item.sections} ageGroups={ageGroups} onOpenIds={(ids,value)=>onOpenIds(ids,value,item.title)}/><NarrativeRemark item={item} achievementLabel={achievementLabel}/>{item.children.length>0&&<div className="indicator-subindicators"><h4>Subindicators</h4>{item.children.map((child)=><article key={child.id} className={`indicator-child indicator-child-${child.id.endsWith("detainee")?"detainee":"other"}`}><header><div><button type="button" className="indicator-title-copy" onClick={()=>onCopyTitle(child.title)} title="Copy indicator name"><strong>{child.title}</strong></button><small>{child.rule}</small></div><b>{child.total?child.total.toLocaleString():""}</b><div className="indicator-child-actions">{typeof child.contributions.assessmentPeriod==="number"&&<><span>Assessment period <strong>{Number(child.contributions.assessmentPeriod).toLocaleString()}</strong></span><span>Carry-over <strong>{Number(child.contributions.carryOver||0).toLocaleString()}</strong></span></>}<button className="soft" onClick={()=>onView(child)} title="View full disaggregation"><Maximize2/></button><button className="soft" onClick={()=>onCopy(child)} title="Copy numbers"><Copy/></button></div></header><div><PopulationIndicatorMatrix sections={child.sections} ageGroups={ageGroups} onOpenIds={(ids,value)=>onOpenIds(ids,value,child.title)}/><NarrativeRemark item={child} achievementLabel={achievementLabel}/></div></article>)}</div>}</div></article>;
 }
 
 function ExpandedIndicatorGroup({group,ageGroups,achievementLabel,onCopy,onCopyTitle,onView,onOpenIds}:{group:IndicatorReportGroup;ageGroups:string[];achievementLabel:string;onCopy:(item:IndicatorReportItem)=>void;onCopyTitle:(title:string)=>void;onView:(item:IndicatorReportItem)=>void;onOpenIds:(ids:string[],count:number,title:string)=>void}){
@@ -2591,7 +2986,7 @@ function ExpandedIndicatorGroup({group,ageGroups,achievementLabel,onCopy,onCopyT
 }
 
 function IndicatorFullView({item,ageGroups,onClose,onOpenIds,onCopy}:{item:IndicatorReportItem;ageGroups:string[];onClose:()=>void;onOpenIds:(ids:string[],count:number,title:string)=>void;onCopy?:()=>void}){
-  return <div className="indicator-modal" role="dialog" aria-modal="true" aria-label={`Full view: ${item.title}`}><button className="case-modal-backdrop" aria-label="Close full view" onClick={onClose}/><section className="indicator-modal-panel"><header><div><span>INDICATOR DISAGGREGATION</span><h2>{item.title}</h2><p>{item.total.toLocaleString()} total · Select any figure to view Beneficiary IDs.</p></div><div className="indicator-modal-actions"><button className="soft" onClick={onCopy}><Copy/>Copy numbers</button><button className="icon" onClick={onClose} aria-label="Close full view"><X/></button></div></header><div className="indicator-modal-scroll"><PopulationIndicatorMatrix sections={item.sections} ageGroups={ageGroups} onOpenIds={(ids,count)=>onOpenIds(ids,count,item.title)}/>{item.children.map((child)=><section className="indicator-modal-child" key={child.id}><h3>{child.title}</h3><PopulationIndicatorMatrix sections={child.sections} ageGroups={ageGroups} onOpenIds={(ids,count)=>onOpenIds(ids,count,child.title)}/></section>)}</div></section></div>;
+  return <div className="indicator-modal" role="dialog" aria-modal="true" aria-label={`Full view: ${item.title}`}><button className="case-modal-backdrop" aria-label="Close full view" onClick={onClose}/><section className="indicator-modal-panel"><header><div><span>INDICATOR DISAGGREGATION</span><h2>{item.title}</h2><p>{item.total.toLocaleString()} total · Select any figure to view Beneficiary IDs.</p></div><div className="indicator-modal-actions"><button className="soft" onClick={onCopy}><Copy/>Copy numbers</button><button className="icon" onClick={onClose} aria-label="Close full view"><X/></button></div></header><div className="indicator-modal-scroll"><PopulationIndicatorMatrix sections={item.sections} ageGroups={ageGroups} onOpenIds={(ids,count)=>onOpenIds(ids,count,item.title)}/><GenderGroupIndicatorMatrix sections={item.sections} onOpenIds={(ids,count)=>onOpenIds(ids,count,item.title)}/>{item.children.map((child)=><section className="indicator-modal-child" key={child.id}><h3>{child.title}</h3><PopulationIndicatorMatrix sections={child.sections} ageGroups={ageGroups} onOpenIds={(ids,count)=>onOpenIds(ids,count,child.title)}/><GenderGroupIndicatorMatrix sections={child.sections} onOpenIds={(ids,count)=>onOpenIds(ids,count,child.title)}/></section>)}</div></section></div>;
 }
 
 function BeneficiaryIdModal({ids,count,title,onClose,onCopy}:{ids:string[];count:number;title:string;onClose:()=>void;onCopy:(text:string,label:string)=>void}){
@@ -2707,6 +3102,7 @@ export default function LegalPlatform({ onBack }: { onBack: () => void }) {
     [dataMenuOpen, setDataMenuOpen] = useState(false),
     [error, setError] = useState(""),
     [uploading, setUploading] = useState(false),
+    [dataRevision, setDataRevision] = useState(0),
     [uploadProgress, setUploadProgress] = useState(0),
     [uploadPhase, setUploadPhase] = useState<"uploading" | "processing">(
       "uploading",
@@ -2784,6 +3180,13 @@ export default function LegalPlatform({ onBack }: { onBack: () => void }) {
       .catch((e) => setError(e.message))
       .finally(() => setMetadataLoading(false));
   }, []);
+  useEffect(()=>{
+    if(metadataLoading||metadata?.ready||!metadata?.loading)return;
+    let cancelled=false;
+    const poll=()=>getLegalMetadata().then((next)=>{if(!cancelled)setMetadata(next)}).catch(()=>{});
+    const timer=window.setInterval(poll,1000);
+    return()=>{cancelled=true;window.clearInterval(timer)};
+  },[metadataLoading,metadata?.ready,metadata?.loading]);
   useEffect(() => {
     if (!metadata?.ready) return;
     let cancelled = false;
@@ -2834,11 +3237,12 @@ export default function LegalPlatform({ onBack }: { onBack: () => void }) {
     try {
       const next = await uploadLegalFolder(selectedFiles, (status) => {
         setUploadPhase(status.phase);
+        // The browser can measure bytes sent, but the server processes the
+        // CSVs as one request and cannot truthfully report record progress.
+        // Keep the processing stage indeterminate instead of showing 100%.
         if (status.percent !== null) setUploadProgress(status.percent);
-        else if (status.phase === "processing") setUploadProgress(100);
       });
-      setMetadata(next);
-      setPage("overview");
+      setMetadata(next); setDataRevision((value) => value + 1);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -2859,12 +3263,11 @@ export default function LegalPlatform({ onBack }: { onBack: () => void }) {
       const selectedPath = await desktopApi.choose_legal_folder();
       if (!selectedPath) return;
       setUploading(true);
-      setUploadProgress(100);
+      setUploadProgress(0);
       setUploadPhase("processing");
       const next = await desktopApi.process_legal_folder(selectedPath);
       if (next?.ready) {
-        setMetadata(next);
-        setPage("overview");
+        setMetadata(next); setDataRevision((value) => value + 1);
       }
     } catch (reason: any) {
       setError(reason?.message || String(reason) || "Unable to open the selected folder.");
@@ -2876,8 +3279,8 @@ export default function LegalPlatform({ onBack }: { onBack: () => void }) {
   const refreshSelectedFolder = async () => {
     const desktopApi = (window as any).pywebview?.api;
     if (!desktopApi?.refresh_legal_folder) return;
-    setError("");setUploading(true);setUploadProgress(100);setUploadPhase("processing");
-    try { const next = await desktopApi.refresh_legal_folder(); setMetadata(next);setPage("overview"); }
+    setError("");setUploading(true);setUploadProgress(0);setUploadPhase("processing");
+    try { const next = await desktopApi.refresh_legal_folder(); setMetadata(next); setDataRevision((value) => value + 1); }
     catch (reason: any) { setError(reason?.message || "Unable to refresh the selected folder."); }
     finally { setUploading(false);setUploadProgress(0); }
   };
@@ -2888,23 +3291,30 @@ export default function LegalPlatform({ onBack }: { onBack: () => void }) {
     try {
       const paths = await desktopApi.choose_legal_files();
       if (!paths?.length) return;
-      setUploading(true);setUploadProgress(100);setUploadPhase("processing");
+      setUploading(true);setUploadProgress(0);setUploadPhase("processing");
       const next = await desktopApi.process_legal_files(paths);
-      setMetadata(next);setPage("overview");
+      setMetadata(next); setDataRevision((value) => value + 1);
     } catch (reason: any) { setError(reason?.message || "Unable to open the selected CSV files."); }
     finally { setUploading(false);setUploadProgress(0); }
   };
   const refreshSelectedFiles = async () => {
     const desktopApi = (window as any).pywebview?.api;
     if (!desktopApi?.refresh_legal_files) return;
-    setError("");setUploading(true);setUploadProgress(100);setUploadPhase("processing");
-    try { const next = await desktopApi.refresh_legal_files();setMetadata(next);setPage("overview"); }
+    setError("");setUploading(true);setUploadProgress(0);setUploadPhase("processing");
+    try { const next = await desktopApi.refresh_legal_files();setMetadata(next); setDataRevision((value) => value + 1); }
     catch (reason: any) { setError(reason?.message || "Unable to refresh the selected CSV files."); }
     finally { setUploading(false);setUploadProgress(0); }
   };
-  const availableNav = nav.filter(
-    ([id]) => id !== "awareness" || metadata?.availability.awareness,
+  const availableNav = nav.filter(([id]) =>
+    (id !== "awareness" || metadata?.availability.awareness) &&
+    (id !== "deportation" || metadata?.features?.deportation) &&
+    (id !== "detention" || metadata?.features?.detention),
   );
+  useEffect(()=>{
+    if(!metadata?.ready)return;
+    if(page==="deportation"&&!metadata.features?.deportation)setPage("overview");
+    if(page==="detention"&&!metadata.features?.detention)setPage("overview");
+  },[metadata?.ready,metadata?.features?.deportation,metadata?.features?.detention,page]);
   const openReviewCase = (id: string) => setReviewCaseId(id);
   return (
     <div ref={legalShell} className={`app-shell legal-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
@@ -2986,11 +3396,15 @@ export default function LegalPlatform({ onBack }: { onBack: () => void }) {
                 page === "overview" ? "overview" :
                 ["beneficiaries", "assessments", "legalservices", "awareness"].includes(page) ? "review" :
                 page === "explorer" ? "explorer" :
+                page === "deportation" ? "deportation" :
+                page === "studio" ? "studio" :
                 page === "detention" ? "detention" :
                 page === "cases" ? "cases" :
                 page === "lawyer-intelligence" ? "lawyers" : "indicator"
               }
             />
+          ) : !metadata?.ready && metadata?.loading ? (
+            <LegalSkeleton variant="overview" />
           ) : !metadata?.ready ? (
             <div className="glass legal-empty">
               <FolderOpen />
@@ -3008,9 +3422,13 @@ export default function LegalPlatform({ onBack }: { onBack: () => void }) {
               "legalservices",
               "awareness",
             ].includes(page) ? (
-            <ReviewPage dataset={page} onOpenCase={openReviewCase} />
+            <ReviewPage key={`${page}-${dataRevision}`} dataset={page} onOpenCase={openReviewCase} />
           ) : page === "explorer" ? (
             <Explorer metadata={metadata} onOpenCase={openReviewCase} />
+          ) : page === "deportation" ? (
+            <LegalDeportationDashboard metadata={metadata} theme={theme as Theme}/>
+          ) : page === "studio" ? (
+            <LegalAnalyticsStudio metadata={metadata} theme={theme as Theme}/>
           ) : page === "detention" ? (
             <DetentionCases onOpenCase={openReviewCase} theme={theme} />
           ) : page === "cases" ? (
@@ -3018,6 +3436,7 @@ export default function LegalPlatform({ onBack }: { onBack: () => void }) {
               metadata={metadata}
               initialQuery={caseQuery}
               onQueryUsed={() => setCaseQuery("")}
+              onOpenCase={openReviewCase}
             />
           ) : page === "lawyer-intelligence" ? (
             <LawyerOverview metadata={metadata} />
@@ -3050,16 +3469,10 @@ export default function LegalPlatform({ onBack }: { onBack: () => void }) {
                 </div>
               </>
             ) : (
-              <>
-                <strong>{uploadProgress}%</strong>
-                <div role="progressbar" aria-label="CSV upload complete; processing records" aria-valuemin={0} aria-valuemax={100} aria-valuenow={uploadProgress}>
-                  <i style={{ width: `${uploadProgress}%` }} />
-                </div>
-                <div className="legal-processing-indicator" aria-label="Processing records">
-                  <i />
-                  <span>Files uploaded {uploadProgress}% · processing records</span>
-                </div>
-              </>
+              <div className="legal-processing-indicator" role="progressbar" aria-label="Processing Legal Platform records" aria-valuemin={0} aria-valuemax={100} aria-busy="true">
+                <i />
+                <span>Processing records…</span>
+              </div>
             )}
             <p>
               {uploadPhase === "uploading"
@@ -3123,6 +3536,7 @@ function Overview({
         ))}
       </section>
       <TrendCard rows={(o?.activityTrend||[]).map((row)=>({label:row.month,count:row.assessments,percent:0}))} primaryLabel="Assessments" display="count" theme={theme} title="Monthly assessments" subtitle="2026 only · Assessment workload by month"/>
+      <TrendCard rows={(o?.representationTrend||[]).map((row)=>({label:row.month,count:row.representation,percent:0}))} primaryLabel="Representation services" display="count" theme={theme} title="Monthly representation services" subtitle="2026 only · Legal Representation and Legal Assistance services by provision month"/>
       <section className="overview-analysis-grid" aria-label="Operational analysis">
         <ChartCard chart={overviewChart("assessment-status","Assessment status",o?.charts?.assessmentStatus||[])} display="count" theme={theme} onSelect={()=>{}}/>
         <ChartCard chart={overviewChart("representation-status","Representation service status",o?.charts?.representationServiceStatus||[])} display="count" theme={theme} onSelect={()=>{}}/>

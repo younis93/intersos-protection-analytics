@@ -6,6 +6,7 @@ import pytest
 from openpyxl import load_workbook
 
 from backend.legal_platform import LegalStore, normalize_name, phone_digits, versioned_dataset_name
+from backend.duplicate_exclusions import DuplicateExclusionRegistry
 
 
 def csv(**columns):
@@ -29,6 +30,39 @@ def test_optional_files_are_not_required_and_cleanup_is_applied():
     dates=store.explorer("beneficiaries")["rows"]
     assert dates[0]["Date of Identification / تاريخ التحديد"]=="2026-01-31"
     assert dates[1]["Date of Identification / تاريخ التحديد"]=="2026-02-01"
+
+
+def test_amal_only_hides_detention_and_deportation_but_awareness_depends_on_file():
+    payload=required_payload()
+    for name in ("beneficiaries","assessments","legalservices"):
+        frame=pd.read_csv(io.BytesIO(payload[name]),dtype=object)
+        frame["Project"]="UNHCR 2026 - AMAL CAMP"
+        payload[name]=frame.to_csv(index=False).encode("utf-8")
+    payload["awareness"]=csv(**{"Awareness ID":["W1"],"Participant Name":["Person"],"Project":["UNHCR 2026 - AMAL CAMP"]})
+    payload["deportationrecords"]=csv(**{"PN ID":["D1"],"Project":["UNHCR 2026 - AMAL CAMP"]})
+    metadata=LegalStore.from_files(payload,"test").metadata()
+    assert metadata["availability"]["awareness"] is True
+    assert metadata["features"]=={"detention":False,"deportation":False}
+
+
+def test_deportation_dashboard_uses_deportationrecords_csv():
+    payload=required_payload()
+    payload["deportationrecords"]=csv(**{"PN ID":["D1","D2"],"Date of deporting":["05/01/2026","10/01/2026"],"Destination":["Country A","Country B"],"Nationality":["Iraqi","Syrian"]})
+    dashboard=LegalStore.from_files(payload,"test").deportation_dashboard()
+    assert dashboard["total"]==2
+    assert dashboard["trend"]==[{"label":"2026-01","count":2,"percent":1.0}]
+    assert next(chart for chart in dashboard["charts"] if chart["title"]=="Deportations by destination")["rows"][0]["count"]==1
+
+
+def test_deportation_dashboard_filters_and_charts_use_distinct_pn_ids():
+    payload=required_payload()
+    payload["deportationrecords"]=csv(**{"PN ID":["D1","D1","D2"],"Date of deporting":["05/01/2026","06/01/2026","10/02/2026"],"Destination":["Country A","Country A","Country B"]})
+    store=LegalStore.from_files(payload,"test")
+    dashboard=store.deportation_dashboard({"Month":["2026-01"]})
+    destination=next(chart for chart in dashboard["charts"] if chart["title"]=="Deportations by destination")
+    assert dashboard["total"]==1
+    assert destination["rows"]==[{"label":"Country A","count":1,"percent":1.0}]
+    assert dashboard["filterOptions"]["Month"]==["2026-01","2026-02"]
 
 
 def test_missing_mandatory_file_rejects_import():
@@ -105,6 +139,46 @@ def test_exact_duplicate_mode_remains_exact_when_variations_are_enabled():
     assert {row["duplicateSimilarity"] for row in rows}=={100}
 
 
+def test_duplicate_exclusion_registry_persists_and_restores(tmp_path):
+    path=tmp_path/"duplicate-name-exclusions.json"
+    registry=DuplicateExclusionRegistry(path)
+    registry.exclude("B1","Possible duplicate name","Identical Name","UNHCR 2026 - Erbil","Beneficiaries Review")
+    reloaded=DuplicateExclusionRegistry(path)
+    assert reloaded.case_ids()=={"B1"}
+    assert reloaded.entries()[0]["name"]=="Identical Name"
+    assert reloaded.restore("B1","Possible duplicate name") is True
+    assert DuplicateExclusionRegistry(path).entries()==[]
+
+
+def test_excluding_case_recalculates_duplicate_groups_and_export():
+    payload=required_payload();payload["beneficiaries"]=csv(**{
+        "Case ID":["B1","B2","B3"],"Name (Filter Color Red)":["Identical Beneficiary Name"]*3,
+        "Project":["UNHCR 2026 - Erbil"]*3,
+    })
+    store=LegalStore.from_files(payload,"test")
+    store.set_review_exclusions({("Possible duplicate name","B2")})
+    rows=store.review("beneficiaries",rule="Possible duplicate name")["rows"]
+    assert {row["caseId"] for row in rows}=={"B1","B3"}
+    store.set_review_exclusions({("Possible duplicate name","B1"),("Possible duplicate name","B2")})
+    assert store.review("beneficiaries",rule="Possible duplicate name")["total"]==0
+    workbook=load_workbook(io.BytesIO(store.review_export("beneficiaries")),read_only=True,data_only=True)
+    sheet=workbook["North Iraq"]
+    headers=[cell.value for cell in next(sheet.iter_rows(min_row=1,max_row=1))]
+    rows=list(sheet.iter_rows(min_row=2,values_only=True));rule_index=headers.index("Review Finding");case_index=headers.index("Case ID")
+    assert not any(row[rule_index]=="Possible duplicate name" and row[case_index] in {"B1","B2"} for row in rows)
+
+
+def test_rule_specific_exclusion_keeps_other_beneficiary_findings_visible():
+    payload=required_payload();payload["beneficiaries"]=csv(**{
+        "Case ID":["B1"],"Name (Filter Color Red)":["Beneficiary Name"],"Project":["UNHCR 2026 - Erbil"],
+        "Age":[16],"Marital Status":["Married"],"Contact Number":["123"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    store.set_review_exclusions({("Invalid contact number","B1")})
+    assert store.review("beneficiaries",rule="Invalid contact number")["total"]==0
+    assert store.review("beneficiaries",rule="Marital status below 18")["total"]==1
+
+
 def test_duplicate_similarity_uses_each_rows_strongest_peer():
     payload=required_payload();base="A"*20
     payload["beneficiaries"]=csv(**{
@@ -116,6 +190,34 @@ def test_duplicate_similarity_uses_each_rows_strongest_peer():
     assert by_case["B1"]["duplicateSimilarity"]==100
     assert by_case["B2"]["duplicateSimilarity"]==100
     assert by_case["B3"]["duplicateSimilarity"]==90
+
+
+def test_duplicate_name_review_can_show_only_100_percent_matches():
+    payload=required_payload();payload["beneficiaries"]=csv(**{
+        "Case ID":["B1","B2","B3","B4","B5","B6","B7"],
+        "Name (Filter Color Red)":["Identical Beneficiary Name","Identical Beneficiary Name","Identical Beneficiary Namo","Li","Li","Li","Li"],
+        "Project":["UNHCR 2026 - Erbil","UNHCR 2026 - Erbil","UNHCR 2026 - Erbil","UNHCR 2026 - Baghdad","UNHCR 2026 - Gov","UNHCR 2026 - SULI","UNHCR 2026 - Mosul & Kirkuk"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    rows=store.review("beneficiaries",rule="Possible duplicate name",name_compare_chars=30,allow_name_variations=True,exact_matches_only=True)["rows"]
+    assert {row["caseId"] for row in rows}=={"B1","B2","B4","B5"}
+    assert {row["duplicateSimilarity"] for row in rows}=={100}
+
+
+def test_exact_match_export_keeps_other_findings_and_excludes_variations():
+    payload=required_payload();payload["beneficiaries"]=csv(**{
+        "Case ID":["B1","B2","B3","B4"],
+        "Name (Filter Color Red)":["Identical Beneficiary Name","Identical Beneficiary Name","Identical Beneficiary Namo","Unrelated Person"],
+        "Project":["UNHCR 2026 - Erbil"]*4,
+        "Age":[20,20,20,"invalid"],
+        "# total assessments":[1,1,1,1],
+    })
+    workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("beneficiaries",exact_matches_only=True)),read_only=True,data_only=True)
+    rows=list(workbook["North Iraq"].iter_rows(values_only=True));header=list(rows[0])
+    finding_index=header.index("Review Finding");case_index=header.index("Case ID")
+    duplicate_cases={row[case_index] for row in rows[1:] if row[finding_index]=="Possible duplicate name"}
+    assert duplicate_cases=={"B1","B2"}
+    assert any(row[finding_index]=="Invalid age" and row[case_index]=="B4" for row in rows[1:])
 
 
 def test_duplicate_names_follow_north_south_and_amal_project_boundaries():
@@ -163,8 +265,8 @@ def test_review_export_uses_the_same_south_duplicate_group():
     })
     exported=LegalStore.from_files(payload,"test").review_export("beneficiaries")
     workbook=load_workbook(io.BytesIO(exported),read_only=True,data_only=True)
-    assert workbook.sheetnames==["Review findings"]
-    rows=list(workbook["Review findings"].iter_rows(values_only=True))
+    assert workbook.sheetnames==["North Iraq","AMAL Camp","South Iraq"]
+    rows=list(workbook["South Iraq"].iter_rows(values_only=True))
     header=list(rows[0]);case_id_index=header.index("Case ID");detail_index=header.index("Review Detail")
     duplicate_rows=[row for row in rows[1:] if row[header.index("Review Finding")]=="Possible duplicate name"]
     assert {row[case_id_index] for row in duplicate_rows}=={"B1","G1"}
@@ -178,13 +280,30 @@ def test_review_export_uses_consistent_rows_and_duplicate_name_colors():
         "Project":["UNHCR 2026 - Baghdad","UNHCR 2026 - Gov"],
     })
     workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("beneficiaries")))
-    sheet=workbook["Review findings"]
+    sheet=workbook["South Iraq"]
     header=[cell.value for cell in sheet[1]];name_column=header.index("Name")+1
     duplicate_rows=[row for row in range(2,sheet.max_row+1) if sheet.cell(row,2).value=="Possible duplicate name"]
     assert {sheet.row_dimensions[row].height for row in duplicate_rows}=={24.0}
     assert len({sheet.cell(row,name_column).fill.fgColor.rgb for row in duplicate_rows})==1
     assert {sheet.cell(row,name_column).fill.fgColor.rgb for row in duplicate_rows}=={"00FDE8E8"}
     assert {sheet.cell(row,name_column).font.color.rgb for row in duplicate_rows}=={"00991B1B"}
+
+
+def test_beneficiary_review_export_groups_findings_by_region():
+    payload=required_payload();payload["beneficiaries"]=csv(**{
+        "Case ID":["E","S","M","A","B","G"],
+        "Name (Filter Color Red)":["Erbil","Suli","Mosul","Amal","Baghdad","Gov"],
+        "Project":["UNHCR 2026 - Erbil","UNHCR 2026 - SULI","UNHCR 2026 - Mosul & Kirkuk","UNHCR 2026 - AMAL CAMP","UNHCR 2026 - Baghdad","UNHCR 2026 - Gov"],
+        "Age":["bad"]*6,
+    })
+    workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("beneficiaries")),read_only=True,data_only=True)
+    assert workbook.sheetnames==["North Iraq","AMAL Camp","South Iraq"]
+    def case_ids(sheet_name):
+        rows=list(workbook[sheet_name].iter_rows(values_only=True));case_index=list(rows[0]).index("Case ID")
+        return {row[case_index] for row in rows[1:]}
+    assert case_ids("North Iraq")=={"E","S","M"}
+    assert case_ids("AMAL Camp")=={"A"}
+    assert case_ids("South Iraq")=={"B","G"}
 
 
 def test_marital_and_spouse_age_use_current_date_of_birth_age():
@@ -228,6 +347,48 @@ def test_contact_numbers_ignore_one_digit_and_prefix_ten_digits():
     assert flagged=={"B3"}
 
 
+def test_contact_numbers_ignore_requested_prefixes():
+    payload=required_payload()
+    prefixes=["6939","4915","2376","9054","2951","4916"]
+    payload["beneficiaries"]=csv(**{
+        "Case ID":[f"B{index}" for index in range(len(prefixes)+1)],
+        "Name (Filter Color Red)":[f"Person {index}" for index in range(len(prefixes)+1)],
+        "Contact Number":[f"{prefix}123" for prefix in prefixes]+["12345"],
+    })
+    flagged={row["caseId"] for row in LegalStore.from_files(payload,"test").review("beneficiaries",rule="Invalid contact number")["rows"]}
+    assert flagged=={"B6"}
+
+
+def test_community_type_vs_nationality_flags_only_invalid_combinations():
+    payload=required_payload()
+    payload["beneficiaries"]=csv(**{
+        "Case ID":["I1","S1","N1","I2","S2","N2","B1","U1"],
+        "Name (Filter Color Red)":[f"Person {index}" for index in range(8)],
+        "Community Type":["IDPs","Syrian Refugee","Non-Syrian Refugee","IDPs","Syrian Refugee","Non-Syrian Refugee","","Host Community"],
+        "Nationality":["Iraq","Syria","Iran","Syria","Iraq","Syria","Iraq","Iraq"],
+        "Project":["UNHCR 2026 - AMAL CAMP","UNHCR 2026 - Erbil","UNHCR 2026 - Erbil","UNHCR 2026 - Erbil","UNHCR 2026 - Erbil","UNHCR 2026 - Erbil","UNHCR 2026 - AMAL CAMP","UNHCR 2026 - AMAL CAMP"],
+    })
+    rows=LegalStore.from_files(payload,"test").review("beneficiaries",rule="Check Community Type vs Nationality",page_size=100)["rows"]
+    assert {row["caseId"] for row in rows}=={"I2","S2","N2","B1","U1"}
+    assert "blank" in next(row["detail"] for row in rows if row["caseId"]=="B1")
+
+
+def test_under_18_review_rows_sort_youngest_first_and_include_beneficiary_age():
+    current_year=date.today().year
+    payload=required_payload()
+    payload["beneficiaries"]=csv(**{
+        "Case ID":["Older","Younger"], "Name (Filter Color Red)":["Older Person","Younger Person"],
+        "Age":[17,15], "DoB":[f"01/01/{current_year-17}",f"01/01/{current_year-15}"],
+        "Marital Status":["Married","Married"], "Spouse DoB":[f"01/01/{current_year-17}",f"01/01/{current_year-15}"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    marital=store.review("beneficiaries",rule="Marital status below 18",page_size=100)["rows"]
+    spouses=store.review("beneficiaries",rule="Spouse below 18",page_size=100)["rows"]
+    assert [row["caseId"] for row in marital]==["Younger","Older"]
+    assert [row["caseId"] for row in spouses]==["Younger","Older"]
+    assert marital[0]["beneficiaryAge"]==15
+
+
 def connected_case_payload():
     payload=required_payload()
     payload["beneficiaries"]=csv(**{"Case ID":["B1","B2"],"Name (Filter Color Red)":["First Person","Second Person"],"Lawyer":["Beneficiary Lawyer","Other Lawyer"],"Project":["North","South"]})
@@ -252,6 +413,19 @@ def test_lawyer_summary_monthly_assessments_only_uses_2026_and_later():
     assert monthly[("Lawyer One","2026-02")]==(1,1.0)
     assert monthly[("Lawyer Two","2026-02")]==(1,0.5)
     assert all(month>="2026-01" for _,month in monthly)
+
+
+def test_overview_representation_trend_includes_legal_assistance():
+    payload=required_payload()
+    payload["legalservices"]=csv(**{
+        "Service ID":["S1","S2","S3","S3"],
+        "Assessment ID":["A1","A1","A2","A2"],
+        "Beneficiary ID":["B1","B1","B1","B1"],
+        "Type of Service Provided":["Legal Representation","Legal Assistance","Legal Counselling","Legal Representation"],
+        "Date of Service Provision":["10/01/2026","15/01/2026","20/02/2026","20/02/2026"],
+    })
+    trend=LegalStore.from_files(payload,"test").metadata()["overview"]["representationTrend"]
+    assert trend==[{"month":"2026-01","representation":2},{"month":"2026-02","representation":1}]
 
 
 def test_intelligence_integrates_distinct_records_and_keeps_awareness_separate():
@@ -334,10 +508,10 @@ def test_case_hierarchy_works_without_optional_files():
     service=case["assessments"][1]["services"][0]
     assert service["followups"]==[] and service["fees"]==[]
     workbook=load_workbook(io.BytesIO(store.case_export("B1")))
-    assert workbook.sheetnames==["Connected cases"]
-    sheet=workbook["Connected cases"]
-    assert sheet.freeze_panes=="A3"
-    assert "Case ID" in [cell.value for cell in sheet[2]]
+    assert workbook.sheetnames==["Beneficiaries","Assessments","Services","Follow-ups","Fees"]
+    sheet=workbook["Beneficiaries"]
+    assert sheet.freeze_panes=="A2"
+    assert "Case ID" in [cell.value for cell in sheet[1]]
 
 
 def test_connected_case_table_sorts_and_paginates_by_beneficiary_case():
@@ -526,3 +700,74 @@ def test_detention_reconciliation_reports_blank_case_ids_on_both_sides():
     result=store.detention_reconciliation(workbook.getvalue(),"detention.xlsx","2026-01","P1")
     assert result["missingCaseIds"]=={"assessments":1,"excel":1}
     assert {row["note"] for row in result["rows"]}=={"Case ID missing in Assessments","Case ID missing in Excel"}
+
+
+def test_service_missing_document_and_generic_review_exclusions(tmp_path):
+    payload=required_payload()
+    payload["legalservices"]=csv(**{"Service ID":["S1","S2"],"Assessment ID":["A1","A2"],"Beneficiary ID":["B1","B2"],"Type of Document نوع الوثيقة":["","National ID"]})
+    store=LegalStore.from_files(payload,"test")
+    assert {row["serviceId"] for row in store.review("legalservices",rule="Missing Type of Document")["rows"]}=={"S1"}
+    registry=DuplicateExclusionRegistry(tmp_path/"exclusions.json")
+    _, created=registry.exclude_record("legalservices","Missing Type of Document","serviceId","S1")
+    assert created is True
+    store.set_review_exclusions(registry.exclusion_rows())
+    assert store.review("legalservices",rule="Missing Type of Document")["total"]==0
+
+
+def test_awareness_name_exclusion_normalizes_spaces_and_case(tmp_path):
+    payload=required_payload();payload["awareness"]=csv(**{"Awareness ID":["W1"],"Participant Name":["  Person   Name "],"Phone Number":["12345"]})
+    store=LegalStore.from_files(payload,"test")
+    registry=DuplicateExclusionRegistry(tmp_path/"exclusions.json")
+    registry.exclude_record("awareness","Invalid contact number","awarenessName","person name")
+    store.set_review_exclusions(registry.exclusion_rows())
+    assert store.review("awareness",rule="Invalid contact number")["total"]==0
+
+
+def test_analytics_dashboard_filters_sorting_pagination_and_chart_counts():
+    payload=required_payload()
+    payload["assessments"]=csv(**{
+        "Assessment ID":["A1","A2","A3"],"Beneficiary ID":["B1","B2","B3"],
+        "Date of Assessment":["05/01/2026","06/01/2026","05/02/2026"],
+        "Projects":["P1","P1","P2"],"Project Location":["L1","L2","L1"],
+        "Assessment Status":["Open","Closed","Open"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    result=store.analytics_dashboard("assessments",filters={"Projects":["P1"]},page=1,page_size=1,sort_column="Assessment ID",sort_direction="desc")
+    assert result["total"]==2
+    assert result["matchedRows"]==2
+    assert result["rows"][0]["Assessment ID"]=="A2"
+    assert next(chart for chart in result["charts"] if chart["title"]=="Project")["rows"]==[{"label":"P1","count":2,"percent":1.0}]
+    assert result["trend"]==[{"label":"2026-01","count":2,"percent":1.0}]
+
+
+def test_analytics_dashboard_includes_detained_immigration_and_uncompleted_service_kpis():
+    payload=required_payload()
+    payload["assessments"]=csv(**{"Assessment ID":["A1","A2"],"Beneficiary ID":["B1","B2"],"Is the beneficiary detained":["Yes","Yes"],"Is it an immigration related charge":["Yes","No"]})
+    payload["legalservices"]=csv(**{"Service ID":["S1","S2"],"Assessment ID":["A1","A2"],"Beneficiary ID":["B1","B2"],"Service Status":["Completed","Uncompleted"]})
+    store=LegalStore.from_files(payload,"test")
+    assessment_kpis={item["label"]:item["value"] for item in store.analytics_dashboard("assessments")["kpis"]}
+    service_kpis={item["label"]:item["value"] for item in store.analytics_dashboard("legalservices")["kpis"]}
+    assert assessment_kpis["Detention cases with immigration charges"]==1
+    assert service_kpis["Uncompleted services"]==1
+    assert "Projects" not in assessment_kpis and "Locations" not in assessment_kpis
+
+
+def test_services_analytics_joins_assessment_need_and_handles_missing_optional_columns():
+    payload=required_payload()
+    payload["assessments"]=csv(**{"Assessment ID":["A1","A2"],"Beneficiary ID":["B1","B2"],"Type of Legal Service Needed":["Documentation","Counselling"]})
+    payload["legalservices"]=csv(**{"Service ID":["S1","S2"],"Assessment ID":["A1","A2"],"Beneficiary ID":["B1","B2"],"Service Status":["Completed","In process"]})
+    store=LegalStore.from_files(payload,"test")
+    result=store.analytics_dashboard("legalservices",filters={"_assessment_need":["Documentation"]})
+    assert result["total"]==1
+    assert result["rows"][0]["Service ID"]=="S1"
+    assert any(chart["title"]=="Assessment legal-service need" for chart in result["charts"])
+    assert any("source column not available" in warning for warning in result["warnings"])
+
+
+def test_analytics_export_applies_derived_month_filter():
+    payload=required_payload()
+    payload["beneficiaries"]=csv(**{"Case ID":["B1","B2"],"Name (Filter Color Red)":["Person 1","Person 2"],"Date of Identification":["05/01/2026","05/02/2026"],"Projects":["P1","P2"]})
+    store=LegalStore.from_files(payload,"test")
+    exported=store.explorer_export("beneficiaries",filters={"Month":["2026-02"]})
+    rows=pd.read_excel(io.BytesIO(exported))
+    assert rows["Case ID"].tolist()==["B2"]

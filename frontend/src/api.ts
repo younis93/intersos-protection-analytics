@@ -5,8 +5,10 @@ import type {
   Filters,
   LegalExplorerResult,
   LegalMetadata,
+  LegalAnalyticsDashboard,
   IndicatorReport,
   LegalReview,
+  DuplicateExclusion,
   Metadata,
   QualityRow,
   StudioResult,
@@ -81,6 +83,8 @@ export const getStudio = (
     }),
     signal,
   }).then(parse<StudioResult>);
+export const getLegalStudio = (dataset:string,rowDimension:string,columnDimension:string,filters:Filters,measure:string,signal?:AbortSignal) => fetch(`${API}/legal/studio`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dataset,rowDimension,columnDimension,filters,measure}),signal}).then(parse<StudioResult>);
+export const getLegalAnalyticsDashboard = (query:{dataset:string;filters:Filters;search:string;page:number;pageSize:number;sortColumn:string;sortDirection:"asc"|"desc"},signal?:AbortSignal) => fetch(`${API}/legal/analytics-dashboard`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(query),signal}).then(parse<LegalAnalyticsDashboard>);
 export interface ExplorerQuery {
   sheetId: string;
   search: string;
@@ -135,6 +139,7 @@ export const getLegalMetadata = () =>
   fetch(`${API}/legal/metadata`, { cache: "no-store" }).then(
     parse<LegalMetadata>,
   );
+export const getLegalDeportationDashboard = (filters:Filters={}) => fetch(`${API}/legal/deportation-dashboard`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dataset:"deportationrecords",filters})}).then(parse<Dashboard>);
 export const getLegalIndicators = (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[]) =>
   fetch(`${API}/legal/indicators`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({projects,projectLocations,years,quarters,months})}).then(parse<IndicatorReport>);
 export const exportLegalIndicators = async (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[]) => {
@@ -201,6 +206,7 @@ export const getLegalReview = (
   comparisonMonth = "",
   nameCompareChars = 15,
   allowNameVariations = false,
+  exactMatchesOnly = false,
   signal?: AbortSignal,
 ) =>
   fetch(`${API}/legal/review`, {
@@ -214,6 +220,7 @@ export const getLegalReview = (
       pageSize: 100,
       nameCompareChars,
       allowNameVariations,
+      exactMatchesOnly,
       ...filters,
       comparisonMonth,
     }),
@@ -224,8 +231,18 @@ export const legalReviewExportUrl = (
   comparisonMonth = "",
   nameCompareChars = 15,
   allowNameVariations = false,
+  exactMatchesOnly = false,
+  rules: string[] = [],
 ) =>
-  `${API}/legal/review-export/${dataset}?comparison_month=${encodeURIComponent(comparisonMonth)}&name_compare_chars=${nameCompareChars}&allow_name_variations=${allowNameVariations}`;
+  `${API}/legal/review-export/${dataset}?comparison_month=${encodeURIComponent(comparisonMonth)}&name_compare_chars=${nameCompareChars}&allow_name_variations=${allowNameVariations}&exact_matches_only=${exactMatchesOnly}&rules=${encodeURIComponent(rules.join(","))}`;
+export const getDuplicateExclusions = () =>
+  fetch(`${API}/legal/duplicate-exclusions`, { cache: "no-store" }).then(parse<{rows: DuplicateExclusion[]; count: number}>);
+export const createDuplicateExclusion = (record: Pick<DuplicateExclusion, "caseId" | "rule" | "name" | "project" | "source"> & Partial<Pick<DuplicateExclusion,"dataset"|"identifierType"|"identifierValue">>) =>
+  fetch(`${API}/legal/duplicate-exclusions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(record) }).then(parse<{rows: DuplicateExclusion[]; count: number}>);
+export const restoreDuplicateExclusion = (caseId: string, rule: string, dataset="", identifierType="") =>
+  fetch(`${API}/legal/duplicate-exclusions/${encodeURIComponent(caseId)}?rule=${encodeURIComponent(rule)}&dataset=${encodeURIComponent(dataset)}&identifier_type=${encodeURIComponent(identifierType)}`, { method: "DELETE" }).then(parse<{rows: DuplicateExclusion[]; count: number}>);
+export const importDuplicateExclusions = (file: File, dataset: string, identifierType: string, rules: string[]) => { const body=new FormData(); body.append("file",file); body.append("dataset",dataset); body.append("identifier_type",identifierType); body.append("rules",rules.join(",")); return fetch(`${API}/legal/duplicate-exclusions/import`,{method:"POST",body}).then(parse<{imported:number;duplicates:number;invalid:number;column:string;rows:DuplicateExclusion[];count:number}>); };
+export const duplicateExclusionsExportUrl = () => `${API}/legal/duplicate-exclusions-export`;
 export const getLegalExplorer = (
   dataset: string,
   search: string,
@@ -233,11 +250,12 @@ export const getLegalExplorer = (
   filters: Record<string, string[]> = {},
   sortColumn = "",
   sortDirection: "asc" | "desc" = "asc",
+  pageSize = 100,
 ) =>
   fetch(`${API}/legal/explorer`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dataset, search, page, pageSize: 100, filters, sortColumn, sortDirection }),
+    body: JSON.stringify({ dataset, search, page, pageSize, filters, sortColumn, sortDirection }),
   }).then(parse<LegalExplorerResult>);
 export const getLegalExplorerFilters = (dataset: string) =>
   fetch(`${API}/legal/explorer-filters/${dataset}`, { cache: "no-store" }).then(
@@ -267,6 +285,11 @@ export const exportLegalExplorer = async (
   link.download = `${dataset}-filtered.${format}`;
   link.click();
   URL.revokeObjectURL(url);
+};
+export const exportTableWorkbook = async (filename:string,columns:string[],rows:Record<string,unknown>[]) => {
+  const response=await fetch(`${API}/table-workbook`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename,columns,rows})});
+  if(!response.ok){const issue=await response.json().catch(()=>({detail:response.statusText}));throw new Error(issue.detail||"Excel export failed");}
+  const url=URL.createObjectURL(await response.blob()),link=document.createElement("a");link.href=url;link.download=filename.endsWith(".xlsx")?filename:`${filename}.xlsx`;link.click();window.setTimeout(()=>URL.revokeObjectURL(url),1500);
 };
 export const getLegalCase = (
   query: string,
@@ -427,3 +450,5 @@ export const exportLegalDetentionReconciliation = async (file: File, months: str
 };
 export const legalExportUrl = (dataset: string) =>
   `${API}/legal/export/${dataset}`;
+export const legalAttachmentDownloadUrl = (url: string) =>
+  `${API}/legal/attachment-download?${new URLSearchParams({url}).toString()}`;

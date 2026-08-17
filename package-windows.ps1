@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $VenvPython = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
+$VenvPythonWindowed = Join-Path $ProjectRoot '.venv\Scripts\pythonw.exe'
 $ReleaseRoot = Join-Path $ProjectRoot 'release\INTERSOS-Protection-Analytics-Windows'
 $StagingReleaseRoot = Join-Path $ProjectRoot 'release\INTERSOS-Protection-Analytics-Windows-staging'
 $PackageTemp = Join-Path $ProjectRoot 'packaging-temp'
@@ -50,6 +51,9 @@ if ($LaunchOnly) {
     if (-not (Test-Path -LiteralPath $VenvPython)) {
         throw 'Run start-dashboard.ps1 once before using quick launch so the Python environment exists.'
     }
+    if (-not (Test-Path -LiteralPath $VenvPythonWindowed)) {
+        throw 'The windowed Python launcher was not found. Recreate the local Python environment, then try again.'
+    }
     $FrontendDist = Join-Path $ProjectRoot 'frontend\dist\index.html'
     $NewestFrontendSource = Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'frontend\src') -File -Recurse |
         Sort-Object LastWriteTimeUtc -Descending |
@@ -64,7 +68,13 @@ if ($LaunchOnly) {
     }
     Write-Host 'Starting the current local application...' -ForegroundColor Green
     $LauncherPath = Join-Path $ProjectRoot 'desktop_launcher.py'
-    $LaunchProcess = Start-Process -WindowStyle Hidden -FilePath $VenvPython -ArgumentList "`"$LauncherPath`"" -WorkingDirectory $ProjectRoot -PassThru
+    $VersionSource = Get-Content -LiteralPath (Join-Path $ProjectRoot 'backend\version.py') -Raw
+    $AppVersionMatch = [regex]::Match($VersionSource, 'APP_VERSION\s*=\s*["''](?<version>[^"'']+)["'']')
+    if (-not $AppVersionMatch.Success) { throw 'Unable to read APP_VERSION from backend/version.py.' }
+    $WindowTitle = "INTERSOS Protection Analytics $($AppVersionMatch.Groups['version'].Value)"
+    # pythonw.exe hosts the visible WebView window without creating a second
+    # console window for the Python launcher.
+    $LaunchProcess = Start-Process -FilePath $VenvPythonWindowed -ArgumentList "`"$LauncherPath`"" -WorkingDirectory $ProjectRoot -PassThru
     $LaunchDeadline = (Get-Date).AddSeconds(30)
     $ApplicationWindow = $null
     do {
@@ -73,11 +83,10 @@ if ($LaunchOnly) {
             throw "The local application launcher exited before opening a window (exit code $($LaunchProcess.ExitCode))."
         }
         $ApplicationWindow = Get-Process -ErrorAction SilentlyContinue |
-            Where-Object { $_.MainWindowTitle -like 'INTERSOS Protection Analytics*' } |
+            Where-Object { $_.MainWindowTitle -eq $WindowTitle -and $_.MainWindowHandle -ne 0 } |
             Select-Object -First 1
     } while (-not $ApplicationWindow -and (Get-Date) -lt $LaunchDeadline)
     if (-not $ApplicationWindow) {
-        Stop-Process -Id $LaunchProcess.Id -Force -ErrorAction SilentlyContinue
         throw 'The local application started but no window appeared within 30 seconds.'
     }
     Write-Host 'Application window opened successfully.' -ForegroundColor Green

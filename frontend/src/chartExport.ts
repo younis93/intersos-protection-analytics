@@ -77,3 +77,17 @@ export async function exportChart(graphDiv:any,title:string,format:'png'|'pdf'){
     }
   }finally{Plotly.purge(host);host.remove()}
 }
+
+export async function exportSvgChart(svg:SVGSVGElement,title:string,format:'png'|'pdf'){
+  const clone=svg.cloneNode(true) as SVGSVGElement;const width=1600,height=1100;
+  clone.setAttribute('xmlns','http://www.w3.org/2000/svg');clone.setAttribute('width',String(width));clone.setAttribute('height',String(height));
+  const markup=new XMLSerializer().serializeToString(clone),url=URL.createObjectURL(new Blob([markup],{type:'image/svg+xml;charset=utf-8'}));
+  try{
+    if(format==='png'){
+      const image=new Image();await new Promise<void>((resolve,reject)=>{image.onload=()=>resolve();image.onerror=()=>reject(new Error('Map image could not be prepared.'));image.src=url;});
+      const canvas=document.createElement('canvas');canvas.width=width*2;canvas.height=height*2;const context=canvas.getContext('2d');if(!context)throw new Error('PNG canvas is unavailable.');context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.scale(2,2);context.drawImage(image,0,0,width,height);const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob((result)=>result?resolve(result):reject(new Error('PNG could not be created.')),'image/png'));saveBlob(blob,`${safeName(title)}.png`);
+    }else{
+      const pdf=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});await addBilingualFont(pdf,clone);const pageWidth=pdf.internal.pageSize.getWidth(),pageHeight=pdf.internal.pageSize.getHeight(),margin=10,ratio=Math.min((pageWidth-margin*2)/width,(pageHeight-margin*2)/height);await pdf.svg(clone,{x:(pageWidth-width*ratio)/2,y:(pageHeight-height*ratio)/2,width:width*ratio,height:height*ratio});saveBlob(pdf.output('blob'),`${safeName(title)}.pdf`);
+    }
+  }finally{URL.revokeObjectURL(url)}
+}

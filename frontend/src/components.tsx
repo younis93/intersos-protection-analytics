@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { Chart, Display, Filters, QualityRow, Row, Theme } from "./types";
 import { exportChart } from "./chartExport";
+import { exportTableWorkbook } from "./api";
 
 export const formatNumber = (n: number) =>
   new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(n);
@@ -516,12 +517,8 @@ function PivotModal({
   rows: Row[];
   onClose: () => void;
 }) {
-  const downloadCsv=()=>{
-    const safe=(value:string|number)=>`"${String(value).replaceAll('"','""')}"`;
-    const content=["Category,Count,Percent",...pivotRows(rows).map((row)=>[safe(row.label),row.count,`${(row.percent*100).toFixed(1)}%`].join(","))].join("\r\n");
-    const blob=new Blob([content],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),link=document.createElement("a");
-    link.href=url;link.download=`${title.replace(/[^a-z0-9]+/gi,"-").replace(/^-|-$/g,"").toLowerCase()||"interactive-detail"}.csv`;link.click();URL.revokeObjectURL(url);
-  };
+  const [downloading,setDownloading]=useState(false);
+  const downloadExcel=async()=>{setDownloading(true);try{await exportTableWorkbook(`${title.replace(/[^a-z0-9]+/gi,"-").replace(/^-|-$/g,"").toLowerCase()||"interactive-detail"}.xlsx`,["Category","Count","Percent"],pivotRows(rows).map((row)=>({Category:row.label,Count:row.count,Percent:`${(row.percent*100).toFixed(1)}%`})));}finally{setDownloading(false)}};
   useEffect(() => {
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -549,7 +546,7 @@ function PivotModal({
             <p>Counts and percentages use the active dashboard filters.</p>
           </div>
           <div className="pivot-actions">
-            <button className="soft pivot-download" onClick={downloadCsv}><Download/>CSV</button>
+            <button className="soft pivot-download" disabled={downloading} onClick={downloadExcel}><Download/>{downloading?"Preparing…":"Excel"}</button>
             <button className="icon" onClick={onClose} aria-label="Close pivot table">
               <X />
             </button>

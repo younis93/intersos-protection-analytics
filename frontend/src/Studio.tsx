@@ -1,8 +1,8 @@
 import {useEffect,useMemo,useState} from 'react';
 import Plot from 'react-plotly.js';
-import {Filter,LayoutDashboard,RotateCcw,SlidersHorizontal,Table2} from 'lucide-react';
-import {getStudio} from './api';
-import {AppSelect,ExportButtons,FilterDrawer,formatNumber,formatPercent} from './components';
+import {ChevronDown,LayoutDashboard,RotateCcw,Search,SlidersHorizontal,Table2,X} from 'lucide-react';
+import {getStudio,getLegalExplorerFilters} from './api';
+import {AppSelect,ExportButtons,formatNumber,formatPercent} from './components';
 import {transformStudioResult,type StudioView} from './studioChart';
 import type {Filters,Measure,Metadata,StudioChartOptions,StudioLabelMode,StudioOrientation,StudioResult,StudioSort,StudioTopN,StudioValueMode,Theme} from './types';
 
@@ -14,8 +14,9 @@ const palette=['#315ea8','#2f8f68','#d4852f','#7759b8','#c94f68','#16858d','#9b6
 const defaultText=['#ffffff','#ffffff','#172334','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff'];
 const defaultOptions:StudioChartOptions={sort:'value-desc',topN:'all',valueMode:'count',labelMode:'auto',orientation:'horizontal'};
 
-export default function Studio({metadata,theme}:{metadata:Metadata;theme:Theme}){
-  const [source,setSource]=useState('assessment'),[row,setRow]=useState('project'),[column,setColumn]=useState(''),[measure,setMeasure]=useState<Measure>('records'),[chartType,setChartType]=useState<ChartType>('bar'),[filters,setFilters]=useState<Filters>({}),[drawer,setDrawer]=useState(false),[result,setResult]=useState<StudioResult|null>(null),[busy,setBusy]=useState(true),[error,setError]=useState(''),[graph,setGraph]=useState<any>(null);
+export default function Studio({metadata,theme,sourceOptions,studioLoader}:{metadata:Metadata;theme:Theme;sourceOptions?:[string,string][];studioLoader?:typeof getStudio}){
+  const sources=sourceOptions||[['assessment','Assessments'],['services','Legal Services'],['deportation','Deportation']];
+  const [source,setSource]=useState(sources[0][0]),[row,setRow]=useState('project'),[column,setColumn]=useState(''),[measure,setMeasure]=useState<Measure>('records'),[chartType,setChartType]=useState<ChartType>('bar'),[filters,setFilters]=useState<Filters>({}),[drawer,setDrawer]=useState(false),[filterSearch,setFilterSearch]=useState(''),[availableFilters,setAvailableFilters]=useState<Record<string,string[]>>({}),[result,setResult]=useState<StudioResult|null>(null),[busy,setBusy]=useState(true),[error,setError]=useState(''),[graph,setGraph]=useState<any>(null);
   const [options,setOptions]=useState<StudioChartOptions>(defaultOptions);
   const [customColors,setCustomColors]=useState(false),[markColors,setMarkColors]=useState<Record<string,string>>({}),[textColors,setTextColors]=useState<Record<string,string>>({});
   const sourceMeta=metadata.pages[source];
@@ -24,7 +25,8 @@ export default function Studio({metadata,theme}:{metadata:Metadata;theme:Theme})
   const hasSeries=Boolean(column);
 
   useEffect(()=>{setFilters({});setColumn('');setMeasure('records');setRow(metadata.pages[source]?.dimensions?.[0]||'project')},[source,metadata]);
-  useEffect(()=>{if(!row)return;const controller=new AbortController();setBusy(true);setError('');getStudio(source,row,column,filters,measure,controller.signal).then(setResult).catch(reason=>{if(reason.name!=='AbortError')setError(reason.message)}).finally(()=>{if(!controller.signal.aborted)setBusy(false)});return()=>controller.abort()},[source,row,column,filters,measure]);
+  useEffect(()=>{let active=true;getLegalExplorerFilters(source).then((result)=>{if(active)setAvailableFilters(Object.fromEntries(result.columns.map((column)=>[column.name,column.values])))}).catch(()=>{if(active)setAvailableFilters(sourceMeta?.filters||{})});return()=>{active=false}},[source]);
+  useEffect(()=>{if(!row)return;const controller=new AbortController();setBusy(true);setError('');(studioLoader||getStudio)(source,row,column,filters,measure,controller.signal).then(setResult).catch(reason=>{if(reason.name!=='AbortError')setError(reason.message)}).finally(()=>{if(!controller.signal.aborted)setBusy(false)});return()=>controller.abort()},[source,row,column,filters,measure,studioLoader]);
   useEffect(()=>{setOptions(current=>({...current,orientation:chartType==='bar'?'horizontal':chartType==='stacked'?'vertical':current.orientation,valueMode:!column&&['percent-row','percent-series'].includes(current.valueMode)?'percent-total':current.valueMode}))},[chartType,column]);
 
   const view=useMemo(()=>result?transformStudioResult(result,options):null,[result,options]);
@@ -41,7 +43,7 @@ export default function Studio({metadata,theme}:{metadata:Metadata;theme:Theme})
     <div className="studio-toolbar glass">
       <div className="studio-heading"><LayoutDashboard/><div><strong>Analysis builder</strong><span>Choose a source, one or two dimensions, and a visual.</span></div></div>
       <div className="studio-controls">
-        <Select label="Source sheet" value={source} onChange={setSource} options={[['assessment','Assessments'],['services','Legal Services'],['deportation','Deportation']]}/>
+        <Select label="Source sheet" value={source} onChange={setSource} options={sources}/>
         <Select label="Rows / X-axis" value={row} onChange={setRow} options={dimensions.map(dimension=>[dimension,label(dimension)])}/>
         <Select label="Columns / Series" value={column} onChange={setColumn} options={[['','None'],...dimensions.filter(dimension=>dimension!==row).map(dimension=>[dimension,label(dimension)] as [string,string])]}/>
         <Select label="Measure" value={measure} onChange={value=>setMeasure(value as Measure)} options={source==='deportation'?[['records','PN IDs']]:[['records',source==='services'?'Service IDs':'Assessment IDs'],['beneficiaries','Unique beneficiaries']]}/>
@@ -57,12 +59,12 @@ export default function Studio({metadata,theme}:{metadata:Metadata;theme:Theme})
           {showOrientation&&<Select label="Orientation" value={options.orientation} onChange={value=>setOption('orientation',value as StudioOrientation)} options={[['horizontal','Horizontal'],['vertical','Vertical']]}/>}
         </div>
       </section>
-      <div className="studio-actions"><button className="primary" onClick={()=>setDrawer(true)}><Filter/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft" onClick={()=>setFilters({})}><RotateCcw/>Clear filters</button></div>
+      <div className="studio-actions studio-shared-filter-actions"><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>All filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft" disabled={!activeCount} onClick={()=>setFilters({})}><RotateCcw/>Clear</button></div>
       {theme==='multicolor'&&chartType!=='table'&&<section className="studio-color-panel"><div className="studio-color-head"><div><strong>Answer colors</strong><span>Use the curated palette or customize chart and label colors independently.</span></div><label className="color-toggle"><input type="checkbox" checked={customColors} onChange={event=>setCustomColors(event.target.checked)}/><i/><span>Custom colors</span></label></div>{customColors&&<div className="studio-color-grid">{colorKeys.map((key,index)=><div className="answer-color" key={key}><span title={key}>{key}</span><label>Chart<input type="color" value={markColors[key]||palette[index%palette.length]} onChange={event=>setMarkColors(colors=>({...colors,[key]:event.target.value}))}/></label><label>Text<input type="color" value={textColors[key]||defaultText[index%defaultText.length]} onChange={event=>setTextColors(colors=>({...colors,[key]:event.target.value}))}/></label></div>)}</div>}</section>}
     </div>
     {error&&<div className="error glass">{error}</div>}
     <article className="studio-canvas glass"><div className="card-title"><div><h3>{label(row)}{column?` by ${label(column)}`:''}</h3><p>{result?`${formatNumber(result.total)} filtered ${measure==='beneficiaries'?'beneficiaries':'records'} · 2026 YTD`:''}</p></div><div className="chart-actions">{chartType!=='table'&&<ExportButtons graph={graph} title={`${label(row)}${column?` by ${label(column)}`:''}`}/>}<span className="studio-badge"><Table2/>{chartType==='table'?'Pivot':'Interactive chart'}</span></div></div>{busy&&!result?<div className="loading"><div/><span>Building analysis…</span></div>:chartType==='table'?<StudioTable view={view}/>:chart&&<div className="studio-plot"><Plot key={`${source}-${row}-${column}-${chartType}-${theme}`} useResizeHandler onInitialized={(_,graphDiv)=>setGraph(graphDiv)} data={chart.data as any} layout={chart.layout as any} config={{displayModeBar:false,responsive:true,scrollZoom:false,doubleClick:false}} style={{width:'100%',height:'100%'}}/></div>}</article>
-    <FilterDrawer open={drawer} available={sourceMeta?.filters||{}} filters={filters} onClose={()=>setDrawer(false)} onChange={setFilters} onReset={()=>setFilters({})}/>
+    {drawer&&<><button className="filter-backdrop" aria-label="Close Custom Builder filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer analytics-filter-drawer"><header><div><span className="eyebrow">ANALYTICS STUDIO FILTERS</span><h2>Filter Custom Builder</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header><label className="filter-search"><Search/><input value={filterSearch} onChange={(event)=>setFilterSearch(event.target.value)} placeholder="Search filters"/></label><div className="case-filter-scroll">{Object.entries(availableFilters).filter(([field])=>field.toLowerCase().includes(filterSearch.toLowerCase())).map(([field,values])=><details key={field} open={Boolean(filters[field]?.length)}><summary><span>{label(field)}</span>{filters[field]?.length>0&&<b>{filters[field].length}</b>}<ChevronDown/></summary><div>{values.map((value)=><label key={value}><input type="checkbox" checked={filters[field]?.includes(value)||false} onChange={()=>setFilters(current=>({...current,[field]:current[field]?.includes(value)?current[field].filter((item)=>item!==value):[...(current[field]||[]),value]}))}/><span>{value}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!activeCount} onClick={()=>setFilters({})}>Clear all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {activeCount>0&&`(${activeCount})`}</button></footer></aside></>}
   </>;
 }
 

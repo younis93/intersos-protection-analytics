@@ -1,21 +1,28 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import re
 import secrets
 import sys
 from pathlib import Path
+from urllib.parse import unquote, urlparse
+from urllib.request import Request, urlopen
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from .analytics import DataStore
 from .legal_platform import LegalStore, FILES, versioned_dataset_name
+from .duplicate_exclusions import DuplicateExclusionRegistry
 from .indicator_reporting import build_indicator_report, build_indicator_workbook, build_narrative_workbook
 from . import updater
 
@@ -30,9 +37,20 @@ LOCAL_SESSION_TOKEN = os.getenv("INTERSOS_LOCAL_SESSION_TOKEN", "")
 SESSION_COOKIE = "intersos_session"
 workbook = Path(os.getenv("UNHCR_WORKBOOK", DEFAULT_FILE))
 REMEMBERED_ANALYTICS_WORKBOOK = os.getenv("INTERSOS_ANALYTICS_WORKBOOK", "")
-store: DataStore | None = None if (UPLOAD_ONLY and not REMEMBERED_ANALYTICS_WORKBOOK) or not workbook.exists() else DataStore.from_path(workbook)
+store: DataStore | None = None
+analytics_store_loading = False
+
+def load_initial_analytics_store() -> None:
+    global store, analytics_store_loading
+    analytics_store_loading = True
+    try:
+        if not (UPLOAD_ONLY and not REMEMBERED_ANALYTICS_WORKBOOK) and workbook.exists():
+            store = DataStore.from_path(workbook)
+    finally:
+        analytics_store_loading = False
 LEGAL_SAMPLE = ROOT / "Legal Platform Data"
 REMEMBERED_LEGAL_FOLDER = Path(os.getenv("INTERSOS_LEGAL_FOLDER", "")) if os.getenv("INTERSOS_LEGAL_FOLDER") else None
+REMEMBERED_LEGAL_SOURCE = os.getenv("INTERSOS_LEGAL_SOURCE", "folder")
 try:
     REMEMBERED_LEGAL_FILES = [Path(value) for value in json.loads(os.getenv("INTERSOS_LEGAL_FILES", "[]"))]
 except (json.JSONDecodeError, TypeError):
@@ -44,11 +62,41 @@ def remembered_legal_file_payload(paths: list[Path]) -> dict[str, bytes]:
         if not parsed: continue
         name, version = parsed
         current = selected.get(name)
-        if current is None or version > current[0]: selected[name] = (version, path)
+        if current is None or version > current[0] or (version == current[0] and path.stat().st_mtime > current[1].stat().st_mtime): selected[name] = (version, path)
     return {name: path.read_bytes() for name, (_, path) in selected.items()}
 
 
-legal_store: LegalStore | None = (LegalStore.from_files(remembered_legal_file_payload(REMEMBERED_LEGAL_FILES), "Selected Legal Platform CSV files") if REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else (LegalStore.from_folder(REMEMBERED_LEGAL_FOLDER) if REMEMBERED_LEGAL_FOLDER and REMEMBERED_LEGAL_FOLDER.is_dir() else (LegalStore.from_folder(LEGAL_SAMPLE) if LEGAL_SAMPLE.exists() else None)))
+duplicate_exclusions = DuplicateExclusionRegistry()
+legal_store: LegalStore | None = None
+legal_store_loading = False
+legal_store_restore_error = ""
+
+def load_initial_legal_store() -> None:
+    """Restore the remembered Legal data outside the desktop window startup path."""
+    global legal_store, legal_store_loading, legal_store_restore_error
+    legal_store_loading = True
+    try:
+        use_files=REMEMBERED_LEGAL_SOURCE=="files"
+        candidate = (LegalStore.from_files(remembered_legal_file_payload(REMEMBERED_LEGAL_FILES), "Selected Legal Platform CSV files") if use_files and REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else (LegalStore.from_folder(REMEMBERED_LEGAL_FOLDER) if REMEMBERED_LEGAL_FOLDER and REMEMBERED_LEGAL_FOLDER.is_dir() else (LegalStore.from_files(remembered_legal_file_payload(REMEMBERED_LEGAL_FILES), "Selected Legal Platform CSV files") if REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else (LegalStore.from_folder(LEGAL_SAMPLE) if LEGAL_SAMPLE.exists() else None))))
+        if candidate:
+            candidate.set_review_exclusions(duplicate_exclusions.exclusion_rows())
+        legal_store = candidate
+        legal_store_restore_error = ""
+    except Exception as exc:
+        legal_store = None
+        legal_store_restore_error = f"Unable to restore the last Legal Platform source: {exc}"
+    finally:
+        legal_store_loading = False
+
+if os.getenv("INTERSOS_DEFER_LEGAL_LOAD", "").lower() in {"1", "true", "yes"}:
+    legal_store_loading = True
+else:
+    load_initial_legal_store()
+
+if os.getenv("INTERSOS_DEFER_INITIAL_DATA", "").lower() in {"1", "true", "yes"}:
+    analytics_store_loading = True
+else:
+    load_initial_analytics_store()
 
 app = FastAPI(title="UNHCR CfP Analytics API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -115,6 +163,7 @@ class LegalQuery(BaseModel):
     pageSize: int = 100
     nameCompareChars: int = 15
     allowNameVariations: bool = False
+    exactMatchesOnly: bool = False
     filterColumn: str = ""
     filterValue: str = ""
     severity: str = ""
@@ -125,6 +174,33 @@ class LegalQuery(BaseModel):
     comparisonMonth: str = ""
     sortColumn: str = ""
     sortDirection: str = "asc"
+
+class LegalStudioRequest(BaseModel):
+    dataset: str
+    rowDimension: str
+    columnDimension: str = ""
+    filters: dict[str, list[str]] = {}
+    measure: str = "records"
+
+class LegalAnalyticsDashboardRequest(BaseModel):
+    dataset: str
+    filters: dict[str, list[str]] = {}
+    search: str = ""
+    page: int = 1
+    pageSize: int = 100
+    sortColumn: str = ""
+    sortDirection: str = "asc"
+
+
+class DuplicateExclusionRequest(BaseModel):
+    caseId: str = ""
+    rule: str
+    dataset: str = "beneficiaries"
+    identifierType: str = "caseId"
+    identifierValue: str = ""
+    name: str = ""
+    project: str = ""
+    source: str = ""
 
 
 class IndicatorReportRequest(BaseModel):
@@ -148,6 +224,12 @@ class CaseQuery(BaseModel):
     columns: list[str] = []
 
 
+class TableWorkbookRequest(BaseModel):
+    filename: str = "table-export.xlsx"
+    columns: list[str] = []
+    rows: list[dict[str, object]] = []
+
+
 @app.get("/api/health")
 def health(): return {"status": "ready" if store else "awaiting_upload", "source": store.source_name if store else None}
 
@@ -169,13 +251,23 @@ def update_install():
 @app.get("/api/metadata")
 def metadata():
     if store is None:
-        return {"ready": False, "source": None, "loadedAt": None, "pages": {}}
+        return {"ready": False, "loading":analytics_store_loading, "source": None, "loadedAt": None, "pages": {}}
     return {"ready": True, **store.metadata()}
 
 
 @app.get("/api/legal/metadata")
 def legal_metadata():
-    return legal_store.metadata() if legal_store else {"ready": False, "source": None, "warnings": [], "availability": {name: False for name in FILES}, "sheets": [], "months": [], "reviewCounts": {}}
+    return legal_store.metadata() if legal_store else {"ready": False, "loading":legal_store_loading, "source": None, "warnings": [legal_store_restore_error] if legal_store_restore_error else [], "availability": {name: False for name in FILES}, "features":{"detention":False,"deportation":False}, "sheets": [], "months": [], "reviewCounts": {}}
+
+@app.get("/api/legal/deportation-dashboard")
+def legal_deportation_dashboard():
+    try:return require_legal_store().deportation_dashboard()
+    except ValueError as exc: raise HTTPException(400,str(exc)) from exc
+
+@app.post("/api/legal/deportation-dashboard")
+def legal_deportation_dashboard_filtered(request:LegalQuery):
+    try:return require_legal_store().deportation_dashboard(request.filters)
+    except ValueError as exc: raise HTTPException(400,str(exc)) from exc
 
 
 @app.post("/api/legal/upload")
@@ -195,6 +287,7 @@ async def legal_upload(files: list[UploadFile] = File(...)):
             if total > MAX_UPLOAD_BYTES: raise HTTPException(413, "Legal Platform files must total 100 MB or smaller.")
             if version >= versions.get(key, -1):payload[key]=raw;versions[key]=version
         candidate = await run_in_threadpool(LegalStore.from_files, payload, "Selected Legal Platform folder")
+        candidate.set_review_exclusions(duplicate_exclusions.exclusion_rows())
         legal_store = candidate
         return candidate.metadata()
     except HTTPException:
@@ -213,13 +306,103 @@ def require_legal_store() -> LegalStore:
 @app.post("/api/legal/review")
 def legal_review(request: LegalQuery):
     if request.page < 1 or request.pageSize < 1 or request.pageSize > 500: raise HTTPException(400, "Invalid pagination")
-    return require_legal_store().review(request.dataset, request.search, request.rule, request.page, request.pageSize, request.severity,request.lawyer,request.project,request.location,request.comparisonMonth,request.nameCompareChars,request.allowNameVariations)
+    return require_legal_store().review(request.dataset, request.search, request.rule, request.page, request.pageSize, request.severity,request.lawyer,request.project,request.location,request.comparisonMonth,request.nameCompareChars,request.allowNameVariations,request.exactMatchesOnly)
 
 
 @app.get("/api/legal/review-export/{dataset}")
-def legal_review_export(dataset:str,comparison_month:str="",name_compare_chars:int=15,allow_name_variations:bool=False):
-    payload=require_legal_store().review_export(dataset,comparison_month,name_compare_chars,allow_name_variations)
+def legal_review_export(dataset:str,comparison_month:str="",name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False,rules:str=""):
+    selected_rules=[rule.strip() for rule in rules.split(",") if rule.strip()]
+    payload=require_legal_store().review_export(dataset,comparison_month,name_compare_chars,allow_name_variations,exact_matches_only,selected_rules)
     return Response(payload,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":f'attachment; filename="{dataset}-review-findings.xlsx"'})
+
+
+def duplicate_exclusion_payload() -> dict[str, object]:
+    rows = duplicate_exclusions.entries()
+    return {"rows": rows, "count": len(rows)}
+
+
+@app.get("/api/legal/duplicate-exclusions")
+def list_duplicate_exclusions():
+    return duplicate_exclusion_payload()
+
+
+@app.post("/api/legal/duplicate-exclusions")
+def create_duplicate_exclusion(request: DuplicateExclusionRequest):
+    try:
+        value=request.identifierValue or request.caseId
+        record, _ = duplicate_exclusions.exclude_record(request.dataset, request.rule, request.identifierType, value, request.name, request.project, request.source)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if legal_store:
+        legal_store.set_review_exclusions(duplicate_exclusions.exclusion_rows())
+    return {"record": record, **duplicate_exclusion_payload()}
+
+
+@app.delete("/api/legal/duplicate-exclusions/{case_id}")
+def restore_duplicate_exclusion(case_id: str, rule: str, dataset: str = "", identifier_type: str = ""):
+    if not duplicate_exclusions.restore(case_id, rule, dataset, identifier_type):
+        raise HTTPException(404, "Excluded Case ID was not found.")
+    if legal_store:
+        legal_store.set_review_exclusions(duplicate_exclusions.exclusion_rows())
+    return duplicate_exclusion_payload()
+
+
+@app.post("/api/legal/duplicate-exclusions/import")
+async def import_duplicate_exclusions(file: UploadFile = File(...), dataset: str = Form(...), identifier_type: str = Form(...), rules: str = Form(...)):
+    if dataset not in {"assessments", "legalservices", "awareness", "beneficiaries"}:
+        raise HTTPException(400, "Unsupported review page.")
+    selected_rules=[item.strip() for item in rules.split(",") if item.strip()]
+    if not selected_rules: raise HTTPException(400, "Choose at least one finding table.")
+    raw=await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(raw)>MAX_UPLOAD_BYTES: raise HTTPException(413, "Exclusion file must be 100 MB or smaller.")
+    try:
+        import pandas as pd
+        source=io.BytesIO(raw)
+        frame=pd.read_excel(source, dtype=object) if (file.filename or "").lower().endswith((".xlsx", ".xls")) else pd.read_csv(source, dtype=object, encoding="utf-8-sig")
+        if frame.empty or not len(frame.columns): raise ValueError("The exclusion file has no identifier column.")
+        expected_columns={
+            "beneficiaries": ("case id", "beneficiary id"),
+            "assessments": ("assessment id",),
+            "legalservices": ("service id",),
+            "awareness": ("awareness id",),
+        }
+        normalized_columns={re.sub(r"\s+", " ", str(column).strip().casefold()): column for column in frame.columns}
+        column=next((normalized_columns[name] for name in expected_columns[dataset] if name in normalized_columns), None)
+        if column is None:
+            raise ValueError(f"No {expected_columns[dataset][0].title()} column was found in the uploaded file.")
+        values=frame[column].dropna().astype(str).map(str.strip).tolist()
+        imported=duplicates=invalid=0
+        for value in values:
+            if not value: invalid+=1; continue
+            for rule in selected_rules:
+                _, created=duplicate_exclusions.exclude_record(dataset, rule, identifier_type, value, source=f"Imported from {Path(file.filename or 'file').name}")
+                imported += int(created); duplicates += int(not created)
+        if legal_store: legal_store.set_review_exclusions(duplicate_exclusions.exclusion_rows())
+        return {"imported":imported,"duplicates":duplicates,"invalid":invalid,"column":str(column),"rows":duplicate_exclusions.entries(),"count":len(duplicate_exclusions.entries())}
+    except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+    finally: await file.close()
+
+
+@app.get("/api/legal/duplicate-exclusions-export")
+def export_duplicate_exclusions():
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Excluded findings"
+    sheet.append(["Review page", "Finding", "Identifier type", "Identifier value", "Name", "Project", "Excluded on", "Source context"])
+    for row in duplicate_exclusions.entries():
+        sheet.append([row.get("dataset", "beneficiaries"), row.get("rule", ""), row.get("identifierType", "caseId"), row.get("identifierValue", row.get("caseId", "")), row.get("name", ""), row.get("project", ""), row.get("excludedAt", ""), row.get("source", "")])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="2454C6")
+    for column, width in zip("ABCDEF", (32, 20, 32, 34, 28, 28)):
+        sheet.column_dimensions[column].width = width
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return Response(buffer.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": 'attachment; filename="beneficiary-finding-exclusions.xlsx"'})
 
 
 @app.post("/api/legal/explorer")
@@ -228,6 +411,17 @@ def legal_explorer(request: LegalQuery):
     if request.sortDirection not in {"asc","desc"}: raise HTTPException(400,"Invalid sort direction")
     try: return require_legal_store().explorer(request.dataset, request.search, request.page, request.pageSize, request.filterColumn, request.filterValue,request.filters,request.sortColumn,request.sortDirection)
     except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
+@app.post("/api/legal/studio")
+def legal_studio(request: LegalStudioRequest):
+    try: return require_legal_store().studio(request.dataset,request.rowDimension,request.columnDimension,request.filters,request.measure)
+    except ValueError as exc: raise HTTPException(400,str(exc)) from exc
+
+@app.post("/api/legal/analytics-dashboard")
+def legal_analytics_dashboard(request: LegalAnalyticsDashboardRequest):
+    if request.page<1 or request.pageSize<1 or request.pageSize>10000 or request.sortDirection not in {"asc","desc"}: raise HTTPException(400,"Invalid dashboard query.")
+    try:return require_legal_store().analytics_dashboard(request.dataset,request.filters,request.search,request.page,request.pageSize,request.sortColumn,request.sortDirection)
+    except ValueError as exc:raise HTTPException(400,str(exc)) from exc
 
 
 @app.get("/api/legal/explorer-filters/{dataset}")
@@ -252,11 +446,50 @@ def legal_case(request: CaseQuery): return require_legal_store().case(request.qu
 def legal_case_filters(): return require_legal_store().case_filters()
 
 
+@app.get("/api/legal/attachment-download")
+def legal_attachment_download(url: str = Query(..., min_length=8)):
+    parsed=urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(400,"Only HTTP(S) attachment links can be downloaded.")
+    try:
+        with urlopen(Request(url,headers={"User-Agent":"INTERSOS-Protection-Analytics"}),timeout=30) as remote:
+            length=int(remote.headers.get("Content-Length","0") or 0)
+            if length>50*1024*1024: raise HTTPException(413,"Attachment is larger than 50 MB.")
+            payload=remote.read(50*1024*1024+1)
+            if len(payload)>50*1024*1024: raise HTTPException(413,"Attachment is larger than 50 MB.")
+            media_type=remote.headers.get_content_type() or "application/octet-stream"
+    except HTTPException: raise
+    except Exception as exc: raise HTTPException(502,f"Unable to download the secured document: {exc}") from exc
+    filename=Path(unquote(parsed.path)).name or "secured-document"
+    filename=re.sub(r"[^A-Za-z0-9._ -]","_",filename)
+    return Response(payload,media_type=media_type,headers={"Content-Disposition":f'attachment; filename="{filename}"'})
+
+
 @app.post("/api/legal/case-export")
 def legal_case_export(request: CaseQuery):
     payload=require_legal_store().case_export(request.query,request.filters)
     name="beneficiary-case" if request.query else "filtered-beneficiary-cases"
     return Response(payload,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":f'attachment; filename="{name}.xlsx"'})
+
+
+@app.post("/api/table-workbook")
+def table_workbook(request: TableWorkbookRequest):
+    """Create a local Excel workbook for selected visible rows and pivots."""
+    if not request.columns: raise HTTPException(400,"Choose at least one table column.")
+    if len(request.rows)>10000: raise HTTPException(400,"Excel export is limited to 10,000 selected rows.")
+    output=io.BytesIO();book=Workbook();sheet=book.active;sheet.title="Data"
+    sheet.append(request.columns)
+    for cell in sheet[1]:
+        cell.font=Font(bold=True,color="FFFFFF");cell.fill=PatternFill("solid",fgColor="2563EB");cell.alignment=Alignment(wrap_text=True,vertical="center")
+    for row in request.rows: sheet.append([row.get(column,"") for column in request.columns])
+    sheet.freeze_panes="A2";sheet.auto_filter.ref=sheet.dimensions
+    for index,column in enumerate(request.columns,1):
+        values=[str(row.get(column,"") or "") for row in request.rows[:500]]
+        sheet.column_dimensions[get_column_letter(index)].width=min(42,max(12,len(column)+2,*(len(value)+2 for value in values)))
+    book.save(output)
+    name=re.sub(r"[^A-Za-z0-9._ -]","_",request.filename or "table-export.xlsx")
+    if not name.lower().endswith(".xlsx"): name+= ".xlsx"
+    return Response(output.getvalue(),media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":f'attachment; filename="{name}"'})
 
 
 @app.post("/api/legal/lawyers")

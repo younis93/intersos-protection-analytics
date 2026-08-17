@@ -200,7 +200,11 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         return chosen
 
     amal_project = "UNHCR 2026 - AMAL CAMP"
-    show_refugee_columns = not projects or any(project != amal_project for project in projects)
+    # AMAL is an IDP-only project.  A project filter that includes AMAL therefore
+    # presents only IDP reporting; without AMAL, IDP reporting is not relevant.
+    show_refugee_columns = not (projects and amal_project in projects)
+    # With no project filter, the report covers every available project,
+    # including AMAL; retain the IDP section and workbook sheet in that case.
     show_idp_columns = not projects or amal_project in projects
     all_populations = tuple(
         ([(("syrian-refugee", "Syrian Refugees")), (("non-syrian-refugee", "Non-Syrian Refugees"))] if show_refugee_columns else [])
@@ -354,8 +358,9 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         civil_representation,
     ]
     reached_indicators = [indicator("individuals-reached", "# of individuals receiving legal assistance, representation or counselling", "Assessments", "Date of Assessment", "Type of Legal Service Needed is not blank.", "all", reached, assessments)]
-    groups = [{"id": "refugee", "label": "Refugee", "indicators": refugee_indicators}]
-    if not projects or amal_project in projects: groups.append({"id": "idp", "label": "IDP", "indicators": idp_indicators})
+    groups = []
+    if show_refugee_columns: groups.append({"id": "refugee", "label": "Refugee", "indicators": refugee_indicators})
+    if show_idp_columns: groups.append({"id": "idp", "label": "IDP", "indicators": idp_indicators})
     groups.append({"id": "individual-beneficiaries-reached", "label": "# of individual beneficiaries reached", "indicators": reached_indicators})
     north_projects = {"UNHCR 2026 - Erbil", "UNHCR 2026 - SULI", "UNHCR 2026 - Mosul & Kirkuk"}
 

@@ -17,14 +17,33 @@ export const workspaces:WorkspaceDefinition[]=[
 ];
 
 export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:()=>void}){
-  const [theme,setTheme]=useState<Theme>(()=>(localStorage.getItem('app-theme') as Theme)||'glass-light');
+  const [theme,setTheme]=useState<Theme>(()=>{
+    const startupTheme=new URLSearchParams(window.location.search).get('appTheme') as Theme|null;
+    return startupTheme||(localStorage.getItem('app-theme') as Theme)||'glass-light';
+  });
   const [fullscreen,setFullscreen]=useState(false);
   const [avatarRevealed,setAvatarRevealed]=useState(false);
   const [updateInfo,setUpdateInfo]=useState<UpdateCheck|null>(null);
   const [updateStatus,setUpdateStatus]=useState<UpdateStatus|null>(null);
   const [updateOpen,setUpdateOpen]=useState(false);
   const {phase,pressLogo,pressShattered,setPhase,finishRestore}=useFractureSequence();
-  useEffect(()=>{document.documentElement.dataset.theme=theme;localStorage.setItem('app-theme',theme);localStorage.setItem('legal-platform-theme',theme);(window as any).pywebview?.api?.set_title_bar_theme?.(theme)},[theme]);
+  useEffect(()=>{
+    document.documentElement.dataset.theme=theme;
+    localStorage.setItem('app-theme',theme);
+    localStorage.setItem('legal-platform-theme',theme);
+    let attempts=0,timer:number|undefined,cancelled=false;
+    const syncNativeTitleBar=async()=>{
+      try{
+        const nativeApi=(window as any).pywebview?.api;
+        if(nativeApi?.set_title_bar_theme&&await nativeApi.set_title_bar_theme(theme))return;
+      }catch{/* The native window may still be initializing on first launch. */}
+      if(!cancelled&&attempts++<50)timer=window.setTimeout(()=>void syncNativeTitleBar(),100);
+    };
+    void syncNativeTitleBar();
+    const onNativeReady=()=>void syncNativeTitleBar();
+    window.addEventListener('pywebviewready',onNativeReady,{once:true});
+    return()=>{cancelled=true;window.removeEventListener('pywebviewready',onNativeReady);if(timer)window.clearTimeout(timer)};
+  },[theme]);
   useEffect(()=>{const sync=()=>setFullscreen(Boolean(document.fullscreenElement));document.addEventListener('fullscreenchange',sync);return()=>document.removeEventListener('fullscreenchange',sync)},[]);
   const toggleFullscreen=async()=>{const nativeApi=(window as any).pywebview?.api;if(nativeApi?.toggle_fullscreen)setFullscreen(await nativeApi.toggle_fullscreen());else if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()};
   useEffect(()=>{let active=true;const refresh=(openWhenAvailable:boolean)=>checkForUpdates().then(info=>{if(!active)return;setUpdateInfo(info);if(openWhenAvailable&&info.available)setUpdateOpen(true)}).catch(()=>{});refresh(true);const timer=window.setInterval(()=>refresh(false),UPDATE_CHECK_INTERVAL_MS);return()=>{active=false;window.clearInterval(timer)}},[]);

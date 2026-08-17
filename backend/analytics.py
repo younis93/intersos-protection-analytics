@@ -11,6 +11,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from .legal_platform import format_excel_dates
+
 MAX_XLSX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 MAX_XLSX_ENTRY_BYTES = 128 * 1024 * 1024
 MAX_XLSX_ENTRIES = 10_000
@@ -362,8 +364,9 @@ class DataStore:
                 frame[column] = frame[column].map(lambda value: "'" + value if isinstance(value, str) and re.match(r"^[=+\-@]", value) else value)
         output = io.BytesIO()
         if export_format == "xlsx":
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            with pd.ExcelWriter(output, engine="openpyxl", date_format="YYYY-MMMM-DD", datetime_format="YYYY-MMMM-DD") as writer:
                 frame.to_excel(writer, index=False, sheet_name="Filtered data")
+                format_excel_dates(writer.book)
         else:
             return frame.to_csv(index=False).encode("utf-8-sig")
         return output.getvalue()

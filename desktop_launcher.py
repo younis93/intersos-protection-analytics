@@ -48,6 +48,7 @@ def save_legal_folder(path: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     settings = load_settings()
     settings["legalFolder"] = str(path)
+    settings["legalSource"] = "folder"
     target.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
 
@@ -57,6 +58,33 @@ def load_settings() -> dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError, TypeError):
         return {}
+
+
+THEME_NAMES = {"glass-light", "glass-dark", "unhcr", "executive", "multicolor"}
+
+
+def saved_app_theme() -> str:
+    theme = str(load_settings().get("appTheme", "glass-light"))
+    return theme if theme in THEME_NAMES else "glass-light"
+
+
+def save_app_theme(theme: str) -> None:
+    if theme not in THEME_NAMES:
+        return
+    target = settings_path(); target.parent.mkdir(parents=True, exist_ok=True)
+    settings = load_settings(); settings["appTheme"] = theme
+    target.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+
+
+def theme_background(theme: str) -> str:
+    """Return the webview background used while the frontend is loading."""
+    return {
+        "glass-light": "#eef5fb",
+        "glass-dark": "#07131e",
+        "unhcr": "#f3f7fa",
+        "executive": "#f4f2ed",
+        "multicolor": "#f3f5f9",
+    }.get(theme, "#eef5fb")
 
 
 def saved_analytics_workbook() -> Path | None:
@@ -79,7 +107,7 @@ def saved_legal_files() -> list[Path]:
 
 def save_legal_files(paths: list[Path]) -> None:
     target = settings_path(); target.parent.mkdir(parents=True, exist_ok=True)
-    settings = load_settings(); settings["legalFiles"] = [str(path) for path in paths]
+    settings = load_settings(); settings["legalFiles"] = [str(path) for path in paths]; settings["legalSource"] = "files"
     target.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
 
@@ -121,7 +149,7 @@ def show_error(message: str) -> None:
     ctypes.windll.user32.MessageBoxW(0, message, APP_TITLE, 0x10)
 
 
-def apply_windows_branding(window_title: str) -> None:
+def apply_windows_branding(window_title: str, theme: str = "glass-light") -> None:
     """Apply the application identity to local Python and packaged windows."""
     if sys.platform != "win32":
         return
@@ -141,9 +169,17 @@ def apply_windows_branding(window_title: str) -> None:
             user32.SendMessageW(hwnd, wm_seticon, 0, small)
         if large:
             user32.SendMessageW(hwnd, wm_seticon, 1, large)
-        # Use a polished light caption until the web UI applies its saved theme.
+        # Apply the saved app theme before the web UI is ready.
         dwm = ctypes.windll.dwmapi.DwmSetWindowAttribute
-        caption, text = ctypes.c_uint(0x00FCF4EA), ctypes.c_uint(0x00452B0E)
+        colors = {
+            "glass-light": (0x00FBF5EE, 0x00342212),
+            "glass-dark": (0x001E1307, 0x00FFF7ED),
+            "unhcr": (0x00BC7200, 0x00FFFFFF),
+            "multicolor": (0x00F9F5F3, 0x00372818),
+            "executive": (0x00EDF2F4, 0x00302A20),
+        }
+        caption_color, text_color = colors.get(theme, colors["glass-light"])
+        caption, text = ctypes.c_uint(caption_color), ctypes.c_uint(text_color)
         dwm(hwnd, 35, ctypes.byref(caption), ctypes.sizeof(caption))
         dwm(hwnd, 36, ctypes.byref(text), ctypes.sizeof(text))
     except Exception:
@@ -234,15 +270,18 @@ class NativeFullscreenController:
         intentionally leaves the standard native title bar in place.
         """
         try:
+            if theme not in THEME_NAMES:
+                return False
+            save_app_theme(theme)
             hwnd = ctypes.windll.user32.FindWindowW(None, self.title)
             if not hwnd:
                 return False
             colors = {
-                "glass-light": (0x00FCF4EA, 0x00452B0E, False),  # #EAF4FC / #0E2B45
-                "glass-dark": (0x00331F0B, 0x00FFF9F5, True),   # #0B1F33 / #F5F9FF
+                "glass-light": (0x00FBF5EE, 0x00342212, False),  # #EEF5FB / #122234
+                "glass-dark": (0x001E1307, 0x00FFF7ED, True),    # #07131E / #EDF7FF
                 "unhcr": (0x00BC7200, 0x00FFFFFF, False),       # #0072BC / white
-                "multicolor": (0x00FAF3F7, 0x00412C32, False),  # #F7F3FA / #322C41
-                "executive": (0x00F2F1EE, 0x00302A20, False),   # #EEF1F2 / #202A30
+                "multicolor": (0x00F9F5F3, 0x00372818, False),  # #F3F5F9 / #182837
+                "executive": (0x00EDF2F4, 0x00302A20, False),   # #F4F2ED / #202A30
             }
             caption, text, dark_mode = colors.get(theme, colors["glass-light"])
             dwm = ctypes.windll.dwmapi.DwmSetWindowAttribute
@@ -266,6 +305,9 @@ class DesktopApi:
     def set_title_bar_theme(self, theme: str) -> bool:
         return bool(self.fullscreen.set_title_bar_theme(theme))
 
+    def get_saved_app_theme(self) -> str:
+        return saved_app_theme()
+
     def choose_legal_folder(self) -> str | None:
         previous = saved_legal_folder()
         selection = webview.windows[0].create_file_dialog(webview.FileDialog.FOLDER, str(previous or ""))
@@ -280,6 +322,8 @@ class DesktopApi:
         from backend import main as backend_main
         from backend.legal_platform import LegalStore
         candidate = LegalStore.from_folder(folder)
+        from backend import main as backend_main
+        candidate.set_review_exclusions(backend_main.duplicate_exclusions.exclusion_rows())
         backend_main.legal_store = candidate
         save_legal_folder(folder)
         return candidate.metadata()
@@ -325,9 +369,10 @@ class DesktopApi:
             if not parsed: continue
             name, version = parsed
             current = selected.get(name)
-            if current is None or version > current[0]: selected[name] = (version, path)
+            if current is None or version > current[0] or (version == current[0] and path.stat().st_mtime > current[1].stat().st_mtime): selected[name] = (version, path)
         payload = {name: path.read_bytes() for name, (_, path) in selected.items()}
         candidate = LegalStore.from_files(payload, "Selected Legal Platform CSV files")
+        candidate.set_review_exclusions(backend_main.duplicate_exclusions.exclusion_rows())
         backend_main.legal_store = candidate
         save_legal_files(paths)
         return candidate.metadata()
@@ -355,10 +400,15 @@ def main() -> None:
     remembered_legal_files = saved_legal_files()
     if remembered_legal_files:
         os.environ["INTERSOS_LEGAL_FILES"] = json.dumps([str(path) for path in remembered_legal_files])
+    os.environ["INTERSOS_LEGAL_SOURCE"] = str(load_settings().get("legalSource", "folder"))
     remembered_workbook = saved_analytics_workbook()
     if remembered_workbook:
         os.environ["INTERSOS_ANALYTICS_WORKBOOK"] = str(remembered_workbook)
         os.environ["UNHCR_WORKBOOK"] = str(remembered_workbook)
+    # Show the native window immediately. Legal CSV restoration is expensive
+    # and continues in the background once the local server is available.
+    os.environ.setdefault("INTERSOS_DEFER_LEGAL_LOAD", "1")
+    os.environ.setdefault("INTERSOS_DEFER_INITIAL_DATA", "1")
     from backend import main as backend_main
     from backend.version import APP_VERSION
     if sys.platform == "win32":
@@ -368,7 +418,11 @@ def main() -> None:
             pass
 
     port = available_port()
-    url = f"http://127.0.0.1:{port}"
+    startup_theme = saved_app_theme()
+    # Private WebView profiles intentionally do not retain localStorage. Put the
+    # native persisted theme in the initial URL so React cannot reset it to light
+    # while the bridge is still starting.
+    url = f"http://127.0.0.1:{port}/?appTheme={startup_theme}"
     local_server = LocalServer(backend_main.app, port)
     try:
         local_server.start()
@@ -389,12 +443,14 @@ def main() -> None:
             min_size=(1100, 700),
             resizable=True,
             maximized=True,
-            background_color="#f4f7fb",
+            background_color=theme_background(startup_theme),
             js_api=desktop_api,
         )
+        threading.Thread(target=backend_main.load_initial_analytics_store, name="restore-analytics-data", daemon=True).start()
+        threading.Thread(target=backend_main.load_initial_legal_store, name="restore-legal-data", daemon=True).start()
         webview.start(
             apply_windows_branding,
-            (window_title,),
+            (window_title, startup_theme),
             gui="edgechromium",
             debug=False,
             private_mode=True,
