@@ -11,6 +11,7 @@ installer = Path(installer_name)
 manifest = {
     "version": version,
     "installerUrl": f"https://github.com/{repository}/releases/download/v{version}/{installer.name}",
+    "sizeBytes": installer.stat().st_size,
     "sha256": hashlib.sha256(installer.read_bytes()).hexdigest(),
     "notes": f"INTERSOS Legal Platform {version}",
     "publishedAt": datetime.now(timezone.utc).isoformat(),

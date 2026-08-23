@@ -21,7 +21,7 @@ REPOSITORY = os.getenv("INTERSOS_GITHUB_REPOSITORY", DEFAULT_GITHUB_REPOSITORY).
 SIGNING_CERTIFICATE_THUMBPRINT = "C4F1B12A3BCCC73BEF903FA3796304CF0E67670D"
 ENABLED = "/" in REPOSITORY and not REPOSITORY.startswith("YOUR_")
 _lock = threading.Lock()
-_state: dict[str, Any] = {"phase": "idle", "progress": 0, "error": None}
+_state: dict[str, Any] = {"phase": "idle", "progress": 0, "error": None, "downloadedBytes": 0, "totalBytes": 0}
 _available: dict[str, Any] | None = None
 
 
@@ -43,12 +43,13 @@ def check() -> dict[str, Any]:
         return {**base, "message": "Update repository is not configured."}
     try:
         manifest = _json(f"https://github.com/{REPOSITORY}/releases/latest/download/update.json")
-        required = {"version", "installerUrl", "sha256", "publishedAt"}
-        if not required.issubset(manifest) or len(str(manifest["sha256"])) != 64:
+        required = {"version", "installerUrl", "sha256", "publishedAt", "sizeBytes"}
+        size_bytes = manifest.get("sizeBytes")
+        if not required.issubset(manifest) or len(str(manifest["sha256"])) != 64 or isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or size_bytes <= 0:
             raise ValueError("Invalid update manifest")
         available = _version(str(manifest["version"])) > _version(APP_VERSION)
         _available = manifest if available else None
-        return {**base, "available": available, "latestVersion": manifest["version"], "notes": manifest.get("notes", ""), "publishedAt": manifest["publishedAt"]}
+        return {**base, "available": available, "latestVersion": manifest["version"], "notes": manifest.get("notes", ""), "publishedAt": manifest["publishedAt"], "sizeBytes": size_bytes}
     except (OSError, ValueError, KeyError, urllib.error.URLError) as exc:
         return {**base, "message": f"Unable to check for updates: {exc}"}
 
@@ -71,23 +72,7 @@ def _installer_command(target: Path) -> list[str]:
         "/CLOSEAPPLICATIONS",
         "/NORESTART",
         "/INTERSOSUPDATE",
-        "/EXTERNALRELAUNCH",
     ]
-
-
-def _relaunch_command(target: Path, application: Path, process_id: int | None = None) -> list[str]:
-    installer = str(target).replace("'", "''")
-    app = str(application).replace("'", "''")
-    current_process_id = process_id if process_id is not None else os.getpid()
-    arguments = ",".join("'{}'".format(argument.replace("'", "''")) for argument in _installer_command(target)[1:])
-    script = (
-        f"$deadline=(Get-Date).AddSeconds(60); while (Get-Process -Id {current_process_id} -ErrorAction SilentlyContinue) {{ "
-        "if ((Get-Date) -ge $deadline) { exit 1 }; Start-Sleep -Milliseconds 250 }; "
-        f"$process=Start-Process -FilePath '{installer}' -ArgumentList @({arguments}) -PassThru; "
-        "$process.WaitForExit(); "
-        f"if ($process.ExitCode -in @(0,5,3010)) {{ Start-Sleep -Seconds 2; Start-Process -FilePath '{app}' }}"
-    )
-    return ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script]
 
 
 def _cleanup_stale_downloads() -> None:
@@ -124,14 +109,16 @@ def _download_and_install(manifest: dict[str, Any]) -> None:
             raise ValueError("Untrusted installer URL")
         target = Path(tempfile.mkdtemp(prefix="intersos-update-")) / "INTERSOS-Legal-Platform-Setup.exe"
         request = urllib.request.Request(url, headers={"User-Agent": "INTERSOS-Legal-Platform"})
-        _set(phase="downloading", progress=1, error=None)
+        total = int(manifest["sizeBytes"])
+        _set(phase="downloading", progress=1, error=None, downloadedBytes=0, totalBytes=total)
         with urllib.request.urlopen(request, timeout=60) as response, target.open("wb") as output:
-            total = int(response.headers.get("Content-Length") or 0)
             downloaded = 0
             while chunk := response.read(1024 * 1024):
                 output.write(chunk)
                 downloaded += len(chunk)
-                _set(progress=min(90, int(downloaded / total * 90)) if total else min(90, status()["progress"] + 1))
+                _set(progress=min(90, int(downloaded / total * 90)), downloadedBytes=min(downloaded, total), totalBytes=total)
+        if downloaded != total:
+            raise ValueError("Downloaded installer size does not match the release manifest")
         _set(phase="verifying", progress=94)
         hasher = hashlib.sha256()
         with target.open("rb") as downloaded_file:
@@ -154,7 +141,7 @@ def _download_and_install(manifest: dict[str, Any]) -> None:
         creation_flags = 0
         if os.name == "nt":
             creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        command = _relaunch_command(target, Path(sys.executable), os.getpid()) if os.name == "nt" and getattr(sys, "frozen", False) else _installer_command(target)
+        command = _installer_command(target)
         subprocess.Popen(
             command,
             close_fds=True,
@@ -175,6 +162,6 @@ def install() -> dict[str, Any]:
             raise ValueError(result.get("message") or "No update is available")
     if status()["phase"] in {"downloading", "verifying", "installing", "restarting"}:
         return status()
-    _set(phase="downloading", progress=0, error=None)
+    _set(phase="downloading", progress=0, error=None, downloadedBytes=0, totalBytes=int(_available["sizeBytes"]))
     threading.Thread(target=_download_and_install, args=(_available.copy(),), daemon=True).start()
     return status()

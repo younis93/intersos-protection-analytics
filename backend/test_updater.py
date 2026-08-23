@@ -11,6 +11,7 @@ from backend import updater
 class UpdaterTests(unittest.TestCase):
     def setUp(self):
         updater._available = None
+        updater._set(phase="idle", progress=0, error=None, downloadedBytes=0, totalBytes=0)
 
     def test_semantic_version_comparison(self):
         self.assertGreater(updater._version("v1.10.0"), updater._version("1.9.9"))
@@ -22,12 +23,20 @@ class UpdaterTests(unittest.TestCase):
         self.assertFalse(result["enabled"])
 
     def test_valid_manifest_reports_update(self):
-        manifest = {"version": "1.1.0", "installerUrl": "https://github.com/example/setup.exe", "sha256": "a" * 64, "publishedAt": "2026-07-23T00:00:00Z"}
+        manifest = {"version": "1.1.0", "installerUrl": "https://github.com/example/setup.exe", "sha256": "a" * 64, "publishedAt": "2026-07-23T00:00:00Z", "sizeBytes": 12_345_678}
         with patch.object(updater, "ENABLED", True), patch.object(updater, "REPOSITORY", "example/repo"), patch.object(updater, "_json", return_value=manifest) as fetch_json:
             result = updater.check()
         self.assertTrue(result["available"])
         self.assertEqual(result["latestVersion"], "1.1.0")
+        self.assertEqual(result["sizeBytes"], 12_345_678)
         fetch_json.assert_called_once_with("https://github.com/example/repo/releases/latest/download/update.json")
+
+    def test_manifest_without_a_positive_size_is_rejected(self):
+        manifest = {"version": "1.1.0", "installerUrl": "https://github.com/example/setup.exe", "sha256": "a" * 64, "publishedAt": "2026-07-23T00:00:00Z"}
+        with patch.object(updater, "ENABLED", True), patch.object(updater, "_json", return_value=manifest):
+            result = updater.check()
+        self.assertFalse(result["available"])
+        self.assertIn("Invalid update manifest", result["message"])
 
     def test_network_failure_never_raises(self):
         with patch.object(updater, "ENABLED", True), patch.object(updater, "_json", side_effect=OSError("offline")):
@@ -35,21 +44,18 @@ class UpdaterTests(unittest.TestCase):
         self.assertFalse(result["available"])
         self.assertIn("Unable to check", result["message"])
 
-    def test_update_installer_gets_explicit_relaunch_marker(self):
+    def test_update_installer_uses_the_installer_relaunch_flow(self):
         command = updater._installer_command(Path("setup.exe"))
         self.assertIn("/INTERSOSUPDATE", command)
-        self.assertIn("/EXTERNALRELAUNCH", command)
         self.assertIn("/NORESTART", command)
+        self.assertNotIn("/EXTERNALRELAUNCH", command)
         self.assertNotIn("/RESTARTAPPLICATIONS", command)
 
-    def test_relaunch_helper_waits_for_installer_then_starts_app(self):
-        command = updater._relaunch_command(Path("setup.exe"), Path("app.exe"), 4321)
-        self.assertEqual(command[0], "powershell.exe")
-        self.assertIn("Get-Process -Id 4321", command[-1])
-        self.assertLess(command[-1].index("Get-Process -Id 4321"), command[-1].index("Start-Process -FilePath 'setup.exe'"))
-        self.assertIn("WaitForExit", command[-1])
-        self.assertIn("app.exe", command[-1])
-        self.assertIn("/EXTERNALRELAUNCH", command[-1])
+    def test_status_reports_download_byte_counts(self):
+        updater._set(phase="downloading", progress=45, downloadedBytes=45_000_000, totalBytes=100_000_000)
+        result = updater.status()
+        self.assertEqual(result["downloadedBytes"], 45_000_000)
+        self.assertEqual(result["totalBytes"], 100_000_000)
 
     def test_expected_signing_certificate_is_pinned(self):
         self.assertEqual(
