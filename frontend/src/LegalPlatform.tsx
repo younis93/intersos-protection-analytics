@@ -257,7 +257,12 @@ function TableSelectionActions({selected,filename,onClear,showActions=true,iconO
   return <div className={`table-selection-actions${iconOnly?" icon-only":""}`}><span>{rows.length} selected</span>{showActions&&<><button className="soft" disabled={!rows.length} onClick={onClear} aria-label="Clear selected records" title="Clear selected records">{iconOnly?<RotateCcw/>:"Clear selection"}</button><ExcelDownloadButton onClick={download} busy={busy} disabled={!hasSelection&&!onDownloadAll} title={downloadLabel}>{iconOnly?null:(hasSelection?"Download selected":"Download all")}</ExcelDownloadButton></>}</div>;
 }
 
-const duplicatePalette = ["#FCE8E6", "#FFF4D6", "#E7F0FF", "#E5F5EA", "#F0E8FA", "#FFECDD", "#E3F4F4", "#F7E8F1"];
+const duplicatePalette = [
+  "var(--review-duplicate-1)", "var(--review-duplicate-2)",
+  "var(--review-duplicate-3)", "var(--review-duplicate-4)",
+  "var(--review-duplicate-5)", "var(--review-duplicate-6)",
+  "var(--review-duplicate-7)", "var(--review-duplicate-8)",
+];
 const duplicateColor = (key = "") => duplicatePalette[[...key].reduce((total, char) => total + char.charCodeAt(0), 0) % duplicatePalette.length];
 
 const latestLegalFiles = (files: File[]) => {
