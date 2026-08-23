@@ -14,18 +14,18 @@ const palette=['#315ea8','#2f8f68','#d4852f','#7759b8','#c94f68','#16858d','#9b6
 const defaultText=['#ffffff','#ffffff','#172334','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff'];
 const defaultOptions:StudioChartOptions={sort:'value-desc',topN:'all',valueMode:'count',labelMode:'auto',orientation:'horizontal'};
 
-export default function Studio({metadata,theme,sourceOptions,studioLoader}:{metadata:Metadata;theme:Theme;sourceOptions?:[string,string][];studioLoader?:typeof getStudio}){
+export default function Studio({metadata,theme,sourceOptions,studioLoader,excludeFields}:{metadata:Metadata;theme:Theme;sourceOptions?:[string,string][];studioLoader?:typeof getStudio;excludeFields?:(field:string)=>boolean}){
   const sources=sourceOptions||[['assessment','Assessments'],['services','Legal Services'],['deportation','Deportation']];
   const [source,setSource]=useState(sources[0][0]),[row,setRow]=useState('project'),[column,setColumn]=useState(''),[measure,setMeasure]=useState<Measure>('records'),[chartType,setChartType]=useState<ChartType>('bar'),[filters,setFilters]=useState<Filters>({}),[drawer,setDrawer]=useState(false),[filterSearch,setFilterSearch]=useState(''),[availableFilters,setAvailableFilters]=useState<Record<string,string[]>>({}),[result,setResult]=useState<StudioResult|null>(null),[busy,setBusy]=useState(true),[error,setError]=useState(''),[graph,setGraph]=useState<any>(null);
   const [options,setOptions]=useState<StudioChartOptions>(defaultOptions);
   const [customColors,setCustomColors]=useState(false),[markColors,setMarkColors]=useState<Record<string,string>>({}),[textColors,setTextColors]=useState<Record<string,string>>({});
   const sourceMeta=metadata.pages[source];
-  const dimensions=sourceMeta?.dimensions||Object.keys(sourceMeta?.filters||{});
+  const dimensions=(sourceMeta?.dimensions||Object.keys(sourceMeta?.filters||{})).filter(field=>!excludeFields?.(field));
   const activeCount=Object.values(filters).reduce((total,values)=>total+values.length,0);
   const hasSeries=Boolean(column);
 
   useEffect(()=>{setFilters({});setColumn('');setMeasure('records');setRow(metadata.pages[source]?.dimensions?.[0]||'project')},[source,metadata]);
-  useEffect(()=>{let active=true;getLegalExplorerFilters(source).then((result)=>{if(active)setAvailableFilters(Object.fromEntries(result.columns.map((column)=>[column.name,column.values])))}).catch(()=>{if(active)setAvailableFilters(sourceMeta?.filters||{})});return()=>{active=false}},[source]);
+  useEffect(()=>{let active=true;getLegalExplorerFilters(source).then((result)=>{if(active)setAvailableFilters(Object.fromEntries(result.columns.filter(column=>!excludeFields?.(column.name)).map((column)=>[column.name,column.values])))}).catch(()=>{if(active)setAvailableFilters(Object.fromEntries(Object.entries(sourceMeta?.filters||{}).filter(([field])=>!excludeFields?.(field))))});return()=>{active=false}},[source,sourceMeta,excludeFields]);
   useEffect(()=>{if(!row)return;const controller=new AbortController();setBusy(true);setError('');(studioLoader||getStudio)(source,row,column,filters,measure,controller.signal).then(setResult).catch(reason=>{if(reason.name!=='AbortError')setError(reason.message)}).finally(()=>{if(!controller.signal.aborted)setBusy(false)});return()=>controller.abort()},[source,row,column,filters,measure,studioLoader]);
   useEffect(()=>{setOptions(current=>({...current,orientation:chartType==='bar'?'horizontal':chartType==='stacked'?'vertical':current.orientation,valueMode:!column&&['percent-row','percent-series'].includes(current.valueMode)?'percent-total':current.valueMode}))},[chartType,column]);
 

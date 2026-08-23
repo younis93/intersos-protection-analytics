@@ -15,6 +15,8 @@ import pandas as pd
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from .file_security import safe_spreadsheet_value, validate_xlsx_archive
+
 
 MANDATORY = ("beneficiaries", "assessments", "legalservices")
 OPTIONAL = ("followupslogbooks", "legalfees", "awareness", "deportationrecords")
@@ -104,6 +106,9 @@ REGISTERED_RULES = {
 DETENTION_ASSESSMENT_RULES = frozenset((
     "Detained beneficiary has counselling only", "Detention/immigration inconsistency",
     "Detained beneficiary below 10 years", "Detention Governorate mismatch",
+))
+AMAL_HIDDEN_ASSESSMENT_RULES = DETENTION_ASSESSMENT_RULES | frozenset((
+    "Representation while not detained",
 ))
 
 
@@ -257,9 +262,10 @@ def versioned_dataset_name(filename: str) -> tuple[str, int] | None:
 
 def _safe_export(frame: pd.DataFrame) -> pd.DataFrame:
     result = frame.copy()
+    result.columns = [safe_spreadsheet_value(column) for column in result.columns]
     for column in result.columns:
         if result[column].dtype == object:
-            result[column] = result[column].map(lambda v: "'" + v if isinstance(v, str) and re.match(r"^[=+\-@]", v) else v)
+            result[column] = result[column].map(safe_spreadsheet_value)
     return result
 
 
@@ -480,7 +486,9 @@ class LegalStore:
             project_column=_find(list(frame.columns),"Projects -","Project")
             if project_column:
                 project_values.update(value for value in frame[project_column].fillna("").astype(str).str.strip() if value)
-        amal_only=bool(project_values) and all(re.search(r"\bamal\b",value,flags=re.I) for value in project_values)
+        # Detention eligibility is driven by the Assessments dataset. Auxiliary
+        # files can legitimately retain records from other projects.
+        amal_only=self._amal_only_assessment_projects()
         self._metadata_cache = {
             "ready": True, "source": self.source, "warnings": self.warnings,
             "availability": {name: name in self.frames for name in FILES},
@@ -522,7 +530,7 @@ class LegalStore:
             else:df=df[df[column].fillna("").astype(str).isin(values)]
         ident=_find(list(df.columns),"PN ID","Deportation ID")
         date_col=source_date
-        fields=[("Governorate","Governorate","Project Location","Project location"),("Destination","Destination","Country of destination"),("Nationality","Nationality"),("Authority","Authority","Detaining Authority"),("Project","Project","Projects -")]
+        fields=[("Governorate","Governorate","Project Location","Project location"),("Destination","Destination","Country of destination","Deported to"),("Nationality","Nationality"),("Authority","Authority","Detaining Authority"),("Project","Project","Projects -")]
         metric=df[ident].map(clean_id).replace("",pd.NA) if ident else pd.Series(df.index.astype(str),index=df.index)
         total=int(metric.nunique())
         charts=[]
@@ -1008,6 +1016,11 @@ class LegalStore:
         projects={clean_id(value).casefold() for value in df[project] if clean_id(value)}
         return bool(projects) and all("amal" in value for value in projects)
 
+    @staticmethod
+    def _is_detention_column(column: str) -> bool:
+        normalized=column.casefold()
+        return "detain" in normalized or "immigration related charge" in normalized
+
     def _service_month_flags(self, comparison_month: str | None = None) -> tuple[list[dict[str, Any]],str,list[str]]:
         df=self.frames["legalservices"]; beneficiary=_find(list(df.columns),"Beneficiary ID"); date_col=_find(list(df.columns),"Date of Service Provision"); created_col=_find(list(df.columns),"Created On")
         if not beneficiary or not date_col:return [],"",[]
@@ -1094,7 +1107,7 @@ class LegalStore:
                 if dataset=="assessments":
                     month_rows,active_month,available_months=self._assessment_month_flags(comparison_month);rows += [dict(item) for item in month_rows]
                     if self._amal_only_assessment_projects():
-                        rows=[item for item in rows if item["rule"] not in DETENTION_ASSESSMENT_RULES]
+                        rows=[item for item in rows if item["rule"] not in AMAL_HIDDEN_ASSESSMENT_RULES]
                 elif dataset=="legalservices":
                     month_rows,active_month,available_months=self._service_month_flags(comparison_month);rows += [dict(item) for item in month_rows]
                 if dataset in {"assessments","legalservices"}:
@@ -1110,7 +1123,7 @@ class LegalStore:
                             for key,column in (("phone",phone_col),("project",project_col),("location",location_col)):
                                 if not item.get(key) and column:item[key]=clean_id(source.get(column,""))
                 observed=pd.Series([r["rule"] for r in rows],dtype=object).value_counts().to_dict();registered_rules=REGISTERED_RULES.get(dataset,())
-                if dataset=="assessments" and self._amal_only_assessment_projects(): registered_rules=tuple(name for name in registered_rules if name not in DETENTION_ASSESSMENT_RULES)
+                if dataset=="assessments" and self._amal_only_assessment_projects(): registered_rules=tuple(name for name in registered_rules if name not in AMAL_HIDDEN_ASSESSMENT_RULES)
                 rule_counts={name:int(observed.get(name,0)) for name in registered_rules}
                 date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate"}.get(dataset,"")
                 options={key:sorted({r.get(key,"") for r in rows if r.get(key,"")}) for key in ("severity","lawyer","project","location")}
@@ -1159,7 +1172,7 @@ class LegalStore:
             flags=[row for row in flags if not self._is_excluded(row)]
         if dataset=="assessments":
             flags+=self._assessment_month_flags(comparison_month)[0]
-            if self._amal_only_assessment_projects(): flags=[row for row in flags if row["rule"] not in DETENTION_ASSESSMENT_RULES]
+            if self._amal_only_assessment_projects(): flags=[row for row in flags if row["rule"] not in AMAL_HIDDEN_ASSESSMENT_RULES]
         elif dataset=="legalservices":flags+=self._service_month_flags(comparison_month)[0]
         flags=[row for row in flags if not self._is_excluded(row)]
         if selected_rules is not None: flags=[row for row in flags if row.get("rule") in selected_rules]
@@ -1170,11 +1183,11 @@ class LegalStore:
         duplicate_colors={key:palette[i%len(palette)] for i,key in enumerate(sorted({x.get("duplicateGroup","") for x in flags if x.get("duplicateGroup")}))}
         thin=Side(style="thin",color="D9E2EC");name_source=_find(list(frame.columns),"Name (Filter Color Red)")
         def write_sheet(sheet:Any,items:list[dict[str,Any]])->None:
-            sheet.append(columns)
+            sheet.append([safe_spreadsheet_value(column) for column in columns])
             for flag in items:
                 source=frame.iloc[flag["row"]-2] if 0 <= flag["row"]-2 < len(frame) else pd.Series(dtype=object)
                 values=[flag.get("lawyer",""),flag["rule"],flag["severity"],flag["action"],flag["detail"],flag.get("project",""),flag.get("location",""),flag.get("name",""),flag.get("phone",""),flag.get("caseId",""),flag.get("assessmentId",""),flag.get("serviceId","")]+[display_value(source.get(c,"")) for c in frame.columns]
-                sheet.append(values);row_number=sheet.max_row;sheet.row_dimensions[row_number].height=24
+                sheet.append([safe_spreadsheet_value(value) for value in values]);row_number=sheet.max_row;sheet.row_dimensions[row_number].height=24
                 sheet.cell(row_number,2).fill=PatternFill("solid",fgColor=rule_colors[flag["rule"]])
                 if flag.get("duplicateGroup"):
                     exact=flag.get("nameMatchMode")=="exact";color="FDE8E8" if exact else duplicate_colors[flag["duplicateGroup"]]
@@ -1216,6 +1229,9 @@ class LegalStore:
     def studio(self,dataset:str,row_dimension:str,column_dimension:str="",filters:dict[str,list[str]]|None=None,measure:str="records")->dict[str,Any]:
         if dataset not in self.frames: raise ValueError("Selected source file is not loaded.")
         frame=self.frames[dataset].copy()
+        if dataset=="assessments" and self._amal_only_assessment_projects():
+            hidden_columns=[column for column in frame.columns if self._is_detention_column(column)]
+            frame=frame.drop(columns=hidden_columns)
         if row_dimension not in frame.columns or (column_dimension and column_dimension not in frame.columns): raise ValueError("Choose valid source columns.")
         for column,values in (filters or {}).items():
             if column in frame.columns and values: frame=frame[frame[column].fillna("").astype(str).isin(values)]
@@ -1229,6 +1245,11 @@ class LegalStore:
     def analytics_dashboard(self,dataset:str,filters:dict[str,list[str]]|None=None,search:str="",page:int=1,page_size:int=100,sort_column:str="",sort_direction:str="asc")->dict[str,Any]:
         if dataset not in {"assessments","legalservices","beneficiaries","awareness"} or dataset not in self.frames: raise ValueError("Selected Analytics Studio section is not loaded.")
         frame=self.frames[dataset].copy(); original_columns=list(frame.columns)
+        amal_only_assessments=dataset=="assessments" and self._amal_only_assessment_projects()
+        if amal_only_assessments:
+            hidden_columns=[column for column in frame.columns if self._is_detention_column(column)]
+            frame=frame.drop(columns=hidden_columns)
+            original_columns=[column for column in original_columns if column not in hidden_columns]
         specs={
           "assessments":{"id":("Assessment ID",),"beneficiary":("Beneficiary ID",),"date":("Date of Assessment",),"charts":[("Project",("Projects -","Project")),("Project location",("Project Location",)),("Gender / age group",("Age Gender Group","UNHCR Age Group")),("Nationality",("Nationality",)),("Community type",("Community Type",)),("Assessment status",("Assessment Status",)),("Legal service needed",("Type of Legal Service Needed",)),("Document needed",("Type of Documents to be issued",)),("Beneficiary detained",("Is the beneficiary detained",)),("Detainee current status",("Detainee current status",))]},
           "legalservices":{"id":("Service ID",),"beneficiary":("Beneficiary ID",),"date":("Date of Service Provision",),"charts":[("Project",("Projects -","Project")),("Project location",("Project Location",)),("Gender / age group",("Age Gender Group","UNHCR Age Group")),("Type of service provided",("Type of Service Provided",)),("Service status",("Service Status",)),("Type of document",("Type of Document",)),("Nationality",("Nationality",)),("Community type",("Community Type",)),("Assessment legal-service need",("_assessment_need",))]},
@@ -1268,7 +1289,10 @@ class LegalStore:
         status_col=_find(list(filtered.columns),"Assessment Status" if dataset=="assessments" else "Service Status")
         distinct=lambda mask:int(metric[mask].replace("",pd.NA).nunique())
         if dataset=="assessments":
-            status=filtered[status_col].fillna("").astype(str).str.lower() if status_col else pd.Series("",index=filtered.index);open_count=distinct(status.str.contains("open|pend"));closed=distinct(status.str.contains("closed"));detained_col=_find(list(filtered.columns),"Is the beneficiary detained");immigration_col=_find(list(filtered.columns),"Is it an immigration related charge","Immigration related charge");detained=filtered[detained_col].fillna("").astype(str).str.contains(r"\byes\b|نعم",case=False,regex=True) if detained_col else pd.Series(False,index=filtered.index);immigration=filtered[immigration_col].fillna("").astype(str).str.contains(r"\byes\b|نعم",case=False,regex=True) if immigration_col else pd.Series(False,index=filtered.index);kpis=[("Assessments",total),("Unique beneficiaries",filtered[beneficiary_col].map(clean_id).nunique() if beneficiary_col else 0),("Open caseload",open_count),("Closed",closed),("Detention cases with immigration charges",distinct(detained&immigration)),("Closure rate",closed/total if total else 0)]
+            status=filtered[status_col].fillna("").astype(str).str.lower() if status_col else pd.Series("",index=filtered.index);open_count=distinct(status.str.contains("open|pend"));closed=distinct(status.str.contains("closed"));kpis=[("Assessments",total),("Unique beneficiaries",filtered[beneficiary_col].map(clean_id).nunique() if beneficiary_col else 0),("Open caseload",open_count),("Closed",closed)]
+            if not amal_only_assessments:
+                detained_col=_find(list(filtered.columns),"Is the beneficiary detained");immigration_col=_find(list(filtered.columns),"Is it an immigration related charge","Immigration related charge");detained=filtered[detained_col].fillna("").astype(str).str.contains(r"\byes\b|نعم",case=False,regex=True) if detained_col else pd.Series(False,index=filtered.index);immigration=filtered[immigration_col].fillna("").astype(str).str.contains(r"\byes\b|نعم",case=False,regex=True) if immigration_col else pd.Series(False,index=filtered.index);kpis.append(("Detention cases with immigration charges",distinct(detained&immigration)))
+            kpis.append(("Closure rate",closed/total if total else 0))
         elif dataset=="legalservices":
             status=filtered[status_col].fillna("").astype(str).str.lower() if status_col else pd.Series("",index=filtered.index);completed=distinct(status.str.contains("completed")&~status.str.contains("uncompleted"));uncompleted=distinct(status.str.contains("uncompleted|not completed|incomplete"));kpis=[("Services",total),("Unique beneficiaries",filtered[beneficiary_col].map(clean_id).nunique() if beneficiary_col else 0),("Completed",completed),("Uncompleted services",uncompleted),("In process",distinct(status.str.contains("process"))),("Completion rate",completed/total if total else 0)]
         elif dataset=="beneficiaries":
@@ -2015,7 +2039,9 @@ class LegalStore:
 
     @staticmethod
     def detention_workbook_sheets(raw:bytes) -> list[str]:
-        try:return list(pd.ExcelFile(io.BytesIO(raw)).sheet_names)
+        try:
+            validate_xlsx_archive(raw)
+            return list(pd.ExcelFile(io.BytesIO(raw)).sheet_names)
         except Exception as exc:raise ValueError("The comparison file could not be read. Upload a valid .xlsx workbook.") from exc
 
     def detention_reconciliation(self, raw:bytes, filename:str, month:str, project:str|list[str]="", sheet_name:str="") -> dict[str,Any]:
@@ -2023,6 +2049,7 @@ class LegalStore:
         projects=list(dict.fromkeys(item.strip() for item in ([project] if isinstance(project,str) else project) if item.strip()))
         if not months or any(not re.fullmatch(r"\d{4}-\d{2}",item) for item in months): raise ValueError("Select at least one valid assessment month before comparing.")
         try:
+            validate_xlsx_archive(raw)
             workbook=pd.ExcelFile(io.BytesIO(raw));available_sheets=list(workbook.sheet_names)
             selected_sheet=sheet_name or (available_sheets[0] if available_sheets else "")
             if selected_sheet not in available_sheets:raise ValueError(f"Worksheet not found: {selected_sheet}")

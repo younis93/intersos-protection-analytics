@@ -1,4 +1,5 @@
 import io
+import zipfile
 from datetime import date, timedelta
 
 import pandas as pd
@@ -30,6 +31,25 @@ def test_optional_files_are_not_required_and_cleanup_is_applied():
     dates=store.explorer("beneficiaries")["rows"]
     assert dates[0]["Date of Identification / تاريخ التحديد"]=="2026-01-31"
     assert dates[1]["Date of Identification / تاريخ التحديد"]=="2026-02-01"
+
+
+def test_review_export_neutralizes_spreadsheet_formulas():
+    payload=required_payload()
+    frame=pd.read_csv(io.BytesIO(payload["beneficiaries"]),dtype=object)
+    frame.loc[0,"Name (Filter Color Red)"]="=1+1"
+    payload["beneficiaries"]=frame.to_csv(index=False).encode("utf-8")
+    workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("beneficiaries")),data_only=False)
+    cells=[cell for sheet in workbook.worksheets for row in sheet.iter_rows() for cell in row]
+    assert any(cell.value=="'=1+1" for cell in cells)
+    assert not any(cell.data_type=="f" for cell in cells)
+
+
+def test_detention_workbook_rejects_extreme_xlsx_compression_ratio():
+    output=io.BytesIO()
+    with zipfile.ZipFile(output,"w",zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("xl/worksheets/sheet1.xml",b"0"*1_000_000)
+    with pytest.raises(ValueError,match="valid .xlsx workbook"):
+        LegalStore.detention_workbook_sheets(output.getvalue())
 
 
 def test_amal_only_hides_detention_and_deportation_but_awareness_depends_on_file():
@@ -539,12 +559,14 @@ def test_awareness_duplicate_priority_uses_name_and_session_and_minor_is_hidden_
 def test_assessment_review_hides_detention_rules_for_amal_only_projects():
     payload=required_payload();payload["assessments"]=csv(**{
         "Assessment ID":["A1"], "Beneficiary ID":["B1"], "Projects - المشروع":["UNHCR 2026 - AMAL CAMP"],
-        "Community Type":["Syrian Refugee"], "Date of Assessment":["01/01/2026"],
-        "Is the beneficiary detained":["Yes"], "Is it an immigration related charge?":[""],
+        "Community Type":["Syrian Refugee"], "Date of Assessment":["01/01/2026"], "Created On":["05/01/2026"],
+        "Is the beneficiary detained":["No"], "Is it an immigration related charge?":[""],
     })
+    payload["legalservices"]=csv(**{"Service ID":["S1"],"Assessment ID":["A1"],"Beneficiary ID":["B1"],"Type of Service Provided":["Legal Representation"]})
     result=LegalStore.from_files(payload,"test").review("assessments",page_size=100)
     assert not DETENTION_ASSESSMENT_RULES.intersection(result["ruleCounts"])
     assert not any(row["rule"] in DETENTION_ASSESSMENT_RULES for row in result["rows"])
+    assert "Representation while not detained" not in result["ruleCounts"]
 
 
 def test_assessment_review_keeps_detention_rules_when_project_scope_is_not_amal_only():
@@ -555,6 +577,13 @@ def test_assessment_review_keeps_detention_rules_when_project_scope_is_not_amal_
     })
     result=LegalStore.from_files(payload,"test").review("assessments",page_size=100)
     assert "Detention/immigration inconsistency" in result["ruleCounts"]
+
+
+def test_metadata_hides_detention_for_amal_assessments_despite_auxiliary_project_data():
+    payload=required_payload()
+    payload["assessments"]=csv(**{"Assessment ID":["A1"],"Beneficiary ID":["B1"],"Projects - المشروع":["UNHCR 2026 - AMAL CAMP"]})
+    payload["followupslogbooks"]=csv(**{"Follow-ups & Logbook ID":["F1"],"Projects - المشروع":["UNHCR 2026 - Baghdad"]})
+    assert LegalStore.from_files(payload,"test").metadata()["features"]["detention"] is False
 
 
 def test_review_flags_assessment_and_service_dates_after_today():

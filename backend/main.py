@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import io
+import ipaddress
 import os
 import re
 import secrets
+import socket
 import sys
 from pathlib import Path
 from urllib.parse import unquote, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +23,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from .legal_platform import LegalStore, FILES, versioned_dataset_name
+from .file_security import safe_spreadsheet_value, validate_xlsx_archive
 from .duplicate_exclusions import DuplicateExclusionRegistry
 from .indicator_reporting import build_indicator_report, build_indicator_workbook, build_narrative_workbook
 from . import updater
@@ -41,6 +44,57 @@ try:
     REMEMBERED_LEGAL_FILES = [Path(value) for value in json.loads(os.getenv("INTERSOS_LEGAL_FILES", "[]"))]
 except (json.JSONDecodeError, TypeError):
     REMEMBERED_LEGAL_FILES = []
+
+
+def validate_attachment_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Only HTTP(S) attachment links can be downloaded.")
+    if parsed.username or parsed.password or parsed.fragment:
+        raise ValueError("Attachment links cannot contain credentials or fragments.")
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError as exc:
+        raise ValueError("Attachment link contains an invalid port.") from exc
+    try:
+        addresses = socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise ValueError("Attachment host could not be resolved.") from exc
+    if not addresses:
+        raise ValueError("Attachment host could not be resolved.")
+    for address in addresses:
+        host = str(address[4][0]).split("%", 1)[0]
+        try:
+            resolved = ipaddress.ip_address(host)
+        except ValueError as exc:
+            raise ValueError("Attachment host resolved to an invalid address.") from exc
+        if not resolved.is_global:
+            raise ValueError("Attachment links cannot target local or private network addresses.")
+    return url
+
+
+class ValidatedAttachmentRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        validate_attachment_url(new_url)
+        return super().redirect_request(request, file_pointer, code, message, headers, new_url)
+
+
+ATTACHMENT_OPENER = build_opener(ValidatedAttachmentRedirectHandler())
+
+
+async def read_upload_limited(file: UploadFile, limit: int = MAX_UPLOAD_BYTES) -> bytes:
+    if file.size is not None and file.size > limit:
+        raise HTTPException(413, "Workbook must be 100 MB or smaller.")
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(413, "Workbook must be 100 MB or smaller.")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def remembered_legal_file_payload(paths: list[Path]) -> dict[str, bytes]:
     selected: dict[str, tuple[int, Path]] = {}
     for path in paths:
@@ -309,7 +363,9 @@ async def import_duplicate_exclusions(file: UploadFile = File(...), dataset: str
     try:
         import pandas as pd
         source=io.BytesIO(raw)
-        frame=pd.read_excel(source, dtype=object) if (file.filename or "").lower().endswith((".xlsx", ".xls")) else pd.read_csv(source, dtype=object, encoding="utf-8-sig")
+        suffix=Path(file.filename or "").suffix.lower()
+        if suffix==".xlsx": validate_xlsx_archive(raw)
+        frame=pd.read_excel(source, dtype=object) if suffix in {".xlsx", ".xls"} else pd.read_csv(source, dtype=object, encoding="utf-8-sig")
         if frame.empty or not len(frame.columns): raise ValueError("The exclusion file has no identifier column.")
         expected_columns={
             "beneficiaries": ("case id", "beneficiary id"),
@@ -345,7 +401,7 @@ def export_duplicate_exclusions():
     sheet.title = "Excluded findings"
     sheet.append(["Review page", "Finding", "Identifier type", "Identifier value", "Name", "Project", "Excluded on", "Source context"])
     for row in duplicate_exclusions.entries():
-        sheet.append([row.get("dataset", "beneficiaries"), row.get("rule", ""), row.get("identifierType", "caseId"), row.get("identifierValue", row.get("caseId", "")), row.get("name", ""), row.get("project", ""), row.get("excludedAt", ""), row.get("source", "")])
+        sheet.append([safe_spreadsheet_value(value) for value in [row.get("dataset", "beneficiaries"), row.get("rule", ""), row.get("identifierType", "caseId"), row.get("identifierValue", row.get("caseId", "")), row.get("name", ""), row.get("project", ""), row.get("excludedAt", ""), row.get("source", "")]])
     for cell in sheet[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="2454C6")
@@ -399,18 +455,22 @@ def legal_case_filters(): return require_legal_store().case_filters()
 
 @app.get("/api/legal/attachment-download")
 def legal_attachment_download(url: str = Query(..., min_length=8)):
-    parsed=urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise HTTPException(400,"Only HTTP(S) attachment links can be downloaded.")
     try:
-        with urlopen(Request(url,headers={"User-Agent":"INTERSOS-Legal-Platform"}),timeout=30) as remote:
+        validate_attachment_url(url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    parsed=urlparse(url)
+    try:
+        with ATTACHMENT_OPENER.open(Request(url,headers={"User-Agent":"INTERSOS-Legal-Platform"}),timeout=30) as remote:
+            validate_attachment_url(remote.geturl())
             length=int(remote.headers.get("Content-Length","0") or 0)
             if length>50*1024*1024: raise HTTPException(413,"Attachment is larger than 50 MB.")
             payload=remote.read(50*1024*1024+1)
             if len(payload)>50*1024*1024: raise HTTPException(413,"Attachment is larger than 50 MB.")
             media_type=remote.headers.get_content_type() or "application/octet-stream"
     except HTTPException: raise
-    except Exception as exc: raise HTTPException(502,f"Unable to download the secured document: {exc}") from exc
+    except ValueError as exc: raise HTTPException(400,str(exc)) from exc
+    except Exception as exc: raise HTTPException(502,"Unable to download the secured document.") from exc
     filename=Path(unquote(parsed.path)).name or "secured-document"
     filename=re.sub(r"[^A-Za-z0-9._ -]","_",filename)
     return Response(payload,media_type=media_type,headers={"Content-Disposition":f'attachment; filename="{filename}"'})
@@ -429,10 +489,10 @@ def table_workbook(request: TableWorkbookRequest):
     if not request.columns: raise HTTPException(400,"Choose at least one table column.")
     if len(request.rows)>10000: raise HTTPException(400,"Excel export is limited to 10,000 selected rows.")
     output=io.BytesIO();book=Workbook();sheet=book.active;sheet.title="Data"
-    sheet.append(request.columns)
+    sheet.append([safe_spreadsheet_value(column) for column in request.columns])
     for cell in sheet[1]:
         cell.font=Font(bold=True,color="FFFFFF");cell.fill=PatternFill("solid",fgColor="2563EB");cell.alignment=Alignment(wrap_text=True,vertical="center")
-    for row in request.rows: sheet.append([row.get(column,"") for column in request.columns])
+    for row in request.rows: sheet.append([safe_spreadsheet_value(row.get(column,"")) for column in request.columns])
     sheet.freeze_panes="A2";sheet.auto_filter.ref=sheet.dimensions
     for index,column in enumerate(request.columns,1):
         values=[str(row.get(column,"") or "") for row in request.rows[:500]]
@@ -495,12 +555,8 @@ async def legal_detention_reconcile(month: str, project: list[str] = Query([]), 
     if not file.filename or not file.filename.lower().endswith(".xlsx"): raise HTTPException(400,"Upload an .xlsx comparison workbook")
     if file.size is not None and file.size > MAX_UPLOAD_BYTES: raise HTTPException(413,"Workbook must be 100 MB or smaller.")
     try:
-        chunks:list[bytes]=[];total=0
-        while chunk:=await file.read(1024*1024):
-            total+=len(chunk)
-            if total>MAX_UPLOAD_BYTES: raise HTTPException(413,"Workbook must be 100 MB or smaller.")
-            chunks.append(chunk)
-        return await run_in_threadpool(require_legal_store().detention_reconciliation,b"".join(chunks),file.filename,month,project,sheet)
+        raw=await read_upload_limited(file)
+        return await run_in_threadpool(require_legal_store().detention_reconciliation,raw,file.filename,month,project,sheet)
     except HTTPException: raise
     except ValueError as exc: raise HTTPException(400,str(exc)) from exc
     finally: await file.close()
@@ -510,8 +566,7 @@ async def legal_detention_reconcile(month: str, project: list[str] = Query([]), 
 async def legal_detention_reconcile_export(month: str, project: list[str] = Query([]), sheet: str = "", file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".xlsx"): raise HTTPException(400,"Upload an .xlsx comparison workbook")
     try:
-        raw=await file.read()
-        if len(raw)>MAX_UPLOAD_BYTES: raise HTTPException(413,"Workbook must be 100 MB or smaller.")
+        raw=await read_upload_limited(file)
         payload=await run_in_threadpool(require_legal_store().detention_reconciliation_export,raw,file.filename,month,project,sheet)
         return Response(payload,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":'attachment; filename="detention-comparison-issues.xlsx"'})
     except HTTPException: raise
@@ -523,8 +578,7 @@ async def legal_detention_reconcile_export(month: str, project: list[str] = Quer
 async def legal_detention_reconcile_sheets(file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".xlsx"): raise HTTPException(400,"Upload an .xlsx comparison workbook")
     try:
-        raw=await file.read()
-        if len(raw)>MAX_UPLOAD_BYTES:raise HTTPException(413,"Workbook must be 100 MB or smaller.")
+        raw=await read_upload_limited(file)
         sheets=await run_in_threadpool(LegalStore.detention_workbook_sheets,raw)
         if not sheets:raise HTTPException(400,"The workbook does not contain any worksheets.")
         return {"sheets":sheets,"selected":sheets[0]}

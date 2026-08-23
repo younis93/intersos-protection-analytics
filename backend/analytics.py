@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import zipfile
 import re
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -12,33 +11,14 @@ from pathlib import Path
 from typing import Any
 
 from .legal_platform import format_excel_dates
+from .file_security import validate_xlsx_archive
 
-MAX_XLSX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
-MAX_XLSX_ENTRY_BYTES = 128 * 1024 * 1024
-MAX_XLSX_ENTRIES = 10_000
-MAX_XLSX_COMPRESSION_RATIO = 200
 OPEN_STATUS_PATTERN = "open|pend"
 CLOSED_STATUS_PATTERN = "closed"
 COMPLETED_STATUS_PATTERN = "completed"
 IN_PROCESS_STATUS_PATTERN = "process"
 UNCOMPLETED_STATUS_PATTERN = "uncompleted"
 
-
-def validate_xlsx_archive(raw: bytes) -> None:
-    try:
-        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-            entries = archive.infolist()
-            if len(entries) > MAX_XLSX_ENTRIES:
-                raise ValueError("Workbook contains too many internal files.")
-            if sum(entry.file_size for entry in entries) > MAX_XLSX_UNCOMPRESSED_BYTES:
-                raise ValueError("Workbook expands beyond the allowed size.")
-            for entry in entries:
-                if entry.file_size > MAX_XLSX_ENTRY_BYTES:
-                    raise ValueError("Workbook contains an oversized internal file.")
-                if entry.file_size > MAX_XLSX_COMPRESSION_RATIO * max(entry.compress_size, 1):
-                    raise ValueError("Workbook contains an unsafe compression ratio.")
-    except zipfile.BadZipFile as exc:
-        raise ValueError("Workbook is not a valid .xlsx file.") from exc
 
 import pandas as pd
 import polars as pl

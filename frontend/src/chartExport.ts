@@ -103,11 +103,15 @@ export async function exportSvgChart(svg:SVGSVGElement,title:string,format:'png'
   clone.insertBefore(background,clone.firstChild);
   const markup=new XMLSerializer().serializeToString(clone),url=URL.createObjectURL(new Blob([markup],{type:'image/svg+xml;charset=utf-8'}));
   try{
+    // Render the fully styled clone in the browser for both formats. svg2pdf
+    // cannot parse Chromium's resolved color(srgb ...) values, which caused
+    // thematic map paths and borders to disappear from PDF exports.
+    const image=new Image();await new Promise<void>((resolve,reject)=>{image.onload=()=>resolve();image.onerror=()=>reject(new Error('Map image could not be prepared.'));image.src=url;});
+    const canvas=document.createElement('canvas');canvas.width=width*2;canvas.height=height*2;const context=canvas.getContext('2d');if(!context)throw new Error('Export canvas is unavailable.');context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.scale(2,2);context.drawImage(image,0,0,width,height);
     if(format==='png'){
-      const image=new Image();await new Promise<void>((resolve,reject)=>{image.onload=()=>resolve();image.onerror=()=>reject(new Error('Map image could not be prepared.'));image.src=url;});
-      const canvas=document.createElement('canvas');canvas.width=width*2;canvas.height=height*2;const context=canvas.getContext('2d');if(!context)throw new Error('PNG canvas is unavailable.');context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.scale(2,2);context.drawImage(image,0,0,width,height);const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob((result)=>result?resolve(result):reject(new Error('PNG could not be created.')),'image/png'));saveBlob(blob,`${safeName(title)}.png`);
+      const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob((result)=>result?resolve(result):reject(new Error('PNG could not be created.')),'image/png'));saveBlob(blob,`${safeName(title)}.png`);
     }else{
-      const pdf=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});await addBilingualFont(pdf,clone);const pageWidth=pdf.internal.pageSize.getWidth(),pageHeight=pdf.internal.pageSize.getHeight(),margin=10,ratio=Math.min((pageWidth-margin*2)/width,(pageHeight-margin*2)/height);await pdf.svg(clone,{x:(pageWidth-width*ratio)/2,y:(pageHeight-height*ratio)/2,width:width*ratio,height:height*ratio});saveBlob(pdf.output('blob'),`${safeName(title)}.pdf`);
+      const pdf=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});const pageWidth=pdf.internal.pageSize.getWidth(),pageHeight=pdf.internal.pageSize.getHeight(),margin=4,ratio=Math.min((pageWidth-margin*2)/width,(pageHeight-margin*2)/height),outWidth=width*ratio,outHeight=height*ratio;pdf.addImage(canvas,'PNG',(pageWidth-outWidth)/2,(pageHeight-outHeight)/2,outWidth,outHeight,undefined,'FAST');saveBlob(pdf.output('blob'),`${safeName(title)}.pdf`);
     }
   }finally{URL.revokeObjectURL(url)}
 }
