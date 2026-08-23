@@ -20,7 +20,6 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from .analytics import DataStore
 from .legal_platform import LegalStore, FILES, versioned_dataset_name
 from .duplicate_exclusions import DuplicateExclusionRegistry
 from .indicator_reporting import build_indicator_report, build_indicator_workbook, build_narrative_workbook
@@ -30,27 +29,14 @@ from . import updater
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLE_ROOT = Path(getattr(sys, "_MEIPASS", ROOT))
 STATIC_DIR = Path(os.getenv("UNHCR_STATIC_DIR", BUNDLE_ROOT / "frontend" / "dist"))
-DEFAULT_FILE = ROOT / "# Legal platform Analysis - share.xlsx"
 UPLOAD_ONLY = os.getenv("UNHCR_UPLOAD_ONLY", "").lower() in {"1", "true", "yes"}
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 LOCAL_SESSION_TOKEN = os.getenv("INTERSOS_LOCAL_SESSION_TOKEN", "")
 SESSION_COOKIE = "intersos_session"
-workbook = Path(os.getenv("UNHCR_WORKBOOK", DEFAULT_FILE))
-REMEMBERED_ANALYTICS_WORKBOOK = os.getenv("INTERSOS_ANALYTICS_WORKBOOK", "")
-store: DataStore | None = None
-analytics_store_loading = False
-
-def load_initial_analytics_store() -> None:
-    global store, analytics_store_loading
-    analytics_store_loading = True
-    try:
-        if not (UPLOAD_ONLY and not REMEMBERED_ANALYTICS_WORKBOOK) and workbook.exists():
-            store = DataStore.from_path(workbook)
-    finally:
-        analytics_store_loading = False
 LEGAL_SAMPLE = ROOT / "Legal Platform Data"
 REMEMBERED_LEGAL_FOLDER = Path(os.getenv("INTERSOS_LEGAL_FOLDER", "")) if os.getenv("INTERSOS_LEGAL_FOLDER") else None
 REMEMBERED_LEGAL_SOURCE = os.getenv("INTERSOS_LEGAL_SOURCE", "folder")
+REMEMBERED_LEGAL_SOURCE_CONFIGURED = os.getenv("INTERSOS_LEGAL_SOURCE_CONFIGURED", "").lower() in {"1", "true", "yes"}
 try:
     REMEMBERED_LEGAL_FILES = [Path(value) for value in json.loads(os.getenv("INTERSOS_LEGAL_FILES", "[]"))]
 except (json.JSONDecodeError, TypeError):
@@ -77,7 +63,20 @@ def load_initial_legal_store() -> None:
     legal_store_loading = True
     try:
         use_files=REMEMBERED_LEGAL_SOURCE=="files"
-        candidate = (LegalStore.from_files(remembered_legal_file_payload(REMEMBERED_LEGAL_FILES), "Selected Legal Platform CSV files") if use_files and REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else (LegalStore.from_folder(REMEMBERED_LEGAL_FOLDER) if REMEMBERED_LEGAL_FOLDER and REMEMBERED_LEGAL_FOLDER.is_dir() else (LegalStore.from_files(remembered_legal_file_payload(REMEMBERED_LEGAL_FILES), "Selected Legal Platform CSV files") if REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else (LegalStore.from_folder(LEGAL_SAMPLE) if LEGAL_SAMPLE.exists() else None))))
+        if REMEMBERED_LEGAL_SOURCE_CONFIGURED:
+            if use_files:
+                candidate = LegalStore.from_files(remembered_legal_file_payload(REMEMBERED_LEGAL_FILES), "Selected Legal Platform CSV files") if REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else None
+                unavailable = "The last selected Legal Platform CSV files are unavailable. Choose a new source."
+            else:
+                candidate = LegalStore.from_folder(REMEMBERED_LEGAL_FOLDER) if REMEMBERED_LEGAL_FOLDER and REMEMBERED_LEGAL_FOLDER.is_dir() else None
+                unavailable = "The last selected Legal Platform folder is unavailable. Choose a new source."
+        else:
+            candidate = LegalStore.from_folder(LEGAL_SAMPLE) if LEGAL_SAMPLE.exists() else None
+            unavailable = ""
+        if candidate is None and unavailable:
+            legal_store = None
+            legal_store_restore_error = unavailable
+            return
         if candidate:
             candidate.set_review_exclusions(duplicate_exclusions.exclusion_rows())
         legal_store = candidate
@@ -93,12 +92,7 @@ if os.getenv("INTERSOS_DEFER_LEGAL_LOAD", "").lower() in {"1", "true", "yes"}:
 else:
     load_initial_legal_store()
 
-if os.getenv("INTERSOS_DEFER_INITIAL_DATA", "").lower() in {"1", "true", "yes"}:
-    analytics_store_loading = True
-else:
-    load_initial_analytics_store()
-
-app = FastAPI(title="UNHCR CfP Analytics API", version="1.0.0")
+app = FastAPI(title="INTERSOS Legal Platform API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -116,45 +110,6 @@ async def prevent_stale_api_state(request, call_next):
     return response
 
 
-def require_store() -> DataStore:
-    if store is None:
-        raise HTTPException(409, "Upload an approved Excel workbook to begin analysis.")
-    return store
-
-
-class DashboardRequest(BaseModel):
-    filters: dict[str, list[str]] = {}
-    measure: str = "records"
-    defaultYtd: bool = False
-
-
-class StudioRequest(BaseModel):
-    page: str = "assessment"
-    rowDimension: str
-    columnDimension: str | None = None
-    filters: dict[str, list[str]] = {}
-    measure: str = "records"
-    defaultYtd: bool = False
-
-
-class ExplorerFilter(BaseModel):
-    column: str
-    operator: str
-    value: str | float | None = None
-    value2: str | float | None = None
-
-
-class ExplorerRequest(BaseModel):
-    sheetId: str
-    search: str = ""
-    filters: list[ExplorerFilter] = []
-    sortColumn: str | None = None
-    sortDirection: str = "asc"
-    page: int = 1
-    pageSize: int = 100
-    columns: list[str] = []
-
-
 class LegalQuery(BaseModel):
     dataset: str = "beneficiaries"
     search: str = ""
@@ -170,6 +125,7 @@ class LegalQuery(BaseModel):
     lawyer: str = ""
     project: str = ""
     location: str = ""
+    date: str = ""
     filters: dict[str, list[str]] = {}
     comparisonMonth: str = ""
     sortColumn: str = ""
@@ -211,11 +167,13 @@ class IndicatorReportRequest(BaseModel):
     years: list[str] = []
     quarters: list[str] = []
     months: list[str] = []
+    communityTypes: list[str] = []
 
 
 class CaseQuery(BaseModel):
     query: str
     filters: dict[str, list[str]] = {}
+    caseIds: list[str] = []
     viewMode: str = "cards"
     page: int = 1
     pageSize: int = 100
@@ -231,7 +189,7 @@ class TableWorkbookRequest(BaseModel):
 
 
 @app.get("/api/health")
-def health(): return {"status": "ready" if store else "awaiting_upload", "source": store.source_name if store else None}
+def health(): return {"status": "ready" if legal_store else "awaiting_source", "source": legal_store.source if legal_store else None, "loading": legal_store_loading}
 
 
 @app.get("/api/update/check")
@@ -246,13 +204,6 @@ def update_status(): return updater.status()
 def update_install():
     try: return updater.install()
     except ValueError as exc: raise HTTPException(409, str(exc)) from exc
-
-
-@app.get("/api/metadata")
-def metadata():
-    if store is None:
-        return {"ready": False, "loading":analytics_store_loading, "source": None, "loadedAt": None, "pages": {}}
-    return {"ready": True, **store.metadata()}
 
 
 @app.get("/api/legal/metadata")
@@ -305,8 +256,8 @@ def require_legal_store() -> LegalStore:
 
 @app.post("/api/legal/review")
 def legal_review(request: LegalQuery):
-    if request.page < 1 or request.pageSize < 1 or request.pageSize > 500: raise HTTPException(400, "Invalid pagination")
-    return require_legal_store().review(request.dataset, request.search, request.rule, request.page, request.pageSize, request.severity,request.lawyer,request.project,request.location,request.comparisonMonth,request.nameCompareChars,request.allowNameVariations,request.exactMatchesOnly)
+    if request.page < 1 or request.pageSize < 1 or request.pageSize > 5000: raise HTTPException(400, "Invalid pagination")
+    return require_legal_store().review(request.dataset, request.search, request.rule, request.page, request.pageSize, request.severity,request.lawyer,request.project,request.location,request.date,request.comparisonMonth,request.nameCompareChars,request.allowNameVariations,request.exactMatchesOnly)
 
 
 @app.get("/api/legal/review-export/{dataset}")
@@ -452,7 +403,7 @@ def legal_attachment_download(url: str = Query(..., min_length=8)):
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise HTTPException(400,"Only HTTP(S) attachment links can be downloaded.")
     try:
-        with urlopen(Request(url,headers={"User-Agent":"INTERSOS-Protection-Analytics"}),timeout=30) as remote:
+        with urlopen(Request(url,headers={"User-Agent":"INTERSOS-Legal-Platform"}),timeout=30) as remote:
             length=int(remote.headers.get("Content-Length","0") or 0)
             if length>50*1024*1024: raise HTTPException(413,"Attachment is larger than 50 MB.")
             payload=remote.read(50*1024*1024+1)
@@ -467,7 +418,7 @@ def legal_attachment_download(url: str = Query(..., min_length=8)):
 
 @app.post("/api/legal/case-export")
 def legal_case_export(request: CaseQuery):
-    payload=require_legal_store().case_export(request.query,request.filters)
+    payload=require_legal_store().case_export(request.query,request.filters,request.caseIds)
     name="beneficiary-case" if request.query else "filtered-beneficiary-cases"
     return Response(payload,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":f'attachment; filename="{name}.xlsx"'})
 
@@ -505,11 +456,11 @@ def legal_intelligence(page:str,request:LegalQuery):
 @app.post("/api/legal/indicators")
 def legal_indicators(request:IndicatorReportRequest):
     store=require_legal_store()
-    key=(request.fromDate,request.toDate,tuple(sorted(request.projects)),tuple(sorted(request.projectLocations)),tuple(sorted(request.years)),tuple(sorted(request.quarters)),tuple(sorted(request.months)))
+    key=(request.fromDate,request.toDate,tuple(sorted(request.projects)),tuple(sorted(request.projectLocations)),tuple(sorted(request.years)),tuple(sorted(request.quarters)),tuple(sorted(request.months)),tuple(sorted(request.communityTypes)))
     with store._cache_lock:
         cached=store._indicator_cache.get(key)
     if cached is not None:return cached
-    try:result=build_indicator_report(store.frames,request.fromDate,request.toDate,request.projects,request.projectLocations,request.years,request.quarters,request.months)
+    try:result=build_indicator_report(store.frames,request.fromDate,request.toDate,request.projects,request.projectLocations,request.years,request.quarters,request.months,request.communityTypes)
     except ValueError as exc:raise HTTPException(400,str(exc)) from exc
     with store._cache_lock:
         store._indicator_cache[key]=result
@@ -587,85 +538,6 @@ def legal_export(dataset: str):
     try: payload=require_legal_store().export(dataset)
     except ValueError as exc: raise HTTPException(400, str(exc)) from exc
     return Response(payload, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{dataset}-filtered.xlsx"'})
-
-
-@app.post("/api/dashboard/{page}")
-def dashboard(page: str, request: DashboardRequest):
-    active_store = require_store()
-    if page != "executive" and page not in active_store.frames: raise HTTPException(404, "Unknown dashboard page")
-    if request.measure not in {"records", "beneficiaries"}: raise HTTPException(400, "Invalid measure")
-    return active_store.dashboard(page, request.filters, request.measure, request.defaultYtd)
-
-
-@app.get("/api/quality")
-def quality(): return require_store().quality_summary() if store else {"rows": [], "source": None, "loadedAt": None}
-
-
-@app.post("/api/studio")
-def studio(request: StudioRequest):
-    try:
-        return require_store().studio(request.page, request.rowDimension, request.columnDimension, request.filters, request.measure, request.defaultYtd)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-@app.post("/api/data-explorer/query")
-def data_explorer_query(request: ExplorerRequest):
-    if request.page < 1 or request.pageSize < 1 or request.pageSize > 500:
-        raise HTTPException(400, "Invalid pagination")
-    if request.sortDirection not in {"asc", "desc"}:
-        raise HTTPException(400, "Invalid sort direction")
-    try:
-        return require_store().explorer_query(request.sheetId, request.search, [item.model_dump() for item in request.filters], request.sortColumn, request.sortDirection, request.page, request.pageSize, request.columns)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-@app.post("/api/data-explorer/export/{export_format}")
-def data_explorer_export(export_format: str, request: ExplorerRequest):
-    if export_format not in {"csv", "xlsx"}:
-        raise HTTPException(400, "Unsupported export format")
-    try:
-        active_store = require_store()
-        payload = active_store.explorer_export(request.sheetId, request.search, [item.model_dump() for item in request.filters], request.sortColumn, request.sortDirection, request.columns, export_format)
-        sheet_name = active_store.raw_sheet_names[request.sheetId]
-        safe_name = re.sub(r'[^A-Za-z0-9._-]+', '-', sheet_name).strip('-') or "data"
-        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if export_format == "xlsx" else "text/csv"
-        return Response(payload, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{safe_name}-filtered.{export_format}"'})
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-@app.post("/api/upload")
-async def upload(file: UploadFile = File(...)):
-    global store
-    if not file.filename or not file.filename.lower().endswith(".xlsx"): raise HTTPException(400, "Upload an .xlsx workbook")
-    if file.size is not None and file.size > MAX_UPLOAD_BYTES:
-        raise HTTPException(413, "Workbook must be 100 MB or smaller.")
-    try:
-        chunks: list[bytes] = []
-        total = 0
-        while chunk := await file.read(1024 * 1024):
-            total += len(chunk)
-            if total > MAX_UPLOAD_BYTES:
-                raise HTTPException(413, "Workbook must be 100 MB or smaller.")
-            chunks.append(chunk)
-        store = await run_in_threadpool(DataStore.from_bytes, b"".join(chunks), file.filename)
-    except HTTPException:
-        raise
-    except Exception as exc: raise HTTPException(400, str(exc)) from exc
-    finally:
-        await file.close()
-    return {"ready": True, **store.metadata()}
-
-
-@app.get("/api/export/{page}")
-def export(page: str, filters: str = Query("{}"), default_ytd: bool = False):
-    active_store = require_store()
-    if page not in active_store.frames: raise HTTPException(404, "Unknown dashboard page")
-    try: parsed = json.loads(filters)
-    except json.JSONDecodeError as exc: raise HTTPException(400, "Invalid filters JSON") from exc
-    return Response(active_store.export_xlsx(page, parsed, default_ytd), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{page}-filtered.xlsx"'})
 
 
 if STATIC_DIR.exists():

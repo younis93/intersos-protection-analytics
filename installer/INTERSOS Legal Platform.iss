@@ -1,8 +1,8 @@
 #ifndef MyAppVersion
   #define MyAppVersion "1.0.0"
 #endif
-#define MyAppName "INTERSOS Protection Analytics"
-#define MyAppExeName "INTERSOS Protection Analytics.exe"
+#define MyAppName "INTERSOS Legal Platform"
+#define MyAppExeName "INTERSOS Legal Platform.exe"
 #define SigningCertificateName "INTERSOS-Code-Signing.cer"
 #define SigningCertificateThumbprint "C4F1B12A3BCCC73BEF903FA3796304CF0E67670D"
 #define WebView2BootstrapperName "MicrosoftEdgeWebview2Setup.exe"
@@ -13,7 +13,7 @@
 [Setup]
 #ifdef UiTestBuild
 AppId={{C8D92D64-8962-452B-BDF1-064DD32EF45F}
-DefaultDirName={tmp}\INTERSOS Protection Analytics UI Test
+DefaultDirName={tmp}\INTERSOS Legal Platform UI Test
 Uninstallable=no
 CreateUninstallRegKey=no
 #else
@@ -26,7 +26,7 @@ AppPublisher=INTERSOS
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
 OutputDir={#MyOutputDir}
-OutputBaseFilename=INTERSOS-Protection-Analytics-Setup-{#MyAppVersion}
+OutputBaseFilename=INTERSOS-Legal-Platform-Setup-{#MyAppVersion}
 SetupIconFile=..\intersos-protection-analytics.ico
 Compression=lzma2/fast
 SolidCompression=yes
@@ -44,7 +44,7 @@ DisableProgramGroupPage=yes
 SetupLogging=yes
 
 [Files]
-Source: "..\packaging-temp\dist\INTERSOS Protection Analytics\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\packaging-temp\dist\INTERSOS Legal Platform\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "INTERSOS-Code-Signing.cer"; Flags: dontcopy
 Source: "MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy
 
@@ -223,7 +223,7 @@ begin
   AppSummaryHeading.Top := WizardForm.DirEdit.Top + WizardForm.DirEdit.Height + ScaleY(34);
   AppSummaryHeading.Width := WizardForm.DirEdit.Width;
   AppSummaryHeading.Height := ScaleY(22);
-  AppSummaryHeading.Caption := 'About Protection Analytics';
+  AppSummaryHeading.Caption := 'About INTERSOS Legal Platform';
   AppSummaryHeading.Font.Name := 'Segoe UI Semibold';
   AppSummaryHeading.Font.Size := 10;
   AppSummaryHeading.Font.Color := $00784016;
@@ -236,8 +236,8 @@ begin
     WizardForm.DirBrowseButton.Width - AppSummaryText.Left;
   AppSummaryText.Height := ScaleY(92);
   AppSummaryText.Caption :=
-    'A secure desktop workspace for protection analysis, interactive charts,' + #13#10 +
-    'data exploration, and presentation-ready reporting.' + #13#10 + #13#10 +
+    'A secure desktop workspace for Legal Platform data review, case analysis,' + #13#10 +
+    'data exploration, and reporting.' + #13#10 + #13#10 +
     'Desktop and Start menu shortcuts and secure updates are configured' + #13#10 +
     'automatically.';
   AppSummaryText.Font.Name := 'Segoe UI';
@@ -249,9 +249,9 @@ function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo,
   MemoTypeInfo, MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
 begin
   Result :=
-    'INTERSOS Protection Analytics' + NewLine + NewLine +
-    'A secure desktop workspace for protection analysis, interactive charts, ' +
-    'data exploration, and presentation-ready reporting.' + NewLine + NewLine +
+    'INTERSOS Legal Platform' + NewLine + NewLine +
+    'A secure desktop workspace for Legal Platform data review, case analysis, ' +
+    'data exploration, and reporting.' + NewLine + NewLine +
     'The installer also creates desktop and Start menu shortcuts and enables ' +
     'secure application updates.';
 end;
@@ -260,7 +260,7 @@ procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = wpSelectDir then
   begin
-    WizardForm.PageNameLabel.Caption := 'Install Protection Analytics';
+    WizardForm.PageNameLabel.Caption := 'Install INTERSOS Legal Platform';
     WizardForm.PageDescriptionLabel.Caption := 'Choose a folder and review the application summary';
     WizardForm.SelectDirLabel.Caption :=
       'Install on the Windows C: drive using the recommended folder, or choose another location.';
@@ -270,21 +270,21 @@ begin
   end;
   if CurPageID = wpReady then
   begin
-    WizardForm.PageNameLabel.Caption := 'Install Protection Analytics';
+    WizardForm.PageNameLabel.Caption := 'Install INTERSOS Legal Platform';
     WizardForm.PageDescriptionLabel.Caption := 'Ready to install for your Windows account';
     WizardForm.ReadyLabel.Caption := 'Review the details below, then select Install.';
     WizardForm.NextButton.Caption := 'Install';
   end;
   if CurPageID = wpInstalling then
   begin
-    WizardForm.PageNameLabel.Caption := 'Installing Protection Analytics';
+    WizardForm.PageNameLabel.Caption := 'Installing INTERSOS Legal Platform';
     WizardForm.PageDescriptionLabel.Caption := 'This usually takes less than a minute';
   end;
   if CurPageID = wpFinished then
   begin
     WizardForm.FinishedHeadingLabel.Caption := 'Installation complete';
     WizardForm.FinishedLabel.Caption :=
-      'Protection Analytics was installed successfully.';
+      'INTERSOS Legal Platform was installed successfully.';
     WizardForm.NextButton.Caption := 'Finish';
   end;
 end;

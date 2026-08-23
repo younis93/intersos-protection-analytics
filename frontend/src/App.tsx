@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import {
   exportUrl,
+  downloadExcelUrl,
   getDashboard,
   getMetadata,
   getQuality,
@@ -28,6 +29,7 @@ import {
 } from "./api";
 import {
   ActiveFilters,
+  ExcelDownloadButton,
   AppSelect,
   ChartCard,
   FilterDrawer,
@@ -318,12 +320,7 @@ export default function App() {
                   <RotateCcw />
                   Clear all filters
                 </button>
-                {page !== "executive" && (
-                  <a className="soft link" href={exportUrl(page, filters)}>
-                    <Download />
-                    Excel
-                  </a>
-                )}
+                {page !== "executive" && <ExcelDownloadButton className="soft" onClick={()=>downloadExcelUrl(exportUrl(page, filters),`${page}.xlsx`)}/>}
                 <div className="toolbar-metrics">
                   {page !== "executive" && (
                     <AppSelect label="Measure" value={measure} onChange={(value) => setMeasure(value as Measure)} disabled={page === "deportation"} options={[["records", page === "services" ? "Service IDs" : page === "deportation" ? "PN IDs" : "Assessment IDs"], ...(page !== "deportation" ? [["beneficiaries", "Unique beneficiaries"] as [string, string]] : [])]} />

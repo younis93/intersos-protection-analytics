@@ -1,5 +1,5 @@
 import {useCallback,useEffect,useState} from 'react';
-import {ArrowRight,BarChart3,BriefcaseBusiness,Maximize2,Minimize2,Palette,RefreshCw} from 'lucide-react';
+import {ArrowRight,BriefcaseBusiness,Maximize2,Minimize2,Palette,RefreshCw} from 'lucide-react';
 import {checkForUpdates,getUpdateStatus,installUpdate} from './api';
 import {AppSelect} from './components';
 import type {Theme,UpdateCheck,UpdateStatus} from './types';
@@ -12,7 +12,6 @@ const UPDATE_CHECK_INTERVAL_MS=6*60*60*1000;
 
 export interface WorkspaceDefinition {id:string;label:string;description:string;route:string;icon:any;accent:string;badge?:string;enabled:boolean}
 export const workspaces:WorkspaceDefinition[]=[
-  {id:'analytics',label:'Protection Analytics',description:'Explore programme reach, legal-service delivery, protection trends and reporting quality.',route:'/executive',icon:BarChart3,accent:'blue',badge:'Analytics & reporting',enabled:true},
   {id:'legal',label:'Legal Platform',description:'Review legal-platform data, investigate findings, explore beneficiary cases and analyze lawyer activity.',route:'/legal/overview',icon:BriefcaseBusiness,accent:'violet',badge:'Review & case analysis',enabled:true},
 ];
 
@@ -61,13 +60,13 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
         <div className="welcome-brand-stage">
           <button type="button" className="welcome-logo-secret" onClick={pressLogo} aria-label="INTERSOS home logo"><span className="welcome-logo-mark"><img src="/intersos-symbol-transparent.png" alt=""/></span><span className="welcome-logo-word" aria-hidden="true">{'INTERSOS'.split('').map((letter,index)=><b key={`${letter}-${index}`} style={{'--letter':index} as React.CSSProperties}>{letter}</b>)}</span><span className="sr-only">INTERSOS</span>{AVATAR_ENABLED&&foxUnlocked&&<GuardianFox mode="home"/>}</button>
         </div>
-        <span>Protection Analysis Platform</span>
+        <span>Legal Platform</span>
       </header>
       <div className="workspace-cards">{workspaces.filter(x=>x.enabled).map((workspace,index)=>{const Icon=workspace.icon;return <a key={workspace.id} href={`#${workspace.route}`} className={`workspace-card workspace-${workspace.accent}`} style={{'--card-index':index} as React.CSSProperties}><span className="workspace-card-glow"/><span className="workspace-icon"><Icon/></span><span className="workspace-badge">{workspace.badge}</span><strong>{workspace.label}</strong><p>{workspace.description}</p><span className="workspace-enter">Enter workspace <ArrowRight/></span></a>})}</div>
-      <footer><span>Designed for clear, local and decision-ready protection analysis.</span><button type="button" className="designer-unlock" onClick={toggleAvatar} aria-pressed={avatarRevealed} aria-label={`${avatarRevealed?'Hide':'Show'} the guardian pet`}>Designed by <strong>Younis Jamal</strong></button></footer>
+      <footer><span>Designed for clear, local and decision-ready legal data review.</span><button type="button" className="designer-unlock" onClick={toggleAvatar} aria-pressed={avatarRevealed} aria-label={`${avatarRevealed?'Hide':'Show'} the guardian pet`}>Designed by <strong>Younis Jamal</strong></button></footer>
     </section>
     {RIVE_HOME_AVATAR_ENABLED&&avatarRevealed&&<HomeRiveAvatar disabled={phase!=='normal'} phase={phase}/>} 
     <ScreenFracture phase={phase} onShattered={markShattered} onRestorePress={pressShattered} onRestored={markRestored}/>
-    {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?'Updates need configuration':updateInfo?.message?.startsWith('Unable')?'Unable to check for updates':'You’re up to date'}</h2><p>{updateInfo?.available?(updateInfo.notes||'A new signed version of Protection Analytics is ready to install.'):(updateInfo?.message||`You are using version ${updateInfo?.currentVersion||'1.0.0'}.`)}</p>{updateStatus&&updateStatus.phase!=='idle'&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}<div className="update-actions">{updateInfo?.available&&(!updateStatus||['idle','error'].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>Update now</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&['installing','restarting'].includes(updateStatus.phase))}>{updateInfo?.available?'Later':'Close'}</button></div></section></div>}
+    {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?'Updates need configuration':updateInfo?.message?.startsWith('Unable')?'Unable to check for updates':'You’re up to date'}</h2><p>{updateInfo?.available?(updateInfo.notes||'A new signed version of INTERSOS Legal Platform is ready to install.'):(updateInfo?.message||`You are using version ${updateInfo?.currentVersion||'1.0.0'}.`)}</p>{updateStatus&&updateStatus.phase!=='idle'&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}<div className="update-actions">{updateInfo?.available&&(!updateStatus||['idle','error'].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>Update now</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&['installing','restarting'].includes(updateStatus.phase))}>{updateInfo?.available?'Later':'Close'}</button></div></section></div>}
   </main>;
 }

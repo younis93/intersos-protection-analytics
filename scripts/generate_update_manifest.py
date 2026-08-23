@@ -12,7 +12,7 @@ manifest = {
     "version": version,
     "installerUrl": f"https://github.com/{repository}/releases/download/v{version}/{installer.name}",
     "sha256": hashlib.sha256(installer.read_bytes()).hexdigest(),
-    "notes": f"INTERSOS Protection Analytics {version}",
+    "notes": f"INTERSOS Legal Platform {version}",
     "publishedAt": datetime.now(timezone.utc).isoformat(),
 }
 Path(output_name).write_text(json.dumps(manifest, indent=2), encoding="utf-8")

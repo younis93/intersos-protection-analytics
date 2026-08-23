@@ -45,7 +45,7 @@ def header() -> Image.Image:
     icon = app_icon(58)
     image.paste(icon, (229, 25), icon)
     draw.text((22, 27), "INTERSOS", fill=BLUE, font=font(21, True))
-    draw.text((22, 58), "Protection Analytics", fill="#49657D", font=font(15))
+    draw.text((22, 58), "Legal Platform", fill="#49657D", font=font(15))
     return image
 
 

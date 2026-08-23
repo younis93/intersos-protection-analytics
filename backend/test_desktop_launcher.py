@@ -82,7 +82,7 @@ class DesktopLauncherTests(unittest.TestCase):
     def test_folder_is_saved_only_after_successful_processing(self):
         with TemporaryDirectory() as temporary:
             folder = Path(temporary)
-            candidate = SimpleNamespace(metadata=lambda: {"ready": True})
+            candidate = SimpleNamespace(metadata=lambda: {"ready": True}, set_review_exclusions=lambda _rows: None)
             api = desktop_launcher.DesktopApi(SimpleNamespace(toggle=lambda: False))
             with patch("backend.legal_platform.LegalStore.from_folder", return_value=candidate), patch.object(
                 desktop_launcher, "save_legal_folder"

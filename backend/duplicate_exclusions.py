@@ -12,11 +12,13 @@ class DuplicateExclusionRegistry:
 
     def __init__(self, path: Path | None = None) -> None:
         local_app_data = Path(os.getenv("LOCALAPPDATA", str(Path.home())))
-        self.path = path or local_app_data / "INTERSOS Protection Analytics" / "duplicate-name-exclusions.json"
+        self.path = path or local_app_data / "INTERSOS Legal Platform" / "duplicate-name-exclusions.json"
+        self.legacy_path = None if path else local_app_data / "INTERSOS Protection Analytics" / "duplicate-name-exclusions.json"
 
     def entries(self) -> list[dict[str, Any]]:
         try:
-            value = json.loads(self.path.read_text(encoding="utf-8"))
+            source = self.path if self.path.exists() or not self.legacy_path else self.legacy_path
+            value = json.loads(source.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             return []
         if not isinstance(value, list):

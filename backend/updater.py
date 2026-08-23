@@ -31,7 +31,7 @@ def _version(value: str) -> tuple[int, ...]:
 
 
 def _json(url: str) -> dict[str, Any]:
-    request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "INTERSOS-Protection-Analytics"})
+    request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "INTERSOS-Legal-Platform"})
     with urllib.request.urlopen(request, timeout=12) as response:
         return json.load(response)
 
@@ -122,8 +122,8 @@ def _download_and_install(manifest: dict[str, Any]) -> None:
         url = str(manifest["installerUrl"])
         if not _trusted_installer_url(url):
             raise ValueError("Untrusted installer URL")
-        target = Path(tempfile.mkdtemp(prefix="intersos-update-")) / "INTERSOS-Protection-Analytics-Setup.exe"
-        request = urllib.request.Request(url, headers={"User-Agent": "INTERSOS-Protection-Analytics"})
+        target = Path(tempfile.mkdtemp(prefix="intersos-update-")) / "INTERSOS-Legal-Platform-Setup.exe"
+        request = urllib.request.Request(url, headers={"User-Agent": "INTERSOS-Legal-Platform"})
         _set(phase="downloading", progress=1, error=None)
         with urllib.request.urlopen(request, timeout=60) as response, target.open("wb") as output:
             total = int(response.headers.get("Content-Length") or 0)

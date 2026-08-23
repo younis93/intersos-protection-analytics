@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Plot from "react-plotly.js";
 import {
@@ -26,6 +26,13 @@ export const formatPercent = (n: number) =>
 export const formatProjectLabel = (value: string) =>
   value.replace(/^UNHCR\s+2026\s*-\s*/i, "").trim() || value;
 
+export function ExcelDownloadButton({onClick,children="Excel",className="primary",disabled=false,busy:controlledBusy,title}:{onClick:()=>Promise<void>|void;children?:ReactNode;className?:string;disabled?:boolean;busy?:boolean;title?:string}) {
+  const [localBusy,setLocalBusy]=useState(false),busy=controlledBusy??localBusy;
+  const download=async()=>{if(busy)return;setLocalBusy(true);try{await onClick()}finally{setLocalBusy(false)}};
+  const label=title||"Download Excel";
+  return <button className={`${className} excel-download-button${busy?" is-preparing":""}`} disabled={disabled||busy} aria-busy={busy} aria-label={busy?"Preparing Excel download":label} title={busy?"Preparing Excel download":label} onClick={()=>void download()}><span className="excel-download-button-content"><Download/>{children}</span>{busy&&<span className="button-spinner excel-download-spinner" aria-hidden="true"/>}</button>;
+}
+
 export function AppSelect({
   label,
   value,
@@ -35,6 +42,7 @@ export function AppSelect({
   icon: Icon,
   disabled = false,
   ariaLabel,
+  searchable = false,
 }: {
   label: string;
   value: string;
@@ -44,13 +52,17 @@ export function AppSelect({
   icon?: any;
   disabled?: boolean;
   ariaLabel?: string;
+  searchable?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(false), [search, setSearch] = useState("");
   const root = useRef<HTMLDivElement>(null);
   const selected = options.find(([option]) => option === value)?.[1] || value;
   const isProjectSelect = /^projects?$/i.test(label.trim());
   const displayCaption = (caption: string) =>
     isProjectSelect ? formatProjectLabel(caption) : caption;
+  const visibleOptions = searchable
+    ? options.filter(([, caption]) => displayCaption(caption).toLowerCase().includes(search.trim().toLowerCase()))
+    : options;
   useEffect(() => {
     const close = (event: MouseEvent) => {
       if (root.current && !root.current.contains(event.target as Node)) setOpen(false);
@@ -69,18 +81,20 @@ export function AppSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         disabled={disabled}
-        onClick={() => setOpen((shown) => !shown)}
+        onClick={() => setOpen((shown) => { if (!shown) setSearch(""); return !shown; })}
         onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }}
       >
         <span>{displayCaption(selected)}</span><ChevronDown />
       </button>
       {open && (
         <div className="app-select-menu" role="listbox" aria-label={`${label} options`}>
-          {options.map(([option, caption]) => (
+          {searchable && <label className="app-select-menu-search"><Search/><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${label.toLowerCase()}`}/></label>}
+          {visibleOptions.map(([option, caption]) => (
             <button key={option} type="button" role="option" aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>
               <span>{displayCaption(caption)}</span>{option === value && <Check />}
             </button>
           ))}
+          {searchable && !visibleOptions.length && <p className="app-select-no-results">No matching options</p>}
         </div>
       )}
     </div>
@@ -546,7 +560,7 @@ function PivotModal({
             <p>Counts and percentages use the active dashboard filters.</p>
           </div>
           <div className="pivot-actions">
-            <button className="soft pivot-download" disabled={downloading} onClick={downloadExcel}><Download/>{downloading?"Preparing…":"Excel"}</button>
+            <ExcelDownloadButton className="primary pivot-download" onClick={downloadExcel} busy={downloading}/>
             <button className="icon" onClick={onClose} aria-label="Close pivot table">
               <X />
             </button>
@@ -574,23 +588,25 @@ export function FilterDrawer({
   onChange: (f: Filters) => void;
   onReset: () => void;
 }) {
+  const reviewStyle=available.__reviewStyle?.includes("true")||false;
   const datePriority: Record<string, number> = { year: 0, quarter: 1, month: 2 };
-  const availableFilters = Object.entries(available).sort(
+  const availableFilters = Object.entries(available).filter(([field])=>field!=="__reviewStyle").sort(
     ([left], [right]) => (datePriority[left] ?? 3) - (datePriority[right] ?? 3),
   );
+  if(reviewStyle){if(!open)return null;return <><button className="filter-backdrop" aria-label="Close deportation filters" onClick={onClose}/><aside className="case-filter-drawer"><header><div><span className="eyebrow">REVIEW FILTERS</span><h2>Filter all deportation records</h2></div><button onClick={onClose} aria-label="Close filters"><X/></button></header><div className="case-filter-scroll review-checkbox-filters">{availableFilters.map(([field,values])=><details key={field} open={Boolean(filters[field]?.length)}><summary><span>{field.replaceAll("_"," ")}</span>{filters[field]?.length>0&&<b>{filters[field].length}</b>}<ChevronDown/></summary><div>{values.map((item)=><label key={item}><input type="checkbox" checked={filters[field]?.includes(item)||false} onChange={()=>{const selected=filters[field]||[];onChange({...filters,[field]:selected.includes(item)?selected.filter((value)=>value!==item):[...selected,item]})}}/><span>{/project/i.test(field)?formatProjectLabel(item):item}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!Object.values(filters).some((values)=>values.length)} onClick={onReset}>Clear all</button><button className="primary" onClick={onClose}>Apply filters</button></footer></aside></>}
   return (
-    <aside className={`filter-drawer glass ${open ? "open" : ""}`}><div className="filter-scroll">
+    <aside className={`filter-drawer glass ${open ? "open" : ""}${reviewStyle ? " review-style-filter" : ""}`}><div className="filter-scroll">
       <div className="filter-head">
         <div>
-          <span>Dashboard controls</span>
-          <h2>Filters</h2>
+          <span>{reviewStyle ? "REVIEW FILTERS" : "Dashboard controls"}</span>
+          <h2>{reviewStyle ? "Filter all deportation records" : "Filters"}</h2>
         </div>
         <button className="icon" onClick={onClose}>
           <X />
         </button>
       </div>
       <button className="reset" onClick={onReset}>
-        Reset all filters
+        {reviewStyle ? "Clear all" : "Reset all filters"}
       </button>
       <div className="filter-list">
         {availableFilters.map(([field, values]) => (

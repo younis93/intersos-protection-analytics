@@ -1,11 +1,11 @@
 import io
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 import pytest
 from openpyxl import load_workbook
 
-from backend.legal_platform import LegalStore, normalize_name, phone_digits, versioned_dataset_name
+from backend.legal_platform import DETENTION_ASSESSMENT_RULES, LegalStore, normalize_name, phone_digits, versioned_dataset_name
 from backend.duplicate_exclusions import DuplicateExclusionRegistry
 
 
@@ -42,7 +42,7 @@ def test_amal_only_hides_detention_and_deportation_but_awareness_depends_on_file
     payload["deportationrecords"]=csv(**{"PN ID":["D1"],"Project":["UNHCR 2026 - AMAL CAMP"]})
     metadata=LegalStore.from_files(payload,"test").metadata()
     assert metadata["availability"]["awareness"] is True
-    assert metadata["features"]=={"detention":False,"deportation":False}
+    assert metadata["features"]=={"awareness":True,"detention":False,"deportation":False}
 
 
 def test_deportation_dashboard_uses_deportationrecords_csv():
@@ -127,6 +127,41 @@ def test_small_spelling_differences_are_optional_and_do_not_match_unrelated_name
     assert result["allowNameVariationsApplied"] is True
     assert {row["nameMatchMode"] for row in result["rows"]}=={"variation"}
     assert all(90 <= row["duplicateSimilarity"] < 100 for row in result["rows"])
+
+
+def test_contact_and_name_duplicate_requires_matching_contact_markers_and_project_group():
+    payload=required_payload();payload["beneficiaries"]=csv(**{
+        "Case ID":["B1","B2","B3","B4","B5"],
+        "Name (Filter Color Red)":["Ahmed Ali Hassan","Ahmad Ali Hassan","Ahmed Ali Hassan","Ahmed Ali Hassan","Ahmed Ali Hassan"],
+        "Contact Number":["07701234567","0770-123-4567","07709999999","07701234567","07701234567"],
+        "# UNHCR":["U-1","","U-3","","U-5"],
+        "Spouse name":["","Spouse Two","","","Spouse Five"],
+        "Project":["UNHCR 2026 - Erbil","UNHCR 2026 - Erbil","UNHCR 2026 - Erbil","UNHCR 2026 - Erbil","UNHCR 2026 - SULI"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    result=store.review("beneficiaries",rule="Possible duplicate contact and name",page_size=100)
+    assert {row["caseId"] for row in result["rows"]}=={"B1","B2"}
+    assert all(row["duplicateSimilarity"] >= 90 for row in result["rows"])
+    assert all("contact number 07701234567 matches" in row["detail"] for row in result["rows"])
+    store.set_review_exclusions({("Possible duplicate contact and name","B1")})
+    assert store.review("beneficiaries",rule="Possible duplicate contact and name")["total"]==0
+    workbook=load_workbook(io.BytesIO(store.review_export("beneficiaries")),read_only=True,data_only=True)
+    for sheet in workbook.worksheets:
+        headers=[cell.value for cell in next(sheet.iter_rows(min_row=1,max_row=1))]
+        finding_index=headers.index("Review Finding")
+        assert all(row[finding_index]!="Possible duplicate contact and name" for row in sheet.iter_rows(min_row=2,values_only=True))
+
+
+def test_invalid_age_includes_invalid_and_future_spouse_dates_without_flagging_blank_dates():
+    payload=required_payload();future=(date.today()+timedelta(days=1)).strftime("%d/%m/%Y")
+    payload["beneficiaries"]=csv(**{
+        "Case ID":["Valid","Malformed","Future","Blank"],
+        "Name (Filter Color Red)":["Valid Person","Malformed Person","Future Person","Blank Person"],
+        "Spouse DoB":["01/01/1990","not a date",future,""],
+    })
+    rows=LegalStore.from_files(payload,"test").review("beneficiaries",rule="Invalid age",page_size=100)["rows"]
+    assert {row["caseId"] for row in rows}=={"Malformed","Future"}
+    assert {row["detail"] for row in rows}=={"Spouse DoB is not a valid date","Spouse DoB is later than the current date"}
 
 
 def test_exact_duplicate_mode_remains_exact_when_variations_are_enabled():
@@ -331,7 +366,7 @@ def test_normalization_and_review_rules():
     assert {"Case without assessment","Invalid age","Invalid contact number"}<=rules
     assert "Possible duplicate name" not in rules
     assessment_rules={row["rule"] for row in store.review("assessments")["rows"]}
-    assert "Beneficiary has multiple assessments" in assessment_rules
+    assert "Beneficiary has multiple assessments" not in assessment_rules
 
 
 def test_contact_numbers_ignore_one_digit_and_prefix_ten_digits():
@@ -495,9 +530,59 @@ def test_awareness_duplicate_priority_uses_name_and_session_and_minor_is_hidden_
     minor=[row for row in rows if row["rule"]=="Possible duplicate participant name"]
     assert {row["awarenessId"] for row in high}=={"W1","W2"}
     assert {row["awarenessId"] for row in minor}=={"W3"}
+    assert len({row["duplicateGroup"] for row in high})==1
     assert all(row["severity"]=="High" for row in high)
     assert all(row["severity"]=="Minor" for row in minor)
     assert store.metadata()["reviewCounts"]["awareness"]==2
+
+
+def test_assessment_review_hides_detention_rules_for_amal_only_projects():
+    payload=required_payload();payload["assessments"]=csv(**{
+        "Assessment ID":["A1"], "Beneficiary ID":["B1"], "Projects - المشروع":["UNHCR 2026 - AMAL CAMP"],
+        "Community Type":["Syrian Refugee"], "Date of Assessment":["01/01/2026"],
+        "Is the beneficiary detained":["Yes"], "Is it an immigration related charge?":[""],
+    })
+    result=LegalStore.from_files(payload,"test").review("assessments",page_size=100)
+    assert not DETENTION_ASSESSMENT_RULES.intersection(result["ruleCounts"])
+    assert not any(row["rule"] in DETENTION_ASSESSMENT_RULES for row in result["rows"])
+
+
+def test_assessment_review_keeps_detention_rules_when_project_scope_is_not_amal_only():
+    payload=required_payload();payload["assessments"]=csv(**{
+        "Assessment ID":["A1"], "Beneficiary ID":["B1"], "Projects - المشروع":["UNHCR 2026 - Erbil"],
+        "Community Type":["Syrian Refugee"], "Date of Assessment":["01/01/2026"],
+        "Is the beneficiary detained":["Yes"], "Is it an immigration related charge?":[""],
+    })
+    result=LegalStore.from_files(payload,"test").review("assessments",page_size=100)
+    assert "Detention/immigration inconsistency" in result["ruleCounts"]
+
+
+def test_review_flags_assessment_and_service_dates_after_today():
+    tomorrow=(date.today()+timedelta(days=1)).strftime("%d/%m/%Y")
+    payload=required_payload()
+    payload["assessments"]=csv(**{
+        "Assessment ID":["A1"], "Beneficiary ID":["B1"], "Date of Assessment":[tomorrow],
+        "Date of Detention":[tomorrow], "Date of Assessment Closure":["01/01/2026"],
+    })
+    payload["legalservices"]=csv(**{
+        "Service ID":["S1"], "Assessment ID":["A1"], "Beneficiary ID":["B1"],
+        "Date of Service Provision":[tomorrow], "Date of Issuance":[tomorrow],
+    })
+    store=LegalStore.from_files(payload,"test")
+    assessment_rows=store.review("assessments",rule="Assessment date after today",page_size=100)["rows"]
+    service_rows=store.review("legalservices",rule="Legal service date after today",page_size=100)["rows"]
+    assert len(assessment_rows)==1 and "Date of Assessment" in assessment_rows[0]["detail"] and "Date of Detention" in assessment_rows[0]["detail"]
+    assert len(service_rows)==1 and "Date of Service Provision" in service_rows[0]["detail"] and "Date of Issuance" in service_rows[0]["detail"]
+
+
+def test_assessment_date_of_request_imports_as_month_day_year_and_displays_day_month_year():
+    payload=required_payload();payload["assessments"]=csv(**{
+        "Assessment ID":["A1"], "Beneficiary ID":["B1"], "Date of the Request":["03/04/2026"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    request_column="Date of the Request"
+    assert store.frames["assessments"].loc[0,request_column]==pd.Timestamp("2026-03-04")
+    assert store.explorer("assessments",page_size=10)["rows"][0][request_column]=="04/03/2026"
 
 
 def test_case_hierarchy_works_without_optional_files():
@@ -508,7 +593,7 @@ def test_case_hierarchy_works_without_optional_files():
     service=case["assessments"][1]["services"][0]
     assert service["followups"]==[] and service["fees"]==[]
     workbook=load_workbook(io.BytesIO(store.case_export("B1")))
-    assert workbook.sheetnames==["Beneficiaries","Assessments","Services","Follow-ups","Fees"]
+    assert workbook.sheetnames==["Beneficiaries","Assessments","Services"]
     sheet=workbook["Beneficiaries"]
     assert sheet.freeze_panes=="A2"
     assert "Case ID" in [cell.value for cell in sheet[1]]
@@ -546,10 +631,107 @@ def test_refugee_2026_detention_scope_and_selectable_month():
     detention=[row for row in january["rows"] if row["rule"]=="Detention/immigration inconsistency"]
     assert {row["assessmentId"] for row in detention}=={"A2","A4"}
     repeated=[row for row in january["rows"] if row["rule"]=="Selected month with previous assessment"]
-    assert {row["assessmentId"] for row in repeated}=={"A2"}
+    assert repeated==[]
     assert january["activeComparisonMonth"]=="2026-01"
     assert "Marital status below 18" in store.review("beneficiaries")["ruleCounts"]
     assert "Spouse below 18" in store.review("beneficiaries")["ruleCounts"]
+
+
+def test_multiple_assessments_flags_same_month_or_two_open_assessments_only():
+    payload=required_payload();payload["assessments"]=csv(**{
+        "Assessment ID":["M1","M2","O1","O2","H1","H2"],
+        "Beneficiary ID":["SameMonth","SameMonth","TwoOpen","TwoOpen","History","History"],
+        "Date of Assessment":["10/08/2026","20/08/2026","10/07/2026","10/08/2026","10/06/2026","10/07/2026"],
+        "Created On":["10/08/2026","20/08/2026","10/07/2026","10/08/2026","10/06/2026","10/07/2026"],
+        "Assessment Status":["Closed","Open","Open","Open","Closed","Closed"],
+    })
+    rows=LegalStore.from_files(payload,"test").review("assessments",rule="Beneficiary has multiple assessments",page_size=100)["rows"]
+    assert {row["assessmentId"] for row in rows}=={"M1","M2","O1","O2"}
+    assert "2 assessments in 2026-08" in next(row["detail"] for row in rows if row["assessmentId"]=="M1")
+    assert "2 Open assessments" in next(row["detail"] for row in rows if row["assessmentId"]=="O1")
+
+
+def test_selected_month_previous_assessment_uses_created_on_grace_from_august_2026():
+    payload=required_payload();payload["assessments"]=csv(**{
+        "Assessment ID":["A1","A2","B1","B2","C1","C2","C3"],
+        "Beneficiary ID":["Allowed","Allowed","Late","Late","OlderHistory","OlderHistory","OlderHistory"],
+        "Date of Assessment":["15/06/2026","15/07/2026","15/06/2026","15/07/2026","15/05/2026","15/06/2026","15/07/2026"],
+        "Created On":["15/06/2026","04/08/2026","15/06/2026","05/08/2026","15/05/2026","15/06/2026","04/08/2026"],
+    })
+    rows=LegalStore.from_files(payload,"test").review("assessments",comparison_month="2026-07",rule="Selected month with previous assessment",page_size=100)["rows"]
+    assert {row["assessmentId"] for row in rows}=={"B2","C3"}
+    assert {str(row["createdOn"])[:10] for row in rows}=={"04/08/2026","05/08/2026"}
+
+
+def test_current_previous_month_service_duplicate_uses_created_on_grace_from_august_2026():
+    payload=required_payload();payload["legalservices"]=csv(**{
+        "Service ID":["S1","S2","S3","S4","S5","S6","S7"],
+        "Beneficiary ID":["Allowed","Allowed","Late","Late","OlderHistory","OlderHistory","OlderHistory"],
+        "Assessment ID":["A1","A2","A3","A4","A5","A6","A7"],
+        "Date of Service Provision":["15/06/2026","15/07/2026","15/06/2026","15/07/2026","15/05/2026","15/06/2026","15/07/2026"],
+        "Created On":["15/06/2026","04/08/2026","15/06/2026","05/08/2026","15/05/2026","15/06/2026","04/08/2026"],
+    })
+    rows=LegalStore.from_files(payload,"test").review("legalservices",comparison_month="2026-07",rule="Current and previous month duplicate",page_size=100)["rows"]
+    assert {row["serviceId"] for row in rows}=={"S4","S7"}
+    assert {str(row["createdOn"])[:10] for row in rows}=={"04/08/2026","05/08/2026"}
+
+
+def test_representation_rules_use_created_on_and_require_requested_counselling():
+    payload=required_payload();payload["assessments"]=csv(**{
+        "Assessment ID":["OldAdult","MissingCounselling","RepresentationOnly","NoLinkedService","OldNotDetained","NewNotDetained"],
+        "Beneficiary ID":["B1","B2","B3","B4","B5","B6"],
+        "Age":[30,30,30,30,30,30],
+        "Created On":["31/12/2025","05/01/2026","05/01/2026","05/01/2026","31/12/2025","05/01/2026"],
+        "Date of Assessment":["01/01/2026"]*6,
+        "Type of Legal Service Needed":["Legal Representation, Legal Counselling","Legal Representation, Legal Counselling","Legal Representation","Legal Representation, Legal Counselling","",""],
+        "Community Type":["IDP","IDP","IDP","IDP","Syrian Refugee","Syrian Refugee"],
+        "Is the beneficiary detained":["Yes","Yes","Yes","Yes","No","No"],
+    })
+    payload["legalservices"]=csv(**{
+        "Service ID":["S1","S2","S3","S4"],
+        "Assessment ID":["OldAdult","MissingCounselling","RepresentationOnly","NewNotDetained"],
+        "Beneficiary ID":["B1","B2","B3","B6"],
+        "Type of Service Provided":["Legal Representation","Legal Representation","Legal Representation","Legal Assistance"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    adult=store.review("assessments",rule="Adult representation without counselling",page_size=100)["rows"]
+    assert {row["assessmentId"] for row in adult}=={"MissingCounselling","NoLinkedService"}
+    not_detained=store.review("assessments",rule="Representation while not detained",page_size=100)["rows"]
+    assert {row["assessmentId"] for row in not_detained}=={"NewNotDetained"}
+
+
+def test_assessment_document_and_service_type_reconciliation():
+    payload=required_payload()
+    payload["assessments"]=csv(**{
+        "Assessment ID":["A1","A2","A3","A4"],"Beneficiary ID":["B1","B2","B3","B4"],
+        "Date of Assessment":["01/01/2026","01/01/2026","01/01/2026","01/01/2026"],
+        "Type of Documents to be issued":["Birth Certificate بيان ولادة, Marriage Certificate عقد زواج","","","Passport جواز السفر"],
+        "Type of Legal Service Needed":["Legal Counselling - استشارة, Legal Representation - تمثيل","","","Legal Assistance - مساعدة"],
+    })
+    payload["legalservices"]=csv(**{
+        "Service ID":["S1","S2","S3"],"Assessment ID":["A1","A1","A2"],"Beneficiary ID":["B1","B1","B2"],
+        "Type of Document":["Birth Certificate","Divorce Certificate شهادة الطلاق","Proof of Marriage اثبات الزواج"],
+        "Type of Service Provided":["Legal Counselling - استشارة","Legal Representation - تمثيل","Legal Counselling - استشارة"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    documents=store.review("assessments",rule="Type of document in Assessments vs Services",page_size=100)["rows"]
+    assert {(row["assessmentId"],row["comparisonFinding"],row["missingValues"]) for row in documents}=={
+        ("A1","Missing Type of Document in Services","Marriage Certificate عقد زواج"),
+        ("A1","Missing Type of Document in Assessment","Divorce Certificate شهادة الطلاق"),
+        ("A2","Missing Type of Document in Assessment","Proof of Marriage اثبات الزواج"),
+        ("A4","Missing Type of Document in Services","Passport جواز السفر"),
+    }
+    service_types=store.review("assessments",rule="Type of Legal Service in Assessment vs Services",page_size=100)["rows"]
+    assert [(row["assessmentId"],row["missingValues"]) for row in service_types]==[("A4","Legal Representation - تمثيل")]
+
+
+def test_assessment_reconciliation_ignores_dates_before_2026():
+    payload=required_payload()
+    payload["assessments"]=csv(**{"Assessment ID":["Old"],"Beneficiary ID":["B1"],"Date of Assessment":["31/12/2025"],"Type of Documents to be issued":["Passport"],"Type of Legal Service Needed":["Legal Counselling"]})
+    payload["legalservices"]=csv(**{"Service ID":["S1"],"Assessment ID":["Old"],"Beneficiary ID":["B1"],"Type of Document":["Birth Certificate"],"Type of Service Provided":["Legal Representation"]})
+    review=LegalStore.from_files(payload,"test").review("assessments",page_size=100)
+    assert review["ruleCounts"]["Type of document in Assessments vs Services"]==0
+    assert review["ruleCounts"]["Type of Legal Service in Assessment vs Services"]==0
 
 
 def test_versioned_csv_names_and_detention_page():

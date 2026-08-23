@@ -44,13 +44,13 @@ export default function Studio({metadata,theme,sourceOptions,studioLoader}:{meta
       <div className="studio-heading"><LayoutDashboard/><div><strong>Analysis builder</strong><span>Choose a source, one or two dimensions, and a visual.</span></div></div>
       <div className="studio-controls">
         <Select label="Source sheet" value={source} onChange={setSource} options={sources}/>
-        <Select label="Rows / X-axis" value={row} onChange={setRow} options={dimensions.map(dimension=>[dimension,label(dimension)])}/>
-        <Select label="Columns / Series" value={column} onChange={setColumn} options={[['','None'],...dimensions.filter(dimension=>dimension!==row).map(dimension=>[dimension,label(dimension)] as [string,string])]}/>
+        <Select label="Rows / X-axis" value={row} onChange={setRow} options={dimensions.map(dimension=>[dimension,label(dimension)])} searchable/>
+        <Select label="Columns / Series" value={column} onChange={setColumn} options={[['','None'],...dimensions.filter(dimension=>dimension!==row).map(dimension=>[dimension,label(dimension)] as [string,string])]} searchable/>
         <Select label="Measure" value={measure} onChange={value=>setMeasure(value as Measure)} options={source==='deportation'?[['records','PN IDs']]:[['records',source==='services'?'Service IDs':'Assessment IDs'],['beneficiaries','Unique beneficiaries']]}/>
         <Select label="Output" value={chartType} onChange={value=>setChartType(value as ChartType)} options={[['bar','Ranked bar'],['stacked','Stacked bar'],['line','Line'],['donut','Donut'],['heatmap','Heatmap'],['table','Pivot table']]}/>
       </div>
       <section className="studio-options" aria-label="Chart options">
-        <div className="studio-options-title"><SlidersHorizontal/><div><strong>Chart options</strong><span>Shape the visual without changing the source data.</span></div></div>
+        <SlidersHorizontal className="studio-options-icon" aria-hidden="true"/>
         <div className="studio-option-grid">
           <Select label="Sort categories" value={options.sort} onChange={value=>setOption('sort',value as StudioSort)} options={[['value-desc','Value: high to low'],['value-asc','Value: low to high'],['label-asc','Label: A to Z'],['label-desc','Label: Z to A'],['source','Source order']]}/>
           <Select label="Categories" value={String(options.topN)} onChange={value=>setOption('topN',value==='all'?'all':Number(value) as StudioTopN)} options={[['all','All categories'],['5','Top 5 + Other'],['10','Top 10 + Other'],['15','Top 15 + Other'],['20','Top 20 + Other']]}/>
@@ -68,7 +68,7 @@ export default function Studio({metadata,theme,sourceOptions,studioLoader}:{meta
   </>;
 }
 
-function Select({label:caption,value,onChange,options}:{label:string;value:string;onChange:(value:string)=>void;options:string[][]}){return <AppSelect label={caption} value={value} onChange={onChange} options={options as [string,string][]}/>}
+function Select({label:caption,value,onChange,options,searchable=false}:{label:string;value:string;onChange:(value:string)=>void;options:string[][];searchable?:boolean}){return <AppSelect label={caption} value={value} onChange={onChange} options={options as [string,string][]} searchable={searchable}/>}
 const valueTitle=(mode:StudioValueMode)=>mode==='count'?'Count':mode==='percent-total'?'Percent of filtered total':mode==='percent-series'?'Percent within series':'Percent within row';
 const valueText=(value:number,mode:StudioValueMode)=>mode==='count'?formatNumber(value):`${value.toFixed(1)}%`;
 

@@ -1,4 +1,4 @@
-"""Native Windows launcher for INTERSOS Protection Analytics."""
+"""Native Windows launcher for INTERSOS Legal Platform."""
 from __future__ import annotations
 
 import ctypes
@@ -16,8 +16,8 @@ import uvicorn
 import webview
 
 
-APP_TITLE = "INTERSOS Protection Analytics"
-APP_USER_MODEL_ID = "INTERSOS.ProtectionAnalytics"
+APP_TITLE = "INTERSOS Legal Platform"
+APP_USER_MODEL_ID = "INTERSOS.LegalPlatform"
 SERVER_START_TIMEOUT = 20.0
 GWL_STYLE = -16
 WS_OVERLAPPEDWINDOW = 0x00CF0000
@@ -30,7 +30,7 @@ SWP_FRAMECHANGED = 0x0020
 
 
 def settings_path() -> Path:
-    base = Path(os.getenv("LOCALAPPDATA", Path.home())) / "INTERSOS Protection Analytics"
+    base = Path(os.getenv("LOCALAPPDATA", Path.home())) / "INTERSOS Legal Platform"
     return base / "settings.json"
 
 
@@ -55,9 +55,10 @@ def save_legal_folder(path: Path) -> None:
 def load_settings() -> dict[str, Any]:
     try:
         data = json.loads(settings_path().read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
+        if isinstance(data, dict): return data
     except (OSError, ValueError, TypeError):
-        return {}
+        pass
+    return {}
 
 
 THEME_NAMES = {"glass-light", "glass-dark", "unhcr", "executive", "multicolor"}
@@ -85,18 +86,6 @@ def theme_background(theme: str) -> str:
         "executive": "#f4f2ed",
         "multicolor": "#f3f5f9",
     }.get(theme, "#eef5fb")
-
-
-def saved_analytics_workbook() -> Path | None:
-    value = load_settings().get("analyticsWorkbook", "")
-    path = Path(value)
-    return path if path.is_file() and path.suffix.lower() == ".xlsx" else None
-
-
-def save_analytics_workbook(path: Path) -> None:
-    target = settings_path(); target.parent.mkdir(parents=True, exist_ok=True)
-    settings = load_settings(); settings["analyticsWorkbook"] = str(path)
-    target.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
 
 def saved_legal_files() -> list[Path]:
@@ -298,6 +287,10 @@ class NativeFullscreenController:
 class DesktopApi:
     def __init__(self, fullscreen: Any) -> None:
         self.fullscreen = fullscreen
+        self._legal_import_progress = 0
+
+    def get_legal_import_progress(self) -> int:
+        return self._legal_import_progress
 
     def toggle_fullscreen(self) -> bool:
         return bool(self.fullscreen.toggle())
@@ -321,29 +314,15 @@ class DesktopApi:
             raise ValueError("The selected Legal Platform folder is no longer available.")
         from backend import main as backend_main
         from backend.legal_platform import LegalStore
-        candidate = LegalStore.from_folder(folder)
-        from backend import main as backend_main
+        self._legal_import_progress = 0
+        candidate = LegalStore.from_folder(folder, lambda percent: setattr(self, "_legal_import_progress", percent))
         candidate.set_review_exclusions(backend_main.duplicate_exclusions.exclusion_rows())
         backend_main.legal_store = candidate
         save_legal_folder(folder)
-        return candidate.metadata()
-
-    def choose_analytics_workbook(self) -> str | None:
-        previous = saved_analytics_workbook()
-        selection = webview.windows[0].create_file_dialog(webview.FileDialog.OPEN, str((previous.parent if previous else "")), False, "", ("Excel workbook (*.xlsx)",))
-        if not selection:
-            return None
-        return str(Path(selection[0]).resolve())
-
-    def process_analytics_workbook(self, selected_path: str) -> dict[str, Any]:
-        workbook = Path(selected_path).resolve()
-        if not workbook.is_file() or workbook.suffix.lower() != ".xlsx":
-            raise ValueError("The selected Excel workbook is no longer available.")
-        from backend import main as backend_main
-        from backend.analytics import DataStore
-        backend_main.store = DataStore.from_path(workbook)
-        save_analytics_workbook(workbook)
-        return {"ready": True, **backend_main.store.metadata()}
+        self._legal_import_progress = 97
+        metadata = candidate.metadata()
+        self._legal_import_progress = 100
+        return metadata
 
     def refresh_legal_folder(self) -> dict[str, Any]:
         folder = saved_legal_folder()
@@ -370,12 +349,17 @@ class DesktopApi:
             name, version = parsed
             current = selected.get(name)
             if current is None or version > current[0] or (version == current[0] and path.stat().st_mtime > current[1].stat().st_mtime): selected[name] = (version, path)
+        self._legal_import_progress = 0
         payload = {name: path.read_bytes() for name, (_, path) in selected.items()}
-        candidate = LegalStore.from_files(payload, "Selected Legal Platform CSV files")
+        self._legal_import_progress = 15
+        candidate = LegalStore.from_files(payload, "Selected Legal Platform CSV files", lambda percent: setattr(self, "_legal_import_progress", percent))
         candidate.set_review_exclusions(backend_main.duplicate_exclusions.exclusion_rows())
         backend_main.legal_store = candidate
         save_legal_files(paths)
-        return candidate.metadata()
+        self._legal_import_progress = 97
+        metadata = candidate.metadata()
+        self._legal_import_progress = 100
+        return metadata
 
     def refresh_legal_files(self) -> dict[str, Any]:
         paths = saved_legal_files()
@@ -383,32 +367,30 @@ class DesktopApi:
             raise ValueError("No previously selected Legal Platform CSV files are available.")
         return self.process_legal_files([str(path) for path in paths])
 
-    def refresh_analytics_workbook(self) -> dict[str, Any]:
-        workbook = saved_analytics_workbook()
-        if not workbook:
-            raise ValueError("No previously selected Protection Analytics workbook is available.")
-        return self.process_analytics_workbook(str(workbook))
-
-
 def main() -> None:
     os.environ["UNHCR_UPLOAD_ONLY"] = "1"
     os.environ["UNHCR_STATIC_DIR"] = str(resource_path("frontend", "dist"))
     os.environ["INTERSOS_LOCAL_SESSION_TOKEN"] = secrets.token_urlsafe(32)
+    legal_settings = load_settings()
+    remembered_source = str(legal_settings.get("legalSource", "folder"))
+    has_remembered_source = bool(
+        legal_settings.get("legalFiles") if remembered_source == "files" else legal_settings.get("legalFolder")
+    )
+    os.environ["INTERSOS_LEGAL_SOURCE_CONFIGURED"] = "1" if has_remembered_source else "0"
     remembered_folder = saved_legal_folder()
     if remembered_folder:
         os.environ["INTERSOS_LEGAL_FOLDER"] = str(remembered_folder)
-    remembered_legal_files = saved_legal_files()
+    remembered_legal_files = legal_settings.get("legalFiles", [])
+    if isinstance(remembered_legal_files, list):
+        remembered_legal_files = [path for path in remembered_legal_files if isinstance(path, str)]
+    else:
+        remembered_legal_files = []
     if remembered_legal_files:
-        os.environ["INTERSOS_LEGAL_FILES"] = json.dumps([str(path) for path in remembered_legal_files])
-    os.environ["INTERSOS_LEGAL_SOURCE"] = str(load_settings().get("legalSource", "folder"))
-    remembered_workbook = saved_analytics_workbook()
-    if remembered_workbook:
-        os.environ["INTERSOS_ANALYTICS_WORKBOOK"] = str(remembered_workbook)
-        os.environ["UNHCR_WORKBOOK"] = str(remembered_workbook)
+        os.environ["INTERSOS_LEGAL_FILES"] = json.dumps(remembered_legal_files)
+    os.environ["INTERSOS_LEGAL_SOURCE"] = remembered_source
     # Show the native window immediately. Legal CSV restoration is expensive
     # and continues in the background once the local server is available.
     os.environ.setdefault("INTERSOS_DEFER_LEGAL_LOAD", "1")
-    os.environ.setdefault("INTERSOS_DEFER_INITIAL_DATA", "1")
     from backend import main as backend_main
     from backend.version import APP_VERSION
     if sys.platform == "win32":
@@ -422,7 +404,7 @@ def main() -> None:
     # Private WebView profiles intentionally do not retain localStorage. Put the
     # native persisted theme in the initial URL so React cannot reset it to light
     # while the bridge is still starting.
-    url = f"http://127.0.0.1:{port}/?appTheme={startup_theme}"
+    url = f"http://127.0.0.1:{port}/?appTheme={startup_theme}#/legal/overview"
     local_server = LocalServer(backend_main.app, port)
     try:
         local_server.start()
@@ -446,7 +428,6 @@ def main() -> None:
             background_color=theme_background(startup_theme),
             js_api=desktop_api,
         )
-        threading.Thread(target=backend_main.load_initial_analytics_store, name="restore-analytics-data", daemon=True).start()
         threading.Thread(target=backend_main.load_initial_legal_store, name="restore-legal-data", daemon=True).start()
         webview.start(
             apply_windows_branding,

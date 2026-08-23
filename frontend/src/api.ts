@@ -127,6 +127,12 @@ export const exportExplorer = async (
   link.click();
   URL.revokeObjectURL(url);
 };
+export const downloadExcelUrl = async (url:string, fallbackFilename="export.xlsx") => {
+  const response=await fetch(url);
+  if(!response.ok)throw new Error(await response.text()||"Excel export failed");
+  const disposition=response.headers.get("Content-Disposition")||"",match=disposition.match(/filename="?([^";]+)"?/i),blobUrl=URL.createObjectURL(await response.blob()),link=document.createElement("a");
+  link.href=blobUrl;link.download=match?.[1]||fallbackFilename;link.click();window.setTimeout(()=>URL.revokeObjectURL(blobUrl),1500);
+};
 export const checkForUpdates = () =>
   fetch(`${API}/update/check`, { cache: "no-store" }).then(parse<UpdateCheck>);
 export const getUpdateStatus = () =>
@@ -140,16 +146,16 @@ export const getLegalMetadata = () =>
     parse<LegalMetadata>,
   );
 export const getLegalDeportationDashboard = (filters:Filters={}) => fetch(`${API}/legal/deportation-dashboard`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dataset:"deportationrecords",filters})}).then(parse<Dashboard>);
-export const getLegalIndicators = (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[]) =>
-  fetch(`${API}/legal/indicators`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({projects,projectLocations,years,quarters,months})}).then(parse<IndicatorReport>);
-export const exportLegalIndicators = async (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[]) => {
-  const response=await fetch(`${API}/legal/indicators/export`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({projects,projectLocations,years,quarters,months})});
+export const getLegalIndicators = (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[],communityTypes:string[]=[]) =>
+  fetch(`${API}/legal/indicators`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({projects,projectLocations,years,quarters,months,communityTypes})}).then(parse<IndicatorReport>);
+export const exportLegalIndicators = async (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[],communityTypes:string[]=[]) => {
+  const response=await fetch(`${API}/legal/indicators/export`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({projects,projectLocations,years,quarters,months,communityTypes})});
   if(!response.ok)throw new Error(await response.text()||"Unable to export indicator report");
   const url=URL.createObjectURL(await response.blob()),link=document.createElement("a");
   link.href=url;link.download="professional-indicator-report.xlsx";link.style.display="none";document.body.appendChild(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),2000);
 };
-export const exportLegalNarrative = async (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[]) => {
-  const response=await fetch(`${API}/legal/indicators/narrative-export`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({projects,projectLocations,years,quarters,months})});
+export const exportLegalNarrative = async (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[],communityTypes:string[]=[]) => {
+  const response=await fetch(`${API}/legal/indicators/narrative-export`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({projects,projectLocations,years,quarters,months,communityTypes})});
   if(!response.ok)throw new Error(await response.text()||"Unable to export narrative report");
   const url=URL.createObjectURL(await response.blob()),link=document.createElement("a");link.href=url;link.download="indicator-narrative-report.xlsx";link.click();URL.revokeObjectURL(url);
 };
@@ -217,7 +223,8 @@ export const getLegalReview = (
       search,
       rule,
       page,
-      pageSize: 100,
+      // Review findings are displayed as one complete table, without paging.
+      pageSize: 5000,
       nameCompareChars,
       allowNameVariations,
       exactMatchesOnly,
@@ -309,11 +316,14 @@ export const exportLegalCases = async (
   query: string,
   filters: Record<string, string[]> = {},
   filename = "beneficiary-cases.xlsx",
+  caseIds: string[] = [],
+  signal?: AbortSignal,
 ) => {
   const response = await fetch(`${API}/legal/case-export`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, filters }),
+    body: JSON.stringify({ query, filters, caseIds }),
+    signal,
   });
   if (!response.ok) {
     const issue = await response

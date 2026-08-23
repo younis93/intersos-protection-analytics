@@ -1,7 +1,7 @@
 import {useEffect,useMemo,useState} from 'react';
 import {ChevronLeft,ChevronRight,Columns3,Download,Eye,EyeOff,Filter,RotateCcw,Search,ShieldAlert} from 'lucide-react';
 import {exportExplorer,getExplorer,type ExplorerQuery} from './api';
-import {AppSelect,formatNumber} from './components';
+import {AppSelect,ExcelDownloadButton,formatNumber} from './components';
 import {formatTableValue} from './dateFormat';
 import type {ExplorerColumn,ExplorerFilter,ExplorerResult,Metadata} from './types';
 
@@ -40,7 +40,7 @@ export default function DataExplorer({metadata}:{metadata:Metadata}){
     <section className="explorer-controls glass">
       <div className="explorer-main-controls">
         <AppSelect label="Worksheet" value={sheet.id} onChange={setSheetId} options={sheets.map(item=>[item.id,`${item.name} · ${formatNumber(item.rows)} rows`])}/>
-        <label className="explorer-search"><Search/><input value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="Search all columns…"/></label>
+        <label className="explorer-search"><Search/><input className="table-search-input" value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="Search all columns…"/></label>
         <button className={filterOpen?'primary':'soft'} onClick={()=>setFilterOpen(v=>!v)}><Filter/>Filters {filters.length>0&&<b>{filters.length}</b>}</button>
         <button className="soft explorer-clear" onClick={clear} disabled={!searchInput&&!filters.length&&!sortColumn}><RotateCcw/>Clear</button>
         <button className={columnsOpen?'primary':'soft'} onClick={()=>setColumnsOpen(v=>!v)}><Columns3/>Columns</button>
@@ -50,7 +50,7 @@ export default function DataExplorer({metadata}:{metadata:Metadata}){
     </section>
     {error&&<div className="error glass">{error}<button onClick={()=>setError('')}>Dismiss</button></div>}
     <section className="explorer-table-card glass">
-      <header><div><h3>{sheet.name}</h3><p>{formatNumber(result?.matchedRows||0)} matched of {formatNumber(result?.totalRows||sheet.rows)} rows · {visible.length} of {sheet.columns.length} columns</p></div><div className="explorer-export"><button className="soft" onClick={download} disabled={Boolean(exporting)}><Download/>{exporting?'Preparing…':'Excel'}</button></div></header>
+      <header><div><h3>{sheet.name}</h3><p>{formatNumber(result?.matchedRows||0)} matched of {formatNumber(result?.totalRows||sheet.rows)} rows · {visible.length} of {sheet.columns.length} columns</p></div><div className="explorer-export"><ExcelDownloadButton className="soft" onClick={download} busy={Boolean(exporting)}/></div></header>
       <div className={`explorer-table-wrap ${busy?'busy':''}`}><table><thead><tr>{visible.map(column=><th key={column}><button onClick={()=>sort(column)} title="Sort column">{column}{sortColumn===column?<span>{sortDirection==='asc'?' ↑':' ↓'}</span>:null}</button></th>)}</tr></thead><tbody>{result?.rows.map((row,index)=><tr key={`${page}-${index}`}>{visible.map(column=>{const rendered=display(row[column],sheet.columns.find(item=>item.name===column)?.type==='date');return <td key={column} title={rendered}>{rendered}</td>})}</tr>)}</tbody></table>{busy&&<div className="explorer-busy">Loading…</div>}{!busy&&result?.rows.length===0&&<div className="explorer-no-results">No rows match the current search and filters.</div>}</div>
       <footer><span>Page {page} of {pages}</span><div><button className="soft" onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page<=1}><ChevronLeft/>Previous</button><button className="soft" onClick={()=>setPage(p=>Math.min(pages,p+1))} disabled={page>=pages}>Next<ChevronRight/></button></div></footer>
     </section>

@@ -9,7 +9,7 @@ from datetime import date
 from difflib import SequenceMatcher
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -44,6 +44,11 @@ INDICATOR_CIVIL_DOCUMENTS = (
     "marriage certificate", "proof of marriage", "marriage attestation", "divorce certificate",
     "death certificate", "proof of death", "proof of curatorship", "housing card", "passport", "civil id",
 )
+REPRESENTATION_DOCUMENT_EXCEPTIONS = (
+    "custody certificate", "divorce certificate", "marriage attestation",
+    "marriage certificate", "proof of kinship", "proof of guardianship",
+    "proof of marriage",
+)
 DISPLAY_NAMES = {
     "beneficiaries": "Beneficiaries", "assessments": "Assessments", "legalservices": "Legal Services",
     "followupslogbooks": "Follow-ups & Logbooks", "legalfees": "Legal Fees", "awareness": "Awareness",
@@ -60,6 +65,7 @@ DATE_HINT = re.compile(r"\b(date|dob|created on|added on|paid date)\b", re.I)
 VERSION_SUFFIX = re.compile(r"\s*\((\d+)\)\s*$")
 ACTIONS = {
     "Possible duplicate name": "Verify the potential duplicate with the responsible lawyer. Where duplication is confirmed, notify the IM Officer to arrange deletion of the redundant case. The lawyer must update the physical file and PR record to retain the correct Case ID.",
+    "Possible duplicate contact and name": "Verify the matching contact number and identity details with the responsible lawyer. Where duplication is confirmed, notify the IM Officer to arrange deletion of the redundant case.",
     "Invalid contact number": "Verify the phone number against the case file and correct it in the platform.",
     "Case without assessment": "The responsible lawyer must complete and link the required assessment in the platform.",
     "Invalid age": "Verify age and date of birth, then correct the inaccurate or missing value.",
@@ -67,7 +73,7 @@ ACTIONS = {
     "Spouse below 18": "Verify the spouse date of birth and review the case for child-protection concerns.",
     "Check Community Type vs Nationality": "Verify the Community Type, Nationality, and Project against the case file, then correct the beneficiary classification in the platform.",
     "Beneficiary has multiple assessments": "Review the assessment timeline and confirm that each assessment is intentional and correctly linked.",
-    "Current and previous month duplicate": "Compare the current record with earlier records and retain only intentional repeat activity.",
+    "Current and previous month duplicate": "Compare the selected-month legal service with the beneficiary's earlier services and confirm the repeat activity is intentional.",
     "Selected month with previous assessment": "Compare the selected-month assessment with the beneficiary's earlier assessments and confirm the repeat activity is intentional.",
     "Assessment without services": "Confirm the action plan and create or link the required legal service.",
     "Pending assessment": "Review the pending reason, owner, and next action; update the assessment when resolved.",
@@ -77,6 +83,12 @@ ACTIONS = {
     "Detained beneficiary has counselling only": "Escalate for legal assistance or representation review and document the decision.",
     "Adult representation without counselling": "Confirm that legal counselling was provided and link or record it.",
     "Representation while not detained": "Review eligibility and the recorded detention/community information.",
+    "Detained beneficiary below 10 years": "Review the detention details and immediately follow the child-protection referral process for this beneficiary.",
+    "Detention Governorate mismatch": "Verify the detention governorate against the assessment project and project location, then correct the inconsistent entry.",
+    "Assessment date after today": "Verify the future date against the source record and correct it if it was entered in error.",
+    "Legal service date after today": "Verify the future date against the source record and correct it if it was entered in error.",
+    "Type of document in Assessments vs Services": "Compare the document types requested in the assessment with the document types recorded on linked legal services, then correct the missing side.",
+    "Type of Legal Service in Assessment vs Services": "Compare the legal service types requested in the assessment with linked legal services and create or correct the missing service type.",
     "Duplicate service": "Compare the service records and correct or remove the duplicate in the source platform.",
     "Missing Type of Document": "Check the service record and complete Type of Document before reporting.",
     "Orphaned assessment relationship": "Correct the Assessment ID or link the service to an existing assessment.",
@@ -84,11 +96,15 @@ ACTIONS = {
     "Duplicate participant in session": "Verify the participant and session topic, then remove or correct the confirmed duplicate record.",
 }
 REGISTERED_RULES = {
-    "beneficiaries": ("Possible duplicate name","Invalid contact number","Case without assessment","Invalid age","Marital status below 18","Spouse below 18","Check Community Type vs Nationality"),
-    "assessments": ("Beneficiary has multiple assessments","Selected month with previous assessment","Assessment without services","Pending assessment","Open counselling-only assessment","Detention/immigration inconsistency","Blank legal service need","Detained beneficiary has counselling only","Adult representation without counselling","Representation while not detained"),
-    "legalservices": ("Duplicate service","Current and previous month duplicate","Orphaned assessment relationship","Missing Type of Document"),
-    "awareness": ("Duplicate participant in session","Possible duplicate participant name","Invalid contact number"),
+    "beneficiaries": ("Possible duplicate name","Possible duplicate contact and name","Invalid contact number","Case without assessment","Invalid age","Marital status below 18","Spouse below 18","Check Community Type vs Nationality"),
+    "assessments": ("Beneficiary has multiple assessments","Selected month with previous assessment","Assessment without services","Pending assessment","Open counselling-only assessment","Blank legal service need","Detained beneficiary has counselling only","Adult representation without counselling","Type of Legal Service in Assessment vs Services","Detention/immigration inconsistency","Representation while not detained","Type of document in Assessments vs Services","Detained beneficiary below 10 years","Detention Governorate mismatch","Assessment date after today"),
+    "legalservices": ("Duplicate service","Current and previous month duplicate","Orphaned assessment relationship","Missing Type of Document","Legal service date after today"),
+    "awareness": ("Duplicate participant in session","Invalid contact number","Possible duplicate participant name"),
 }
+DETENTION_ASSESSMENT_RULES = frozenset((
+    "Detained beneficiary has counselling only", "Detention/immigration inconsistency",
+    "Detained beneficiary below 10 years", "Detention Governorate mismatch",
+))
 
 
 def _find(columns: list[str], *needles: str) -> str | None:
@@ -126,6 +142,35 @@ def normalize_name(value: Any) -> str:
     text = re.sub(r"[\u064b-\u065f\u0670\u06d6-\u06ed\u0640]", "", text)
     text = text.translate(str.maketrans("أإآٱةىؤئكی۱۲۳۴۵۶۷۸۹۰١٢٣٤٥٦٧٨٩٠", "ااااهيويكي12345678901234567890"))
     return re.sub(r"[^\w\u0600-\u06ff]+", "", text, flags=re.UNICODE)
+
+
+def split_multi_value(value: Any) -> list[str]:
+    """Split the comma/semicolon-separated multi-select values used in Legal CSVs."""
+    return [item.strip() for item in re.split(r"[,;]", clean_id(value)) if item.strip()]
+
+
+def normalize_document_label(value: Any) -> str:
+    """Match document labels despite punctuation and bilingual display suffixes."""
+    text=unicodedata.normalize("NFKC",clean_id(value)).casefold()
+    english=re.sub(r"[^a-z0-9]+"," ",text).strip()
+    if english:return english
+    text=re.sub(r"[\u064b-\u065f\u0670\u06d6-\u06ed\u0640]","",text)
+    return re.sub(r"[^\u0600-\u06ff0-9]+"," ",text).strip()
+
+
+def normalize_legal_service_type(value: Any) -> str:
+    text=unicodedata.normalize("NFKC",clean_id(value)).casefold()
+    if re.search(r"counselling|counseling|استشار",text):return "legal counselling"
+    if re.search(r"assistance|مساعد",text):return "legal assistance"
+    if re.search(r"representation|تمثيل",text):return "legal representation"
+    return re.sub(r"[^a-z0-9\u0600-\u06ff]+"," ",text).strip()
+
+
+def replace_legal_assistance(value: Any) -> Any:
+    """Use the agreed Legal Representation label throughout the imported platform data."""
+    if not isinstance(value,str):return value
+    value=re.sub(r"legal assistance\s*-\s*مساعدة", "Legal Representation - تمثيل", value, flags=re.I)
+    return re.sub(r"legal assistance", "Legal Representation", value, flags=re.I)
 
 
 def normalize_governorate(value: Any) -> str:
@@ -177,9 +222,8 @@ def normalize_phone_value(value: Any) -> Any:
 
 def display_value(value: Any) -> Any:
     if pd.isna(value): return ""
-    # CSV imports use UK day/month/year. Return an unambiguous ISO value to the
-    # UI so a date such as 01/02/2026 can never be reinterpreted as 2 January.
-    if isinstance(value, (pd.Timestamp, date)): return value.strftime("%Y-%m-%d")
+    # Legal Platform CSV dates are entered and reviewed as day/month/year.
+    if isinstance(value, (pd.Timestamp, date)): return value.strftime("%d/%m/%Y")
     if isinstance(value, float) and value.is_integer(): return int(value)
     return value
 
@@ -193,12 +237,12 @@ def format_excel_dates(workbook: Any) -> None:
                 value=cell.value
                 if isinstance(value,(pd.Timestamp,date)):
                     cell.value=pd.Timestamp(value).date()
-                    cell.number_format="YYYY-MMMM-DD"
+                    cell.number_format="DD/MM/YYYY"
                 elif isinstance(value,str) and date_pattern.match(value.strip()):
                     parsed=pd.to_datetime(value,errors="coerce",dayfirst=True)
                     if not pd.isna(parsed):
                         cell.value=parsed.date()
-                        cell.number_format="YYYY-MMMM-DD"
+                        cell.number_format="DD/MM/YYYY"
 
 
 def versioned_dataset_name(filename: str) -> tuple[str, int] | None:
@@ -240,7 +284,7 @@ class LegalStore:
     _cache_lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
     @classmethod
-    def from_folder(cls, path: Path) -> "LegalStore":
+    def from_folder(cls, path: Path, progress: Callable[[int], None] | None = None) -> "LegalStore":
         selected: dict[str, tuple[int, Path]] = {}
         for file in path.glob("*.csv"):
             parsed = versioned_dataset_name(file.name)
@@ -249,18 +293,22 @@ class LegalStore:
             current = selected.get(name)
             if current is None or version > current[0] or (version == current[0] and file.stat().st_mtime > current[1].stat().st_mtime):
                 selected[name] = (version, file)
-        payload = {name: file.read_bytes() for name, (_, file) in selected.items()}
-        return cls.from_files(payload, path.name)
+        payload: dict[str, bytes] = {}
+        total = max(len(selected), 1)
+        for index, (name, (_, file)) in enumerate(selected.items(), start=1):
+            payload[name] = file.read_bytes()
+            if progress: progress(round(index / total * 15))
+        return cls.from_files(payload, path.name, progress)
 
     @classmethod
-    def from_files(cls, payload: dict[str, bytes], source: str) -> "LegalStore":
+    def from_files(cls, payload: dict[str, bytes], source: str, progress: Callable[[int], None] | None = None) -> "LegalStore":
         missing = [name for name in MANDATORY if name not in payload]
         if missing: raise ValueError("Missing mandatory files: " + ", ".join(f"{x}.csv" for x in missing))
         frames: dict[str, pd.DataFrame] = {}
         dates: dict[str, list[str]] = {}
         warnings = [f"Optional file not loaded: {name}.csv" for name in OPTIONAL if name not in payload]
-        for name, raw in payload.items():
-            if name not in FILES: continue
+        supported = [(name, raw) for name, raw in payload.items() if name in FILES]
+        for index, (name, raw) in enumerate(supported, start=1):
             try:
                 df = pd.read_csv(io.BytesIO(raw), dtype=object, encoding="utf-8-sig", keep_default_na=True, low_memory=False)
             except UnicodeDecodeError:
@@ -283,18 +331,30 @@ class LegalStore:
                 df[phone_column] = df[phone_column].map(normalize_phone_value)
             drop = [c for c in df.columns if SPLIT_NAME.match(c) or (name == "legalservices" and SECURED_FILE in c and not c.rstrip().endswith(": URL"))]
             df = df.drop(columns=drop)
+            # Keep the source CSV untouched while using the agreed terminology in
+            # every platform view and every export generated from these frames.
+            df = df.apply(lambda column: column.map(replace_legal_assistance) if column.dtype == object else column)
             date_cols = [c for c in df.columns if DATE_HINT.search(c)]
+            request_date=_find(list(df.columns),"Date of the Request") if name=="assessments" else None
             for column in date_cols:
-                parsed = pd.to_datetime(df[column], errors="coerce", dayfirst=True, format="mixed")
-                if parsed.notna().any(): df[column] = parsed
+                # Assessment Date of the Request is the sole source field entered as month/day/year.
+                parsed = pd.to_datetime(df[column], errors="coerce", dayfirst=column != request_date, format="mixed")
+                supplied=df[column].notna() & df[column].astype(str).str.strip().ne("")
+                # Keep malformed spouse dates available to the review rule instead of
+                # converting them to missing values during general date normalization.
+                if parsed.notna().any() and not (name=="beneficiaries" and "spouse dob" in column.casefold() and parsed[supplied].isna().any()): df[column] = parsed
             frames[name] = df
             dates[name] = date_cols
+            if progress: progress(15 + round(index / max(len(supported), 1) * 55))
         result = cls(frames, source, warnings, dates)
         result.flags = result._build_flags()
+        if progress: progress(78)
         # Build the expensive shared review contexts during import so opening a review page is immediate.
-        for dataset in ("beneficiaries", "assessments", "legalservices", "awareness"):
-            if dataset in result.frames:
-                result.review(dataset)
+        review_datasets=[dataset for dataset in ("beneficiaries", "assessments", "legalservices", "awareness") if dataset in result.frames]
+        for index, dataset in enumerate(review_datasets, start=1):
+            result.review(dataset)
+            if progress: progress(78 + round(index / max(len(review_datasets), 1) * 22))
+        if progress: progress(95)
         return result
 
     def metadata(self) -> dict[str, Any]:
@@ -424,7 +484,7 @@ class LegalStore:
         self._metadata_cache = {
             "ready": True, "source": self.source, "warnings": self.warnings,
             "availability": {name: name in self.frames for name in FILES},
-            "features":{"detention":not amal_only,"deportation":"deportationrecords" in self.frames and not amal_only},
+            "features":{"awareness":any(re.search(r"\bamal\b",value,flags=re.I) for value in project_values),"detention":not amal_only,"deportation":"deportationrecords" in self.frames and not amal_only},
             "sheets": [{"id": name, "name": DISPLAY_NAMES[name], "rows": len(df), "columns": [str(c) for c in df.columns]} for name, df in self.frames.items()],
             "months": self._months(),
             "reviewCounts": {name: sum(not row.get("overviewExcluded",False) for row in rows) for name, rows in self.flags.items()},
@@ -443,23 +503,25 @@ class LegalStore:
         source=self.frames.get("deportationrecords")
         if source is None: raise ValueError("deportationrecords.csv is not loaded.")
         source_ident=_find(list(source.columns),"PN ID","Deportation ID")
-        source_date=_find(list(source.columns),"Date of deporting","Deportation Date")
+        source_date=_find(list(source.columns),"Date Of Deportation Knowledge","Date of Deportation Knowledge","Date of deporting","Deportation Date")
         filter_columns=[column for column in source.columns if source[column].nunique(dropna=True)<=200]
-        filter_options={column:sorted({str(value).strip() for value in source[column].dropna() if str(value).strip()}) for column in filter_columns}
-        if source_date:
-            source_months=pd.to_datetime(source[source_date],errors="coerce",dayfirst=True).dt.to_period("M").astype(str)
-            filter_options["Month"]=sorted(month for month in source_months.unique() if month!="NaT")
+        filter_options={"__reviewStyle":["true"]}
+        for column in filter_columns:
+            if DATE_HINT.search(str(column)):
+                months=pd.to_datetime(source[column],errors="coerce",dayfirst=True).dt.to_period("M").astype(str)
+                filter_options[str(column)]=sorted(month for month in months.unique() if month!="NaT")
+            else:
+                filter_options[str(column)]=sorted({str(value).strip() for value in source[column].dropna() if str(value).strip()})
         df=source
         for column,values in (filters or {}).items():
             if not values:continue
-            if column=="Month":
-                filter_date=_find(list(df.columns),"Date of deporting","Deportation Date")
-                if filter_date:
-                    months=pd.to_datetime(df[filter_date],errors="coerce",dayfirst=True).dt.to_period("M").astype(str)
-                    df=df[months.isin(values)]
-            elif column in df.columns:df=df[df[column].fillna("").astype(str).isin(values)]
+            if column not in df.columns:continue
+            if DATE_HINT.search(str(column)):
+                months=pd.to_datetime(df[column],errors="coerce",dayfirst=True).dt.to_period("M").astype(str)
+                df=df[months.isin(values)]
+            else:df=df[df[column].fillna("").astype(str).isin(values)]
         ident=_find(list(df.columns),"PN ID","Deportation ID")
-        date_col=_find(list(df.columns),"Date of deporting","Deportation Date")
+        date_col=source_date
         fields=[("Governorate","Governorate","Project Location","Project location"),("Destination","Destination","Country of destination"),("Nationality","Nationality"),("Authority","Authority","Detaining Authority"),("Project","Project","Projects -")]
         metric=df[ident].map(clean_id).replace("",pd.NA) if ident else pd.Series(df.index.astype(str),index=df.index)
         total=int(metric.nunique())
@@ -510,6 +572,22 @@ class LegalStore:
         spouse_dob=_find(list(row.index),"Spouse DoB")
         spouse_age=age_from_date(row.get(spouse_dob,"")) if spouse_dob else None
         marital_status=_find(list(row.index),"Marital Statues","Marital Status")
+        assessment_date=_find(list(row.index),"Date of Assessment")
+        identification_date=_find(list(row.index),"Date of Identification")
+        awareness_date=_find(list(row.index),"Date of Session","Added On")
+        created_on=_find(list(row.index),"Created On")
+        assessment_status=_find(list(row.index),"Assessment Status")
+        legal_service_needed=_find(list(row.index),"Type of Legal Service Needed")
+        detained=_find(list(row.index),"Is the beneficiary detained")
+        immigration_charge=_find(list(row.index),"Is it an immigration related charge")
+        service_type=_find(list(row.index),"Type of Service Provided")
+        document_type=_find(list(row.index),"Type of Document")
+        court_verdict_detail=_find(list(row.index),"Please specify the Court Verdict")
+        other_document_detail=_find(list(row.index),'Type of Document if "Other" please specify')
+        legal_concern_specified=_find(list(row.index),"Legal Concern Specified")
+        legal_concern=_find(list(row.index),"Legal Concern")
+        detention_governorate=_find(list(row.index),"Detention Governorate")
+        service_date=_find(list(row.index),"Date of Service Provision")
         rows.append({"dataset": dataset, "rule": rule, "severity": severity, "row": int(index) + 2,
                      "recordId": clean_id(row.get(primary, "")) if primary else "", "name":clean_id(row.get(name,"")) if name else "",
                      "caseId":clean_id(row.get(case_id,"")) if case_id else "", "assessmentId":clean_id(row.get(assessment_id,"")) if assessment_id else "",
@@ -520,6 +598,8 @@ class LegalStore:
                      "sessionTopic":clean_id(row.get(session_topic,"")) if session_topic else "",
                      "spouseName":clean_id(row.get(spouse_name,"")) if spouse_name else "", "spouseDateOfBirth":display_value(row.get(spouse_dob,"")) if spouse_dob else "", "spouseAge":spouse_age,
                      "maritalStatus":clean_id(row.get(marital_status,"")) if marital_status else "",
+                     "assessmentDate":display_value(row.get(assessment_date,"")) if assessment_date else "", "identificationDate":display_value(row.get(identification_date,"")) if identification_date else "", "awarenessDate":display_value(row.get(awareness_date,"")) if awareness_date else "", "createdOn":display_value(row.get(created_on,"")) if created_on else "", "assessmentStatus":clean_id(row.get(assessment_status,"")) if assessment_status else "", "legalServiceNeeded":clean_id(row.get(legal_service_needed,"")) if legal_service_needed else "", "beneficiaryDetained":clean_id(row.get(detained,"")) if detained else "", "immigrationRelatedCharge":clean_id(row.get(immigration_charge,"")) if immigration_charge else "", "serviceTypeProvided":clean_id(row.get(service_type,"")) if service_type else "", "typeOfDocument":clean_id(row.get(document_type,"")) if document_type else "", "courtVerdictDetail":clean_id(row.get(court_verdict_detail,"")) if court_verdict_detail else "", "otherDocumentDetail":clean_id(row.get(other_document_detail,"")) if other_document_detail else "", "legalConcernSpecified":clean_id(row.get(legal_concern_specified,"")) if legal_concern_specified else "", "legalConcern":clean_id(row.get(legal_concern,"")) if legal_concern else "", "detentionGovernorate":clean_id(row.get(detention_governorate,"")) if detention_governorate else "",
+                     "serviceDate":display_value(row.get(service_date,"")) if service_date else "",
                      "action":ACTIONS.get(rule,"Review the source record, verify the information, and document the correction.")})
 
     def _build_flags(self) -> dict[str, list[dict[str, Any]]]:
@@ -557,6 +637,7 @@ class LegalStore:
 
     def _beneficiary_flags(self) -> list[dict[str, Any]]:
         df = self.frames["beneficiaries"]; out: list[dict[str, Any]] = self._name_match_flags(excluded_case_ids=self._excluded_case_ids("Possible duplicate name"))
+        out += self._contact_name_match_flags(excluded_case_ids=self._excluded_case_ids("Possible duplicate contact and name"))
         phone = _find(list(df.columns), "Contact Number")
         if phone:
             ignored_prefixes = ("54","55","15","93","94","95","96","98","99","62","46","89","6939","4915","2376","9054","2951","4916")
@@ -585,6 +666,15 @@ class LegalStore:
                     spouse_age=df[spouse_dob].map(age_from_date)
                     spouse_under_18=spouse_age.map(lambda value:value is not None and value < 18)
                     for i in df.index[partnered & spouse_under_18]: self._flag(out,"beneficiaries","Spouse below 18","Warning",i,df.loc[i],f"Spouse is {spouse_age[i]} years old based on date of birth")
+        spouse_dob=_find(list(df.columns),"Spouse DoB")
+        if spouse_dob:
+            spouse_values=df[spouse_dob]
+            spouse_supplied=spouse_values.notna() & spouse_values.astype(str).str.strip().ne("")
+            parsed_spouse_dob=pd.to_datetime(spouse_values,errors="coerce",dayfirst=True)
+            for i in df.index[spouse_supplied & parsed_spouse_dob.isna()]:
+                self._flag(out,"beneficiaries","Invalid age","High",i,df.loc[i],"Spouse DoB is not a valid date")
+            for i in df.index[spouse_supplied & parsed_spouse_dob.notna() & parsed_spouse_dob.gt(pd.Timestamp.today().normalize())]:
+                self._flag(out,"beneficiaries","Invalid age","High",i,df.loc[i],"Spouse DoB is later than the current date")
         community = _find(list(df.columns), "Community Type")
         nationality = _find(list(df.columns), "Nationality")
         project = _find(list(df.columns), "Project")
@@ -673,12 +763,150 @@ class LegalStore:
             out[-1]["duplicateSimilarity"]=round(max(SequenceMatcher(None,normalized[i],normalized[peer]).ratio() for peer in peers)*100)
         return out
 
+    def _contact_name_match_flags(self, excluded_case_ids: set[str] | None = None) -> list[dict[str, Any]]:
+        """Flag likely duplicate beneficiaries with the same contact and a near-identical name."""
+        df=self.frames["beneficiaries"]
+        name=_find(list(df.columns),"Name (Filter Color Red)")
+        project=_find(list(df.columns),"Projects -","Project")
+        contact=_find(list(df.columns),"Contact Number")
+        case_id=_find(list(df.columns),"Case ID")
+        marker_columns=[column for column in (
+            _find(list(df.columns),"# UNHCR"),
+            _find(list(df.columns),"ID Number"),
+            _find(list(df.columns),"Individual Number ASSISIT"),
+            _find(list(df.columns),"Spouse name"),
+        ) if column]
+        if not name or not project or not contact or not marker_columns:
+            return []
+        excluded={clean_id(case) for case in (excluded_case_ids or set()) if clean_id(case)}
+        project_groups={
+            "unhcr 2026 - erbil":"North - Erbil",
+            "unhcr 2026 - mosul & kirkuk":"North - Mosul & Kirkuk",
+            "unhcr 2026 - suli":"North - SULI",
+            "unhcr 2026 - baghdad":"South (Baghdad + Gov)",
+            "unhcr 2026 - gov":"South (Baghdad + Gov)",
+            "unhcr 2026 - amal camp":"AMAL",
+        }
+        normalized_names=df[name].map(normalize_name)
+        normalized_projects=df[project].fillna("").astype(str).map(lambda value:re.sub(r"\s+"," ",value).strip().casefold())
+        contacts=df[contact].map(phone_digits)
+        eligible:dict[int,tuple[str,str,str]]={}
+        for i in df.index:
+            normalized_name=normalized_names[i]
+            project_group=project_groups.get(normalized_projects[i],"")
+            contact_number=contacts[i]
+            has_marker=any(clean_id(df.loc[i,column]) for column in marker_columns)
+            is_excluded=case_id and clean_id(df.loc[i,case_id]) in excluded
+            if normalized_name and contact_number and project_group and has_marker and not is_excluded:
+                eligible[int(i)]=(project_group,contact_number,normalized_name)
+        groups:dict[tuple[str,str],list[int]]=defaultdict(list)
+        for i,(project_group,contact_number,_) in eligible.items():
+            groups[(project_group,contact_number)].append(i)
+        matches:dict[int,set[int]]=defaultdict(set)
+        for indexes in groups.values():
+            if len(indexes)<2:
+                continue
+            for position,i in enumerate(indexes):
+                for j in indexes[position+1:]:
+                    if SequenceMatcher(None,eligible[i][2],eligible[j][2]).ratio() >= .90:
+                        matches[i].add(j)
+                        matches[j].add(i)
+        components:dict[int,str]={};visited:set[int]=set()
+        for start in matches:
+            if start in visited:
+                continue
+            stack=[start];members:set[int]=set()
+            while stack:
+                current=stack.pop()
+                if current in members:
+                    continue
+                members.add(current)
+                stack.extend(matches[current])
+            visited.update(members)
+            group_key=f"contact-name:{eligible[start][0]}:{eligible[start][1]}:{min(members)}"
+            for member in members:
+                components[member]=group_key
+        out=[]
+        for i,peers in matches.items():
+            project_group,contact_number,normalized_name=eligible[i]
+            strongest=max(round(SequenceMatcher(None,normalized_name,eligible[peer][2]).ratio()*100) for peer in peers)
+            self._flag(out,"beneficiaries","Possible duplicate contact and name","High",i,df.loc[i],f"{project_group}: contact number {contact_number} matches {len(peers)} other record(s); strongest normalized-name similarity is {strongest}%")
+            out[-1]["duplicateGroup"]=components[i]
+            out[-1]["nameMatchMode"]="contact-and-name"
+            out[-1]["duplicateSimilarity"]=strongest
+        return out
+
+    def _assessment_reconciliation_flags(self, df: pd.DataFrame, services: pd.DataFrame) -> list[dict[str, Any]]:
+        assessment_id=_find(list(df.columns),"Assessment ID");service_assessment=_find(list(services.columns),"Assessment ID")
+        if not assessment_id or not service_assessment:return []
+        assessment_date=_find(list(df.columns),"Date of Assessment")
+        assessment_dates=pd.to_datetime(df[assessment_date],errors="coerce",dayfirst=True) if assessment_date else pd.Series(pd.NaT,index=df.index)
+        assessment_documents=_find(list(df.columns),"Type of Documents to be issued");service_documents=_find(list(services.columns),"Type of Document")
+        service_needed=_find(list(df.columns),"Type of Legal Service Needed");service_provided=_find(list(services.columns),"Type of Service Provided")
+        linked_documents:dict[str,list[str]]=defaultdict(list);linked_services:dict[str,list[str]]=defaultdict(list)
+        for _,service in services.iterrows():
+            linked_id=clean_id(service.get(service_assessment,""))
+            if not linked_id:continue
+            if service_documents:linked_documents[linked_id].extend(split_multi_value(service.get(service_documents,"")))
+            if service_provided:linked_services[linked_id].extend(split_multi_value(service.get(service_provided,"")))
+        out=[]
+        for i,row in df.iterrows():
+            current_id=clean_id(row.get(assessment_id,""))
+            if not current_id or pd.isna(assessment_dates[i]) or assessment_dates[i] < pd.Timestamp("2026-01-01"):continue
+            requested_documents=split_multi_value(row.get(assessment_documents,"")) if assessment_documents else []
+            delivered_documents=linked_documents.get(current_id,[])
+            requested_document_map={normalize_document_label(item):item for item in requested_documents if normalize_document_label(item)}
+            delivered_document_map={normalize_document_label(item):item for item in delivered_documents if normalize_document_label(item)}
+            requested_display=", ".join(dict.fromkeys(requested_documents));delivered_display=", ".join(dict.fromkeys(delivered_documents))
+            missing_in_services=[raw for key,raw in requested_document_map.items() if key not in delivered_document_map]
+            missing_in_assessment=[raw for key,raw in delivered_document_map.items() if key not in requested_document_map]
+            for finding,missing in (("Missing Type of Document in Services",missing_in_services),("Missing Type of Document in Assessment",missing_in_assessment)):
+                if not missing:continue
+                self._flag(out,"assessments","Type of document in Assessments vs Services","Medium",i,row,f"{finding}: {', '.join(missing)}")
+                out[-1].update({"comparisonFinding":finding,"assessmentDocuments":requested_display,"serviceDocuments":delivered_display,"missingValues":", ".join(missing)})
+            requested_types=split_multi_value(row.get(service_needed,"")) if service_needed else []
+            provided_types=linked_services.get(current_id,[])
+            requested_type_map={normalize_legal_service_type(item):item for item in requested_types if normalize_legal_service_type(item)}
+            provided_type_keys={normalize_legal_service_type(item) for item in provided_types if normalize_legal_service_type(item)}
+            missing_types=[raw for key,raw in requested_type_map.items() if key not in provided_type_keys]
+            if missing_types:
+                self._flag(out,"assessments","Type of Legal Service in Assessment vs Services","Medium",i,row,f"Missing linked legal service type(s): {', '.join(missing_types)}")
+                out[-1].update({"requestedServiceTypes":", ".join(dict.fromkeys(requested_types)),"providedServiceTypes":", ".join(dict.fromkeys(provided_types)),"missingValues":", ".join(missing_types)})
+        return out
+
+    def _future_date_flags(self, dataset: str, rule: str, fields: tuple[str, ...]) -> list[dict[str, Any]]:
+        df=self.frames[dataset]; today=pd.Timestamp(date.today()); columns=[(label,_find(list(df.columns),label)) for label in fields]; out=[]
+        for i,row in df.iterrows():
+            future=[]
+            for label,column in columns:
+                if not column: continue
+                value=pd.to_datetime(row.get(column),errors="coerce",dayfirst=True)
+                if not pd.isna(value) and value.normalize()>today:
+                    future.append(f"{label}: {value.strftime('%d/%m/%Y')}")
+            if future:self._flag(out,dataset,rule,"Medium",i,row,"; ".join(future))
+        return out
+
     def _assessment_flags(self) -> list[dict[str, Any]]:
-        df = self.frames["assessments"]; services = self.frames["legalservices"]; out: list[dict[str, Any]] = []
+        df = self.frames["assessments"]; services = self.frames["legalservices"]; out: list[dict[str, Any]] = self._assessment_reconciliation_flags(df,services)
+        out += self._future_date_flags("assessments","Assessment date after today",("Date of Assessment","Date of the released or deported","Date of Detention","Date of Assessment Closure","Date of the Request"))
         beneficiary = _find(list(df.columns), "Beneficiary ID"); assessment = _find(list(df.columns), "Assessment ID")
+        assessment_date=_find(list(df.columns),"Date of Assessment"); status=_find(list(df.columns), "Assessment Status")
         if beneficiary:
-            ids = df[beneficiary].map(clean_id); counts = ids[ids.ne("")].value_counts()
-            for i in df.index[ids.map(counts).fillna(0).ge(2)]: self._flag(out,"assessments","Beneficiary has multiple assessments","Medium",i,df.loc[i],f"{int(counts[ids[i]])} assessments")
+            ids=df[beneficiary].map(clean_id)
+            assessment_months=pd.to_datetime(df[assessment_date],errors="coerce",dayfirst=True).dt.to_period("M") if assessment_date else pd.Series(pd.NaT,index=df.index)
+            same_month_counts=pd.Series(list(zip(ids,assessment_months)),index=df.index)
+            same_month_counts=same_month_counts[(ids.ne("")) & assessment_months.notna()].value_counts()
+            open_status=status and df[status].fillna("").astype(str).str.contains("open",case=False,regex=False)
+            open_counts=ids[open_status & ids.ne("")].value_counts() if isinstance(open_status,pd.Series) else pd.Series(dtype="int64")
+            for i in df.index:
+                reasons=[]
+                month_count=int(same_month_counts.get((ids[i],assessment_months[i]),0)) if ids[i] and pd.notna(assessment_months[i]) else 0
+                if month_count>=2: reasons.append(f"{month_count} assessments in {assessment_months[i]}")
+                open_count=int(open_counts.get(ids[i],0)) if ids[i] else 0
+                if isinstance(open_status,pd.Series) and bool(open_status[i]) and open_count>=2: reasons.append(f"{open_count} Open assessments")
+                if reasons:
+                    self._flag(out,"assessments","Beneficiary has multiple assessments","Medium",i,df.loc[i],"; ".join(reasons))
+                    out[-1]["duplicateGroup"]=f"assessment-beneficiary:{ids[i]}"
         total = _find(list(df.columns), "# Total Services")
         if total:
             for i in df.index[pd.to_numeric(df[total],errors="coerce").fillna(0).eq(0)]: self._flag(out,"assessments","Assessment without services","High",i,df.loc[i],"# Total Services is 0")
@@ -686,7 +914,6 @@ class LegalStore:
             service_assessment = _find(list(services.columns), "Assessment ID")
             linked = set(services[service_assessment].map(clean_id)) if service_assessment else set()
             for i in df.index[~df[assessment].map(clean_id).isin(linked)]: self._flag(out,"assessments","Assessment without services","High",i,df.loc[i],"No linked legal service")
-        status = _find(list(df.columns), "Assessment Status")
         need = _find(list(df.columns), "Type of Legal Service Needed")
         if status:
             st = df[status].fillna("").astype(str).str.lower()
@@ -704,8 +931,25 @@ class LegalStore:
             refugee=df[community].fillna("").astype(str).str.contains("refugee",case=False,regex=False) if community else pd.Series(False,index=df.index)
             dates=pd.to_datetime(df[date_col],errors="coerce") if date_col else pd.Series(pd.NaT,index=df.index)
             eligible=refugee & dates.notna() & dates.dt.year.ge(2026)
-            for i in df.index[eligible & yes & ~charge_yes]: self._flag(out,"assessments","Detention/immigration inconsistency","High",i,df.loc[i],f"Refugee assessment dated {dates[i].strftime('%m/%d/%Y')}: Detained is Yes but immigration charge is blank or No")
-            for i in df.index[eligible & no & charge.ne("")]: self._flag(out,"assessments","Detention/immigration inconsistency","High",i,df.loc[i],f"Refugee assessment dated {dates[i].strftime('%m/%d/%Y')}: Detained is No but immigration charge is populated")
+            for i in df.index[eligible & yes & ~charge_yes]: self._flag(out,"assessments","Detention/immigration inconsistency","High",i,df.loc[i],f"Refugee assessment dated {dates[i].strftime('%d/%m/%Y')}: Detained is Yes but immigration charge is blank or No")
+            for i in df.index[eligible & no & charge.ne("")]: self._flag(out,"assessments","Detention/immigration inconsistency","High",i,df.loc[i],f"Refugee assessment dated {dates[i].strftime('%d/%m/%Y')}: Detained is No but immigration charge is populated")
+        date_of_birth=_find(list(df.columns),"Date of Birth","DoB")
+        if detained and date_of_birth:
+            detained_yes=df[detained].fillna("").astype(str).str.contains(r"\byes\b|نعم",case=False,regex=True)
+            ages=df[date_of_birth].map(age_from_date)
+            for i in df.index[detained_yes & ages.map(lambda age: age is not None and age < 10)]:
+                self._flag(out,"assessments","Detained beneficiary below 10 years","High",i,df.loc[i],f"Detained beneficiary is {ages[i]} years old")
+        detention_governorate=_find(list(df.columns),"Detention Governorate");project=_find(list(df.columns),"Projects -","Project");location=_find(list(df.columns),"Project Location")
+        if detention_governorate and (project or location):
+            for i,row in df.iterrows():
+                if not detained or not re.search(r"\byes\b|نعم",clean_id(row.get(detained,"")),re.I): continue
+                if project and re.search(r"\bamal\b",clean_id(row.get(project,"")),re.I): continue
+                detained_place=normalize_governorate(row.get(detention_governorate,""))
+                expected={normalize_governorate(row.get(column,"")) for column in (project,location) if column and normalize_governorate(row.get(column,""))}
+                if expected and not detained_place:
+                    self._flag(out,"assessments","Detention Governorate mismatch","Medium",i,row,f"Detention Governorate is missing; expected one of: {', '.join(sorted(expected))}")
+                elif detained_place and expected and detained_place not in expected:
+                    self._flag(out,"assessments","Detention Governorate mismatch","Medium",i,row,f"Detention Governorate {clean_id(row.get(detention_governorate,''))} does not match Project/Project Location ({', '.join(sorted(expected))})")
         if need:
             blank = df[need].isna() | df[need].astype(str).str.strip().eq("")
             for i in df.index[blank]: self._flag(out,"assessments","Blank legal service need","High",i,df.loc[i],"Type of Legal Service Needed is blank")
@@ -714,46 +958,98 @@ class LegalStore:
                 delivered:dict[str,str]={}
                 if service_assessment and provided:
                     delivered=services.assign(_aid=services[service_assessment].map(clean_id)).groupby("_aid")[provided].apply(lambda x:" ".join(x.dropna().astype(str)).lower()).to_dict()
+                documents_to_issue=_find(list(df.columns),"Type of Documents to be issued")
                 for i,row in df.iterrows():
                     wanted=str(row.get(need,"") or "").lower(); actual=delivered.get(clean_id(row.get(assessment,"")),"")
-                    if actual=="": continue
                     if detained and immigration and re.search("yes|نعم",str(row.get(detained,"")),re.I) and re.search("yes|نعم",str(row.get(immigration,"")),re.I) and "counselling" in actual and not re.search("assistance|representation",actual): self._flag(out,"assessments","Detained beneficiary has counselling only","High",i,row,"Detained immigration case has counselling only")
                     age_col=_find(list(df.columns),"Age")
-                    if age_col and pd.to_numeric(pd.Series([row.get(age_col)]),errors="coerce").iloc[0]>18 and "representation" in wanted and "counselling" not in actual: self._flag(out,"assessments","Adult representation without counselling","Medium",i,row,"Adult needs representation but has no counselling service")
-                    community=_find(list(df.columns),"Community Type"); date_col=_find(list(df.columns),"Date of Assessment")
-                    assessed=pd.to_datetime(row.get(date_col),errors="coerce") if date_col else pd.NaT
+                    created_column=_find(list(df.columns),"Created On")
+                    created_on=pd.to_datetime(row.get(created_column),errors="coerce",dayfirst=True) if created_column else pd.NaT
+                    age_is_adult=age_col and pd.to_numeric(pd.Series([row.get(age_col)]),errors="coerce").iloc[0]>18
+                    requests_representation="representation" in wanted
+                    requests_counselling="counselling" in wanted
+                    if age_is_adult and requests_representation and requests_counselling and not pd.isna(created_on) and created_on >= pd.Timestamp("2026-01-01") and "counselling" not in actual: self._flag(out,"assessments","Adult representation without counselling","Medium",i,row,"Adult assessment requests representation and counselling, but linked legal services have no counselling")
+                    community=_find(list(df.columns),"Community Type")
                     non_idp=community and not re.search("idp|نازح",str(row.get(community,"")),re.I)
                     not_detained=detained and re.search("^no|لا",str(row.get(detained,"")),re.I)
-                    if non_idp and not_detained and not pd.isna(assessed) and assessed>pd.Timestamp("2025-12-31") and re.search("assistance|representation",actual): self._flag(out,"assessments","Representation while not detained","Medium",i,row,"Non-IDP has Assistance/Representation after 12/31/2025 and is not detained")
+                    requested_documents={document.strip() for document in re.split(r"[,;]",clean_id(row.get(documents_to_issue,""))) if document.strip()} if documents_to_issue else set()
+                    only_exempt_documents=bool(requested_documents) and all(any(exception in document.casefold() for exception in REPRESENTATION_DOCUMENT_EXCEPTIONS) for document in requested_documents)
+                    if non_idp and not_detained and not only_exempt_documents and not pd.isna(created_on) and created_on >= pd.Timestamp("2026-01-01") and re.search("assistance|representation",actual):
+                        self._flag(out,"assessments","Representation while not detained","Medium",i,row,"Non-IDP has Assistance/Representation, was created in 2026 or later, and is not detained")
+                        out[-1]["typeOfDocument"]=clean_id(row.get(documents_to_issue,"")) if documents_to_issue else ""
         return out
 
     def _assessment_month_flags(self, comparison_month: str | None = None) -> tuple[list[dict[str,Any]],str,list[str]]:
-        df=self.frames["assessments"]; beneficiary=_find(list(df.columns),"Beneficiary ID"); date_col=_find(list(df.columns),"Date of Assessment")
+        df=self.frames["assessments"]; beneficiary=_find(list(df.columns),"Beneficiary ID"); date_col=_find(list(df.columns),"Date of Assessment"); created_col=_find(list(df.columns),"Created On")
         if not beneficiary or not date_col:return [],"",[]
         dates=pd.to_datetime(df[date_col],errors="coerce");months=dates.dt.to_period("M");available=sorted(months.dropna().astype(str).unique().tolist())
         active=comparison_month if comparison_month in available else (available[-1] if available else "")
         if not active:return [],active,available
-        selected=pd.Period(active,freq="M");ids=df[beneficiary].map(clean_id);earlier:dict[str,list[pd.Timestamp]]=defaultdict(list)
-        for i in df.index[(months<selected)&ids.ne("")]:earlier[ids[i]].append(dates[i])
+        selected=pd.Period(active,freq="M");ids=df[beneficiary].map(clean_id);created=pd.to_datetime(df[created_col],errors="coerce",dayfirst=True) if created_col else pd.Series(pd.NaT,index=df.index);earlier:dict[str,list[tuple[pd.Timestamp,pd.Period]]]=defaultdict(list)
+        for i in df.index[(months<selected)&ids.ne("")]:earlier[ids[i]].append((dates[i],months[i]))
         out=[]
         for i in df.index[(months==selected)&ids.isin(earlier.keys())]:
-            history=sorted(earlier[ids[i]]);self._flag(out,"assessments","Selected month with previous assessment","High",i,df.loc[i],f"Selected month {active}; {len(history)} earlier assessment(s), from {history[0].strftime('%m/%d/%Y')} to {history[-1].strftime('%m/%d/%Y')}")
+            created_on=created[i]
+            if pd.isna(created_on) or created_on < pd.Timestamp("2026-08-01"):
+                continue
+            history=sorted(earlier[ids[i]],key=lambda item:item[0]);history_months={month for _,month in history}
+            immediate_previous=selected-1
+            has_older_history=any(month<immediate_previous for month in history_months)
+            grace=history_months=={immediate_previous} and created_on.to_period("M")==selected+1 and created_on.day<=4
+            if grace and not has_older_history:
+                continue
+            history_dates=[item[0] for item in history]
+            self._flag(out,"assessments","Selected month with previous assessment","High",i,df.loc[i],f"Selected month {active}; {len(history_dates)} earlier assessment(s), from {history_dates[0].strftime('%d/%m/%Y')} to {history_dates[-1].strftime('%d/%m/%Y')}; created on {created_on.strftime('%d/%m/%Y')}")
+        return out,active,available
+
+    def _amal_only_assessment_projects(self) -> bool:
+        df=self.frames["assessments"]; project=_find(list(df.columns),"Projects -","Project")
+        if not project:return False
+        projects={clean_id(value).casefold() for value in df[project] if clean_id(value)}
+        return bool(projects) and all("amal" in value for value in projects)
+
+    def _service_month_flags(self, comparison_month: str | None = None) -> tuple[list[dict[str, Any]],str,list[str]]:
+        df=self.frames["legalservices"]; beneficiary=_find(list(df.columns),"Beneficiary ID"); date_col=_find(list(df.columns),"Date of Service Provision"); created_col=_find(list(df.columns),"Created On")
+        if not beneficiary or not date_col:return [],"",[]
+        dates=pd.to_datetime(df[date_col],errors="coerce",dayfirst=True);months=dates.dt.to_period("M");available=sorted(months.dropna().astype(str).unique().tolist())
+        active=comparison_month if comparison_month in available else (available[-1] if available else "")
+        if not active:return [],active,available
+        selected=pd.Period(active,freq="M");ids=df[beneficiary].map(clean_id);created=pd.to_datetime(df[created_col],errors="coerce",dayfirst=True) if created_col else pd.Series(pd.NaT,index=df.index);earlier:dict[str,list[tuple[pd.Timestamp,pd.Period]]]=defaultdict(list)
+        for i in df.index[(months<selected)&ids.ne("")]:earlier[ids[i]].append((dates[i],months[i]))
+        out=[]
+        for i in df.index[(months==selected)&ids.isin(earlier.keys())]:
+            created_on=created[i]
+            if pd.isna(created_on) or created_on < pd.Timestamp("2026-08-01"):
+                continue
+            history=sorted(earlier[ids[i]],key=lambda item:item[0]);history_months={month for _,month in history}
+            immediate_previous=selected-1
+            has_older_history=any(month<immediate_previous for month in history_months)
+            grace=history_months=={immediate_previous} and created_on.to_period("M")==selected+1 and created_on.day<=4
+            if grace and not has_older_history:
+                continue
+            history_dates=[item[0] for item in history]
+            self._flag(out,"legalservices","Current and previous month duplicate","High",i,df.loc[i],f"Selected month {active}; {len(history_dates)} earlier service(s), from {history_dates[0].strftime('%d/%m/%Y')} to {history_dates[-1].strftime('%d/%m/%Y')}; created on {created_on.strftime('%d/%m/%Y')}")
         return out,active,available
 
     def _service_flags(self) -> list[dict[str, Any]]:
         df=self.frames["legalservices"]; out=[]; sid=_find(list(df.columns),"Service ID")
-        if sid:
-            ids=df[sid].map(clean_id); counts=ids[ids.ne("")].value_counts()
-            for i in df.index[ids.map(counts).fillna(0).ge(2)]: self._flag(out,"legalservices","Duplicate service","High",i,df.loc[i],f"Service ID occurs {int(counts[ids[i]])} times")
-            date_col=_find(list(df.columns),"Date of Service Provision")
-            if date_col:
-                months=pd.to_datetime(df[date_col],errors="coerce").dt.to_period("M"); latest=months.max(); historical=set(ids[(months==latest)&ids.ne("")]) & set(ids[(months<latest)&ids.ne("")])
-                for i in df.index[ids.isin(historical)&months.eq(latest)]: self._flag(out,"legalservices","Current and previous month duplicate","High",i,df.loc[i],f"Service also occurs before {latest}")
-        aid=_find(list(df.columns),"Assessment ID"); assessment_id=_find(list(self.frames["assessments"].columns),"Assessment ID")
+        out += self._future_date_flags("legalservices","Legal service date after today",("Date of Service Provision","Date Service Completed","Date of Issuance"))
+        beneficiary=_find(list(df.columns),"Beneficiary ID"); aid=_find(list(df.columns),"Assessment ID"); provided=_find(list(df.columns),"Type of Service Provided"); document_type=_find(list(df.columns),"Type of Document")
+        if beneficiary and aid and provided and document_type:
+            keys={}
+            for i,row in df.iterrows():
+                key=(clean_id(row.get(beneficiary,"")),clean_id(row.get(aid,"")),normalize_legal_service_type(row.get(provided,"")),normalize_document_label(row.get(document_type,"")))
+                if all(key): keys.setdefault(key,[]).append(i)
+            for key,indexes in keys.items():
+                if len(indexes)<2:continue
+                duplicate_group=f"service:{'|'.join(key)}"
+                for i in indexes:
+                    self._flag(out,"legalservices","Duplicate service","High",i,df.loc[i],f"Same Beneficiary ID, Assessment ID, Type of Service Provided, and Type of Document occurs {len(indexes)} times")
+                    out[-1]["duplicateGroup"]=duplicate_group
+        assessment_id=_find(list(self.frames["assessments"].columns),"Assessment ID")
         if aid and assessment_id:
             valid=set(self.frames["assessments"][assessment_id].map(clean_id))
             for i in df.index[~df[aid].map(clean_id).isin(valid)]: self._flag(out,"legalservices","Orphaned assessment relationship","High",i,df.loc[i],"Assessment ID does not exist in assessments.csv")
-        document_type=_find(list(df.columns),"Type of Document")
         if document_type:
             blank=df[document_type].isna()|df[document_type].astype(str).str.strip().eq("")
             for i in df.index[blank]: self._flag(out,"legalservices","Missing Type of Document","Medium",i,df.loc[i],"Type of Document is blank")
@@ -769,6 +1065,7 @@ class LegalStore:
                 same_session=int(pair_counts.get((vals[i],topics[i]),0)) if topics[i] else 0
                 if same_session >= 2:
                     self._flag(out,"awareness","Duplicate participant in session","High",i,df.loc[i],f"Name and session topic occur {same_session} times")
+                    out[-1]["duplicateGroup"]=f"awareness:{vals[i]}|{topics[i]}"
                 else:
                     self._flag(out,"awareness","Possible duplicate participant name","Minor",i,df.loc[i],f"Name occurs {int(name_counts[vals[i]])} times across different sessions")
                     out[-1]["overviewExcluded"]=True
@@ -781,7 +1078,7 @@ class LegalStore:
         return out
 
     def review(self, dataset: str, search: str="", rule: str="", page: int=1, page_size: int=100,
-               severity: str="", lawyer: str="", project: str="", location: str="",comparison_month:str="",
+               severity: str="", lawyer: str="", project: str="", location: str="", date: str="", comparison_month:str="",
                name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False) -> dict[str, Any]:
         bounded_chars=max(10,min(30,name_compare_chars));cache_key=(dataset,comparison_month or "",bounded_chars,bool(allow_name_variations))
         with self._cache_lock:
@@ -789,11 +1086,17 @@ class LegalStore:
             if context is None:
                 rows=[dict(item) for item in self.flags.get(dataset,[])]
                 if dataset=="beneficiaries":
-                    rows=[r for r in rows if r["rule"]!="Possible duplicate name"]+self._name_match_flags(bounded_chars,allow_name_variations,excluded_case_ids=self._excluded_case_ids("Possible duplicate name"))
+                    rows=[r for r in rows if r["rule"] not in {"Possible duplicate name","Possible duplicate contact and name"}]
+                    rows += self._name_match_flags(bounded_chars,allow_name_variations,excluded_case_ids=self._excluded_case_ids("Possible duplicate name"))
+                    rows += self._contact_name_match_flags(excluded_case_ids=self._excluded_case_ids("Possible duplicate contact and name"))
                     rows=[row for row in rows if not self._is_excluded(row)]
                 active_month="";available_months=[]
                 if dataset=="assessments":
                     month_rows,active_month,available_months=self._assessment_month_flags(comparison_month);rows += [dict(item) for item in month_rows]
+                    if self._amal_only_assessment_projects():
+                        rows=[item for item in rows if item["rule"] not in DETENTION_ASSESSMENT_RULES]
+                elif dataset=="legalservices":
+                    month_rows,active_month,available_months=self._service_month_flags(comparison_month);rows += [dict(item) for item in month_rows]
                 if dataset in {"assessments","legalservices"}:
                     beneficiaries=self.frames["beneficiaries"];case_col=_find(list(beneficiaries.columns),"Case ID");name_col=_find(list(beneficiaries.columns),"Name (Filter Color Red)")
                     phone_col=_find(list(beneficiaries.columns),"Contact Number");project_col=_find(list(beneficiaries.columns),"Project");location_col=_find(list(beneficiaries.columns),"Project Location")
@@ -806,8 +1109,12 @@ class LegalStore:
                             if not item.get("name") and name_col:item["name"]=clean_id(source.get(name_col,""))
                             for key,column in (("phone",phone_col),("project",project_col),("location",location_col)):
                                 if not item.get(key) and column:item[key]=clean_id(source.get(column,""))
-                observed=pd.Series([r["rule"] for r in rows],dtype=object).value_counts().to_dict();rule_counts={name:int(observed.get(name,0)) for name in REGISTERED_RULES.get(dataset,())}
+                observed=pd.Series([r["rule"] for r in rows],dtype=object).value_counts().to_dict();registered_rules=REGISTERED_RULES.get(dataset,())
+                if dataset=="assessments" and self._amal_only_assessment_projects(): registered_rules=tuple(name for name in registered_rules if name not in DETENTION_ASSESSMENT_RULES)
+                rule_counts={name:int(observed.get(name,0)) for name in registered_rules}
+                date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate"}.get(dataset,"")
                 options={key:sorted({r.get(key,"") for r in rows if r.get(key,"")}) for key in ("severity","lawyer","project","location")}
+                options["date"]=sorted({pd.to_datetime(r.get(date_field,""),errors="coerce",dayfirst=True).strftime("%Y-%m") for r in rows if date_field and not pd.isna(pd.to_datetime(r.get(date_field,""),errors="coerce",dayfirst=True))})
                 name_records=0;eligible_name_records=0
                 if dataset=="beneficiaries":
                     name_column=_find(list(self.frames[dataset].columns),"Name (Filter Color Red)")
@@ -828,6 +1135,9 @@ class LegalStore:
             rows=[r for r in rows if r["rule"]==rule]
         for key,selection in (("severity",severity),("lawyer",lawyer),("project",project),("location",location)):
             if selection: rows=[r for r in rows if r.get(key)==selection]
+        if date:
+            date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate"}.get(dataset,"")
+            rows=[r for r in rows if date_field and not pd.isna(pd.to_datetime(r.get(date_field,""),errors="coerce",dayfirst=True)) and pd.to_datetime(r.get(date_field,""),errors="coerce",dayfirst=True).strftime("%Y-%m")==date]
         if search:
             needle=search.lower(); rows=[r for r in rows if needle in " ".join(map(str,r.values())).lower()]
         if rule in {"Marital status below 18", "Spouse below 18"}:
@@ -843,9 +1153,14 @@ class LegalStore:
         from openpyxl.utils import get_column_letter
         flags=list(self.flags.get(dataset,[]))
         if dataset=="beneficiaries":
-            flags=[r for r in flags if r["rule"]!="Possible duplicate name"]+self._name_match_flags(name_compare_chars,allow_name_variations,exact_only=exact_matches_only,excluded_case_ids=self._excluded_case_ids("Possible duplicate name"))
+            flags=[r for r in flags if r["rule"] not in {"Possible duplicate name","Possible duplicate contact and name"}]
+            flags += self._name_match_flags(name_compare_chars,allow_name_variations,exact_only=exact_matches_only,excluded_case_ids=self._excluded_case_ids("Possible duplicate name"))
+            flags += self._contact_name_match_flags(excluded_case_ids=self._excluded_case_ids("Possible duplicate contact and name"))
             flags=[row for row in flags if not self._is_excluded(row)]
-        if dataset=="assessments":flags+=self._assessment_month_flags(comparison_month)[0]
+        if dataset=="assessments":
+            flags+=self._assessment_month_flags(comparison_month)[0]
+            if self._amal_only_assessment_projects(): flags=[row for row in flags if row["rule"] not in DETENTION_ASSESSMENT_RULES]
+        elif dataset=="legalservices":flags+=self._service_month_flags(comparison_month)[0]
         flags=[row for row in flags if not self._is_excluded(row)]
         if selected_rules is not None: flags=[row for row in flags if row.get("rule") in selected_rules]
         frame=self.frames[dataset]; columns=["Lawyer","Review Finding","Priority","Recommended Action","Review Detail","Project","Project Location","Name","Phone Number","Case ID","Assessment ID","Service ID"]+list(frame.columns)
@@ -918,7 +1233,7 @@ class LegalStore:
           "assessments":{"id":("Assessment ID",),"beneficiary":("Beneficiary ID",),"date":("Date of Assessment",),"charts":[("Project",("Projects -","Project")),("Project location",("Project Location",)),("Gender / age group",("Age Gender Group","UNHCR Age Group")),("Nationality",("Nationality",)),("Community type",("Community Type",)),("Assessment status",("Assessment Status",)),("Legal service needed",("Type of Legal Service Needed",)),("Document needed",("Type of Documents to be issued",)),("Beneficiary detained",("Is the beneficiary detained",)),("Detainee current status",("Detainee current status",))]},
           "legalservices":{"id":("Service ID",),"beneficiary":("Beneficiary ID",),"date":("Date of Service Provision",),"charts":[("Project",("Projects -","Project")),("Project location",("Project Location",)),("Gender / age group",("Age Gender Group","UNHCR Age Group")),("Type of service provided",("Type of Service Provided",)),("Service status",("Service Status",)),("Type of document",("Type of Document",)),("Nationality",("Nationality",)),("Community type",("Community Type",)),("Assessment legal-service need",("_assessment_need",))]},
           "beneficiaries":{"id":("Case ID","Beneficiary ID"),"beneficiary":("Case ID","Beneficiary ID"),"date":("Date of Identification",),"charts":[("Project",("Project",)),("Project location",("Project Location",)),("Gender / age group",("Age Gender Group","UNHCR Age Group")),("Nationality",("Nationality",)),("Community type",("Community Type",)),("Marital status",("Marital Statues","Marital Status")),("Vulnerability",("Type of vulnerabilities",)),("Protection category",("Protection Category",))]},
-          "awareness":{"id":("Awareness ID",),"beneficiary":("Participant Name",),"date":("Date of Session","Added On"),"charts":[("Project",("Projects -","Project")),("Project location",("Project location","Project Location")),("Session topic",("Session Topic",)),("Gender / age group",("Gender Age Group","UNHCR Age Group")),("Nationality",("Nationality",)),("Community type",("Community Type",)),("Governorate",("Governorate",)),("Lawyer",("Lawyer",))]},
+          "awareness":{"id":("Awareness ID",),"beneficiary":("Participant Name",),"date":("Date of Session","Added On"),"charts":[("Session topic - sessions",("Session Topic",)),("Session topic - participants",("Session Topic",)),("Gender / age group",("Gender Age Group","UNHCR Age Group")),("Nationality",("Nationality",)),("Community type",("Community Type",)),("Governorate",("Governorate",)),("Lawyer",("Lawyer",))]},
         }[dataset]
         if dataset=="legalservices" and "assessments" in self.frames:
             aid=_find(list(frame.columns),"Assessment ID"); assessment=self.frames["assessments"]; other_id=_find(list(assessment.columns),"Assessment ID"); need=_find(list(assessment.columns),"Type of Legal Service Needed")
@@ -944,7 +1259,8 @@ class LegalStore:
         metric=filtered[id_col].map(clean_id) if id_col else pd.Series(filtered.index.astype(str),index=filtered.index); total=int(metric.replace("",pd.NA).nunique())
         charts=[]
         for title,column in chart_columns:
-            working=pd.DataFrame({"label":filtered[column].fillna("").astype(str).str.strip(),"metric":metric});working=working[working.label.ne("")]
+            chart_metric=(filtered[beneficiary_col].fillna("").astype(str).str.strip() if dataset=="awareness" and title=="Session topic - participants" and beneficiary_col else metric)
+            working=pd.DataFrame({"label":filtered[column].fillna("").astype(str).str.strip(),"metric":chart_metric});working=working[working.label.ne("") & working.metric.ne("")]
             counts=working.groupby("label").metric.nunique().sort_values(ascending=False).head(12);charts.append({"id":column,"title":title,"kind":"bar","multiChoice":False,"rows":[{"label":label,"count":int(count),"percent":int(count)/total if total else 0} for label,count in counts.items()]})
         trend=[]
         if date_col:
@@ -1011,7 +1327,7 @@ class LegalStore:
         if export_format=="csv":
             return frame.to_csv(index=False).encode("utf-8-sig")
         if export_format!="xlsx":raise ValueError("Unsupported export format")
-        with pd.ExcelWriter(output,engine="openpyxl",date_format="YYYY-MMMM-DD",datetime_format="YYYY-MMMM-DD") as writer:
+        with pd.ExcelWriter(output,engine="openpyxl",date_format="DD/MM/YYYY",datetime_format="DD/MM/YYYY") as writer:
             frame.to_excel(writer,index=False,sheet_name="Filtered data")
             sheet=writer.book["Filtered data"];sheet.freeze_panes="A2";sheet.auto_filter.ref=sheet.dimensions
             for cell in sheet[1]:
@@ -1175,9 +1491,11 @@ class LegalStore:
             cases.append(item)
         return {"query":query,"cases":cases,"rows":[],"columns":[],"availableColumns":[],"totalRows":total_cases if view_mode=="table" else 0,"totalCases":total_cases,"page":page if view_mode=="table" else 1,"pageSize":page_size}
 
-    def case_export(self, query: str, filters: dict[str, list[str]] | None = None) -> bytes:
-        bulk_export=not query.strip()
+    def case_export(self, query: str, filters: dict[str, list[str]] | None = None, case_ids: list[str] | None = None) -> bytes:
+        bulk_export=not query.strip() and not case_ids
         candidate_ids=self._case_candidate_ids(query,filters)
+        if case_ids:
+            candidate_ids &= {clean_id(case_id) for case_id in case_ids if clean_id(case_id)}
         def unique_records(frame:pd.DataFrame,*id_hints:str)->pd.DataFrame:
             identifier=_find(list(frame.columns),*id_hints)
             return frame.drop_duplicates(subset=[identifier]) if identifier else frame.drop_duplicates()
@@ -1209,9 +1527,11 @@ class LegalStore:
             ("Fees",service_children("legalfees","Legal Service ID","Service ID")),
         ]
         output=io.BytesIO()
-        with pd.ExcelWriter(output,engine="openpyxl",date_format="YYYY-MMMM-DD",datetime_format="YYYY-MMMM-DD") as writer:
+        with pd.ExcelWriter(output,engine="openpyxl",date_format="DD/MM/YYYY",datetime_format="DD/MM/YYYY") as writer:
             thin=Side(style="thin",color="D9E2EC");border=Border(bottom=thin)
             for sheet_name,frame in sheets:
+                if sheet_name in {"Follow-ups","Fees"} and frame.empty:
+                    continue
                 safe=_safe_export(frame.copy())
                 safe.to_excel(writer,index=False,sheet_name=sheet_name)
                 sheet=writer.book[sheet_name]
@@ -1220,7 +1540,7 @@ class LegalStore:
                 date_columns=[index for index,column in enumerate(safe.columns,1) if pd.api.types.is_datetime64_any_dtype(safe[column])]
                 for column in date_columns:
                     for row in range(2,sheet.max_row+1):
-                        sheet.cell(row,column).number_format="YYYY-MMMM-DD"
+                        sheet.cell(row,column).number_format="DD/MM/YYYY"
                 for cell in sheet[1]:cell.font=Font(bold=True,color="FFFFFF");cell.fill=PatternFill("solid",fgColor="174EA6");cell.alignment=Alignment(wrap_text=True,vertical="center");cell.border=border
                 sheet.row_dimensions[1].height=34
                 for index,column in enumerate(safe.columns,1):
@@ -1396,6 +1716,24 @@ class LegalStore:
             open_mask=~followups[follow_complete].fillna("").astype(str).str.contains(r"\byes\b|complete|نعم",case=False,regex=True) if follow_complete else pd.Series(True,index=followups.index)
             overdue=int((next_dates.lt(pd.Timestamp.today().normalize())&open_mask).sum())
         assessment_id=_find(list(assessments.columns),"Assessment ID");beneficiary_id=_find(list(assessments.columns),"Beneficiary ID")
+        detained_column=_find(list(assessments.columns),"Is the beneficiary detained")
+        detained_mask=assessments[detained_column].fillna("").astype(str).str.contains(r"\byes\b|نعم",case=False,regex=True) if detained_column else pd.Series(False,index=assessments.index)
+        detention_count=int(assessments.loc[detained_mask,assessment_id].map(clean_id).replace("",pd.NA).nunique()) if assessment_id else int(detained_mask.sum())
+        amal_project_exists=any(
+            bool(project_column and frame[project_column].fillna("").astype(str).str.contains(r"\bamal\b",case=False,regex=True).any())
+            for frame in frames.values()
+            for project_column in [_find(list(frame.columns),"Projects - المشروع","Project")]
+        )
+        selected_projects=[str(value).strip() for value in filters.get("project",[]) if str(value).strip()]
+        scoped_projects={
+            str(value).strip()
+            for frame in frames.values()
+            for project_column in [_find(list(frame.columns),"Projects - المشروع","Project")]
+            if project_column
+            for value in frame[project_column].dropna()
+            if str(value).strip()
+        }
+        amal_only=(bool(selected_projects) and all(re.search(r"\bamal\b",value,re.I) for value in selected_projects)) or (not selected_projects and bool(scoped_projects) and all(re.search(r"\bamal\b",value,re.I) for value in scoped_projects))
         service_assessment=_find(list(services.columns),"Assessment ID")
         assessment_ids=set(assessments[assessment_id].map(clean_id)) if assessment_id else set()
         linked_assessments=set(services[service_assessment].map(clean_id)) if service_assessment else set()
@@ -1427,13 +1765,12 @@ class LegalStore:
                 place=normalize_governorate(raw)
                 if place:geography.setdefault(place,{"label":place.title(),"Beneficiaries":0,"Assessments":0,"Services":0,"Deportations":0,"Awareness":0})[label]+=int(count)
         breakdowns=[]
-        for title,name,hints in (("Service mix","legalservices",("Type of Service Provided",)),("Population","assessments",("Community Type",)),("Nationality","assessments",("Nationality",)),("Vulnerability","beneficiaries",("Type of vulnerabilities",)),("Project","assessments",("Projects - المشروع","Project"))):
+        for title,name,hints in (("Service mix","legalservices",("Type of Service Provided",)),("Nationality","assessments",("Nationality",))):
             frame=frames.get(name,pd.DataFrame());column=_find(list(frame.columns),*hints)
             if column:
                 raw_values=frame[column].fillna("Blank").astype(str).str.strip().replace("","Blank")
                 if title=="Service mix":
                     raw_values=raw_values.map(lambda value:"Legal Representation" if re.search(r"assistance|representation",value,re.I) else "Legal Counselling" if re.search(r"counselling|counseling",value,re.I) else value)
-                if title=="Vulnerability":raw_values=raw_values[raw_values.str.strip().str.lower() != "blank"]
                 values=raw_values.value_counts().head(8)
                 breakdowns.append({"title":title,"total":int(len(raw_values)),"items":[{"label":str(label),"value":int(value)} for label,value in values.items()]})
         document_type=_find(list(representation.columns),"Type of Documents to be issued","Type of Document")
@@ -1441,6 +1778,12 @@ class LegalStore:
             document_values=representation[document_type].fillna("Blank").astype(str).str.strip().replace("","Blank")
             document_counts=document_values.value_counts().head(8)
             breakdowns.append({"title":"Representation document type","total":int(len(document_values)),"items":[{"label":str(label),"value":int(value)} for label,value in document_counts.items()]})
+        for title,name,hints in (("Population","assessments",("Community Type",)),("Project","assessments",("Projects - المشروع","Project"))):
+            frame=frames.get(name,pd.DataFrame());column=_find(list(frame.columns),*hints)
+            if column:
+                raw_values=frame[column].fillna("Blank").astype(str).str.strip().replace("","Blank")
+                values=raw_values.value_counts().head(8)
+                breakdowns.append({"title":title,"total":int(len(raw_values)),"items":[{"label":str(label),"value":int(value)} for label,value in values.items()]})
         lawyer_names=set()
         for frame in frames.values():
             column=_find(list(frame.columns),"Lawyers","Lawyer","Created by")
@@ -1492,13 +1835,18 @@ class LegalStore:
             {"title":"Detention added","detail":f"{counts['deportations']} deportation records are included separately from detention-related assessments.","tone":"neutral"},
         ])
         lawyer_summary=self.lawyer_summary(filters)
-        payload={"page":page,"period":"2026 onward","kpis":[
+        kpis=[
             {"label":"Beneficiaries","value":counts["beneficiaries"],"format":"number"},{"label":"Assessments","value":counts["assessments"],"format":"number"},
             {"label":"Legal services","value":counts["services"],"format":"number"},{"label":"Completed services","value":completed_services,"format":"number"},
             {"label":"Representation services","value":len(representation),"format":"number"},{"label":"Representation completed","value":representation_completed,"format":"number"},
             {"label":"Follow-ups","value":counts["followups"],"format":"number"},{"label":"Legal fees","value":total_fees,"format":"currency"},
             {"label":"Deportations","value":counts["deportations"],"format":"number"},{"label":"Awareness participants","value":counts["awareness"],"format":"number"},
-        ],"funnel":funnel,"monthly":monthly_rows,"geography":list(geography.values()),"breakdowns":breakdowns,"lawyers":lawyer_rows,"lawyerSummary":{"rows":lawyer_summary["rows"],"monthlyAssessments":lawyer_summary["monthlyAssessments"],"charts":lawyer_summary["charts"]},"risks":risks,"insights":insights,
+        ]
+        if page=="lawyer-intelligence":
+            kpis=[item for item in kpis if item["label"] not in {"Deportations","Awareness participants"}]
+            if not amal_only:kpis.append({"label":"Detentions","value":detention_count,"format":"number"})
+            if amal_project_exists:kpis.append({"label":"Awareness participants","value":counts["awareness"],"format":"number"})
+        payload={"page":page,"period":"2026 onward","kpis":kpis,"funnel":funnel,"monthly":monthly_rows,"geography":list(geography.values()),"breakdowns":breakdowns,"lawyers":lawyer_rows,"lawyerSummary":{"rows":lawyer_summary["rows"],"monthlyAssessments":lawyer_summary["monthlyAssessments"],"charts":lawyer_summary["charts"]},"risks":risks,"insights":insights,
         "finance":{"total":total_fees,"averagePerCompletedService":total_fees/max(completed_services,1),"records":counts["fees"]},
         "filterOptions":{key:sorted({str(value).strip() for frame in self.frames.values() for hint in hints for column in [_find(list(frame.columns),hint)] if column for value in frame[column].dropna().unique() if str(value).strip()}) for key,hints in filter_hints.items()},
         "activeFilters":filters,"availability":{name:name in self.frames for name in FILES}}
@@ -1556,13 +1904,24 @@ class LegalStore:
             ('Detaining Authority "If Other" - " جهة الاحتجاز "إذا كانت أخرى',("Detaining Authority \"If Other\"","Detaining Authority If Other")),
         )
         detail_selected=[(label,_find(list(frame.columns),*hints)) for label,hints in detail_specs]
+        columns_by_label=dict(selected)
         filter_labels=("Gender / age group","Community type","Nationality","Project","Project location","Detention governorate","Detaining authority","Immigration charge","Current status","Lawyer")
         options={label:sorted({str(value).strip() for value in scoped[column].dropna().unique() if str(value).strip()}) for label,column in selected if label in filter_labels}
-        columns_by_label=dict(selected)
         assessment_date=columns_by_label.get("Assessment date")
+        release_date=columns_by_label.get("Release/deportation date")
+        month_options=lambda column: sorted({str(value) for value in pd.to_datetime(scoped[column],errors="coerce",dayfirst=True).dt.to_period("M").dropna()},reverse=True) if column else []
+        options["Date of Assessment"]=month_options(assessment_date)
+        options["Date of the released"]=month_options(release_date)
+        options["Type of Released"]=sorted({str(value).strip() for value in scoped[columns_by_label["Release type"]].dropna().unique() if str(value).strip()}) if columns_by_label.get("Release type") else []
         for label,values in (filters or {}).items():
             if label=="month":continue
-            column=columns_by_label.get(label)
+            if label=="Date of Assessment" and assessment_date and values:
+                scoped=scoped[pd.to_datetime(scoped[assessment_date],errors="coerce",dayfirst=True).dt.to_period("M").astype(str).isin(values)]
+                continue
+            if label=="Date of the released" and release_date and values:
+                scoped=scoped[pd.to_datetime(scoped[release_date],errors="coerce",dayfirst=True).dt.to_period("M").astype(str).isin(values)]
+                continue
+            column=columns_by_label.get("Release type" if label=="Type of Released" else label)
             if column and values:scoped=scoped[scoped[column].fillna("").astype(str).isin(values)]
         trend_scope=scoped.copy()
         month_values=(filters or {}).get("month",[])
@@ -1577,7 +1936,7 @@ class LegalStore:
         active=int(scoped[status_col].fillna("").astype(str).str.contains("detain|detention|custody|held|لازال",case=False,regex=True).sum()) if status_col else len(scoped)
         immigration_count=int(scoped[immigration_col].fillna("").astype(str).str.contains(r"\byes\b|نعم",case=False,regex=True).sum()) if immigration_col else 0
         distinct=int(scoped[beneficiary_col].map(clean_id).nunique()) if beneficiary_col else len(scoped)
-        release_date=columns_by_label.get("Release/deportation date");trend=[]
+        trend=[]
         released_scope=trend_scope.copy()
         if status_col:
             released_scope=released_scope[released_scope[status_col].fillna("").astype(str).str.contains("released",case=False,regex=False)]
@@ -1792,7 +2151,7 @@ class LegalStore:
         comparison=self.detention_reconciliation(raw,filename,month,project,sheet_name)
         output=io.BytesIO()
         palette=("E8F1FB","FDF0E7","EAF6EE","F3ECFA","FFF7D9","E8F5F5")
-        with pd.ExcelWriter(output,engine="openpyxl",date_format="YYYY-MMMM-DD",datetime_format="YYYY-MMMM-DD") as writer:
+        with pd.ExcelWriter(output,engine="openpyxl",date_format="DD/MM/YYYY",datetime_format="DD/MM/YYYY") as writer:
             sheet=writer.book.create_sheet("Comparison issues")
             sheet.merge_cells("A1:G1");sheet["A1"]="INTERSOS | Detention Excel comparison issues"
             sheet["A1"].font=Font(bold=True,color="FFFFFF",size=14);sheet["A1"].fill=PatternFill("solid",fgColor="0B5C95");sheet["A1"].alignment=Alignment(horizontal="left",vertical="center")
@@ -1823,7 +2182,7 @@ class LegalStore:
         if dataset not in self.frames: raise ValueError("Dataset not loaded")
         frame=_safe_export(self.frames[dataset])
         output=io.BytesIO()
-        with pd.ExcelWriter(output,engine="openpyxl",date_format="YYYY-MMMM-DD",datetime_format="YYYY-MMMM-DD") as writer:
+        with pd.ExcelWriter(output,engine="openpyxl",date_format="DD/MM/YYYY",datetime_format="DD/MM/YYYY") as writer:
             frame.to_excel(writer,index=False,sheet_name="Data");sheet=writer.book["Data"];sheet.freeze_panes="A2";sheet.auto_filter.ref=sheet.dimensions
             for cell in sheet[1]:cell.font=Font(bold=True,color="FFFFFF");cell.fill=PatternFill("solid",fgColor="2563EB");cell.alignment=Alignment(wrap_text=True)
             for index,column in enumerate(frame.columns,1):sheet.column_dimensions[get_column_letter(index)].width=min(38,max(12,len(str(column))+2))

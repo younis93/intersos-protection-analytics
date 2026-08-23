@@ -18,7 +18,7 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid release version: $Ver
 
 $Tag = "v$Version"
 $BaseUrl = "https://github.com/younis93/intersos-protection-analytics/releases/download/$Tag"
-$InstallerName = "INTERSOS-Protection-Analytics-Setup-$Version.exe"
+$InstallerName = "INTERSOS-Legal-Platform-Setup-$Version.exe"
 $TempRoot = Join-Path ([IO.Path]::GetTempPath()) "intersos-release-sync-$Version"
 $ManifestPath = Join-Path $TempRoot 'update.json'
 $InstallerPath = Join-Path $TempRoot $InstallerName

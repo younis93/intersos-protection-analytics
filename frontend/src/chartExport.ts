@@ -79,8 +79,28 @@ export async function exportChart(graphDiv:any,title:string,format:'png'|'pdf'){
 }
 
 export async function exportSvgChart(svg:SVGSVGElement,title:string,format:'png'|'pdf'){
-  const clone=svg.cloneNode(true) as SVGSVGElement;const width=1600,height=1100;
+  // CSS custom properties and color-mix() are not available once an SVG is
+  // detached for canvas/PDF rendering. Copy the browser-resolved paint and text
+  // styles into the export so thematic maps retain their actual colours.
+  const clone=svg.cloneNode(true) as SVGSVGElement;
+  const sourceNodes=[svg,...Array.from(svg.querySelectorAll('*'))] as Element[];
+  const cloneNodes=[clone,...Array.from(clone.querySelectorAll('*'))] as Element[];
+  const exportedStyles=['fill','stroke','stroke-width','stroke-linejoin','stroke-linecap','font-family','font-size','font-weight','font-style','letter-spacing','text-anchor','paint-order','opacity','fill-opacity','stroke-opacity','visibility','display'];
+  sourceNodes.forEach((node,index)=>{
+    const target=cloneNodes[index];if(!target)return;
+    const computed=getComputedStyle(node);
+    exportedStyles.forEach((property)=>{
+      const value=computed.getPropertyValue(property);
+      if(value&&value!=='normal'&&value!=='none'&&value!=='auto')(target as HTMLElement).style.setProperty(property,value);
+    });
+  });
+  const viewBox=svg.viewBox.baseVal;
+  const width=1600,height=Math.round(width*(viewBox.width&&viewBox.height?viewBox.height/viewBox.width:1100/1600));
   clone.setAttribute('xmlns','http://www.w3.org/2000/svg');clone.setAttribute('width',String(width));clone.setAttribute('height',String(height));
+  clone.setAttribute('preserveAspectRatio','xMidYMid meet');
+  const background=document.createElementNS('http://www.w3.org/2000/svg','rect');
+  background.setAttribute('width','100%');background.setAttribute('height','100%');background.setAttribute('fill','#ffffff');
+  clone.insertBefore(background,clone.firstChild);
   const markup=new XMLSerializer().serializeToString(clone),url=URL.createObjectURL(new Blob([markup],{type:'image/svg+xml;charset=utf-8'}));
   try{
     if(format==='png'){

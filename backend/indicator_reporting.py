@@ -102,6 +102,15 @@ def _population(value: Any) -> str:
     return "other"
 
 
+def _community_filter_label(value: Any) -> str:
+    """Return the English-only community label used by the reporting filter."""
+    population = _population(value)
+    if population == "idp": return "IDP"
+    if population == "syrian-refugee": return "Syrian Refugee"
+    if population == "non-syrian-refugee": return "Non-Syrian Refugee"
+    return ""
+
+
 def _gender(value: Any) -> str:
     text = _norm(value)
     if text.startswith("male"): return "male"
@@ -125,8 +134,15 @@ def _common_columns(frame: pd.DataFrame) -> dict[str, str | None]:
     }
 
 
-def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "", to_date: str = "", projects: list[str] | None = None, locations: list[str] | None = None, years: list[str] | None = None, quarters: list[str] | None = None, months: list[str] | None = None) -> dict[str, Any]:
-    projects, locations, years, quarters, months = projects or [], locations or [], years or [], quarters or [], months or []
+def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "", to_date: str = "", projects: list[str] | None = None, locations: list[str] | None = None, years: list[str] | None = None, quarters: list[str] | None = None, months: list[str] | None = None, community_types: list[str] | None = None) -> dict[str, Any]:
+    projects, locations, years, quarters, months, community_types = projects or [], locations or [], years or [], quarters or [], months or [], community_types or []
+    # The source values often append Arabic text (for example, "Syrian Refugee
+    # لاجئ-سوري"). Expose the reporting populations as clean English labels
+    # while retaining a population-aware filter against the original data.
+    community_options=sorted({_community_filter_label(value) for frame in frames.values() for column in [_common_columns(frame).get("community")] if column for value in frame[column].dropna() if _community_filter_label(value)})
+    if community_types:
+        selected_communities=set(community_types)
+        frames={name:frame[frame[_common_columns(frame)["community"]].map(_community_filter_label).isin(selected_communities)].copy() if _common_columns(frame).get("community") else frame.copy() for name,frame in frames.items()}
     start = pd.to_datetime(from_date, errors="coerce") if from_date else None
     end = pd.to_datetime(to_date, errors="coerce") if to_date else None
     if from_date and pd.isna(start): raise ValueError("From date is invalid.")
@@ -202,10 +218,11 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
     amal_project = "UNHCR 2026 - AMAL CAMP"
     # AMAL is an IDP-only project.  A project filter that includes AMAL therefore
     # presents only IDP reporting; without AMAL, IDP reporting is not relevant.
-    show_refugee_columns = not (projects and amal_project in projects)
+    refugee_community_types = {"Syrian Refugee", "Non-Syrian Refugee"}
+    show_refugee_columns = not (projects and amal_project in projects) and "IDP" not in community_types
     # With no project filter, the report covers every available project,
     # including AMAL; retain the IDP section and workbook sheet in that case.
-    show_idp_columns = not projects or amal_project in projects
+    show_idp_columns = (not projects or amal_project in projects) and not (refugee_community_types & set(community_types))
     all_populations = tuple(
         ([(("syrian-refugee", "Syrian Refugees")), (("non-syrian-refugee", "Non-Syrian Refugees"))] if show_refugee_columns else [])
         + ([("idp", "IDP")] if show_idp_columns else [])
@@ -255,7 +272,7 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         return {"rows": rows, "totals": totals, "total": totals[-1], "totalBeneficiaryIds": total_ids, "warnings": {"unclassified": unclassified, "unknownLocation": unknown}}
 
     def indicator(identifier: str, title: str, source: str, date_field: str, rule: str, population_group: str, records: list[pd.Series], frame: pd.DataFrame) -> dict[str, Any]:
-        source_file = {"Assessments": "assessments.csv", "Legal Services": "legalservices.csv", "Deportation Records": "deportationrecords.csv", "Assessments (this year)": "assessments.csv — this year", "Legal Services (carry-over)": "legalservices.csv — carry-over"}.get(source, source)
+        source_file = {"Assessments": "assessments.csv", "Legal Services": "legalservices.csv", "Deportation Records": "deportationrecords.csv", "Awareness": "awareness.csv", "Assessments (this year)": "assessments.csv - this year", "Legal Services (carry-over)": "legalservices.csv - carry-over"}.get(source, source)
         sections = [{"id": pid, "label": label, **matrix(records, frame, pid, population_group, source_file)} for pid, label in populations[population_group]]
         return {"id": identifier, "title": title, "source": source, "dateField": date_field, "rule": rule, "population": population_group, "total": sum(section["total"] for section in sections), "sections": sections, "children": [], "contributions": {}}
 
@@ -356,6 +373,7 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         indicator("secured-civil-documentation", "# of secured civil documentation", "Legal Services", "Date Service Completed", "Civil Documents is Yes, service is Completed, and type is not Legal Counselling.", "idp", secured, services),
         indicator("uid-secured", "# of persons who received UIDs", "Legal Services", "Date Service Completed", "Unified National Card and type is not Legal Counselling.", "idp", uid, services),
         civil_representation,
+        indicator("legal-awareness-participants", "# of girls, boys, women, and men participating in legal awareness sessions", "Awareness", "Date of Session", "All awareness-session participant records in the selected reporting period, counted by gender and age group.", "idp", awareness_rows, awareness),
     ]
     reached_indicators = [indicator("individuals-reached", "# of individuals receiving legal assistance, representation or counselling", "Assessments", "Date of Assessment", "Type of Legal Service Needed is not blank.", "all", reached, assessments)]
     groups = []
@@ -368,6 +386,11 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         """Keep the English location label and remove appended Arabic text."""
         text = str(value or "").strip()
         return re.split(r"\s+(?=[\u0600-\u06ffØÙÚÛ])", text, maxsplit=1)[0].strip()
+
+    def narrative_topic(value: Any) -> str:
+        """Keep an English session topic while dropping its appended Arabic translation."""
+        text = str(value or "").strip()
+        return re.split(r"\s*(?:/|-|–|—)?\s*(?=[\u0600-\u06ff])", text, maxsplit=1)[0].rstrip(" /-–—").strip()
 
     def demographic_values(sections: list[dict[str, Any]], row_filter: Callable[[dict[str, Any]], bool] | None = None) -> list[int]:
         values = [0] * 12
@@ -382,7 +405,10 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         boys, men = sum(values[:3]), sum(values[3:6])
         girls, women = sum(values[6:9]), sum(values[9:12])
         label = lambda value, singular, plural: f"{value:,} {singular if value == 1 else plural}"
-        return f"{label(girls, 'girl', 'girls')}, {label(women, 'woman', 'women')}, {label(boys, 'boy', 'boys')}, and {label(men, 'man', 'men')}"
+        groups = [(girls, "girl", "girls"), (women, "woman", "women"), (boys, "boy", "boys"), (men, "man", "men")]
+        visible = [label(value, singular, plural) for value, singular, plural in groups if value]
+        if not visible: return "no classified gender or age data"
+        return list_text(visible)
 
     def list_text(values: list[str]) -> str:
         if len(values) < 2: return values[0] if values else ""
@@ -443,6 +469,45 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         if carry_over: remark += f"\n\nOf the individuals supported in {narrative_period}, {carry_over:,} were carry-over cases from 2025 that were successfully closed during the reporting period."
         return remark
 
+    def legal_awareness_narrative(entry: dict[str, Any]) -> str:
+        if not entry["total"]: return ""
+        values = demographic_values(entry["sections"])
+        gender_groups = (
+            ("Girls", sum(values[6:9])),
+            ("Boys", sum(values[:3])),
+            ("Women", sum(values[9:12])),
+            ("Men", sum(values[3:6])),
+        )
+        gender_summary = ", ".join(f"{label}: {value:,} ({value / entry['total'] * 100:.1f}%)" for label, value in gender_groups if value)
+        awareness_id_column = _find(list(awareness.columns), "Awareness ID")
+        topic_column = _find(list(awareness.columns), "Session Topic")
+        session_ids = {clean_id(row.get(awareness_id_column, "")) for row in awareness_rows if awareness_id_column and clean_id(row.get(awareness_id_column, ""))}
+        topics: dict[str, dict[str, Any]] = {}
+        awareness_columns = _common_columns(awareness)
+        for row in awareness_rows:
+            topic = narrative_topic(row.get(topic_column, "")) if topic_column else ""
+            topic = topic or "Unspecified topic"
+            detail = topics.setdefault(topic, {"participants": 0, "sessionIds": set(), "genderValues": [0] * 12})
+            detail["participants"] += 1
+            session_id = clean_id(row.get(awareness_id_column, "")) if awareness_id_column else ""
+            if session_id: detail["sessionIds"].add(session_id)
+            gender, age = _gender(row.get(awareness_columns["gender"], "")), _age_group(row.get(awareness_columns["age"], ""))
+            if gender and age:
+                detail["genderValues"][AGE_GROUPS.index(age) + (0 if gender == "male" else 6)] += 1
+        def topic_gender_summary(values: list[int]) -> str:
+            groups = (("Girls", sum(values[6:9])), ("Women", sum(values[9:12])), ("Boys", sum(values[:3])), ("Men", sum(values[3:6])))
+            return ", ".join(f"{label}: {value:,}" for label, value in groups if value)
+        topic_summary = [f"• {topic} - {len(detail['sessionIds']):,} awareness session{'s' if len(detail['sessionIds']) != 1 else ''} | Participants: {detail['participants']:,}{f' | {topic_gender_summary(detail["genderValues"])}' if topic_gender_summary(detail['genderValues']) else ''}" for topic, detail in sorted(topics.items(), key=lambda item: (-item[1]["participants"], item[0]))]
+        sessions = len(session_ids)
+        sections = [
+            "LEGAL AWARENESS SESSIONS",
+            f"Reporting period: {narrative_period}  |  Participants: {entry['total']:,}  |  Awareness sessions: {sessions:,}",
+            "",
+            f"PARTICIPANT PROFILE  |  {gender_summary}",
+        ]
+        if topic_summary: sections.extend(["", "SESSION-TOPIC BREAKDOWN", *topic_summary])
+        return "\n".join(sections)
+
     def attach_narrative(entry: dict[str, Any]) -> None:
         narrative_rows: list[dict[str, Any]] = []
         section_groups = (
@@ -485,6 +550,9 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         elif entry["id"] == "civil-representation":
             special_remark = civil_representation_narrative(entry)
             for row in narrative_rows: row["remarks"] = special_remark
+        elif entry["id"] == "legal-awareness-participants":
+            special_remark = legal_awareness_narrative(entry)
+            for row in narrative_rows: row["remarks"] = special_remark
         entry["narrative"] = {"remark": "\n\n".join(row["remarks"] for row in narrative_rows if row["remarks"]), "rows": narrative_rows}
         for child in entry.get("children", []): attach_narrative(child)
     for group in groups:
@@ -501,7 +569,7 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
     month_options = sorted({date.strftime("%Y-%m") for date in report_dates}, reverse=True)
     quarter_options = sorted({f"{date.year}-Q{date.quarter}" for date in report_dates}, reverse=True)
     year_options = sorted({str(date.year) for date in report_dates}, reverse=True)
-    return {"fromDate": from_date, "toDate": to_date, "ageGroups": list(AGE_GROUPS), "filterOptions": {"projects": project_order, "locations": list(dict.fromkeys(location for _, location in REPORT_ROWS)), "locationsByProject": {project: [location for row_project, location in REPORT_ROWS if row_project == project] for project in project_order}, "years": year_options, "quarters": quarter_options, "months": month_options}, "activeFilters": {"projects": projects, "locations": locations, "years": years, "quarters": quarters, "months": months}, "groups": groups}
+    return {"fromDate": from_date, "toDate": to_date, "ageGroups": list(AGE_GROUPS), "filterOptions": {"projects": project_order, "locations": list(dict.fromkeys(location for _, location in REPORT_ROWS)), "locationsByProject": {project: [location for row_project, location in REPORT_ROWS if row_project == project] for project in project_order}, "years": year_options, "quarters": quarter_options, "months": month_options, "communityTypes": community_options}, "activeFilters": {"projects": projects, "locations": locations, "years": years, "quarters": quarters, "months": months, "communityTypes": community_types}, "groups": groups}
 
 
 def _carryover_match(row: pd.Series, provision_column: str | None, completed_column: str | None, status_column: str | None, type_column: str | None, in_period: Callable[[Any], bool]) -> bool:
@@ -704,7 +772,7 @@ def build_narrative_workbook(report: dict[str, Any]) -> bytes:
         try: achievement_period = pd.Timestamp(f"{selected_months[0]}-01").strftime("%B %Y")
         except (TypeError, ValueError): achievement_period = str(selected_months[0])
     else: achievement_period = "Selected Period" if selected_months else "Reporting Period"
-    headers = ["Indicators", "Population", f"Total Achievement — {achievement_period}", "Remarks"]
+    headers = ["Indicators", "Population", f"Total Achievement - {achievement_period}", "Remarks"]
     sheet.append(headers)
     for cell in sheet[1]: cell.fill = PatternFill("solid", fgColor="1687D9"); cell.font = Font(color="FFFFFF", bold=True); cell.alignment = Alignment(horizontal="center", vertical="center")
     sheet.row_dimensions[1].height = 28

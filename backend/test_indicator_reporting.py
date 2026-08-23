@@ -50,7 +50,7 @@ def test_indicator_parent_carryover_and_reporting_mappings():
     assert reached["narrative"]["rows"][0]["totalAchievement"] == sum(section["total"] for section in reached["sections"][:2])
     assert "Anbar Ø" not in reached["narrative"]["remark"]
     narrative_sheet = load_workbook(BytesIO(build_narrative_workbook(report)))["Narrative Report"]
-    assert [narrative_sheet.cell(1, column).value for column in range(1, 5)] == ["Indicators", "Population", "Total Achievement — Reporting Period", "Remarks"]
+    assert [narrative_sheet.cell(1, column).value for column in range(1, 5)] == ["Indicators", "Population", "Total Achievement - Reporting Period", "Remarks"]
     assert [section["id"] for section in reached["sections"]] == ["syrian-refugee", "non-syrian-refugee", "idp"]
     all_rows = reached["sections"][0]["rows"]
     diyala = next(row for row in all_rows if row["location"] == "Diyala ديالى")
@@ -74,7 +74,7 @@ def test_indicator_filters_hide_rows_and_validate_dates():
     january = build_indicator_report({"assessments": assessments, "legalservices": services}, years=["2026"], quarters=["2026-Q1"], months=["2026-01"])
     january_reached = next(item for group in january["groups"] for item in group["indicators"] if item["id"] == "individuals-reached")
     assert january_reached["total"] == 1
-    assert load_workbook(BytesIO(build_narrative_workbook(january)))["Narrative Report"]["C1"].value == "Total Achievement — January 2026"
+    assert load_workbook(BytesIO(build_narrative_workbook(january)))["Narrative Report"]["C1"].value == "Total Achievement - January 2026"
     assert january["filterOptions"]["years"] == ["2026"]
     assert january["filterOptions"]["quarters"] == ["2026-Q1"]
     assert january["filterOptions"]["months"] == ["2026-01"]
@@ -183,8 +183,8 @@ def test_representation_uses_unique_assessment_and_monthly_beneficiary_ids():
         {"Projects - المشروع": "UNHCR 2026 - Gov", "Project Location": "Anbar أنبار", "PN ID": "P1", "Gender النوع الاجتماعي": "Male ذکر", "UNHCR Age Group": "(18-39)", "Community Type / نوع المجتمع": "Syrian Refugee لاجئ-سوري", "Date of Deportation Knowledge - تاريخ العلم بالترحيل": pd.Timestamp("2026-01-12")},
     ])
     awareness = pd.DataFrame([
-        {"Projects - المشروع": "UNHCR 2026 - AMAL CAMP", "Project location": "AMAL Camp", "Participant Name": "Person", "Gender الجنس": "Female أنثى", "UNHCR Age Group": "(18-39)", "Community Type / نوع المجتمع": "IDP", "Date of Session تاريخ الجلسة": pd.Timestamp("2026-01-05")},
-        {"Projects - المشروع": "UNHCR 2026 - AMAL CAMP", "Project location": "AMAL Camp", "Participant Name": "", "Gender الجنس": "Female أنثى", "UNHCR Age Group": "(18-39)", "Community Type / نوع المجتمع": "IDP", "Date of Session تاريخ الجلسة": pd.Timestamp("2026-01-05")},
+        {"Projects - المشروع": "UNHCR 2026 - AMAL CAMP", "Project location": "AMAL Camp", "Awareness ID": "AW-1", "Session Topic": "Civil documentation / الوثائق المدنية", "Participant Name": "Person", "Gender الجنس": "Female أنثى", "UNHCR Age Group": "(18-39)", "Community Type / نوع المجتمع": "IDP", "Date of Session تاريخ الجلسة": pd.Timestamp("2026-01-05")},
+        {"Projects - المشروع": "UNHCR 2026 - AMAL CAMP", "Project location": "AMAL Camp", "Awareness ID": "AW-1", "Session Topic": "Civil documentation / الوثائق المدنية", "Participant Name": "", "Gender الجنس": "Female أنثى", "UNHCR Age Group": "(18-39)", "Community Type / نوع المجتمع": "IDP", "Date of Session تاريخ الجلسة": pd.Timestamp("2026-01-05")},
     ])
     report = build_indicator_report({"assessments": pd.DataFrame(assessment_rows), "legalservices": services, "deportationrecords": deportation, "awareness": awareness}, "2026-01-01", "2026-01-31")
     indicators = {item["id"]: item for group in report["groups"] for item in group["indicators"]}
@@ -192,10 +192,10 @@ def test_representation_uses_unique_assessment_and_monthly_beneficiary_ids():
         "detention-immigration", "deported", "released-immigration", "06-1-1-legal-assistance",
         "legal-counselling", "legal-representation",
     ]
-    assert [item["id"] for item in report["groups"][1]["indicators"]] == ["civil-counselling", "secured-civil-documentation", "uid-secured", "civil-representation"]
+    assert [item["id"] for item in report["groups"][1]["indicators"]] == ["civil-counselling", "secured-civil-documentation", "uid-secured", "civil-representation", "legal-awareness-participants"]
     assert [item["id"] for item in report["groups"][2]["indicators"]] == ["individuals-reached"]
     amal_report = build_indicator_report({"assessments": pd.DataFrame(assessment_rows), "legalservices": services, "deportationrecords": deportation, "awareness": awareness}, "2026-01-01", "2026-01-31", projects=["UNHCR 2026 - AMAL CAMP"])
-    assert [item["id"] for item in amal_report["groups"][0]["indicators"]] == ["civil-counselling", "secured-civil-documentation", "uid-secured", "civil-representation"]
+    assert [item["id"] for item in amal_report["groups"][0]["indicators"]] == ["civil-counselling", "secured-civil-documentation", "uid-secured", "civil-representation", "legal-awareness-participants"]
     amal_indicators = {item["id"]: item for group in amal_report["groups"] for item in group["indicators"]}
     assert indicators["detention-immigration"]["total"] == 3
     assert indicators["released-immigration"]["total"] == 1
@@ -207,5 +207,13 @@ def test_representation_uses_unique_assessment_and_monthly_beneficiary_ids():
     assistance_remark = indicators["06-1-1-legal-assistance"]["narrative"]["remark"]
     assert "age, gender, location, and nationality breakdown" in assistance_remark
     assert "Service shares were" in assistance_remark
+    assert "0 girls" not in assistance_remark and "0 women" not in assistance_remark
     assert amal_indicators["secured-civil-documentation"]["total"] == 1
     assert amal_indicators["uid-secured"]["total"] == 2
+    assert amal_indicators["legal-awareness-participants"]["total"] == 2
+    awareness_remark = amal_indicators["legal-awareness-participants"]["narrative"]["remark"]
+    assert "PARTICIPANT PROFILE  |  Women: 2 (100.0%)" in awareness_remark and "Girls: 0" not in awareness_remark
+    assert "Awareness sessions: 1" in awareness_remark
+    assert "SESSION-TOPIC BREAKDOWN" in awareness_remark
+    assert "• Civil documentation - 1 awareness session | Participants: 2 | Women: 2" in awareness_remark
+    assert "الوثائق" not in awareness_remark
