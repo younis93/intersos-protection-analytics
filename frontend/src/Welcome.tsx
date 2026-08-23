@@ -18,7 +18,7 @@ export const workspaces:WorkspaceDefinition[]=[
 export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:()=>void}){
   const [theme,setTheme]=useState<Theme>(()=>{
     const startupTheme=new URLSearchParams(window.location.search).get('appTheme') as Theme|null;
-    return startupTheme||(localStorage.getItem('app-theme') as Theme)||'glass-light';
+    return (localStorage.getItem('app-theme') as Theme)||startupTheme||'glass-light';
   });
   const [fullscreen,setFullscreen]=useState(false);
   const [avatarRevealed,setAvatarRevealed]=useState(false);

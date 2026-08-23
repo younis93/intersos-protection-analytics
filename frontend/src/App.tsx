@@ -81,7 +81,7 @@ export default function App() {
   const [page, setPage] = useState<Page>(pageFromUrl);
   const [theme, setTheme] = useState<Theme>(() => {
     const startupTheme = new URLSearchParams(window.location.search).get("appTheme") as Theme | null;
-    return startupTheme || (localStorage.getItem("app-theme") as Theme) || "glass-light";
+    return (localStorage.getItem("app-theme") as Theme) || startupTheme || "glass-light";
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("analytics-sidebar-collapsed") === "true");
   const [metadata, setMetadata] = useState<Metadata | null>(null);
