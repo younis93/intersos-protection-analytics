@@ -105,11 +105,13 @@ export const getExplorer = (query: ExplorerQuery, signal?: AbortSignal) =>
 export const exportExplorer = async (
   format: "csv" | "xlsx",
   query: ExplorerQuery,
+  signal?: AbortSignal,
 ) => {
   const response = await fetch(`${API}/data-explorer/export/${format}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(query),
+    signal,
   });
   if (!response.ok) {
     const issue = await response
@@ -273,11 +275,13 @@ export const exportLegalExplorer = async (
   dataset: string,
   search: string,
   filters: Record<string, string[]> = {},
+  signal?: AbortSignal,
 ) => {
   const response = await fetch(`${API}/legal/explorer-export/${format}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ dataset, search, filters }),
+    signal,
   });
   if (!response.ok) {
     const issue = await response

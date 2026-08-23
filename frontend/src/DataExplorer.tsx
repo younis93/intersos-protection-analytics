@@ -1,7 +1,7 @@
 import {useEffect,useMemo,useState} from 'react';
-import {ChevronLeft,ChevronRight,Columns3,Download,Eye,EyeOff,Filter,RotateCcw,Search,ShieldAlert} from 'lucide-react';
+import {ChevronLeft,ChevronRight,Columns3,Download,Eye,EyeOff,Filter,RotateCcw,Search,ShieldAlert,X} from 'lucide-react';
 import {exportExplorer,getExplorer,type ExplorerQuery} from './api';
-import {AppSelect,ExcelDownloadButton,formatNumber} from './components';
+import {AppSelect,formatNumber} from './components';
 import {formatTableValue} from './dateFormat';
 import type {ExplorerColumn,ExplorerFilter,ExplorerResult,Metadata} from './types';
 
@@ -12,6 +12,19 @@ const operators=(type:ExplorerColumn['type']):[string,string][]=> type==='number
     ? [['date_on','On'],['date_after','On or after'],['date_before','On or before'],['date_between','Between'],['blank','Is blank'],['not_blank','Is not blank']]
     : [['contains','Contains'],['equals','Equals'],['blank','Is blank'],['not_blank','Is not blank']];
 
+type ExplorerExportTask={preparing:boolean;error:string};
+let explorerExportTask:ExplorerExportTask={preparing:false,error:''};
+let explorerExportController:AbortController|null=null;
+const explorerExportListeners=new Set<(task:ExplorerExportTask)=>void>();
+const notifyExplorerExportTask=()=>explorerExportListeners.forEach(listener=>listener(explorerExportTask));
+const subscribeExplorerExportTask=(listener:(task:ExplorerExportTask)=>void)=>{explorerExportListeners.add(listener);return()=>{explorerExportListeners.delete(listener)}};
+const startExplorerExportTask=(query:ExplorerQuery)=>{
+  if(explorerExportTask.preparing)return;
+  const controller=new AbortController();explorerExportController=controller;explorerExportTask={preparing:true,error:''};notifyExplorerExportTask();
+  void exportExplorer('xlsx',{...query,page:1},controller.signal).catch((reason:any)=>{if(reason?.name!=='AbortError')explorerExportTask={preparing:false,error:reason?.message||'Excel export failed.'}}).finally(()=>{if(explorerExportController!==controller)return;explorerExportController=null;if(explorerExportTask.preparing)explorerExportTask={preparing:false,error:''};notifyExplorerExportTask()});
+};
+const cancelExplorerExportTask=()=>{explorerExportController?.abort();explorerExportController=null;explorerExportTask={preparing:false,error:''};notifyExplorerExportTask()};
+
 export default function DataExplorer({metadata}:{metadata:Metadata}){
   const sheets=metadata.dataExplorer?.sheets||[];
   const [sheetId,setSheetId]=useState(sheets[0]?.id||'');
@@ -19,7 +32,9 @@ export default function DataExplorer({metadata}:{metadata:Metadata}){
   const [searchInput,setSearchInput]=useState(''),[search,setSearch]=useState('');
   const [filters,setFilters]=useState<ExplorerFilter[]>([]),[sortColumn,setSortColumn]=useState<string|null>(null),[sortDirection,setSortDirection]=useState<'asc'|'desc'>('asc');
   const [hidden,setHidden]=useState<string[]>([]),[page,setPage]=useState(1),[result,setResult]=useState<ExplorerResult|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
-  const [filterOpen,setFilterOpen]=useState(false),[columnsOpen,setColumnsOpen]=useState(false),[exporting,setExporting]=useState('');
+  const [filterOpen,setFilterOpen]=useState(false),[columnsOpen,setColumnsOpen]=useState(false),[exportTask,setExportTask]=useState(explorerExportTask);
+  useEffect(()=>subscribeExplorerExportTask(setExportTask),[]);
+  useEffect(()=>{if(exportTask.error)setError(exportTask.error)},[exportTask.error]);
   useEffect(()=>{const timer=window.setTimeout(()=>setSearch(searchInput),300);return()=>window.clearTimeout(timer)},[searchInput]);
   useEffect(()=>{if(!sheetId&&sheets[0])setSheetId(sheets[0].id)},[sheetId,sheets]);
   useEffect(()=>{setFilters([]);setSortColumn(null);setHidden([]);setPage(1);setSearchInput('');setSearch('')},[sheetId]);
@@ -31,7 +46,6 @@ export default function DataExplorer({metadata}:{metadata:Metadata}){
   const updateFilter=(column:string,patch:Partial<ExplorerFilter>)=>setFilters(current=>{const found=current.find(item=>item.column===column);const next={column,operator:'contains',...found,...patch};return[...current.filter(item=>item.column!==column),next]});
   const removeFilter=(column:string)=>setFilters(current=>current.filter(item=>item.column!==column));
   const sort=(column:string)=>{if(sortColumn===column)setSortDirection(value=>value==='asc'?'desc':'asc');else{setSortColumn(column);setSortDirection('asc')}};
-  const download=async()=>{setExporting('xlsx');setError('');try{await exportExplorer('xlsx',{...query,page:1})}catch(e:any){setError(e.message)}finally{setExporting('')}};
   if(!sheet)return <div className="explorer-empty glass"><h2>No worksheets available</h2><p>The uploaded workbook does not contain a non-empty worksheet that can be displayed.</p></div>;
   const pages=Math.max(1,Math.ceil((result?.matchedRows||0)/PAGE_SIZE));
   return <div className="explorer-page">
@@ -50,7 +64,7 @@ export default function DataExplorer({metadata}:{metadata:Metadata}){
     </section>
     {error&&<div className="error glass">{error}<button onClick={()=>setError('')}>Dismiss</button></div>}
     <section className="explorer-table-card glass">
-      <header><div><h3>{sheet.name}</h3><p>{formatNumber(result?.matchedRows||0)} matched of {formatNumber(result?.totalRows||sheet.rows)} rows · {visible.length} of {sheet.columns.length} columns</p></div><div className="explorer-export"><ExcelDownloadButton className="soft" onClick={download} busy={Boolean(exporting)}/></div></header>
+      <header><div><h3>{sheet.name}</h3><p>{formatNumber(result?.matchedRows||0)} matched of {formatNumber(result?.totalRows||sheet.rows)} rows · {visible.length} of {sheet.columns.length} columns</p></div><div className="explorer-export"><button className={`soft explorer-export-button${exportTask.preparing?' is-preparing':''}`} aria-busy={exportTask.preparing} aria-label={exportTask.preparing?'Cancel Excel download':'Download Excel'} title={exportTask.preparing?'Cancel Excel download':'Download Excel'} onClick={()=>{if(exportTask.preparing)cancelExplorerExportTask();else{setError('');startExplorerExportTask(query)}}}><span className="explorer-export-content"><Download/>Excel</span>{exportTask.preparing&&<><span className="button-spinner explorer-export-spinner" aria-hidden="true"/><span className="explorer-export-cancel"><X/>Cancel</span></>}</button></div></header>
       <div className={`explorer-table-wrap ${busy?'busy':''}`}><table><thead><tr>{visible.map(column=><th key={column}><button onClick={()=>sort(column)} title="Sort column">{column}{sortColumn===column?<span>{sortDirection==='asc'?' ↑':' ↓'}</span>:null}</button></th>)}</tr></thead><tbody>{result?.rows.map((row,index)=><tr key={`${page}-${index}`}>{visible.map(column=>{const rendered=display(row[column],sheet.columns.find(item=>item.name===column)?.type==='date');return <td key={column} title={rendered}>{rendered}</td>})}</tr>)}</tbody></table>{busy&&<div className="explorer-busy">Loading…</div>}{!busy&&result?.rows.length===0&&<div className="explorer-no-results">No rows match the current search and filters.</div>}</div>
       <footer><span>Page {page} of {pages}</span><div><button className="soft" onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page<=1}><ChevronLeft/>Previous</button><button className="soft" onClick={()=>setPage(p=>Math.min(pages,p+1))} disabled={page>=pages}>Next<ChevronRight/></button></div></footer>
     </section>

@@ -139,7 +139,7 @@ const labels: Record<LegalPage, string> = {
   awareness: "Awareness Review",
   deportation: "Deportation",
   studio: "Analytics Studio",
-  detention: "Detention Cases",
+  detention: "Detention",
   explorer: "Data Explorer",
   cases: "Beneficiary Cases",
   "lawyer-intelligence": "Lawyer Overview",
@@ -1190,7 +1190,7 @@ function LegalDeportationDashboard({metadata,theme}:{metadata:LegalMetadata;them
   const dashboardFilterOptions=dash.filterOptions||{};
   const quickFields=Object.keys(dashboardFilterOptions).filter((field)=>field!=="__reviewStyle"&&(/project/i.test(field)||/date.*deportation.*knowledge/i.test(field))).sort((left,right)=>(/project.*location/i.test(left)?1:/date/i.test(left)?2:0)-(/project.*location/i.test(right)?1:/date/i.test(right)?2:0));
   const quickLabel=(field:string)=>/project.*location/i.test(field)?"Project location":/date/i.test(field)?"Date Of Deportation Knowledge":"Project";
-  return <section className={`legal-deportation-dashboard dashboard-content ${refreshing?"refreshing":""}`}><LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={clear}><div className="toolbar deportation-top-toolbar"><div className="deportation-quick-filters">{quickFields.map((field)=><CheckboxMultiSelect key={field} hideLabel label={quickLabel(field)} values={dashboardFilterOptions[field]||[]} selected={filters[field]||[]} onChange={(items)=>setFilters((current)=>({...current,[field]:items}))}/>)}</div><div className="deportation-toolbar-actions"><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft detention-filter-clear" onClick={clear} disabled={!activeCount}><RotateCcw/>Clear</button></div><div className="toolbar-metrics"><AppSelect label="Display" value={display} onChange={(value)=>setDisplay(value as "both"|"count"|"percent")} options={[["both","# + %"],["count","Count #"],["percent","Percentage %"]]}/></div></div></LegalScrollControls><ActiveFilters filters={filters} onRemove={(field,value)=>setFilters((current)=>({...current,[field]:current[field].filter((item)=>item!==value)}))}/><div className="refresh-indicator">Updating filters…</div><div className="kpi-grid">{dash.kpis.map((item)=><KpiCard key={item.label} {...item}/>)}</div><div className="dashboard-grid"><TrendCard rows={dash.trend} display={display} theme={theme} selected={filters.Month||[]} onSelect={(months,replace)=>setFilters((current)=>({...current,Month:replace?months:Array.from(new Set([...(current.Month||[]),...months]))}))} onRemove={(month)=>setFilters((current)=>({...current,Month:(current.Month||[]).filter((item)=>item!==month)}))} title="Activity over time" subtitle="Date of deportation"/>{dash.charts.map((chart)=><ChartCard key={chart.id} chart={chart} display={display} theme={theme} onSelect={selectChart}/>)}</div><DeportationRecordsTable filters={filters}/><FilterDrawer open={drawer} available={dashboardFilterOptions} filters={filters} onClose={()=>setDrawer(false)} onChange={setFilters} onReset={clear}/></section>;
+  return <section className={`legal-deportation-dashboard dashboard-content ${refreshing?"refreshing":""}`}><LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={clear}><div className="toolbar deportation-top-toolbar"><div className="deportation-quick-filters">{quickFields.map((field)=><CheckboxMultiSelect key={field} hideLabel label={quickLabel(field)} values={dashboardFilterOptions[field]||[]} selected={filters[field]||[]} onChange={(items)=>setFilters((current)=>({...current,[field]:items}))}/>)}</div><div className="deportation-toolbar-actions"><button className="soft detention-filter-clear" onClick={clear} disabled={!activeCount}><RotateCcw/>Clear</button><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button></div><div className="toolbar-metrics"><AppSelect label="Display" value={display} onChange={(value)=>setDisplay(value as "both"|"count"|"percent")} options={[["both","# + %"],["count","Count #"],["percent","Percentage %"]]}/></div></div></LegalScrollControls><ActiveFilters filters={filters} onRemove={(field,value)=>setFilters((current)=>({...current,[field]:current[field].filter((item)=>item!==value)}))}/><div className="refresh-indicator">Updating filters…</div><div className="kpi-grid">{dash.kpis.map((item)=><KpiCard key={item.label} {...item}/>)}</div><div className="dashboard-grid"><TrendCard rows={dash.trend} display={display} theme={theme} selected={filters.Month||[]} onSelect={(months,replace)=>setFilters((current)=>({...current,Month:replace?months:Array.from(new Set([...(current.Month||[]),...months]))}))} onRemove={(month)=>setFilters((current)=>({...current,Month:(current.Month||[]).filter((item)=>item!==month)}))} title="Activity over time" subtitle="Date of deportation"/>{dash.charts.map((chart)=><ChartCard key={chart.id} chart={chart} display={display} theme={theme} onSelect={selectChart}/>)}</div><DeportationRecordsTable filters={filters}/><FilterDrawer open={drawer} available={dashboardFilterOptions} filters={filters} onClose={()=>setDrawer(false)} onChange={setFilters} onReset={clear}/></section>;
 }
 
 function DeportationRecordsTable({filters}:{filters:Record<string,string[]>}){
@@ -1231,9 +1231,9 @@ function LegalAnalyticsSection({dataset,theme,state,update,onOpenCase}:{dataset:
   const toolbarFilterLabel=(column:string)=>column.replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/g,"").replace(/\s*[-–,:/]\s*$/,"").replace(/\s{2,}/g," ").trim()||"Filter";
   return <section className={`studio-fixed-section ${busy?"refreshing":""}`}>
     <LegalScrollControls filterLabel="All filters" onFilters={()=>setDrawer(true)} activeCount={active} onClear={clear}>
-    <div className="glass studio-quick-toolbar">
+      <div className="glass studio-quick-toolbar">
       <div className="studio-quick-fields">{quick.map((column)=><CheckboxMultiSelect key={column} hideLabel label={toolbarFilterLabel(column)} values={data?.filterOptions[column]||[]} selected={state.filters[column]||[]} onChange={(values)=>setFilter(column,values)}/>)}</div>
-      <div className="studio-quick-actions"><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>All filters {active>0&&<b>{active}</b>}</button><button className="soft" disabled={!active} onClick={clear}><RotateCcw/>Clear</button><button className="primary studio-excel" onClick={()=>void exportLegalExplorer("xlsx",dataset,state.search,state.filters)}><Download/>Excel</button></div>
+      <div className="studio-quick-actions"><button className="soft detention-filter-clear" disabled={!active} onClick={clear}><RotateCcw/>Clear</button><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>All filters {active>0&&<b>{active}</b>}</button><button className="primary studio-excel" onClick={()=>void exportLegalExplorer("xlsx",dataset,state.search,state.filters)}><Download/>Excel</button></div>
     </div>
     </LegalScrollControls>
     {error&&<div className="error glass">{error}</div>}
@@ -1243,6 +1243,19 @@ function LegalAnalyticsSection({dataset,theme,state,update,onOpenCase}:{dataset:
     {drawer&&<><button className="filter-backdrop" aria-label="Close Analytics Studio filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer analytics-filter-drawer"><header><div><span className="eyebrow">ANALYTICS STUDIO FILTERS</span><h2>Filter {dataset==="legalservices"?"Legal Services":dataset[0].toUpperCase()+dataset.slice(1)}</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header><label className="filter-search"><Search/><input value={filterSearch} onChange={(event)=>setFilterSearch(event.target.value)} placeholder="Search filters"/></label><div className="case-filter-scroll">{Object.entries(data?.filterOptions||{}).filter(([column])=>column.toLowerCase().includes(filterSearch.toLowerCase())).map(([column,values])=><details key={column} open={Boolean(state.filters[column]?.length)}><summary><span>{column}</span>{state.filters[column]?.length>0&&<b>{state.filters[column].length}</b>}<ChevronDown/></summary><div>{values.map((item)=><label key={item}><input type="checkbox" checked={state.filters[column]?.includes(item)||false} onChange={()=>setFilter(column,state.filters[column]?.includes(item)?state.filters[column].filter((value)=>value!==item):[...(state.filters[column]||[]),item])}/><span>{item}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!active} onClick={clear}>Clear all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {active>0&&`(${active})`}</button></footer></aside></>}
   </section>;
 }
+
+type ExplorerExportTask={preparing:boolean;error:string};
+let explorerExportTask:ExplorerExportTask={preparing:false,error:""};
+let explorerExportController:AbortController|null=null;
+const explorerExportListeners=new Set<(task:ExplorerExportTask)=>void>();
+const notifyExplorerExportTask=()=>explorerExportListeners.forEach((listener)=>listener(explorerExportTask));
+const subscribeExplorerExportTask=(listener:(task:ExplorerExportTask)=>void)=>{explorerExportListeners.add(listener);return()=>{explorerExportListeners.delete(listener)}};
+const startExplorerExportTask=(dataset:string,search:string,filters:Record<string,string[]>)=>{
+  if(explorerExportTask.preparing)return;
+  const controller=new AbortController();explorerExportController=controller;explorerExportTask={preparing:true,error:""};notifyExplorerExportTask();
+  void exportLegalExplorer("xlsx",dataset,search,filters,controller.signal).catch((reason:any)=>{if(reason?.name!=="AbortError")explorerExportTask={preparing:false,error:reason?.message||"Excel export failed."}}).finally(()=>{if(explorerExportController!==controller)return;explorerExportController=null;if(explorerExportTask.preparing)explorerExportTask={preparing:false,error:""};notifyExplorerExportTask()});
+};
+const cancelExplorerExportTask=()=>{explorerExportController?.abort();explorerExportController=null;explorerExportTask={preparing:false,error:""};notifyExplorerExportTask()};
 
 function Explorer({
   metadata,
@@ -1267,9 +1280,11 @@ function Explorer({
     [options, setOptions] = useState<{ name: string; values: string[] }[]>([]),
     [result, setResult] = useState<LegalExplorerResult | null>(null),
     [selectedRows,setSelectedRows]=useState<Map<string,Record<string,unknown>>>(new Map()),
-    [exporting, setExporting] = useState(false),
+    [exportTask,setExportTask]=useState(explorerExportTask),
     [busy, setBusy] = useState(true),
     [error, setError] = useState("");
+  useEffect(()=>subscribeExplorerExportTask(setExportTask),[]);
+  useEffect(()=>{if(exportTask.error)setError(exportTask.error)},[exportTask.error]);
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(search), 300);
     return () => window.clearTimeout(timer);
@@ -1300,14 +1315,7 @@ function Explorer({
       }));
       setPage(1);
     };
-  const download = async () => {
-    setExporting(true);
-    try {
-      await exportLegalExplorer("xlsx", dataset, search, filters);
-    } finally {
-      setExporting(false);
-    }
-  };
+  const download=async()=>{setError("");startExplorerExportTask(dataset,search,filters)};
   const displayedRows = [...(result?.rows || [])].sort(
     (left, right) => Number(selectedRows.has(String((right as any).__rowKey))) - Number(selectedRows.has(String((left as any).__rowKey))),
   );
@@ -1340,7 +1348,7 @@ function Explorer({
           <RotateCcw />
           Clear
         </button>
-        <ExcelDownloadButton className="primary" onClick={download} busy={exporting}/>
+        <button className={`primary explorer-sticky-export${exportTask.preparing?" is-preparing":""}`} aria-busy={exportTask.preparing} aria-label={exportTask.preparing?"Cancel Excel download":"Download Excel"} title={exportTask.preparing?"Cancel Excel download":"Download Excel"} onClick={()=>{if(exportTask.preparing)cancelExplorerExportTask();else download()}}><span className="explorer-sticky-export-content"><Download/>Excel</span>{exportTask.preparing&&<><span className="button-spinner explorer-sticky-export-spinner" aria-hidden="true"/><span className="explorer-sticky-export-cancel"><X/>Cancel</span></>}</button>
       </div>
       </LegalScrollControls>
       {activeCount > 0 && (
@@ -1920,7 +1928,7 @@ function DetentionCases({
       {tab!=="reconcile"&&<LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={()=>{setFilters({});setPage(1)}}>
       <div className="glass detention-toolbar">
         {quickFilters()}
-        <div className="detention-toolbar-actions"><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft detention-filter-clear" disabled={!activeCount} onClick={()=>{setFilters({});setPage(1)}}><RotateCcw/>Clear</button></div>
+        <div className="detention-toolbar-actions"><button className="soft detention-filter-clear" disabled={!activeCount} onClick={()=>{setFilters({});setPage(1)}}><RotateCcw/>Clear</button><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button></div>
       </div>
       </LegalScrollControls>}
       {tab==="analysis"&&<>
@@ -2279,7 +2287,7 @@ function Cases({
           </div>
         </div>
       )}
-      {data && (viewMode === "table" ? data.totalRows === 0 : data.cases?.length === 0) && (
+      {data && viewMode === "cards" && data.cases?.length === 0 && (
         <div className="glass legal-empty">
           <Search />
           <h2>No matching cases</h2>
