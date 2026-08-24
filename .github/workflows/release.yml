@@ -65,14 +65,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Application signing failed." }
           iscc "/DMyAppVersion=$env:APP_VERSION" "installer/INTERSOS Legal Platform.iss"
           if ($LASTEXITCODE -ne 0) { throw "Installer build failed." }
-          & $signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f certificate.pfx /p $env:SIGNING_CERTIFICATE_PASSWORD "release/INTERSOS-Legal-Platform-Setup-$env:APP_VERSION.exe"
+          & $signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f certificate.pfx /p $env:SIGNING_CERTIFICATE_PASSWORD "release/Iraq-Data-Analysis-Setup-$env:APP_VERSION.exe"
           if ($LASTEXITCODE -ne 0) { throw "Installer signing failed." }
           Remove-Item certificate.pfx -Force
       - name: Generate update manifest
-        run: python scripts/generate_update_manifest.py "$env:APP_VERSION" "${{ github.repository }}" "release/INTERSOS-Legal-Platform-Setup-$env:APP_VERSION.exe" "release/update.json"
+        run: python scripts/generate_update_manifest.py "$env:APP_VERSION" "${{ github.repository }}" "release/Iraq-Data-Analysis-Setup-$env:APP_VERSION.exe" "release/update.json"
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           generate_release_notes: true
           files: |
-            release/INTERSOS-Legal-Platform-Setup-${{ env.APP_VERSION }}.exe
+            release/Iraq-Data-Analysis-Setup-${{ env.APP_VERSION }}.exe
             release/update.json
