@@ -236,10 +236,17 @@ class CaseQuery(BaseModel):
     columns: list[str] = []
 
 
+class TableWorkbookSheet(BaseModel):
+    title: str
+    columns: list[str]
+    rows: list[dict[str, object]]
+
+
 class TableWorkbookRequest(BaseModel):
     filename: str = "table-export.xlsx"
     columns: list[str] = []
     rows: list[dict[str, object]] = []
+    sheets: list[TableWorkbookSheet] = []
 
 
 @app.get("/api/health")
@@ -486,17 +493,20 @@ def legal_case_export(request: CaseQuery):
 @app.post("/api/table-workbook")
 def table_workbook(request: TableWorkbookRequest):
     """Create a local Excel workbook for selected visible rows and pivots."""
-    if not request.columns: raise HTTPException(400,"Choose at least one table column.")
-    if len(request.rows)>10000: raise HTTPException(400,"Excel export is limited to 10,000 selected rows.")
-    output=io.BytesIO();book=Workbook();sheet=book.active;sheet.title="Data"
-    sheet.append([safe_spreadsheet_value(column) for column in request.columns])
-    for cell in sheet[1]:
-        cell.font=Font(bold=True,color="FFFFFF");cell.fill=PatternFill("solid",fgColor="2563EB");cell.alignment=Alignment(wrap_text=True,vertical="center")
-    for row in request.rows: sheet.append([safe_spreadsheet_value(row.get(column,"")) for column in request.columns])
-    sheet.freeze_panes="A2";sheet.auto_filter.ref=sheet.dimensions
-    for index,column in enumerate(request.columns,1):
-        values=[str(row.get(column,"") or "") for row in request.rows[:500]]
-        sheet.column_dimensions[get_column_letter(index)].width=min(42,max(12,len(column)+2,*(len(value)+2 for value in values)))
+    sheets=request.sheets or [TableWorkbookSheet(title="Data",columns=request.columns,rows=request.rows)]
+    if any(not item.columns for item in sheets): raise HTTPException(400,"Choose at least one table column.")
+    if sum(len(item.rows) for item in sheets)>10000: raise HTTPException(400,"Excel export is limited to 10,000 selected rows.")
+    output=io.BytesIO();book=Workbook();book.remove(book.active)
+    for item in sheets:
+        sheet=book.create_sheet(re.sub(r"[\\/*?:\[\]]","_",item.title)[:31] or "Data")
+        sheet.append([safe_spreadsheet_value(column) for column in item.columns])
+        for cell in sheet[1]:
+            cell.font=Font(bold=True,color="FFFFFF");cell.fill=PatternFill("solid",fgColor="2563EB");cell.alignment=Alignment(wrap_text=True,vertical="center")
+        for row in item.rows: sheet.append([safe_spreadsheet_value(row.get(column,"")) for column in item.columns])
+        sheet.freeze_panes="A2";sheet.auto_filter.ref=sheet.dimensions
+        for index,column in enumerate(item.columns,1):
+            values=[str(row.get(column,"") or "") for row in item.rows[:500]]
+            sheet.column_dimensions[get_column_letter(index)].width=min(42,max(12,len(column)+2,*(len(value)+2 for value in values)))
     book.save(output)
     name=re.sub(r"[^A-Za-z0-9._ -]","_",request.filename or "table-export.xlsx")
     if not name.lower().endswith(".xlsx"): name+= ".xlsx"
@@ -505,6 +515,12 @@ def table_workbook(request: TableWorkbookRequest):
 
 @app.post("/api/legal/lawyers")
 def legal_lawyers(request:LegalQuery): return require_legal_store().lawyer_summary(request.filters)
+
+
+@app.post("/api/legal/representation-case-load/{status}")
+def legal_representation_case_load(status:str,request:LegalQuery):
+    if status not in {"open","closed"}:raise HTTPException(404,"Unknown case load status")
+    return require_legal_store().representation_case_load(request.filters,status)
 
 
 @app.post("/api/legal/intelligence/{page}")

@@ -602,6 +602,7 @@ path.detention-map-region{stroke:color-mix(in srgb,var(--muted) 32%,var(--line))
 .lawyer-overview-page .lawyer-section:not(.lawyer-workload) .legal-table-wrap th:first-child,.lawyer-overview-page .lawyer-section:not(.lawyer-workload) .legal-table-wrap td:first-child{position:sticky;left:0;z-index:3;width:130px;min-width:130px;background:var(--panel-strong)}
 .lawyer-overview-page .lawyer-section:not(.lawyer-workload) .legal-table-wrap th:nth-child(2),.lawyer-overview-page .lawyer-section:not(.lawyer-workload) .legal-table-wrap td:nth-child(2){position:sticky;left:130px;z-index:3;background:var(--panel-strong)}
 .lawyer-overview-page .lawyer-section .legal-table-wrap th:first-child,.lawyer-overview-page .lawyer-section .legal-table-wrap th:nth-child(2){z-index:4}
+.lawyer-overview-page .representation-case-load.documents-hidden .legal-table-wrap th:nth-child(2),.lawyer-overview-page .representation-case-load.documents-hidden .legal-table-wrap td:nth-child(2){position:static;left:auto;background:transparent;z-index:auto}.caseload-count{border:0;background:transparent;color:var(--blue);font:inherit;font-weight:700;cursor:pointer;padding:2px 0;text-decoration:underline;text-underline-offset:3px}.caseload-count:hover{color:var(--ink)}
 
 /* Legal Platform design system: a shared, quiet rhythm across every workspace page. */
 .legal-shell{--lp-gap:16px;--lp-panel-padding:18px;--lp-radius:18px;--lp-control-height:48px;--lp-table-row:44px;--lp-heading-size:16px}
@@ -723,6 +724,74 @@ path.detention-map-region{stroke:color-mix(in srgb,var(--muted) 32%,var(--line))
 :root[data-theme='unhcr'] .topbar{background:#f3f7fa}
 :root[data-theme='executive'] .topbar{background:#f4f2ed}
 :root[data-theme='multicolor'] .topbar{background:#f3f5f9}
+
+/* Keep sidebar controls legible and native to the solid-brand themes. */
+:root[data-theme='unhcr'] .sidebar-workspace-controls .soft,
+:root[data-theme='unhcr'] .sidebar-workspace-controls .data-source-control{
+  border-color:rgba(255,255,255,.28)!important;
+  background:rgba(255,255,255,.13)!important;
+  color:#fff;
+}
+:root[data-theme='unhcr'] .sidebar-workspace-controls .data-source-control :is(.app-select-label,.app-select-trigger,.app-select-trigger svg){color:#fff}
+:root[data-theme='unhcr'] .sidebar-workspace-controls :is(.soft,.data-source-control):hover,
+:root[data-theme='unhcr'] .sidebar-workspace-controls .data-source-control.open{
+  border-color:rgba(255,255,255,.7)!important;
+  background:rgba(255,255,255,.22)!important;
+  box-shadow:none;
+}
+:root[data-theme='executive'] .sidebar-workspace-controls .soft,
+:root[data-theme='executive'] .sidebar-workspace-controls .data-source-control{
+  border-color:rgba(255,255,255,.22)!important;
+  background:rgba(255,255,255,.09)!important;
+  color:#fff;
+}
+:root[data-theme='executive'] .sidebar-workspace-controls .data-source-control :is(.app-select-label,.app-select-trigger,.app-select-trigger svg){color:rgba(255,255,255,.9)}
+:root[data-theme='executive'] .sidebar-workspace-controls :is(.soft,.data-source-control):hover,
+:root[data-theme='executive'] .sidebar-workspace-controls .data-source-control.open{
+  border-color:rgba(255,255,255,.58)!important;
+  background:rgba(255,255,255,.16)!important;
+  box-shadow:none;
+}
+:root[data-theme='executive'] .legal-sidebar-utilities button{
+  border-color:rgba(255,255,255,.22);
+  background:rgba(255,255,255,.09);
+  color:#fff;
+}
+:root[data-theme='executive'] .legal-sidebar-utilities button:hover,
+:root[data-theme='executive'] .legal-sidebar-utilities button:focus-visible{
+  border-color:rgba(255,255,255,.58);
+  background:rgba(255,255,255,.16);
+  color:#fff;
+}
+:root[data-theme='executive'] .sidebar nav button:hover,
+:root[data-theme='executive'] .sidebar nav button:focus-visible{
+  background:rgba(255,255,255,.16);
+  color:#fff;
+  box-shadow:none;
+}
+:root[data-theme='executive'] .sidebar nav button:hover svg,
+:root[data-theme='executive'] .sidebar nav button:focus-visible svg{color:#fff}
+
+/* Home uses the active theme accent instead of the original blue and violet defaults. */
+:root[data-theme='unhcr'] .workspace-card,
+:root[data-theme='executive'] .workspace-card{--card-color:var(--blue)}
+:root[data-theme='unhcr'] .welcome-logo-word,
+:root[data-theme='executive'] .welcome-logo-word{color:var(--blue)}
+
+/* The duplicate-name slider keeps its hover feedback within the active theme palette. */
+.professional-review-toolbar .name-similarity-slider input:hover::-webkit-slider-thumb{
+  background:color-mix(in srgb,var(--blue) 82%,var(--ink));
+  box-shadow:0 4px 11px color-mix(in srgb,var(--blue) 52%,transparent);
+}
+.professional-review-toolbar .name-similarity-slider input:hover::-moz-range-thumb{
+  background:color-mix(in srgb,var(--blue) 82%,var(--ink));
+  box-shadow:0 4px 11px color-mix(in srgb,var(--blue) 52%,transparent);
+}
+:root[data-theme='executive'] .professional-review-toolbar .name-similarity-slider input:hover::-webkit-slider-thumb,
+:root[data-theme='executive'] .professional-review-toolbar .name-similarity-slider input:hover::-moz-range-thumb{
+  background:#b8893d;
+  box-shadow:0 4px 11px rgba(155,114,42,.5);
+}
 
 /* Review pages: the scroll sentinel is non-visual, so it must not create a second section gap. */
 .legal-content:has(.review-finding-selector){position:relative}

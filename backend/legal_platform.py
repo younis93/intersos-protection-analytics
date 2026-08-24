@@ -1697,6 +1697,51 @@ class LegalStore:
         ]
         payload={"rows":result,"monthlyAssessments":monthly_assessments,"breakdowns":breakdowns,"charts":charts,"kpis":kpis,"filterOptions":{key:sorted(values) for key,values in options.items()},"activeFilters":filters,"availability":{name:name in self.frames for name in FILES}};self._lawyer_cache[cache_key]=payload;return payload
 
+    def representation_case_load(self, filters:dict[str,list[str]]|None=None, status:str="open") -> dict[str,Any]:
+        """Aggregate representation services by lawyer, document type, and the applicable service month."""
+        filters=filters or {}
+        services=self.frames.get("legalservices",pd.DataFrame()).copy()
+        if services.empty:return {"status":status,"months":[],"rows":[]}
+        filter_hints={"lawyer":("Lawyers","Lawyer"),"createdBy":("Original Created By","Created By","Created by"),"project":("Projects - المشروع","Project"),"location":("Project Location","Project location","Governorate")}
+        service_type=_find(list(services.columns),"Type of Service Provided","Type of Legal Service Needed")
+        service_status=_find(list(services.columns),"Service Status","Status")
+        date_column=_find(list(services.columns),"Date of Service Provision") if status=="open" else _find(list(services.columns),"Date Service Completed","Date of Service Close")
+        if not service_type or not service_status or not date_column:return {"status":status,"months":[],"rows":[]}
+        for key,selections in filters.items():
+            if not selections:continue
+            if key=="assessmentMonth":
+                months=pd.to_datetime(services[date_column],errors="coerce",dayfirst=True).dt.strftime("%Y-%m")
+                services=services[months.isin(selections)]
+                continue
+            column=_find(list(services.columns),*filter_hints.get(key,(key,)))
+            if column:services=services[services[column].fillna("").astype(str).str.strip().isin(selections)]
+        representation=services[service_type].fillna("").astype(str).str.contains("representation",case=False,regex=False)
+        state=services[service_status].fillna("").astype(str)
+        state_match=state.str.contains(r"in[ -]?(?:progress|process)",case=False,regex=True) if status=="open" else state.str.contains("closed|completed",case=False,regex=True)
+        working=services[representation&state_match].copy()
+        working["_month"]=pd.to_datetime(working[date_column],errors="coerce",dayfirst=True).dt.strftime("%Y-%m")
+        working=working[working["_month"].notna()]
+        lawyer=_find(list(working.columns),"Lawyers","Lawyer")
+        document=_find(list(working.columns),"Type of Document")
+        service_id=_find(list(working.columns),"Service ID")
+        if not lawyer:return {"status":status,"months":[],"rows":[]}
+        working["_lawyer"]=working[lawyer].fillna("").astype(str).str.strip().replace("","Unassigned")
+        working["_document"]=working[document].fillna("").astype(str).str.strip().replace("","Blank") if document else "Blank"
+        working["_service"]=working[service_id].map(clean_id) if service_id else working.index.astype(str)
+        beneficiary=_find(list(working.columns),"Beneficiary ID","Case ID")
+        assessment=_find(list(working.columns),"Assessment ID")
+        provision_date=_find(list(working.columns),"Date of Service Provision")
+        close_date=_find(list(working.columns),"Date Service Completed","Date of Service Close")
+        details:dict[tuple[str,str,str],list[dict[str,str]]]=defaultdict(list)
+        for _,record in working.iterrows():
+            key=(str(record["_lawyer"]),str(record["_document"]),str(record["_month"]))
+            details[key].append({"serviceId":str(record["_service"]),"beneficiaryId":str(record[beneficiary]) if beneficiary else "","assessmentId":str(record[assessment]) if assessment else "","lawyer":key[0],"document":key[1],"status":str(record[service_status]),"provisionDate":str(record[provision_date]) if provision_date else "","closeDate":str(record[close_date]) if close_date else "","month":key[2]})
+        grouped=working.groupby(["_lawyer","_document","_month"])["_service"].nunique()
+        rows=[]
+        for (person,doc,month),count in grouped.items():
+            key=(str(person),str(doc),str(month));rows.append({"lawyer":key[0],"document":key[1],"month":key[2],"count":int(count),"services":details[key]})
+        return {"status":status,"months":sorted(working["_month"].unique()),"rows":rows}
+
     def intelligence(self, page:str, filters:dict[str,list[str]]|None=None) -> dict[str,Any]:
         """Cross-dataset summaries with distinct source denominators and no join multiplication."""
         filters=filters or {};cache_key=(page,tuple(sorted((key,tuple(sorted(values))) for key,values in filters.items() if values)))
@@ -1729,6 +1774,7 @@ class LegalStore:
         service_type=_find(list(services.columns),"Type of Service Provided","Type of Legal Service Needed")
         representation=services[services[service_type].fillna("").astype(str).str.contains("representation",case=False,regex=False)] if service_type else services.iloc[0:0]
         representation_completed=int(completed_mask.reindex(representation.index,fill_value=False).sum())
+        representation_in_process=int(representation[service_status].fillna("").astype(str).str.contains(r"in[ -]?(?:progress|process)",case=False,regex=True).sum()) if service_status else 0
         fees=frames["legalfees"];amount_col=_find(list(fees.columns),"Amount Spent","Total Cost")
         amounts=pd.to_numeric(fees[amount_col].astype(str).str.replace(r"[^0-9.\-]","",regex=True),errors="coerce").fillna(0) if amount_col else pd.Series(0,index=fees.index,dtype=float)
         total_fees=float(amounts.sum())
@@ -1863,6 +1909,7 @@ class LegalStore:
             {"label":"Beneficiaries","value":counts["beneficiaries"],"format":"number"},{"label":"Assessments","value":counts["assessments"],"format":"number"},
             {"label":"Legal services","value":counts["services"],"format":"number"},{"label":"Completed services","value":completed_services,"format":"number"},
             {"label":"Representation services","value":len(representation),"format":"number"},{"label":"Representation completed","value":representation_completed,"format":"number"},
+            {"label":"In-Process Legal Representation","value":representation_in_process,"format":"number"},
             {"label":"Follow-ups","value":counts["followups"],"format":"number"},{"label":"Legal fees","value":total_fees,"format":"currency"},
             {"label":"Deportations","value":counts["deportations"],"format":"number"},{"label":"Awareness participants","value":counts["awareness"],"format":"number"},
         ]

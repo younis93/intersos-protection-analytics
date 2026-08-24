@@ -48,6 +48,7 @@ import {
   exportLegalIndicators,
   exportLegalNarrative,
   exportTableWorkbook,
+  exportTableWorkbookSheets,
   checkForUpdates,
   getLegalCase,
   getLegalCaseFilters,
@@ -56,6 +57,7 @@ import {
   getLegalDetention,
   getDetentionWorkbookSheets,
   getLegalLawyers,
+  getRepresentationCaseLoad,
   getLegalMetadata,
   getLegalDeportationDashboard,
   getLegalStudio,
@@ -78,7 +80,7 @@ import {
   uploadLegalFolder,
 } from "./api";
 import Studio from "./Studio";
-import type { LegalIntelligence } from "./api";
+import type { LegalIntelligence, RepresentationCaseLoad, RepresentationCaseLoadService } from "./api";
 import type { Dashboard, DuplicateExclusion, IndicatorReport, IndicatorReportGroup, IndicatorReportItem, IndicatorSection, LegalAnalyticsDashboard, LegalExplorerResult, LegalFlag, LegalMetadata, LegalReview, Metadata, Theme, UpdateCheck, UpdateStatus } from "./types";
 import { ActiveFilters, AppSelect, ChartCard, CheckboxMultiSelect, ExcelDownloadButton, FilterDrawer, formatProjectLabel, KpiCard, TrendCard } from "./components";
 import {formatTableValue} from "./dateFormat";
@@ -2765,7 +2767,7 @@ function IntelligencePage({page,filters,setFilters}:{page:IntelligencePageId;fil
       {filterDrawer&&<><button className="indicator-filter-drawer-backdrop" aria-label="Close filters" onClick={()=>setFilterDrawer(false)}/><aside className="indicator-filter-drawer glass"><header><div><span>LAWYER OVERVIEW FILTERS</span><h2>Filter Lawyer Overview</h2></div><button className="icon" onClick={()=>setFilterDrawer(false)} aria-label="Close filters"><X/></button></header><div className="indicator-filter-drawer-controls">{filterControls}</div><footer><button className="soft" disabled={!activeFilters} onClick={()=>setFilters({})}>Clear all</button></footer></aside></>}
       <section className="intelligence-kpis">{data.kpis.map((item)=><article className="glass" key={item.label}><span>{item.label}</span><strong>{format(item)}</strong><small>{item.label==="Awareness participants"?"Reported separately from case beneficiaries":"Distinct source records"}</small></article>)}</section>
       <section className="glass intelligence-panel intelligence-operational-mix lawyer-section"><header><div><span className="eyebrow">SERVICE DELIVERY PROFILE</span><h3>Service delivery profile</h3></div><small>Leading distribution categories in the current selection</small></header><div className="operational-mix-grid">{data.breakdowns.map((group)=>{const total=Math.max(group.total,1);return <article key={group.title}><strong>{group.title}</strong>{group.items.slice(0,5).map((item)=><div key={item.label}><span title={item.label}>{item.label}</span><b><em>{item.value.toLocaleString()}</em><small>{((item.value/total)*100).toFixed(1)}%</small></b></div>)}</article>})}</div></section>
-      <Lawyers data={data.lawyerSummary} workload={data.lawyers} showAwareness={data.kpis.some((item)=>item.label==="Awareness participants")}/>
+      <Lawyers data={data.lawyerSummary} workload={data.lawyers} showAwareness={data.kpis.some((item)=>item.label==="Awareness participants")} filters={filters}/>
     </>}
   </div>;
 }
@@ -2909,7 +2911,24 @@ function LawyerChart({ chart }: { chart: LawyerData["charts"][number] }) {
   );
 }
 
-function Lawyers({ data, workload, showAwareness }: { data: Pick<LawyerData,"rows"|"monthlyAssessments"|"charts">; workload:LegalIntelligence["lawyers"]; showAwareness:boolean }) {
+function RepresentationCaseLoadTable({filters}:{filters:Record<string,string[]>}){
+  const [status,setStatus]=useState<"open"|"closed">("open"),[showDocuments,setShowDocuments]=useState(true),[data,setData]=useState<RepresentationCaseLoad|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(""),[drill,setDrill]=useState<{title:string;services:RepresentationCaseLoadService[]}|null>(null);
+  useEffect(()=>{let active=true;setBusy(true);setError("");getRepresentationCaseLoad(status,filters).then((result)=>{if(active)setData(result)}).catch((reason)=>active&&setError(reason.message||"Unable to load legal service case load.")).finally(()=>active&&setBusy(false));return()=>{active=false}},[status,filters]);
+  const buildTable=(source:RepresentationCaseLoad|null)=>{
+    const months=source?.months||[],grouped=new Map<string,{lawyer:string;document:string;values:Record<string,number>;total:number;services:RepresentationCaseLoadService[]}>();
+    for(const item of source?.rows||[]){const key=showDocuments?`${item.lawyer}\u0000${item.document}`:item.lawyer;const current=grouped.get(key)||{lawyer:item.lawyer,document:item.document,values:{},total:0,services:[]};current.values[item.month]=(current.values[item.month]||0)+item.count;current.total+=item.count;current.services.push(...item.services);grouped.set(key,current)}
+    return {months,rows:Array.from(grouped.values()).sort((a,b)=>a.lawyer.localeCompare(b.lawyer)||a.document.localeCompare(b.document))};
+  };
+  const table=useMemo(()=>buildTable(data),[data,showDocuments]);
+  const totalLabel=status==="open"?"Open Representation Services":"Closed Representation Services";
+  const workbookSheet=(sheetStatus:"open"|"closed",source:RepresentationCaseLoad)=>{const sheet=buildTable(source),label=sheetStatus==="open"?"Open Representation Services":"Closed Representation Services",max=Math.max(1,...sheet.rows.map((row)=>row.total)),columns=["Lawyer Name",...(showDocuments?["Type of Documents"]:[]),...sheet.months,label,"Average / month","Workload signal"],rows=sheet.rows.map((row)=>({"Lawyer Name":row.lawyer,...(showDocuments?{"Type of Documents":row.document}:{}),...Object.fromEntries(sheet.months.map((month)=>[month,row.values[month]||""])),[label]:row.total,"Average / month":(row.total/Math.max(sheet.months.length,1)).toFixed(1),"Workload signal":`${Math.round(row.total/max*100)}%`}));return {title:sheetStatus==="open"?"Open Cases":"Closed Cases",columns,rows}};
+  const exportWorkbook=async()=>{const [open,closed]=await Promise.all([getRepresentationCaseLoad("open",filters),getRepresentationCaseLoad("closed",filters)]);await exportTableWorkbookSheets("representation-caseload.xlsx",[workbookSheet("open",open),workbookSheet("closed",closed)])};
+  const workloadMax=Math.max(1,...table.rows.map((row)=>row.total));
+  const openDrill=(title:string,services:RepresentationCaseLoadService[])=>setDrill({title,services});
+  return <><section className={`glass intelligence-panel lawyer-section representation-case-load ${showDocuments?"":"documents-hidden"}`}><header><div><span className="eyebrow">LEGAL SERVICES CASELOAD</span><h3>Representation caseload by lawyer</h3></div><div className="pivot-actions"><button className={status==="open"?"primary":"soft"} onClick={()=>setStatus("open")}>Open cases</button><button className={status==="closed"?"primary":"soft"} onClick={()=>setStatus("closed")}>Closed cases</button><button className="soft" onClick={()=>setShowDocuments((value)=>!value)}>{showDocuments?"Hide Documents":"Show Documents"}</button><ExcelDownloadButton className="primary" onClick={exportWorkbook} disabled={busy}/></div></header><small>{status==="open"?"Open representation services, grouped by the month the service was provided. Select a number to view its services.":"Completed or closed representation services, grouped by the month the service was closed. Select a number to view its services."}</small>{error&&<div className="error">{error}</div>}<div className="legal-table-wrap"><table><thead><tr><th>Lawyer Name</th>{showDocuments&&<th>Type of Documents</th>}{table.months.map((month)=><th key={month}>{month}</th>)}<th>{totalLabel}</th><th>Average / month</th><th>Workload signal</th></tr></thead><tbody>{table.rows.map((row)=><tr key={`${row.lawyer}-${row.document}`}><td><strong>{row.lawyer}</strong></td>{showDocuments&&<td>{row.document}</td>}{table.months.map((month)=><td key={month}>{row.values[month]?<button className="caseload-count" onClick={()=>openDrill(`${row.lawyer} - ${month}`,row.services.filter((service)=>service.month===month))}>{row.values[month]}</button>:""}</td>)}<td><button className="caseload-count" onClick={()=>openDrill(row.lawyer,row.services)}><strong>{row.total}</strong></button></td><td>{(row.total/Math.max(table.months.length,1)).toFixed(1)}</td><td><i className="score-bar"><b style={{width:`${row.total/workloadMax*100}%`}}/></i></td></tr>)}{!busy&&!table.rows.length&&<tr><td colSpan={4+table.months.length+(showDocuments?1:0)}>No matching representation services.</td></tr>}</tbody></table></div></section>{drill&&createPortal(<div className="indicator-modal" role="dialog" aria-modal="true" aria-label="Representation service details"><button className="case-modal-backdrop" aria-label="Close service details" onClick={()=>setDrill(null)}/><section className="indicator-modal-panel"><header><div><span>LEGAL SERVICES DRILL-DOWN</span><h2>Matching representation services</h2><p>{drill.title} - {drill.services.length.toLocaleString()} service{drill.services.length===1?"":"s"}</p></div><button className="icon" onClick={()=>setDrill(null)} aria-label="Close service details"><X/></button></header><div className="indicator-modal-scroll"><table><thead><tr><th>Service ID</th><th>Beneficiary ID</th><th>Assessment ID</th><th>Lawyer</th><th>Document</th><th>Status</th><th>Service provided</th><th>Service closed</th></tr></thead><tbody>{drill.services.map((service)=><tr key={service.serviceId}><td>{service.serviceId}</td><td>{service.beneficiaryId}</td><td>{service.assessmentId}</td><td>{service.lawyer}</td><td>{service.document}</td><td>{service.status}</td><td>{service.provisionDate}</td><td>{service.closeDate}</td></tr>)}</tbody></table></div></section></div>,document.body)}</>;
+}
+
+function Lawyers({ data, workload, showAwareness, filters }: { data: Pick<LawyerData,"rows"|"monthlyAssessments"|"charts">; workload:LegalIntelligence["lawyers"]; showAwareness:boolean; filters:Record<string,string[]> }) {
   const assessmentMonths = useMemo(
       () => Array.from(new Set(data.monthlyAssessments.map((r) => r.month))).sort(),
       [data.monthlyAssessments],
@@ -2919,17 +2938,20 @@ function Lawyers({ data, workload, showAwareness }: { data: Pick<LawyerData,"row
       [data.monthlyAssessments],
     );
   const workloadMax=Math.max(1,...workload.map((row)=>row.assessments));
+  const exportWorkload=()=>{const columns=["Project","Lawyer","Assessments","Average / month","Services","Completed","Completion","Follow-ups","Fee records",...(showAwareness?["Awareness"]:[])],rows=workload.filter((row)=>row.assessments>0).map((row)=>({Project:formatProjectLabel(row.project),Lawyer:row.lawyer,Assessments:row.assessments,"Average / month":row.monthlyAverage.toFixed(1),Services:row.services,Completed:row.completedServices,Completion:`${(row.completionRate*100).toFixed(0)}%`,"Follow-ups":row.followups,"Fee records":row.fees,...(showAwareness?{Awareness:row.awareness}:{})}));return exportTableWorkbook("lawyer-workload.xlsx",columns,rows)};
+  const exportMonthlyAssessments=()=>{const columns=["Lawyer",...assessmentMonths,"Average / month"],rows=assessmentLawyers.map((lawyer)=>{const lawyerRows=data.monthlyAssessments.filter((row)=>row.lawyer===lawyer);return {Lawyer:lawyer,...Object.fromEntries(assessmentMonths.map((month)=>[month,lawyerRows.find((row)=>row.month===month)?.count||""])),"Average / month":(lawyerRows[0]?.average||0).toFixed(1)}});return exportTableWorkbook("monthly-assessments-by-lawyer.xlsx",columns,rows)};
   return <div className="lawyer-dashboard-sections">
       <div className="lawyer-chart-grid">
         {data.charts.map((chart) => (
           <LawyerChart key={chart.title} chart={chart} />
         ))}
       </div>
-      <section className="glass intelligence-panel lawyer-section"><header><div><span className="eyebrow">TEAM BENCHMARK</span><h3>Lawyer workload</h3></div><small>Grouped by project</small></header><div className="legal-table-wrap"><table><thead><tr><th>Project</th><th>Lawyer</th><th>Assessments</th><th>Average / month</th><th>Services</th><th>Completed</th><th>Completion</th><th>Follow-ups</th><th>Fee records</th>{showAwareness&&<th>Awareness</th>}<th>Workload signal</th></tr></thead><tbody>{workload.filter((row)=>row.assessments>0).map((row)=><tr key={`${row.project}-${row.lawyer}`}><td><strong>{formatProjectLabel(row.project)}</strong></td><td>{row.lawyer}</td><td>{row.assessments}</td><td>{row.monthlyAverage.toFixed(1)}</td><td>{row.services}</td><td>{row.completedServices}</td><td>{(row.completionRate*100).toFixed(0)}%</td><td>{row.followups}</td><td>{row.fees}</td>{showAwareness&&<td>{row.awareness}</td>}<td><i className="score-bar"><b style={{width:`${row.assessments/workloadMax*100}%`}}/></i></td></tr>)}</tbody></table></div></section>
+      <section className="glass intelligence-panel lawyer-section"><header><div><span className="eyebrow">TEAM BENCHMARK</span><h3>Lawyer workload</h3></div><div className="pivot-actions"><small>Grouped by project</small><ExcelDownloadButton className="primary" onClick={exportWorkload} disabled={!workload.some((row)=>row.assessments>0)}/></div></header><div className="legal-table-wrap"><table><thead><tr><th>Project</th><th>Lawyer</th><th>Assessments</th><th>Average / month</th><th>Services</th><th>Completed</th><th>Completion</th><th>Follow-ups</th><th>Fee records</th>{showAwareness&&<th>Awareness</th>}<th>Workload signal</th></tr></thead><tbody>{workload.filter((row)=>row.assessments>0).map((row)=><tr key={`${row.project}-${row.lawyer}`}><td><strong>{formatProjectLabel(row.project)}</strong></td><td>{row.lawyer}</td><td>{row.assessments}</td><td>{row.monthlyAverage.toFixed(1)}</td><td>{row.services}</td><td>{row.completedServices}</td><td>{(row.completionRate*100).toFixed(0)}%</td><td>{row.followups}</td><td>{row.fees}</td>{showAwareness&&<td>{row.awareness}</td>}<td><i className="score-bar"><b style={{width:`${row.assessments/workloadMax*100}%`}}/></i></td></tr>)}</tbody></table></div></section>
+      <RepresentationCaseLoadTable filters={filters}/>
       <div className="glass legal-table-card lawyer-workload lawyer-section">
         <div className="legal-card-heading">
           <div><strong>Monthly assessments by lawyer</strong></div>
-          <small>Distinct assessments dated January 2026 or later · average uses all displayed months</small>
+          <div className="pivot-actions"><small>Distinct assessments dated January 2026 or later · average uses all displayed months</small><ExcelDownloadButton className="primary" onClick={exportMonthlyAssessments} disabled={!assessmentLawyers.length}/></div>
         </div>
         <div className="legal-table-wrap">
           <table>

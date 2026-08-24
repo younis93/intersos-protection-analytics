@@ -33,6 +33,30 @@ def test_optional_files_are_not_required_and_cleanup_is_applied():
     assert dates[1]["Date of Identification / تاريخ التحديد"]=="2026-02-01"
 
 
+def test_representation_case_load_uses_service_status_and_the_correct_event_month():
+    payload=required_payload()
+    payload["legalservices"]=csv(**{
+        "Service ID":["S1","S2","S3","S4","S5"],
+        "Lawyers":["Lawyer A","Lawyer A","Lawyer A","Lawyer B","Lawyer B"],
+        "Type of Service Provided":["Legal Representation"]*4+["Legal Counselling"],
+        "Service Status":["In-Process","Completed","Closed","In-Process","In-Process"],
+        "Type of Document":["Court Verdict","ID Card","Passport","Court Verdict","ID Card"],
+        "Date of Service Provision":["05/01/2026","06/02/2026","07/03/2026","invalid","08/01/2026"],
+        "Date Service Completed":["","10/02/2026","11/03/2026","12/04/2026",""],
+    })
+    store=LegalStore.from_files(payload,"test")
+    open_load=store.representation_case_load(status="open")
+    assert open_load["months"]==["2026-01"]
+    assert [{key:value for key,value in row.items() if key!="services"} for row in open_load["rows"]]==[{"lawyer":"Lawyer A","document":"Court Verdict","month":"2026-01","count":1}]
+    assert open_load["rows"][0]["services"][0]["serviceId"]=="S1"
+    closed_load=store.representation_case_load(status="closed")
+    assert closed_load["months"]==["2026-02","2026-03"]
+    assert [{key:value for key,value in row.items() if key!="services"} for row in closed_load["rows"]]==[
+        {"lawyer":"Lawyer A","document":"ID Card","month":"2026-02","count":1},
+        {"lawyer":"Lawyer A","document":"Passport","month":"2026-03","count":1},
+    ]
+
+
 def test_review_export_neutralizes_spreadsheet_formulas():
     payload=required_payload()
     frame=pd.read_csv(io.BytesIO(payload["beneficiaries"]),dtype=object)

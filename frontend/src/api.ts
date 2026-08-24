@@ -302,6 +302,11 @@ export const exportTableWorkbook = async (filename:string,columns:string[],rows:
   if(!response.ok){const issue=await response.json().catch(()=>({detail:response.statusText}));throw new Error(issue.detail||"Excel export failed");}
   const url=URL.createObjectURL(await response.blob()),link=document.createElement("a");link.href=url;link.download=filename.endsWith(".xlsx")?filename:`${filename}.xlsx`;link.click();window.setTimeout(()=>URL.revokeObjectURL(url),1500);
 };
+export const exportTableWorkbookSheets = async (filename:string,sheets:{title:string;columns:string[];rows:Record<string,unknown>[]}[]) => {
+  const response=await fetch(`${API}/table-workbook`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename,sheets})});
+  if(!response.ok){const issue=await response.json().catch(()=>({detail:response.statusText}));throw new Error(issue.detail||"Excel export failed");}
+  const url=URL.createObjectURL(await response.blob()),link=document.createElement("a");link.href=url;link.download=filename.endsWith(".xlsx")?filename:`${filename}.xlsx`;link.click();window.setTimeout(()=>URL.revokeObjectURL(url),1500);
+};
 export const getLegalCase = (
   query: string,
   filters: Record<string, string[]> = {},
@@ -375,6 +380,12 @@ export const getLegalLawyers = (filters: Record<string, string[]> = {}) =>
       availability: Record<string, boolean>;
     }>,
   );
+export type RepresentationCaseLoadService = {serviceId:string;beneficiaryId:string;assessmentId:string;lawyer:string;document:string;status:string;provisionDate:string;closeDate:string;month:string};
+export type RepresentationCaseLoad = {status:"open"|"closed";months:string[];rows:{lawyer:string;document:string;month:string;count:number;services:RepresentationCaseLoadService[]}[]};
+export const getRepresentationCaseLoad = (status:"open"|"closed", filters: Record<string, string[]> = {}) =>
+  fetch(`${API}/legal/representation-case-load/${status}`, {
+    method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filters}),
+  }).then(parse<RepresentationCaseLoad>);
 export type LegalIntelligence = {
   page: string;
   period: string;
