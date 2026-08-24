@@ -3676,13 +3676,29 @@ export default function LegalPlatform() {
           ) : !metadata?.ready && metadata?.loading ? (
             <LegalSkeleton variant="overview" />
           ) : !metadata?.ready ? (
-            <div className="glass legal-empty">
-              <FolderOpen />
-              <h2>{metadata?.warnings?.length ? "Last Legal Platform source unavailable" : "Select a Legal Platform data folder"}</h2>
-              <p>
-                {metadata?.warnings?.[0] || "Required: beneficiaries.csv, assessments.csv and legalservices.csv. Optional files can be added when available."}
-              </p>
-            </div>
+            <section className="glass legal-import-source" aria-labelledby="import-data-source-title">
+              <header>
+                <span className="legal-import-source-icon"><Database/></span>
+                <div>
+                  <span className="eyebrow">DATA SOURCE</span>
+                  <h2 id="import-data-source-title">Import Legal Platform data</h2>
+                  <p>Choose a folder or individual CSV files to begin your data review and analysis.</p>
+                </div>
+              </header>
+              <div className="legal-import-source-options">
+                <button type="button" className="legal-import-source-option" onClick={()=>void selectFolder()} disabled={uploading}>
+                  <FolderOpen/>
+                  <span><strong>Select data folder</strong><small>Load all supported CSV files from one folder.</small></span>
+                  <ArrowRight/>
+                </button>
+                <button type="button" className="legal-import-source-option" onClick={()=>void selectFiles()} disabled={uploading}>
+                  <FileText/>
+                  <span><strong>Select CSV files</strong><small>Choose individual source files from different locations.</small></span>
+                  <ArrowRight/>
+                </button>
+              </div>
+              <footer><CheckCircle2/><span><strong>Required files:</strong> beneficiaries, assessments, and legal services. Add optional files whenever available.</span></footer>
+            </section>
           ) : page === "overview" ? (
             <Overview metadata={metadata} theme={theme as Theme} />
           ) : [
