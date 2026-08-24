@@ -71,7 +71,7 @@ if not errorlevel 1 (
 )
 
 echo.
-echo This will publish INTERSOS Legal Platform %TAG% from commit:
+echo This will publish Iraq Data Analysis %TAG% from commit:
 git log -1 --oneline
 echo.
 choice /c YN /n /m "Continue? [Y/N]: "
@@ -84,7 +84,7 @@ git push origin main
 if errorlevel 1 goto :failed
 
 echo Creating %TAG%...
-git tag -a "%TAG%" -m "INTERSOS Legal Platform %TAG%"
+git tag -a "%TAG%" -m "Iraq Data Analysis %TAG%"
 if errorlevel 1 goto :failed
 
 echo Starting the GitHub release workflow...

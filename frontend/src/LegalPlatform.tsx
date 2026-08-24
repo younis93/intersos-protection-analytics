@@ -396,6 +396,20 @@ function LegalSkeleton({
   );
 }
 
+function AppStartupLoadingScreen() {
+  return <section className="app-startup-loading" role="status" aria-live="polite" aria-label="Starting Iraq Data Analysis">
+    <div className="app-startup-loading-ambient" />
+    <div className="app-startup-loading-card glass">
+      <div className="app-startup-loading-mark"><img src="/intersos-symbol-clear.png" alt="INTERSOS" /></div>
+      <span className="eyebrow">IRAQ DATA ANALYSIS</span>
+      <h1>Preparing your workspace</h1>
+      <p>Starting the secure local application.</p>
+      <div className="app-startup-loading-progress" aria-hidden="true"><i /></div>
+      <footer><ShieldCheck /><span>Local and private data workspace</span></footer>
+    </div>
+  </section>;
+}
+
 function ReviewPage({
   dataset,
   onOpenCase,
@@ -3414,10 +3428,11 @@ export default function LegalPlatform() {
     window.scrollTo({ top: 0, behavior: "auto" });
   };
   useEffect(() => {
+    const started=performance.now();
     getLegalMetadata()
       .then(setMetadata)
       .catch((e) => setError(e.message))
-      .finally(() => setMetadataLoading(false));
+      .finally(() => window.setTimeout(() => setMetadataLoading(false),Math.max(0,650-(performance.now()-started))));
   }, []);
   useEffect(()=>{
     if(metadataLoading||metadata?.ready||!metadata?.loading)return;
@@ -3657,18 +3672,7 @@ export default function LegalPlatform() {
             </div>
           )}
           {metadataLoading ? (
-            <LegalSkeleton
-              variant={
-                page === "overview" ? "overview" :
-                ["beneficiaries", "assessments", "legalservices", "awareness"].includes(page) ? "review" :
-                page === "explorer" ? "explorer" :
-                page === "deportation" ? "deportation" :
-                page === "studio" ? "studio" :
-                page === "detention" ? "detention" :
-                page === "cases" ? "cases" :
-                page === "lawyer-intelligence" ? "lawyers" : "indicator"
-              }
-            />
+            <AppStartupLoadingScreen />
           ) : !metadata?.ready && metadata?.loading ? (
             <LegalSkeleton variant="overview" />
           ) : !metadata?.ready ? (
@@ -3731,7 +3735,7 @@ export default function LegalPlatform() {
       )}
       {reviewCaseId && metadata?.ready && <CaseReviewModal caseId={reviewCaseId} metadata={metadata} onClose={() => setReviewCaseId("")} />}
       {copiedValue&&<div className="legal-copy-toast" role="status" aria-live="polite"><CheckCircle2/><span>Copied</span><strong>{copiedValue}</strong></div>}
-      {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?"Updates need configuration":updateInfo?.message?.startsWith("Unable")?"Unable to check for updates":"You’re up to date"}</h2><p>{updateInfo?.available?(updateInfo.notes||"A new signed version of INTERSOS Legal Platform is ready to install."):(updateInfo?.message||`You are using version ${updateInfo?.currentVersion||"1.0.18"}.`)}</p>{updateInfo?.available&&typeof updateInfo.sizeBytes==="number"&&<small className="update-size">Update size: {formatUpdateSize(updateInfo.sizeBytes)}</small>}{updateStatus&&updateStatus.phase!=="idle"&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.phase==="downloading"&&<small>Downloaded {formatUpdateSize(updateStatus.downloadedBytes)} of {formatUpdateSize(updateStatus.totalBytes||updateInfo?.sizeBytes)}</small>}{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}<div className="update-actions">{updateInfo?.available&&(!updateStatus||["idle","error"].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>Update now</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&["installing","restarting"].includes(updateStatus.phase))}>{updateInfo?.available?"Later":"Close"}</button></div></section></div>}
+      {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?"Updates need configuration":updateInfo?.message?.startsWith("Unable")?"Unable to check for updates":"You’re up to date"}</h2><p>{updateInfo?.available?(updateInfo.notes||"A new signed version of Iraq Data Analysis is ready to install."):(updateInfo?.message||`You are using version ${updateInfo?.currentVersion||"1.0.18"}.`)}</p>{updateInfo?.available&&typeof updateInfo.sizeBytes==="number"&&<small className="update-size">Update size: {formatUpdateSize(updateInfo.sizeBytes)}</small>}{updateStatus&&updateStatus.phase!=="idle"&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.phase==="downloading"&&<small>Downloaded {formatUpdateSize(updateStatus.downloadedBytes)} of {formatUpdateSize(updateStatus.totalBytes||updateInfo?.sizeBytes)}</small>}{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}<div className="update-actions">{updateInfo?.available&&(!updateStatus||["idle","error"].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>Update now</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&["installing","restarting"].includes(updateStatus.phase))}>{updateInfo?.available?"Later":"Close"}</button></div></section></div>}
     </div>
   );
 }

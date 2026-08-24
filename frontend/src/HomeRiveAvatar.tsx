@@ -150,7 +150,6 @@ export function HomeRiveAvatar({disabled,phase,className=''}:{disabled:boolean;p
   if(loadFailed)return null;
   return <div ref={avatarRef} className={`home-rive-avatar ${className}`.trim()} data-phase={phase} data-disabled={inactive||undefined} data-activity={activity} data-edge={atFarEdge?'far':'near'} data-dragging={dragging||undefined} data-drop={dropStage||undefined} style={{'--avatar-travel-ms':`${nextWalkDuration(()=>.85)}ms`,'--avatar-x':`${positionX}px`,'--avatar-y':`${-lift}px`} as React.CSSProperties} role="button" tabIndex={inactive?-1:0} aria-label={`INTERSOS guardian avatar, ${dragging?'being dragged':dropStage||activity}`} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={finishDrag} onPointerCancel={finishDrag} onClick={activate} onKeyDown={activate}>
     <div className="avatar-character">
-      <div className="avatar-chair" aria-hidden="true"><i/><b/></div>
       <div className={`avatar-rive-stage ${matteReady?'is-matte-ready':''}`}><RiveComponent aria-hidden="true"/><canvas ref={matteCanvasRef} className="avatar-matte-canvas" aria-hidden="true"/></div>
       <span className="avatar-book" aria-hidden="true"><i/><i/></span>
       <span className="avatar-ball" aria-hidden="true"/>

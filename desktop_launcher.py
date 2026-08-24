@@ -1,4 +1,4 @@
-"""Native Windows launcher for INTERSOS Legal Platform."""
+"""Native Windows launcher for Iraq Data Analysis."""
 from __future__ import annotations
 
 import ctypes
@@ -16,8 +16,8 @@ import uvicorn
 import webview
 
 
-APP_TITLE = "INTERSOS Legal Platform"
-APP_USER_MODEL_ID = "INTERSOS.LegalPlatform"
+APP_TITLE = "Iraq Data Analysis"
+APP_USER_MODEL_ID = "INTERSOS.IraqDataAnalysis"
 SERVER_START_TIMEOUT = 20.0
 GWL_STYLE = -16
 WS_OVERLAPPEDWINDOW = 0x00CF0000
@@ -30,6 +30,7 @@ SWP_FRAMECHANGED = 0x0020
 
 
 def settings_path() -> Path:
+    # Keep the existing data location so current Legal Platform settings carry over.
     base = Path(os.getenv("LOCALAPPDATA", Path.home())) / "INTERSOS Legal Platform"
     return base / "settings.json"
 

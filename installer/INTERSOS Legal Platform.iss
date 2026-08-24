@@ -1,8 +1,8 @@
 #ifndef MyAppVersion
   #define MyAppVersion "1.0.0"
 #endif
-#define MyAppName "INTERSOS Legal Platform"
-#define MyAppExeName "INTERSOS Legal Platform.exe"
+#define MyAppName "Iraq Data Analysis"
+#define MyAppExeName "Iraq Data Analysis.exe"
 #define SigningCertificateName "INTERSOS-Code-Signing.cer"
 #define SigningCertificateThumbprint "C4F1B12A3BCCC73BEF903FA3796304CF0E67670D"
 #define WebView2BootstrapperName "MicrosoftEdgeWebview2Setup.exe"
@@ -13,7 +13,7 @@
 [Setup]
 #ifdef UiTestBuild
 AppId={{C8D92D64-8962-452B-BDF1-064DD32EF45F}
-DefaultDirName={tmp}\INTERSOS Legal Platform UI Test
+DefaultDirName={tmp}\Iraq Data Analysis UI Test
 Uninstallable=no
 CreateUninstallRegKey=no
 #else
@@ -26,7 +26,7 @@ AppPublisher=INTERSOS
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=lowest
 OutputDir={#MyOutputDir}
-OutputBaseFilename=INTERSOS-Legal-Platform-Setup-{#MyAppVersion}
+OutputBaseFilename=Iraq-Data-Analysis-Setup-{#MyAppVersion}
 SetupIconFile=..\intersos-protection-analytics.ico
 Compression=lzma2/fast
 SolidCompression=yes
@@ -44,7 +44,7 @@ DisableProgramGroupPage=yes
 SetupLogging=yes
 
 [Files]
-Source: "..\packaging-temp\dist\INTERSOS Legal Platform\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\packaging-temp\dist\Iraq Data Analysis\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "INTERSOS-Code-Signing.cer"; Flags: dontcopy
 Source: "MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy
 
@@ -223,7 +223,7 @@ begin
   AppSummaryHeading.Top := WizardForm.DirEdit.Top + WizardForm.DirEdit.Height + ScaleY(34);
   AppSummaryHeading.Width := WizardForm.DirEdit.Width;
   AppSummaryHeading.Height := ScaleY(22);
-  AppSummaryHeading.Caption := 'About INTERSOS Legal Platform';
+  AppSummaryHeading.Caption := 'About Iraq Data Analysis';
   AppSummaryHeading.Font.Name := 'Segoe UI Semibold';
   AppSummaryHeading.Font.Size := 10;
   AppSummaryHeading.Font.Color := $00784016;
@@ -249,7 +249,7 @@ function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo,
   MemoTypeInfo, MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
 begin
   Result :=
-    'INTERSOS Legal Platform' + NewLine + NewLine +
+    'Iraq Data Analysis' + NewLine + NewLine +
     'A secure desktop workspace for Legal Platform data review, case analysis, ' +
     'data exploration, and reporting.' + NewLine + NewLine +
     'The installer also creates desktop and Start menu shortcuts and enables ' +
@@ -260,7 +260,7 @@ procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = wpSelectDir then
   begin
-    WizardForm.PageNameLabel.Caption := 'Install INTERSOS Legal Platform';
+    WizardForm.PageNameLabel.Caption := 'Install Iraq Data Analysis';
     WizardForm.PageDescriptionLabel.Caption := 'Choose a folder and review the application summary';
     WizardForm.SelectDirLabel.Caption :=
       'Install on the Windows C: drive using the recommended folder, or choose another location.';
@@ -270,21 +270,21 @@ begin
   end;
   if CurPageID = wpReady then
   begin
-    WizardForm.PageNameLabel.Caption := 'Install INTERSOS Legal Platform';
+    WizardForm.PageNameLabel.Caption := 'Install Iraq Data Analysis';
     WizardForm.PageDescriptionLabel.Caption := 'Ready to install for your Windows account';
     WizardForm.ReadyLabel.Caption := 'Review the details below, then select Install.';
     WizardForm.NextButton.Caption := 'Install';
   end;
   if CurPageID = wpInstalling then
   begin
-    WizardForm.PageNameLabel.Caption := 'Installing INTERSOS Legal Platform';
+    WizardForm.PageNameLabel.Caption := 'Installing Iraq Data Analysis';
     WizardForm.PageDescriptionLabel.Caption := 'This usually takes less than a minute';
   end;
   if CurPageID = wpFinished then
   begin
     WizardForm.FinishedHeadingLabel.Caption := 'Installation complete';
     WizardForm.FinishedLabel.Caption :=
-      'INTERSOS Legal Platform was installed successfully.';
+      'Iraq Data Analysis was installed successfully.';
     WizardForm.NextButton.Caption := 'Finish';
   end;
 end;

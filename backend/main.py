@@ -146,7 +146,7 @@ if os.getenv("INTERSOS_DEFER_LEGAL_LOAD", "").lower() in {"1", "true", "yes"}:
 else:
     load_initial_legal_store()
 
-app = FastAPI(title="INTERSOS Legal Platform API", version="1.0.0")
+app = FastAPI(title="Iraq Data Analysis API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 

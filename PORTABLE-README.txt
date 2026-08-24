@@ -1,7 +1,7 @@
-INTERSOS Legal Platform - Portable Windows Edition
+Iraq Data Analysis - Portable Windows Edition
 
 1. Unzip the package to a local folder.
-2. Double-click INTERSOS Legal Platform.exe.
+2. Double-click Iraq Data Analysis.exe.
 3. The dashboard opens directly in a native Windows application window; no browser or console window is used.
 4. Choose a Legal Platform folder or select the required CSV files: beneficiaries.csv, assessments.csv, and legalservices.csv. Optional Legal Platform CSV files are loaded when available.
 

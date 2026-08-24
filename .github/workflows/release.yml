@@ -38,7 +38,7 @@ jobs:
         run: |
           python -m unittest discover backend
           npm run build --prefix frontend
-          python -m PyInstaller --noconfirm --clean --windowed --onedir --name "INTERSOS Legal Platform" --icon "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico" --distpath packaging-temp/dist --workpath packaging-temp/work --specpath packaging-temp/spec --add-data "$env:GITHUB_WORKSPACE\frontend\dist;frontend\dist" --add-data "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico;." --collect-all polars "$env:GITHUB_WORKSPACE\desktop_launcher.py"
+          python -m PyInstaller --noconfirm --clean --windowed --onedir --name "Iraq Data Analysis" --icon "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico" --distpath packaging-temp/dist --workpath packaging-temp/work --specpath packaging-temp/spec --add-data "$env:GITHUB_WORKSPACE\frontend\dist;frontend\dist" --add-data "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico;." --collect-all polars "$env:GITHUB_WORKSPACE\desktop_launcher.py"
       - name: Sign application and build signed installer
         shell: pwsh
         env:
@@ -61,7 +61,7 @@ jobs:
           $webViewSignature = Get-AuthenticodeSignature -LiteralPath $webViewBootstrapper
           if ($webViewSignature.Status -ne "Valid" -or $webViewSignature.SignerCertificate.Subject -notmatch "Microsoft Corporation") { throw "The Microsoft WebView2 bootstrapper signature is invalid." }
           $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Filter signtool.exe -Recurse | Sort-Object FullName -Descending | Select-Object -First 1).FullName
-          & $signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f certificate.pfx /p $env:SIGNING_CERTIFICATE_PASSWORD "packaging-temp/dist/INTERSOS Legal Platform/INTERSOS Legal Platform.exe"
+          & $signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f certificate.pfx /p $env:SIGNING_CERTIFICATE_PASSWORD "packaging-temp/dist/Iraq Data Analysis/Iraq Data Analysis.exe"
           if ($LASTEXITCODE -ne 0) { throw "Application signing failed." }
           iscc "/DMyAppVersion=$env:APP_VERSION" "installer/INTERSOS Legal Platform.iss"
           if ($LASTEXITCODE -ne 0) { throw "Installer build failed." }

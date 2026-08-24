@@ -1,4 +1,4 @@
-import {useCallback,useEffect,useState} from 'react';
+import {useCallback,useEffect,useRef,useState} from 'react';
 import {ArrowRight,BriefcaseBusiness,Maximize2,Minimize2,Palette,RefreshCw} from 'lucide-react';
 import {checkForUpdates,getUpdateStatus,installUpdate} from './api';
 import {AppSelect} from './components';
@@ -22,6 +22,7 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
   });
   const [fullscreen,setFullscreen]=useState(false);
   const [avatarRevealed,setAvatarRevealed]=useState(false);
+  const avatarPresses=useRef<{count:number;resetTimer:number|undefined}>({count:0,resetTimer:undefined});
   const [updateInfo,setUpdateInfo]=useState<UpdateCheck|null>(null);
   const [updateStatus,setUpdateStatus]=useState<UpdateStatus|null>(null);
   const [updateOpen,setUpdateOpen]=useState(false);
@@ -49,9 +50,17 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
   useEffect(()=>{if(!updateStatus||!["downloading","verifying","installing","restarting"].includes(updateStatus.phase))return;const timer=window.setInterval(()=>getUpdateStatus().then(setUpdateStatus).catch(()=>{}),700);return()=>window.clearInterval(timer)},[updateStatus?.phase]);
   const checkUpdates=()=>checkForUpdates().then(info=>{setUpdateInfo(info);setUpdateOpen(true)}).catch(()=>setUpdateOpen(true));
   const beginUpdate=()=>installUpdate().then(setUpdateStatus).catch((error:Error)=>setUpdateStatus({phase:'error',progress:0,error:error.message,currentVersion:updateInfo?.currentVersion||'1.0.0'}));
-  const toggleAvatar=()=>setAvatarRevealed(revealed=>!revealed);
+  const toggleAvatar=()=>{
+    if(avatarRevealed){setAvatarRevealed(false);return}
+    const presses=avatarPresses.current;
+    presses.count+=1;
+    if(presses.resetTimer!==undefined)window.clearTimeout(presses.resetTimer);
+    if(presses.count===3){presses.count=0;setAvatarRevealed(true);return}
+    presses.resetTimer=window.setTimeout(()=>{presses.count=0;presses.resetTimer=undefined},2500);
+  };
   const markShattered=useCallback(()=>setPhase('shattered'),[setPhase]);
   const markRestored=useCallback(()=>finishRestore(),[finishRestore]);
+  useEffect(()=>()=>{if(avatarPresses.current.resetTimer!==undefined)window.clearTimeout(avatarPresses.current.resetTimer)},[]);
   return <main className={`welcome-page fracture-page-${phase}`}>
     <div className="welcome-home-actions"><button className={`soft fullscreen-button update-button ${updateInfo?.available?'update-available':''}`} onClick={checkUpdates} title={updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:'Check for updates'} aria-label="Check for updates"><RefreshCw/>{updateInfo?.available&&<b aria-label="New update available">New</b>}</button><AppSelect label="Theme" value={theme} onChange={value=>setTheme(value as Theme)} variant="theme" icon={Palette} ariaLabel="Application theme" options={[["glass-light","Liquid Glass Light"],["glass-dark","Liquid Glass Dark"],["unhcr","INTERSOS"],["multicolor","Chromatic Executive"],["executive","Executive Minimal"]]}/><button className="soft fullscreen-button" onClick={toggleFullscreen} title={fullscreen?'Exit full screen':'Enter full screen'} aria-label={fullscreen?'Exit full screen':'Enter full screen'}>{fullscreen?<Minimize2/>:<Maximize2/>}</button></div>
     <div className="welcome-aurora welcome-aurora-one"/><div className="welcome-aurora welcome-aurora-two"/><div className="welcome-orb welcome-orb-one"/><div className="welcome-orb welcome-orb-two"/><div className="welcome-grid"/>
@@ -60,13 +69,13 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
         <div className="welcome-brand-stage">
           <button type="button" className="welcome-logo-secret" onClick={pressLogo} aria-label="INTERSOS home logo"><span className="welcome-logo-mark"><img src="/intersos-symbol-transparent.png" alt=""/></span><span className="welcome-logo-word" aria-hidden="true">{'INTERSOS'.split('').map((letter,index)=><b key={`${letter}-${index}`} style={{'--letter':index} as React.CSSProperties}>{letter}</b>)}</span><span className="sr-only">INTERSOS</span>{AVATAR_ENABLED&&foxUnlocked&&<GuardianFox mode="home"/>}</button>
         </div>
-        <span>Legal Platform</span>
+        <span>Iraq Data Analysis</span>
       </header>
       <div className="workspace-cards">{workspaces.filter(x=>x.enabled).map((workspace,index)=>{const Icon=workspace.icon;return <a key={workspace.id} href={`#${workspace.route}`} className={`workspace-card workspace-${workspace.accent}`} style={{'--card-index':index} as React.CSSProperties}><span className="workspace-card-glow"/><span className="workspace-icon"><Icon/></span><span className="workspace-badge">{workspace.badge}</span><strong>{workspace.label}</strong><p>{workspace.description}</p><span className="workspace-enter">Enter workspace <ArrowRight/></span></a>})}</div>
-      <footer><span>Designed for clear, local and decision-ready legal data review.</span><button type="button" className="designer-unlock" onClick={toggleAvatar} aria-pressed={avatarRevealed} aria-label={`${avatarRevealed?'Hide':'Show'} the guardian pet`}>Designed by <strong>Younis Jamal</strong></button></footer>
+      <footer><span>Designed for clear, local and decision-ready legal data review.</span><button type="button" className="designer-unlock" onClick={toggleAvatar} aria-pressed={avatarRevealed} aria-label={`${avatarRevealed?'Hide':'Reveal'} the guardian pet with three presses`}>Designed by <strong>Younis Jamal</strong></button></footer>
     </section>
     {RIVE_HOME_AVATAR_ENABLED&&avatarRevealed&&<HomeRiveAvatar disabled={phase!=='normal'} phase={phase}/>} 
     <ScreenFracture phase={phase} onShattered={markShattered} onRestorePress={pressShattered} onRestored={markRestored}/>
-    {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?'Updates need configuration':updateInfo?.message?.startsWith('Unable')?'Unable to check for updates':'You’re up to date'}</h2><p>{updateInfo?.available?(updateInfo.notes||'A new signed version of INTERSOS Legal Platform is ready to install.'):(updateInfo?.message||`You are using version ${updateInfo?.currentVersion||'1.0.0'}.`)}</p>{updateStatus&&updateStatus.phase!=='idle'&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}<div className="update-actions">{updateInfo?.available&&(!updateStatus||['idle','error'].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>Update now</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&['installing','restarting'].includes(updateStatus.phase))}>{updateInfo?.available?'Later':'Close'}</button></div></section></div>}
+    {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?'Updates need configuration':updateInfo?.message?.startsWith('Unable')?'Unable to check for updates':'You’re up to date'}</h2><p>{updateInfo?.available?(updateInfo.notes||'A new signed version of Iraq Data Analysis is ready to install.'):(updateInfo?.message||`You are using version ${updateInfo?.currentVersion||'1.0.0'}.`)}</p>{updateStatus&&updateStatus.phase!=='idle'&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}<div className="update-actions">{updateInfo?.available&&(!updateStatus||['idle','error'].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>Update now</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&['installing','restarting'].includes(updateStatus.phase))}>{updateInfo?.available?'Later':'Close'}</button></div></section></div>}
   </main>;
 }

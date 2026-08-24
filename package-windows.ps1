@@ -15,19 +15,19 @@ $PackageTemp = Join-Path $ProjectRoot 'packaging-temp'
 $BuildDist = Join-Path $PackageTemp 'dist'
 $BuildWork = Join-Path $PackageTemp 'work'
 $BuildSpec = Join-Path $PackageTemp 'spec'
-$PackagedApp = Join-Path $StagingReleaseRoot 'INTERSOS Legal Platform.exe'
+$PackagedApp = Join-Path $StagingReleaseRoot 'Iraq Data Analysis.exe'
 
 function Start-PackagedApplication {
     if (-not (Test-Path -LiteralPath $PackagedApp)) {
         throw "The packaged application was not found at $PackagedApp. Run package-windows.ps1 first."
     }
-    Write-Host 'Starting INTERSOS Legal Platform...'
+    Write-Host 'Starting Iraq Data Analysis...'
     Start-Process -FilePath $PackagedApp -WorkingDirectory $StagingReleaseRoot | Out-Null
     $Deadline = (Get-Date).AddSeconds(30)
     $WindowProcess = $null
     do {
         Start-Sleep -Milliseconds 250
-        $WindowProcess = Get-Process -Name 'INTERSOS Legal Platform' -ErrorAction SilentlyContinue |
+        $WindowProcess = Get-Process -Name 'Iraq Data Analysis' -ErrorAction SilentlyContinue |
             Where-Object { $_.MainWindowHandle -ne 0 } |
             Select-Object -First 1
     } while (-not $WindowProcess -and (Get-Date) -lt $Deadline)
@@ -71,7 +71,7 @@ if ($LaunchOnly) {
     $VersionSource = Get-Content -LiteralPath (Join-Path $ProjectRoot 'backend\version.py') -Raw
     $AppVersionMatch = [regex]::Match($VersionSource, 'APP_VERSION\s*=\s*["''](?<version>[^"'']+)["'']')
     if (-not $AppVersionMatch.Success) { throw 'Unable to read APP_VERSION from backend/version.py.' }
-    $WindowTitle = "INTERSOS Legal Platform $($AppVersionMatch.Groups['version'].Value)"
+    $WindowTitle = "Iraq Data Analysis $($AppVersionMatch.Groups['version'].Value)"
     # pythonw.exe hosts the visible WebView window without creating a second
     # console window for the Python launcher.
     $LaunchProcess = Start-Process -FilePath $VenvPythonWindowed -ArgumentList "`"$LauncherPath`"" -WorkingDirectory $ProjectRoot -PassThru
@@ -119,7 +119,7 @@ if ($LASTEXITCODE -ne 0 -or $InstalledPyInstaller -ne '6.21.0') {
     & $VenvPython -m pip install --disable-pip-version-check pyinstaller==6.21.0
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller installation failed.' }
 }
-$PyInstallerArgs = @('--noconfirm', '--windowed', '--onedir', '--name', 'INTERSOS Legal Platform', '--icon', (Join-Path $ProjectRoot 'intersos-protection-analytics.ico'), '--distpath', $BuildDist, '--workpath', $BuildWork, '--specpath', $BuildSpec, '--add-data', "$ProjectRoot\frontend\dist;frontend\dist", '--add-data', "$ProjectRoot\intersos-protection-analytics.ico;.")
+$PyInstallerArgs = @('--noconfirm', '--windowed', '--onedir', '--name', 'Iraq Data Analysis', '--icon', (Join-Path $ProjectRoot 'intersos-protection-analytics.ico'), '--distpath', $BuildDist, '--workpath', $BuildWork, '--specpath', $BuildSpec, '--add-data', "$ProjectRoot\frontend\dist;frontend\dist", '--add-data', "$ProjectRoot\intersos-protection-analytics.ico;.")
 if ($Clean) { $PyInstallerArgs += '--clean' }
 $PyInstallerArgs += (Join-Path $ProjectRoot 'desktop_launcher.py')
 & $VenvPython -m PyInstaller @PyInstallerArgs
@@ -127,7 +127,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Portable application build failed.' }
 
 if (Test-Path -LiteralPath $StagingReleaseRoot) { Remove-Item -LiteralPath $StagingReleaseRoot -Recurse -Force }
 New-Item -ItemType Directory -Force $StagingReleaseRoot | Out-Null
-Copy-Item -Recurse -Force (Join-Path $BuildDist 'INTERSOS Legal Platform\*') $StagingReleaseRoot
+Copy-Item -Recurse -Force (Join-Path $BuildDist 'Iraq Data Analysis\*') $StagingReleaseRoot
 
 $InnoCompiler = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source
 if (-not $InnoCompiler) {
