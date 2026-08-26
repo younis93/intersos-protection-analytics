@@ -68,6 +68,15 @@ def test_review_export_neutralizes_spreadsheet_formulas():
     assert not any(cell.data_type=="f" for cell in cells)
 
 
+def test_review_export_uses_source_fields_once_without_priority():
+    workbook=load_workbook(io.BytesIO(LegalStore.from_files(required_payload(),"test").review_export("beneficiaries")),read_only=True,data_only=True)
+    headers=[cell.value for cell in next(workbook["Unclassified"].iter_rows(min_row=1,max_row=1))]
+    assert "Priority" not in headers
+    assert headers.count("Case ID")==1
+    assert headers.count("Name (Filter Color Red)")==1
+    assert headers[:3]==["Review Finding","Recommended Action","Review Detail"]
+
+
 def test_detention_workbook_rejects_extreme_xlsx_compression_ratio():
     output=io.BytesIO()
     with zipfile.ZipFile(output,"w",zipfile.ZIP_DEFLATED) as archive:
@@ -706,23 +715,82 @@ def test_multiple_assessments_flags_same_month_or_two_open_assessments_only():
 
 def test_selected_month_previous_assessment_uses_created_on_grace_from_august_2026():
     payload=required_payload();payload["assessments"]=csv(**{
-        "Assessment ID":["A1","A2","B1","B2","C1","C2","C3"],
-        "Beneficiary ID":["Allowed","Allowed","Late","Late","OlderHistory","OlderHistory","OlderHistory"],
-        "Date of Assessment":["15/06/2026","15/07/2026","15/06/2026","15/07/2026","15/05/2026","15/06/2026","15/07/2026"],
-        "Created On":["15/06/2026","04/08/2026","15/06/2026","05/08/2026","15/05/2026","15/06/2026","04/08/2026"],
+        "Assessment ID":["A1","A2","B1","B2","C1","C2","C3","SameMonth1","SameMonth2"],
+        "Beneficiary ID":["Allowed","Allowed","Late","Late","OlderHistory","OlderHistory","OlderHistory","SameMonth","SameMonth"],
+        "Date of Assessment":["15/06/2026","15/07/2026","15/06/2026","15/07/2026","15/05/2026","15/06/2026","15/07/2026","15/06/2026","15/07/2026"],
+        "Created On":["15/06/2026","04/08/2026","15/06/2026","05/08/2026","15/05/2026","15/06/2026","04/08/2026","15/06/2026","20/07/2026"],
     })
     rows=LegalStore.from_files(payload,"test").review("assessments",comparison_month="2026-07",rule="Selected month with previous assessment",page_size=100)["rows"]
     assert {row["assessmentId"] for row in rows}=={"B2","C3"}
     assert {str(row["createdOn"])[:10] for row in rows}=={"04/08/2026","05/08/2026"}
 
 
+def test_detention_governorate_project_mapping_overrides_conflicting_location():
+    payload=required_payload();payload["assessments"]=csv(**{
+        "Assessment ID":["SuliCorrect","ErbilCorrect","SuliMismatch"],
+        "Beneficiary ID":["B1","B2","B3"],
+        "Projects - المشروع":["UNHCR   2026 - SULI","UNHCR   2026 - Erbil","UNHCR 2026 - SULI"],
+        "Project Location":["Baghdad","Baghdad","Baghdad"],
+        "Detention Governorate":["Sulaymaniyah - السليمانية","Erbil اربيل","Baghdad"],
+        "Is the beneficiary detained":["Yes","Yes","Yes"],
+    })
+    rows=LegalStore.from_files(payload,"test").review("assessments",rule="Detention Governorate mismatch",page_size=100)["rows"]
+    assert {row["assessmentId"] for row in rows}=={"SuliMismatch"}
+
+
+def test_assessment_review_export_groups_findings_by_region():
+    payload=required_payload();payload["assessments"]=csv(**{
+        "Assessment ID":["ERB","AMAL","GOV"],
+        "Beneficiary ID":["B1","B2","B3"],
+        "Projects - المشروع":["UNHCR 2026 - Erbil","UNHCR 2026 - AMAL CAMP","UNHCR 2026 - Gov"],
+        "Assessment Status":["Pending","Pending","Pending"],
+    })
+    workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("assessments")),read_only=True,data_only=True)
+    assert workbook.sheetnames==["North Iraq","AMAL Camp","South Iraq"]
+    for sheet_name,assessment_id in (("North Iraq","ERB"),("AMAL Camp","AMAL"),("South Iraq","GOV")):
+        rows=list(workbook[sheet_name].iter_rows(values_only=True));assessment_index=list(rows[0]).index("Assessment ID")
+        assert assessment_id in {row[assessment_index] for row in rows[1:]}
+
+
+def test_legal_services_review_export_groups_findings_by_region():
+    payload=required_payload();payload["legalservices"]=csv(**{
+        "Service ID":["ERB","AMAL","GOV"],
+        "Assessment ID":["A1","A2","A3"],
+        "Beneficiary ID":["B1","B2","B3"],
+        "Project":["UNHCR 2026 - Erbil","UNHCR 2026 - AMAL CAMP","UNHCR 2026 - Gov"],
+        "Type of Document نوع الوثيقة":["","",""]
+    })
+    workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("legalservices")),read_only=True,data_only=True)
+    assert workbook.sheetnames==["North Iraq","AMAL Camp","South Iraq"]
+    for sheet_name,service_id in (("North Iraq","ERB"),("AMAL Camp","AMAL"),("South Iraq","GOV")):
+        rows=list(workbook[sheet_name].iter_rows(values_only=True));service_index=list(rows[0]).index("Service ID")
+        assert service_id in {row[service_index] for row in rows[1:]}
+
+
+def test_legal_services_review_export_applies_filters_and_ignores_court_verdict_other():
+    payload=required_payload();payload["legalservices"]=csv(**{
+        "Service ID":["Court1","Court2","Card1","Card2"],
+        "Assessment ID":["A1","A1","A2","A2"],
+        "Beneficiary ID":["B1","B1","B2","B2"],
+        "Project":["UNHCR 2026 - Erbil","UNHCR 2026 - Erbil","UNHCR 2026 - SULI","UNHCR 2026 - SULI"],
+        "Type of Service Provided":["Legal Representation"]*4,
+        "Type of Document":["Court Verdict","Court Verdict","ID Card","ID Card"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    exported=load_workbook(io.BytesIO(store.review_export("legalservices",selected_rules=["Duplicate service"],project="UNHCR 2026 - Erbil")),read_only=True,data_only=True)
+    rows=list(exported["North Iraq"].iter_rows(values_only=True));service_index=list(rows[0]).index("Service ID")
+    assert {row[service_index] for row in rows[1:]}=={"Court1","Court2"}
+    ignored=load_workbook(io.BytesIO(store.review_export("legalservices",selected_rules=["Duplicate service"],project="UNHCR 2026 - Erbil",ignore_court_verdict=True)),read_only=True,data_only=True)
+    assert ignored["North Iraq"].max_row==1
+
+
 def test_current_previous_month_service_duplicate_uses_created_on_grace_from_august_2026():
     payload=required_payload();payload["legalservices"]=csv(**{
-        "Service ID":["S1","S2","S3","S4","S5","S6","S7"],
-        "Beneficiary ID":["Allowed","Allowed","Late","Late","OlderHistory","OlderHistory","OlderHistory"],
-        "Assessment ID":["A1","A2","A3","A4","A5","A6","A7"],
-        "Date of Service Provision":["15/06/2026","15/07/2026","15/06/2026","15/07/2026","15/05/2026","15/06/2026","15/07/2026"],
-        "Created On":["15/06/2026","04/08/2026","15/06/2026","05/08/2026","15/05/2026","15/06/2026","04/08/2026"],
+        "Service ID":["S1","S2","S3","S4","S5","S6","S7","SameMonth1","SameMonth2"],
+        "Beneficiary ID":["Allowed","Allowed","Late","Late","OlderHistory","OlderHistory","OlderHistory","SameMonth","SameMonth"],
+        "Assessment ID":["A1","A2","A3","A4","A5","A6","A7","A8","A9"],
+        "Date of Service Provision":["15/06/2026","15/07/2026","15/06/2026","15/07/2026","15/05/2026","15/06/2026","15/07/2026","15/06/2026","15/07/2026"],
+        "Created On":["15/06/2026","04/08/2026","15/06/2026","05/08/2026","15/05/2026","15/06/2026","04/08/2026","15/06/2026","20/07/2026"],
     })
     rows=LegalStore.from_files(payload,"test").review("legalservices",comparison_month="2026-07",rule="Current and previous month duplicate",page_size=100)["rows"]
     assert {row["serviceId"] for row in rows}=={"S4","S7"}

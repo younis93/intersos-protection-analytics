@@ -103,6 +103,18 @@ REGISTERED_RULES = {
     "legalservices": ("Duplicate service","Current and previous month duplicate","Orphaned assessment relationship","Missing Type of Document","Legal service date after today"),
     "awareness": ("Duplicate participant in session","Invalid contact number","Possible duplicate participant name"),
 }
+REVIEW_EXPORT_PROJECT_SHEETS = {
+    "unhcr 2026 - erbil": "North Iraq",
+    "unhcr 2026 - suli": "North Iraq",
+    "unhcr 2026 - mosul & kirkuk": "North Iraq",
+    "unhcr 2026 - amal camp": "AMAL Camp",
+    "unhcr 2026 - baghdad": "South Iraq",
+    "unhcr 2026 - gov": "South Iraq",
+}
+ASSESSMENT_PROJECT_GOVERNORATES = {
+    "unhcr 2026 - suli": "sulaymaniyah",
+    "unhcr 2026 - erbil": "erbil",
+}
 DETENTION_ASSESSMENT_RULES = frozenset((
     "Detained beneficiary has counselling only", "Detention/immigration inconsistency",
     "Detained beneficiary below 10 years", "Detention Governorate mismatch",
@@ -953,7 +965,8 @@ class LegalStore:
                 if not detained or not re.search(r"\byes\b|نعم",clean_id(row.get(detained,"")),re.I): continue
                 if project and re.search(r"\bamal\b",clean_id(row.get(project,"")),re.I): continue
                 detained_place=normalize_governorate(row.get(detention_governorate,""))
-                expected={normalize_governorate(row.get(column,"")) for column in (project,location) if column and normalize_governorate(row.get(column,""))}
+                project_key=re.sub(r"\s+"," ",clean_id(row.get(project,""))).casefold() if project else ""
+                expected={ASSESSMENT_PROJECT_GOVERNORATES[project_key]} if project_key in ASSESSMENT_PROJECT_GOVERNORATES else {normalize_governorate(row.get(column,"")) for column in (project,location) if column and normalize_governorate(row.get(column,""))}
                 if expected and not detained_place:
                     self._flag(out,"assessments","Detention Governorate mismatch","Medium",i,row,f"Detention Governorate is missing; expected one of: {', '.join(sorted(expected))}")
                 elif detained_place and expected and detained_place not in expected:
@@ -1000,6 +1013,8 @@ class LegalStore:
             created_on=created[i]
             if pd.isna(created_on) or created_on < pd.Timestamp("2026-08-01"):
                 continue
+            if created_on.to_period("M")==selected:
+                continue
             history=sorted(earlier[ids[i]],key=lambda item:item[0]);history_months={month for _,month in history}
             immediate_previous=selected-1
             has_older_history=any(month<immediate_previous for month in history_months)
@@ -1033,6 +1048,8 @@ class LegalStore:
         for i in df.index[(months==selected)&ids.isin(earlier.keys())]:
             created_on=created[i]
             if pd.isna(created_on) or created_on < pd.Timestamp("2026-08-01"):
+                continue
+            if created_on.to_period("M")==selected:
                 continue
             history=sorted(earlier[ids[i]],key=lambda item:item[0]);history_months={month for _,month in history}
             immediate_previous=selected-1
@@ -1160,7 +1177,7 @@ class LegalStore:
         rules=sorted({r["rule"] for r in self.flags.get(dataset,[])})
         return {"dataset":dataset,"total":len(rows),"page":page,"pageSize":page_size,"rules":list(REGISTERED_RULES.get(dataset,rules)),"ruleCounts":context["ruleCounts"],"filterOptions":context["filterOptions"],"availableMonths":context["availableMonths"],"activeComparisonMonth":context["activeComparisonMonth"],"nameRecordCount":context["nameRecordCount"],"eligibleNameRecordCount":context["eligibleNameRecordCount"],"nameCompareCharsApplied":bounded_chars,"allowNameVariationsApplied":bool(allow_name_variations),"rows":rows[start:start+page_size]}
 
-    def review_export(self,dataset:str,comparison_month:str="",name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False,selected_rules:list[str]|None=None)->bytes:
+    def review_export(self,dataset:str,comparison_month:str="",name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False,selected_rules:list[str]|None=None,severity:str="",lawyer:str="",project:str="",location:str="",date:str="",search:str="",ignore_court_verdict:bool=False)->bytes:
         from openpyxl import Workbook
         from openpyxl.styles import Font,PatternFill,Alignment,Border,Side
         from openpyxl.utils import get_column_letter
@@ -1176,7 +1193,16 @@ class LegalStore:
         elif dataset=="legalservices":flags+=self._service_month_flags(comparison_month)[0]
         flags=[row for row in flags if not self._is_excluded(row)]
         if selected_rules is not None: flags=[row for row in flags if row.get("rule") in selected_rules]
-        frame=self.frames[dataset]; columns=["Lawyer","Review Finding","Priority","Recommended Action","Review Detail","Project","Project Location","Name","Phone Number","Case ID","Assessment ID","Service ID"]+list(frame.columns)
+        for key,selection in (("severity",severity),("lawyer",lawyer),("project",project),("location",location)):
+            if selection: flags=[row for row in flags if row.get(key)==selection]
+        if date:
+            date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate"}.get(dataset,"")
+            flags=[row for row in flags if date_field and not pd.isna(pd.to_datetime(row.get(date_field,""),errors="coerce",dayfirst=True)) and pd.to_datetime(row.get(date_field,""),errors="coerce",dayfirst=True).strftime("%Y-%m")==date]
+        if search:
+            needle=search.lower();flags=[row for row in flags if needle in " ".join(map(str,row.values())).lower()]
+        if ignore_court_verdict and dataset=="legalservices":
+            flags=[row for row in flags if not (row.get("rule")=="Duplicate service" and re.search(r"court verdict|\bother\b|اخرى",str(row.get("typeOfDocument", "")),flags=re.I))]
+        frame=self.frames[dataset]; review_columns=["Review Finding","Recommended Action","Review Detail"];columns=review_columns+list(frame.columns)
         workbook=Workbook()
         palette=("FCE8E6","FFF4D6","E7F0FF","E5F5EA","F0E8FA","FFECDD","E3F4F4","F7E8F1")
         rule_colors={rule:palette[i%len(palette)] for i,rule in enumerate(sorted({x["rule"] for x in flags}))}
@@ -1186,15 +1212,15 @@ class LegalStore:
             sheet.append([safe_spreadsheet_value(column) for column in columns])
             for flag in items:
                 source=frame.iloc[flag["row"]-2] if 0 <= flag["row"]-2 < len(frame) else pd.Series(dtype=object)
-                values=[flag.get("lawyer",""),flag["rule"],flag["severity"],flag["action"],flag["detail"],flag.get("project",""),flag.get("location",""),flag.get("name",""),flag.get("phone",""),flag.get("caseId",""),flag.get("assessmentId",""),flag.get("serviceId","")]+[display_value(source.get(c,"")) for c in frame.columns]
+                values=[flag["rule"],flag["action"],flag["detail"]]+[display_value(source.get(c,"")) for c in frame.columns]
                 sheet.append([safe_spreadsheet_value(value) for value in values]);row_number=sheet.max_row;sheet.row_dimensions[row_number].height=24
-                sheet.cell(row_number,2).fill=PatternFill("solid",fgColor=rule_colors[flag["rule"]])
+                sheet.cell(row_number,1).fill=PatternFill("solid",fgColor=rule_colors[flag["rule"]])
                 if flag.get("duplicateGroup"):
                     exact=flag.get("nameMatchMode")=="exact";color="FDE8E8" if exact else duplicate_colors[flag["duplicateGroup"]]
                     sheet.cell(row_number,8).fill=PatternFill("solid",fgColor=color)
                     if exact:sheet.cell(row_number,8).font=Font(bold=True,color="991B1B")
                     if name_source:
-                        source_cell=sheet.cell(row_number,13+list(frame.columns).index(name_source));source_cell.fill=PatternFill("solid",fgColor=color)
+                        source_cell=sheet.cell(row_number,len(review_columns)+1+list(frame.columns).index(name_source));source_cell.fill=PatternFill("solid",fgColor=color)
                         if exact:source_cell.font=Font(bold=True,color="991B1B")
                 for cell in sheet[row_number]:
                     cell.alignment=Alignment(vertical="center",wrap_text=True);cell.border=Border(bottom=thin)
@@ -1203,12 +1229,11 @@ class LegalStore:
             sheet.row_dimensions[1].height=34
             sheet.freeze_panes="A2";sheet.auto_filter.ref=f"A1:{get_column_letter(len(columns))}{len(items)+1}"
             for index,name in enumerate(columns,1):sheet.column_dimensions[get_column_letter(index)].width=min(32,max(13,len(str(name))+2))
-        if dataset=="beneficiaries":
-            project_to_sheet={"unhcr 2026 - erbil":"North Iraq","unhcr 2026 - suli":"North Iraq","unhcr 2026 - mosul & kirkuk":"North Iraq","unhcr 2026 - amal camp":"AMAL Camp","unhcr 2026 - baghdad":"South Iraq","unhcr 2026 - gov":"South Iraq"}
+        if dataset in {"beneficiaries","assessments","legalservices"}:
             grouped={name:[] for name in ("North Iraq","AMAL Camp","South Iraq")};unclassified=[]
             for flag in flags:
                 project_key=re.sub(r"\s+"," ",str(flag.get("project","")).strip()).casefold()
-                sheet_name=project_to_sheet.get(project_key)
+                sheet_name=REVIEW_EXPORT_PROJECT_SHEETS.get(project_key)
                 (grouped[sheet_name] if sheet_name else unclassified).append(flag)
             workbook.remove(workbook.active)
             for name,items in grouped.items(): write_sheet(workbook.create_sheet(name),items)

@@ -322,9 +322,9 @@ def legal_review(request: LegalQuery):
 
 
 @app.get("/api/legal/review-export/{dataset}")
-def legal_review_export(dataset:str,comparison_month:str="",name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False,rules:str=""):
+def legal_review_export(dataset:str,comparison_month:str="",name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False,rules:str="",severity:str="",lawyer:str="",project:str="",location:str="",date:str="",search:str="",ignore_court_verdict:bool=False):
     selected_rules=[rule.strip() for rule in rules.split(",") if rule.strip()]
-    payload=require_legal_store().review_export(dataset,comparison_month,name_compare_chars,allow_name_variations,exact_matches_only,selected_rules)
+    payload=require_legal_store().review_export(dataset,comparison_month,name_compare_chars,allow_name_variations,exact_matches_only,selected_rules,severity,lawyer,project,location,date,search,ignore_court_verdict)
     return Response(payload,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":f'attachment; filename="{dataset}-review-findings.xlsx"'})
 
 

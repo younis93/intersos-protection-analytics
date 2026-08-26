@@ -242,8 +242,11 @@ export const legalReviewExportUrl = (
   allowNameVariations = false,
   exactMatchesOnly = false,
   rules: string[] = [],
+  filters: Record<string, string> = {},
+  search = "",
+  ignoreCourtVerdict = false,
 ) =>
-  `${API}/legal/review-export/${dataset}?comparison_month=${encodeURIComponent(comparisonMonth)}&name_compare_chars=${nameCompareChars}&allow_name_variations=${allowNameVariations}&exact_matches_only=${exactMatchesOnly}&rules=${encodeURIComponent(rules.join(","))}`;
+  `${API}/legal/review-export/${dataset}?comparison_month=${encodeURIComponent(comparisonMonth)}&name_compare_chars=${nameCompareChars}&allow_name_variations=${allowNameVariations}&exact_matches_only=${exactMatchesOnly}&rules=${encodeURIComponent(rules.join(","))}&severity=${encodeURIComponent(filters.severity || "")}&lawyer=${encodeURIComponent(filters.lawyer || "")}&project=${encodeURIComponent(filters.project || "")}&location=${encodeURIComponent(filters.location || "")}&date=${encodeURIComponent(filters.date || "")}&search=${encodeURIComponent(search)}&ignore_court_verdict=${ignoreCourtVerdict}`;
 export const getDuplicateExclusions = () =>
   fetch(`${API}/legal/duplicate-exclusions`, { cache: "no-store" }).then(parse<{rows: DuplicateExclusion[]; count: number}>);
 export const createDuplicateExclusion = (record: Pick<DuplicateExclusion, "caseId" | "rule" | "name" | "project" | "source"> & Partial<Pick<DuplicateExclusion,"dataset"|"identifierType"|"identifierValue">>) =>

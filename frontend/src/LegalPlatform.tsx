@@ -24,6 +24,7 @@ import {
   FileText,
   FileQuestion,
   FolderOpen,
+  Gavel,
   Home,
   LockKeyhole,
   LayoutDashboard,
@@ -83,7 +84,7 @@ import Studio from "./Studio";
 import type { LegalIntelligence, RepresentationCaseLoad, RepresentationCaseLoadService } from "./api";
 import type { Dashboard, DuplicateExclusion, IndicatorReport, IndicatorReportGroup, IndicatorReportItem, IndicatorSection, LegalAnalyticsDashboard, LegalExplorerResult, LegalFlag, LegalMetadata, LegalReview, Metadata, Theme, UpdateCheck, UpdateStatus } from "./types";
 import { ActiveFilters, AppSelect, ChartCard, CheckboxMultiSelect, ExcelDownloadButton, FilterDrawer, formatProjectLabel, KpiCard, TrendCard } from "./components";
-import {formatTableValue} from "./dateFormat";
+import {formatFilterMonth, formatTableValue} from "./dateFormat";
 import {mapIntensity,projectGovernorates,type MapFeature} from "./iraqMap";
 import { exportSvgChart } from "./chartExport";
 
@@ -247,7 +248,7 @@ const nav: [LegalPage, any][] = [
   ["awareness", Megaphone],
   ["detention", LockKeyhole],
   ["deportation", ShieldAlert],
-  ["lawyer-intelligence", BriefcaseBusiness],
+  ["lawyer-intelligence", Gavel],
   ["studio", ChartColumnIncreasing],
   ["explorer", TableProperties],
   ["cases", Search],
@@ -434,6 +435,8 @@ function FindingTable({
   allowNameVariations,
   exactMatchesOnly,
   onExactMatchesOnlyChange,
+  ignoreCourtVerdict,
+  onIgnoreCourtVerdictChange,
   filters,
   comparisonMonth,
   onOpenCase,
@@ -448,6 +451,8 @@ function FindingTable({
   allowNameVariations: boolean;
   exactMatchesOnly: boolean;
   onExactMatchesOnlyChange: (value: boolean) => void;
+  ignoreCourtVerdict: boolean;
+  onIgnoreCourtVerdictChange: (value: boolean) => void;
   filters: Record<string, string>;
   comparisonMonth: string;
   onOpenCase: (caseId: string) => void;
@@ -458,7 +463,6 @@ function FindingTable({
   const [result, setResult] = useState<LegalReview | null>(null),
     [page, setPage] = useState(1),
     [helpOpen, setHelpOpen] = useState(false),
-    [ignoreCourtVerdict, setIgnoreCourtVerdict] = useState(false),
     [error, setError] = useState("");
   useEffect(() => {
     setPage(1);
@@ -509,7 +513,7 @@ function FindingTable({
               <span>Only 100% matches</span>
             </label>
           )}
-          {rule === "Duplicate service" && <label className="exact-match-filter"><input type="checkbox" checked={ignoreCourtVerdict} onChange={(event)=>setIgnoreCourtVerdict(event.target.checked)}/><span>Ignore Court Verdict and Other</span></label>}
+          {rule === "Duplicate service" && <label className="exact-match-filter"><input type="checkbox" checked={ignoreCourtVerdict} onChange={(event)=>onIgnoreCourtVerdictChange(event.target.checked)}/><span>Ignore Court Verdict and Other</span></label>}
           <div className="indicator-total-block finding-total">
             <strong>{visibleRows.length.toLocaleString()}</strong>
             <span>Total</span>
@@ -632,6 +636,7 @@ function ReviewPageBody({
     [appliedNameCompareChars, setAppliedNameCompareChars] = useState(15),
     [allowNameVariations, setAllowNameVariations] = useState(false),
     [exactMatchesOnly, setExactMatchesOnly] = useState(true),
+    [ignoreCourtVerdict, setIgnoreCourtVerdict] = useState(false),
     [selectedRules, setSelectedRules] = useState<string[]>([]),
     [filters, setFilters] = useState<Record<string, string>>({}),
     [drawer, setDrawer] = useState(false),
@@ -658,6 +663,7 @@ function ReviewPageBody({
     setSelectedRules([]);
     setInitialized(false);
     setFilters({});
+    setIgnoreCourtVerdict(false);
   }, [dataset]);
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(search), 300);
@@ -861,7 +867,7 @@ function ReviewPageBody({
           <SlidersHorizontal />
           All filters{activeFilters > 0 && <b>{activeFilters}</b>}
         </button>
-        <ExcelDownloadButton disabled={selectedRules.length === 0} onClick={()=>downloadExcelUrl(legalReviewExportUrl(dataset, comparisonMonth, appliedNameCompareChars, allowNameVariations, exactMatchesOnly, selectedRules),`${dataset}-review-findings.xlsx`)}/>
+        <ExcelDownloadButton disabled={selectedRules.length === 0} onClick={()=>downloadExcelUrl(legalReviewExportUrl(dataset, comparisonMonth, appliedNameCompareChars, allowNameVariations, exactMatchesOnly, selectedRules, filters, debouncedSearch, ignoreCourtVerdict),`${dataset}-review-findings.xlsx`)}/>
       </div>
       </LegalScrollControls>
       {selectedRules.length === 0 ? (
@@ -882,6 +888,8 @@ function ReviewPageBody({
               allowNameVariations={allowNameVariations}
               exactMatchesOnly={exactMatchesOnly}
               onExactMatchesOnlyChange={setExactMatchesOnly}
+              ignoreCourtVerdict={ignoreCourtVerdict}
+              onIgnoreCourtVerdictChange={setIgnoreCourtVerdict}
               filters={filters}
               comparisonMonth={comparisonMonth}
               onOpenCase={onOpenCase}
@@ -946,8 +954,8 @@ function ReviewPageBody({
             <div className="exclusion-import-rules"><span>Exclude from these tables</span>{orderedRules.map(([rule]) => <label key={rule}><input type="checkbox" checked={exclusionImportRules.includes(rule)} onChange={() => setExclusionImportRules((current) => current.includes(rule) ? current.filter((item) => item !== rule) : [...current, rule])} /><span>{rule}</span></label>)}</div>
             <label className="exclusion-file-picker" htmlFor="exclusion-import-file"><span>Choose file</span><small>{exclusionFile?.name || "CSV, XLSX, or XLS"}</small></label>
             <input id="exclusion-import-file" className="exclusion-file-input" type="file" accept=".csv,.xlsx,.xls" onChange={(event) => { setExclusionFile(event.target.files?.[0] || null); setExclusionImportResult(""); }} />
-            {exclusionImportResult && <p>{exclusionImportResult}</p>}
-            <footer><button className="soft" onClick={() => setExclusionImportOpen(false)}>Cancel</button><button className="primary" disabled={!exclusionFile || !exclusionImportRules.length || exclusionBusy} onClick={async () => { if (!exclusionFile) return; setExclusionBusy(true); try { const type=dataset === "assessments" ? "assessmentId" : dataset === "legalservices" ? "serviceId" : dataset === "awareness" ? "awarenessId" : "caseId"; const result=await importDuplicateExclusions(exclusionFile,dataset,type,exclusionImportRules); setExcludedDuplicates(result.rows); setExclusionImportResult(`${result.imported} imported from ${result.column}; ${result.duplicates} already existed; ${result.invalid} invalid.`); setFindingRevisions((current)=>Object.fromEntries(exclusionImportRules.map((rule)=>[rule,(current[rule]||0)+1]))); } finally { setExclusionBusy(false); } }}>{exclusionBusy ? "Importing…" : "Import exclusions"}</button></footer>
+            {exclusionImportResult && <p className="exclusion-import-success" role="status"><CheckCircle2 />{exclusionImportResult}</p>}
+            <footer><button className="soft" onClick={() => setExclusionImportOpen(false)}>Cancel</button><button className="primary" disabled={!exclusionFile || !exclusionImportRules.length || exclusionBusy} onClick={async () => { if (!exclusionFile) return; setExclusionBusy(true); try { const type=dataset === "assessments" ? "assessmentId" : dataset === "legalservices" ? "serviceId" : dataset === "awareness" ? "awarenessId" : "caseId"; const result=await importDuplicateExclusions(exclusionFile,dataset,type,exclusionImportRules); setExcludedDuplicates(result.rows); setExclusionImportResult(`Successfully imported ${result.imported} exclusion${result.imported === 1 ? "" : "s"} from ${result.column}. ${result.duplicates} already existed; ${result.invalid} invalid.`); setFindingRevisions((current)=>Object.fromEntries(exclusionImportRules.map((rule)=>[rule,(current[rule]||0)+1]))); } finally { setExclusionBusy(false); } }}>{exclusionBusy ? "Importing…" : "Import exclusions"}</button></footer>
           </section>
         </div>, document.body,
       )}
@@ -1262,10 +1270,11 @@ function LegalAnalyticsSection({dataset,theme,state,update,onOpenCase}:{dataset:
     </div>
     </LegalScrollControls>
     {error&&<div className="error glass">{error}</div>}
-    <div className="legal-kpis">{(data?.kpis||[]).map((item)=><div className="glass legal-kpi" key={item.label}><span>{item.label}</span><strong>{kpi(item)}</strong><small>Active filters</small></div>)}</div>
-    <div className="dashboard-grid"><TrendCard rows={data?.trend||[]} display="both" theme={theme} selected={state.filters.Month||[]} onSelect={(months,replace)=>setFilter("Month",replace?months:Array.from(new Set([...(state.filters.Month||[]),...months])))} title="Activity over time" subtitle="Based on the section source date"/>{(data?.charts||[]).map((chart)=><ChartCard key={`${chart.id}-${chart.title}`} chart={chart} display="both" theme={theme} onSelect={(field,item)=>setFilter(field,state.filters[field]?.includes(item)?state.filters[field].filter((value)=>value!==item):[...(state.filters[field]||[]),item])}/>)}</div>
-    <div className="glass legal-table-card studio-records-table"><div className="legal-card-heading"><label className="studio-table-search"><Search/><input value={state.search} placeholder={`Search ${dataset} data`} onChange={(event)=>update({search:event.target.value,page:1})}/></label><div className="indicator-total-block detention-table-total"><strong>{data?.matchedRows.toLocaleString()||0}</strong><span>Total</span></div><TableSelectionActions selected={selected} filename={`${dataset}-selected.xlsx`} onClear={()=>setSelected(new Map())} iconOnly/>{data&&<Pager compact page={state.page} total={data.matchedRows} onChange={(page)=>update({page})}/>}</div><div className="legal-table-wrap"><table><thead><tr><th><input type="checkbox" aria-label="Select visible records" checked={Boolean(data?.rows.length)&&data!.rows.every((row:any)=>selected.has(String(row.__rowKey)))} onChange={(event)=>setSelected((current)=>{const next=new Map(current);data?.rows.forEach((row:any)=>{const key=String(row.__rowKey);if(event.target.checked)next.set(key,row);else next.delete(key)});return next})}/></th>{data?.columns.map((column)=><th key={column}><button onClick={()=>update({page:1,sortColumn:column,sortDirection:state.sortColumn===column&&state.sortDirection==="asc"?"desc":"asc"})}>{column} {state.sortColumn===column?(state.sortDirection==="asc"?"▲":"▼"):"↕"}</button></th>)}</tr></thead><tbody>{data?.rows.map((row:any,index)=><tr key={index}><td><input type="checkbox" aria-label="Select record" checked={selected.has(String(row.__rowKey))} onChange={()=>setSelected((current)=>{const next=new Map(current),key=String(row.__rowKey);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td>{data.columns.map((column)=><td key={column}>{column==="Beneficiary ID"||column==="Case ID"?<button className="table-action" onClick={()=>onOpenCase(String(row[column]||""))}>{value(row[column])}<ArrowRight/></button>:value(row[column])}</td>)}</tr>)}</tbody></table></div></div>
-    {drawer&&<><button className="filter-backdrop" aria-label="Close Analytics Studio filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer analytics-filter-drawer"><header><div><span className="eyebrow">ANALYTICS STUDIO FILTERS</span><h2>Filter {dataset==="legalservices"?"Legal Services":dataset[0].toUpperCase()+dataset.slice(1)}</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header><label className="filter-search"><Search/><input value={filterSearch} onChange={(event)=>setFilterSearch(event.target.value)} placeholder="Search filters"/></label><div className="case-filter-scroll">{Object.entries(data?.filterOptions||{}).filter(([column])=>column.toLowerCase().includes(filterSearch.toLowerCase())).map(([column,values])=><details key={column} open={Boolean(state.filters[column]?.length)}><summary><span>{column}</span>{state.filters[column]?.length>0&&<b>{state.filters[column].length}</b>}<ChevronDown/></summary><div>{values.map((item)=><label key={item}><input type="checkbox" checked={state.filters[column]?.includes(item)||false} onChange={()=>setFilter(column,state.filters[column]?.includes(item)?state.filters[column].filter((value)=>value!==item):[...(state.filters[column]||[]),item])}/><span>{item}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!active} onClick={clear}>Clear all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {active>0&&`(${active})`}</button></footer></aside></>}
+    {busy&&data&&<div className="studio-section-refreshing" role="status"><span/><span>Updating analysis…</span></div>}
+    {busy&&!data?<div className="glass studio-section-loading" role="status"><div/><span>Loading analysis…</span></div>:data&&<><div className="legal-kpis">{data.kpis.map((item)=><div className="glass legal-kpi" key={item.label}><span>{item.label}</span><strong>{kpi(item)}</strong><small>Active filters</small></div>)}</div>
+    <div className="dashboard-grid"><TrendCard rows={data.trend} display="both" theme={theme} selected={state.filters.Month||[]} onSelect={(months,replace)=>setFilter("Month",replace?months:Array.from(new Set([...(state.filters.Month||[]),...months])))} title="Activity over time" subtitle="Based on the section source date"/>{data.charts.map((chart)=><ChartCard key={`${chart.id}-${chart.title}`} chart={chart} display="both" theme={theme} onSelect={(field,item)=>setFilter(field,state.filters[field]?.includes(item)?state.filters[field].filter((value)=>value!==item):[...(state.filters[field]||[]),item])}/>)}</div>
+    <div className="glass legal-table-card studio-records-table"><div className="legal-card-heading"><label className="studio-table-search"><Search/><input value={state.search} placeholder={`Search ${dataset} data`} onChange={(event)=>update({search:event.target.value,page:1})}/></label><div className="indicator-total-block detention-table-total"><strong>{data.matchedRows.toLocaleString()}</strong><span>Total</span></div><TableSelectionActions selected={selected} filename={`${dataset}-selected.xlsx`} onClear={()=>setSelected(new Map())} iconOnly/><Pager compact page={state.page} total={data.matchedRows} onChange={(page)=>update({page})}/></div><div className="legal-table-wrap"><table><thead><tr><th><input type="checkbox" aria-label="Select visible records" checked={Boolean(data.rows.length)&&data.rows.every((row:any)=>selected.has(String(row.__rowKey)))} onChange={(event)=>setSelected((current)=>{const next=new Map(current);data.rows.forEach((row:any)=>{const key=String(row.__rowKey);if(event.target.checked)next.set(key,row);else next.delete(key)});return next})}/></th>{data.columns.map((column)=><th key={column}><button onClick={()=>update({page:1,sortColumn:column,sortDirection:state.sortColumn===column&&state.sortDirection==="asc"?"desc":"asc"})}>{column} {state.sortColumn===column?(state.sortDirection==="asc"?"▲":"▼"):"↕"}</button></th>)}</tr></thead><tbody>{data.rows.map((row:any,index)=><tr key={index}><td><input type="checkbox" aria-label="Select record" checked={selected.has(String(row.__rowKey))} onChange={()=>setSelected((current)=>{const next=new Map(current),key=String(row.__rowKey);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td>{data.columns.map((column)=><td key={column}>{column==="Beneficiary ID"||column==="Case ID"?<button className="table-action" onClick={()=>onOpenCase(String(row[column]||""))}>{value(row[column])}<ArrowRight/></button>:value(row[column])}</td>)}</tr>)}</tbody></table></div></div></>}
+    {drawer&&<><button className="filter-backdrop" aria-label="Close Analytics Studio filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer analytics-filter-drawer"><header><div><span className="eyebrow">ANALYTICS STUDIO FILTERS</span><h2>Filter {dataset==="legalservices"?"Legal Services":dataset[0].toUpperCase()+dataset.slice(1)}</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header><label className="filter-search"><Search/><input value={filterSearch} onChange={(event)=>setFilterSearch(event.target.value)} placeholder="Search filters"/></label><div className="case-filter-scroll">{Object.entries(data?.filterOptions||{}).filter(([column])=>column.toLowerCase().includes(filterSearch.toLowerCase())).map(([column,values])=><details key={column} open={Boolean(state.filters[column]?.length)}><summary><span>{column}</span>{state.filters[column]?.length>0&&<b>{state.filters[column].length}</b>}<ChevronDown/></summary><div>{values.map((item)=><label key={item}><input type="checkbox" checked={state.filters[column]?.includes(item)||false} onChange={()=>setFilter(column,state.filters[column]?.includes(item)?state.filters[column].filter((value)=>value!==item):[...(state.filters[column]||[]),item])}/><span>{formatFilterMonth(item)}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!active} onClick={clear}>Clear all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {active>0&&`(${active})`}</button></footer></aside></>}
   </section>;
 }
 
@@ -1347,21 +1356,10 @@ function Explorer({
   return (
     <>
       {error && <div className="error glass">{error}</div>}
-      <LegalScrollControls search={search} onSearch={(value)=>{setSearch(value);setPage(1)}} searchPlaceholder="Search data" onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={()=>{setFilters({});setPage(1)}}>
+      <LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={()=>{setFilters({});setPage(1)}}>
       <div className="legal-toolbar explorer-sticky-controls">
         <AppSelect label="Dataset" value={dataset} options={orderedSheets.map((sheet)=>[sheet.id,`${sheet.name} (${sheet.rows.toLocaleString()})`])} onChange={(next)=>{setDataset(next);setFilters({});setSortColumn("");setSortDirection("asc");setPage(1)}}/>
-        <label>
-          <Search />
-          <input
-            className="table-search-input"
-            placeholder="Search data"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-          />
-        </label>
+        <span className="explorer-toolbar-spacer" aria-hidden="true"/>
         <button
           className="soft case-filter-button"
           onClick={() => setDrawer(true)}
@@ -1394,6 +1392,7 @@ function Explorer({
       {busy && !result && <LegalSkeleton variant="explorer" embedded />}
       {!(busy && !result) && <div className="glass legal-table-card compact-explorer">
         <div className="legal-card-heading">
+          <label className="explorer-table-search"><Search/><input className="table-search-input" placeholder="Search data" value={search} onChange={(event)=>{setSearch(event.target.value);setPage(1)}}/></label>
           <div className="indicator-total-block detention-table-total"><strong>{result?.total.toLocaleString() || 0}</strong><span>Total</span></div>
           <TableSelectionActions selected={selectedRows} filename={`${dataset}-selected.xlsx`} onClear={()=>setSelectedRows(new Map())} onDownloadAll={download} iconOnly/>
           {result && <Pager compact page={page} total={result.total} onChange={setPage}/>}
@@ -1485,7 +1484,7 @@ function Explorer({
                             }
                             onChange={() => toggle(option.name, item)}
                           />
-                          <span>{item}</span>
+                          <span>{formatFilterMonth(item)}</span>
                         </label>
                       ))}
                     </div>
@@ -1674,7 +1673,7 @@ function LegacyExplorer({
                             }
                             onChange={() => toggle(option.name, item)}
                           />
-                          <span>{item}</span>
+                          <span>{formatFilterMonth(item)}</span>
                         </label>
                       ))}
                     </div>
@@ -2054,7 +2053,7 @@ function DetentionCases({
           }):<tr><td colSpan={7}><div className="reconciliation-empty"><CheckCircle2/><strong>All records match for {comparisonResult.month}</strong></div></td></tr>}</tbody></table></div>
         </>}
       </section>}
-      {drawer&&<><button className="filter-backdrop" aria-label="Close filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer"><header><div><span className="eyebrow">DETENTION FILTERS</span><h2>Filter detention cases</h2></div><button onClick={()=>setDrawer(false)}><X/></button></header><div className="case-filter-scroll review-checkbox-filters">{Object.entries(data?.filterOptions||{}).map(([label,values])=><details key={label} open={Boolean(filters[label]?.length)}><summary><span>{label}</span>{filters[label]?.length>0&&<b>{filters[label].length}</b>}<ChevronDown/></summary><div>{values.map((item)=><label key={item}><input type="checkbox" checked={filters[label]?.includes(item)||false} onChange={()=>updateFilter(label,filters[label]?.includes(item)?filters[label].filter((value)=>value!==item):[...(filters[label]||[]),item])}/><span>{item}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!activeCount} onClick={()=>{setFilters({});setPage(1)}}>Clear all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {activeCount>0&&`(${activeCount})`}</button></footer></aside></>}
+      {drawer&&<><button className="filter-backdrop" aria-label="Close filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer"><header><div><span className="eyebrow">DETENTION FILTERS</span><h2>Filter detention cases</h2></div><button onClick={()=>setDrawer(false)}><X/></button></header><div className="case-filter-scroll review-checkbox-filters">{Object.entries(data?.filterOptions||{}).map(([label,values])=><details key={label} open={Boolean(filters[label]?.length)}><summary><span>{label}</span>{filters[label]?.length>0&&<b>{filters[label].length}</b>}<ChevronDown/></summary><div>{values.map((item)=><label key={item}><input type="checkbox" checked={filters[label]?.includes(item)||false} onChange={()=>updateFilter(label,filters[label]?.includes(item)?filters[label].filter((value)=>value!==item):[...(filters[label]||[]),item])}/><span>{/date/i.test(label)?formatFilterMonth(item):item}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!activeCount} onClick={()=>{setFilters({});setPage(1)}}>Clear all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {activeCount>0&&`(${activeCount})`}</button></footer></aside></>}
       {drillMenu&&createPortal(<div ref={drillMenuRef} className="detention-drill-menu" role="menu" aria-label="Chart table options" style={{left:drillMenu.x,top:drillMenu.y}}><span>Filtered records</span><button role="menuitem" autoFocus onClick={()=>{setDrillMenu(null);setPage(1);setTab("records")}}><TableProperties/><div><strong>Open detail table</strong><small>Keep all active filters</small></div><ArrowRight/></button><button role="menuitem" className="cancel" onClick={()=>setDrillMenu(null)}><X/>Cancel</button></div>,document.body)}
     </div>
   );
@@ -2381,7 +2380,7 @@ function Cases({
                             }
                             onChange={() => toggle(option.key, item)}
                           />
-                          <span>{item}</span>
+                          <span>{formatFilterMonth(item)}</span>
                         </label>
                       ))}
                     </div>
@@ -3174,7 +3173,8 @@ function BeneficiaryIdModal({ids,count,title,onClose,onCopy}:{ids:string[];count
   }
   const sortBy=(key:"beneficiaryId"|"assessmentId"|"name"|"source")=>setSort((current)=>({key,ascending:current.key===key?!current.ascending:true}));
   const sortMark=(key:"beneficiaryId"|"assessmentId"|"name"|"source")=>sort.key===key?(sort.ascending?" ↑":" ↓"):"";
-  return <div className="indicator-modal" role="dialog" aria-modal="true" aria-label="Beneficiary and Assessment IDs"><button className="case-modal-backdrop" aria-label="Close IDs" onClick={onClose}/><section className="beneficiary-id-modal"><header><div><span>BENEFICIARY &amp; ASSESSMENT ID DRILL-DOWN</span><h2>Matching case records</h2><p>{title}</p></div><button className="icon" onClick={onClose} aria-label="Close IDs"><X/></button></header><div className="beneficiary-id-summary"><strong>{count.toLocaleString()}</strong><span>reported count</span><b>{rows.length.toLocaleString()}</b><span>unique records</span><button className="soft" disabled={!rows.length} onClick={()=>onCopy(sortedRows.map((row)=>`${row.beneficiaryId}\t${row.assessmentId}\t${row.name}\t${row.source}`).join("\n"),"Beneficiary and Assessment IDs copied")}><Copy/>Copy IDs</button></div><div className="drill-source-summary">{Object.entries(sourceCounts).map(([source,total])=><span key={source}><b>{total.toLocaleString()}</b> from {source}</span>)}</div><div className="beneficiary-id-list">{rows.length?<table className="drilldown-table"><thead><tr><th><button onClick={()=>sortBy("beneficiaryId")}>Beneficiary ID{sortMark("beneficiaryId")}</button></th><th><button onClick={()=>sortBy("assessmentId")}>Assessment ID{sortMark("assessmentId")}</button></th><th><button onClick={()=>sortBy("name")}>Name{sortMark("name")}</button></th><th><button onClick={()=>sortBy("source")}>Source{sortMark("source")}</button></th></tr></thead><tbody>{sortedRows.map((row,index)=><tr key={`${row.beneficiaryId}-${row.assessmentId}-${row.source}-${index}`}><td><code>{row.beneficiaryId}</code></td><td><code>{row.assessmentId||"—"}</code></td><td><code>{row.name||"—"}</code></td><td><span className={`drill-source drill-source-${row.source.toLowerCase().replace(/\s+/g,"-")}`}>{row.source}</span></td></tr>)}</tbody></table>:<p>No Beneficiary ID is available for these matching records.</p>}</div></section></div>;
+  const exportRows=()=>exportTableWorkbook("beneficiary-assessment-id-drill-down.xlsx",["Beneficiary ID","Assessment ID","Name","Source"],sortedRows.map((row)=>({"Beneficiary ID":row.beneficiaryId,"Assessment ID":row.assessmentId,Name:row.name,Source:row.source})));
+  return <div className="indicator-modal" role="dialog" aria-modal="true" aria-label="Beneficiary and Assessment IDs"><button className="case-modal-backdrop" aria-label="Close IDs" onClick={onClose}/><section className="beneficiary-id-modal"><header><div><span>BENEFICIARY &amp; ASSESSMENT ID DRILL-DOWN</span><h2>Matching case records</h2><p>{title}</p></div><button className="icon" onClick={onClose} aria-label="Close IDs"><X/></button></header><div className="beneficiary-id-summary"><strong>{count.toLocaleString()}</strong><span>reported count</span><b>{rows.length.toLocaleString()}</b><span>unique records</span><button className="soft" disabled={!rows.length} onClick={()=>onCopy(sortedRows.map((row)=>`${row.beneficiaryId}\t${row.assessmentId}\t${row.name}\t${row.source}`).join("\n"),"Beneficiary and Assessment IDs copied")}><Copy/>Copy IDs</button><ExcelDownloadButton className="primary" disabled={!rows.length} onClick={exportRows}/></div><div className="drill-source-summary">{Object.entries(sourceCounts).map(([source,total])=><span key={source}><b>{total.toLocaleString()}</b> from {source}</span>)}</div><div className="beneficiary-id-list">{rows.length?<table className="drilldown-table"><thead><tr><th><button onClick={()=>sortBy("beneficiaryId")}>Beneficiary ID{sortMark("beneficiaryId")}</button></th><th><button onClick={()=>sortBy("assessmentId")}>Assessment ID{sortMark("assessmentId")}</button></th><th><button onClick={()=>sortBy("name")}>Name{sortMark("name")}</button></th><th><button onClick={()=>sortBy("source")}>Source{sortMark("source")}</button></th></tr></thead><tbody>{sortedRows.map((row,index)=><tr key={`${row.beneficiaryId}-${row.assessmentId}-${row.source}-${index}`}><td><code>{row.beneficiaryId}</code></td><td><code>{row.assessmentId||"—"}</code></td><td><code>{row.name||"—"}</code></td><td><span className={`drill-source drill-source-${row.source.toLowerCase().replace(/\s+/g,"-")}`}>{row.source}</span></td></tr>)}</tbody></table>:<p>No Beneficiary ID is available for these matching records.</p>}</div></section></div>;
 }
 
 function IndicatorTrendChart({title,months,series}:{title:string;months:string[];series:{label:string;values:number[];color:string}[]}){
@@ -3256,7 +3256,7 @@ function IndicatorReporting(){
   const quarterOptions=useMemo(()=>report?.filterOptions.quarters||[],[report]);
   const monthOptions=useMemo(()=>report?.filterOptions.months.filter((month)=>{if(quarters.length){const quarter=`${month.slice(0,4)}-Q${Math.ceil(Number(month.slice(5,7))/3)}`;if(!quarters.includes(quarter))return false}return true})||[],[report,quarters]);
   const analysisMonths=useMemo(()=>[...(months.length?months:monthOptions)].filter((month)=>month.startsWith("2026-")).sort((left,right)=>right.localeCompare(left)),[months,monthOptions]);
-  useEffect(()=>{if(loading||!report||!analysisMonths.length){setMonthlyReports([]);setAnalysisLoading(false);return;}let active=true;setMonthlyReports([]);setAnalysisLoading(true);(async()=>{for(const month of analysisMonths){try{const next=await getLegalIndicators(projects,locations,[],[],[month],communityTypes);if(active)setMonthlyReports((current)=>[...current,{month,report:next}]);}catch(reason){if(active)setError(reason instanceof Error?reason.message:"Unable to load monthly analysis");break;}}if(active)setAnalysisLoading(false)})();return()=>{active=false};},[loading,report,analysisMonths,projects,locations,communityTypes]);
+  useEffect(()=>{if(loading||!report||!analysisMonths.length){setMonthlyReports([]);setAnalysisLoading(false);return;}let active=true;setMonthlyReports([]);setAnalysisLoading(true);Promise.all(analysisMonths.map(async(month)=>({month,report:await getLegalIndicators(projects,locations,[],[],[month],communityTypes)}))).then((reports)=>{if(active)setMonthlyReports(reports)}).catch((reason)=>{if(active)setError(reason instanceof Error?reason.message:"Unable to load monthly analysis")}).finally(()=>{if(active)setAnalysisLoading(false)});return()=>{active=false};},[loading,report,analysisMonths,projects,locations,communityTypes]);
   useEffect(()=>setQuarters((current)=>{const next=current.filter((value)=>quarterOptions.includes(value));return next.length===current.length?current:next}),[quarterOptions]);
   useEffect(()=>setMonths((current)=>{const next=current.filter((value)=>monthOptions.includes(value));return next.length===current.length?current:next}),[monthOptions]);
   useEffect(()=>setCommunityTypes((current)=>{const next=current.filter((value)=>communityTypeOptions.includes(value));return next.length===current.length?current:next}),[communityTypeOptions]);
@@ -3740,7 +3740,7 @@ export default function LegalPlatform() {
                 ? "Uploading folder"
                 : "Processing records"}
             </h2>
-            <><strong>{uploadProgress}%</strong><div role="progressbar" aria-label={uploadPhase === "uploading" ? "Legal Platform folder upload" : "Processing Legal Platform records"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={uploadProgress}><i style={{ width: `${uploadProgress}%` }} /></div></>
+            {uploadPhase === "uploading"?<><strong>{uploadProgress}%</strong><div role="progressbar" aria-label="Legal Platform folder upload" aria-valuemin={0} aria-valuemax={100} aria-valuenow={uploadProgress}><i style={{ width: `${uploadProgress}%` }} /></div></>:<><strong className="legal-upload-indeterminate-label">Working…</strong><div className="legal-upload-indeterminate" role="progressbar" aria-label="Processing Legal Platform records"><i/></div></>}
             <p>
               {uploadPhase === "uploading"
                 ? "Sending selected CSV files to the local service…"

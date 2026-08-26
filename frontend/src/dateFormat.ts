@@ -1,5 +1,13 @@
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
+/** Formats a YYYY-MM filter value as a readable reporting month. */
+export function formatFilterMonth(value: string): string {
+  const match = value.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return value;
+  const month = Number(match[2]);
+  return month >= 1 && month <= 12 ? `${match[1]} - ${MONTHS[month - 1]}` : value;
+}
+
 /** Formats recognised calendar dates without changing the original table value. */
 export function formatDisplayDate(value: unknown): string | null {
   if (typeof value !== "string") return null;

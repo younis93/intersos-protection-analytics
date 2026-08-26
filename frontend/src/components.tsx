@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Plot from "react-plotly.js";
+import { formatFilterMonth } from "./dateFormat";
 import {
   Check,
   ChevronDown,
@@ -600,7 +601,7 @@ export function FilterDrawer({
   const availableFilters = Object.entries(available).filter(([field])=>field!=="__reviewStyle").sort(
     ([left], [right]) => (datePriority[left] ?? 3) - (datePriority[right] ?? 3),
   );
-  if(reviewStyle){if(!open)return null;return <><button className="filter-backdrop" aria-label="Close deportation filters" onClick={onClose}/><aside className="case-filter-drawer"><header><div><span className="eyebrow">REVIEW FILTERS</span><h2>Filter all deportation records</h2></div><button onClick={onClose} aria-label="Close filters"><X/></button></header><div className="case-filter-scroll review-checkbox-filters">{availableFilters.map(([field,values])=><details key={field} open={Boolean(filters[field]?.length)}><summary><span>{field.replaceAll("_"," ")}</span>{filters[field]?.length>0&&<b>{filters[field].length}</b>}<ChevronDown/></summary><div>{values.map((item)=><label key={item}><input type="checkbox" checked={filters[field]?.includes(item)||false} onChange={()=>{const selected=filters[field]||[];onChange({...filters,[field]:selected.includes(item)?selected.filter((value)=>value!==item):[...selected,item]})}}/><span>{/project\s+location/i.test(field)?formatProjectLocationLabel(item):/project/i.test(field)?formatProjectLabel(item):item}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!Object.values(filters).some((values)=>values.length)} onClick={onReset}>Clear all</button><button className="primary" onClick={onClose}>Apply filters</button></footer></aside></>}
+  if(reviewStyle){if(!open)return null;return <><button className="filter-backdrop" aria-label="Close deportation filters" onClick={onClose}/><aside className="case-filter-drawer"><header><div><span className="eyebrow">REVIEW FILTERS</span><h2>Filter all deportation records</h2></div><button onClick={onClose} aria-label="Close filters"><X/></button></header><div className="case-filter-scroll review-checkbox-filters">{availableFilters.map(([field,values])=><details key={field} open={Boolean(filters[field]?.length)}><summary><span>{field.replaceAll("_"," ")}</span>{filters[field]?.length>0&&<b>{filters[field].length}</b>}<ChevronDown/></summary><div>{values.map((item)=><label key={item}><input type="checkbox" checked={filters[field]?.includes(item)||false} onChange={()=>{const selected=filters[field]||[];onChange({...filters,[field]:selected.includes(item)?selected.filter((value)=>value!==item):[...selected,item]})}}/><span>{/project\s+location/i.test(field)?formatProjectLocationLabel(item):/project/i.test(field)?formatProjectLabel(item):formatFilterMonth(item)}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!Object.values(filters).some((values)=>values.length)} onClick={onReset}>Clear all</button><button className="primary" onClick={onClose}>Apply filters</button></footer></aside></>}
   return (
     <aside className={`filter-drawer glass ${open ? "open" : ""}${reviewStyle ? " review-style-filter" : ""}`}><div className="filter-scroll">
       <div className="filter-head">
@@ -615,7 +616,7 @@ export function FilterDrawer({
       <button className="reset" onClick={onReset}>
         {reviewStyle ? "Clear all" : "Reset all filters"}
       </button>
-      <div className="filter-list">
+    <div className="filter-list">
         {availableFilters.map(([field, values]) => (
           <FilterGroup
             key={field}
