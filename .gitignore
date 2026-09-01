@@ -9,6 +9,7 @@ packaging-temp/
 __pycache__/
 *.pyc
 *.xlsx
+Legal Platform Data/*.csv
 tmp/
 .env
 certificate.pfx
