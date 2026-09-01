@@ -70,6 +70,7 @@ import {
   installUpdate,
   getDuplicateExclusions,
   createDuplicateExclusion,
+  createDuplicateExclusionsBulk,
   importDuplicateExclusions,
   restoreDuplicateExclusion,
   duplicateExclusionsExportUrl,
@@ -124,6 +125,7 @@ const ASSESSMENT_REVIEW_TAIL_RULES = new Set([
 ]);
 const LEGAL_SERVICES_REVIEW_FIRST_RULES = [
   "Duplicate service",
+  "Duplicate service without Assessment ID",
   "Current and previous month duplicate",
   "Legal service date after today",
 ];
@@ -197,6 +199,7 @@ const REVIEW_CHECK_METHODS: Record<string, { columns: string[]; logic: string }>
   "Type of document in Assessments vs Services": { columns: ["Date of Assessment", "Type of Documents to be issued", "Legal Services: Type of Document", "Assessment ID"], logic: "For assessments dated in 2026 or later, compares requested assessment documents with Type of Document across all linked legal services and identifies the missing side." },
   "Type of Legal Service in Assessment vs Services": { columns: ["Date of Assessment", "Type of Legal Service Needed", "Legal Services: Type of Service Provided", "Assessment ID"], logic: "For assessments dated in 2026 or later, flags requested legal service types that are missing from every linked legal service." },
   "Duplicate service": { columns: ["Beneficiary ID", "Assessment ID", "Type of Service Provided", "Type of Document"], logic: "Flags repeated nonblank combinations of Beneficiary ID, Assessment ID, Type of Service Provided, and Type of Document." },
+  "Duplicate service without Assessment ID": { columns: ["Beneficiary ID", "Type of Service Provided", "Type of Document"], logic: "Flags repeated nonblank combinations of Beneficiary ID, Type of Service Provided, and Type of Document across all Assessment IDs." },
   "Detention Governorate mismatch": { columns: ["Detention Governorate", "Project", "Project Location"], logic: "Flags an assessment when its Detention Governorate does not match either its Project or Project Location governorate." },
   "Assessment date after today": { columns: ["Date of Assessment", "Date of the released or deported", "Date of Detention", "Date of Assessment Closure", "Date of the Request"], logic: "Flags any populated assessment date that is later than today." },
   "Current and previous month duplicate": { columns: ["Beneficiary ID", "Date of Service Provision", "Created On"], logic: "From Created On August 2026 onward, flags repeated service history in the selected provision month, except an immediate previous-month service created on days 1-4 of the following month." },
@@ -443,6 +446,7 @@ function FindingTable({
   findingRevision,
   onFindingCountChange,
   onFindingContextMenu,
+  onBulkExclude,
 }: {
   dataset: string;
   rule: string;
@@ -459,11 +463,14 @@ function FindingTable({
   findingRevision: number;
   onFindingCountChange: (rule: string, count: number) => void;
   onFindingContextMenu: (event: React.MouseEvent, row: LegalFlag) => void;
+  onBulkExclude: (rows: LegalFlag[]) => void;
 }) {
   const [result, setResult] = useState<LegalReview | null>(null),
     [page, setPage] = useState(1),
     [helpOpen, setHelpOpen] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const selectVisibleRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     setPage(1);
   }, [dataset, rule, search, filters, comparisonMonth, nameCompareChars, allowNameVariations, exactMatchesOnly, findingRevision]);
@@ -484,9 +491,10 @@ function FindingTable({
       controller.signal,
     )
       .then((x) => {
+        if (controller.signal.aborted) return;
         setResult(x);
         setError("");
-        if (EXCLUDABLE_BENEFICIARY_RULES.has(rule)) onFindingCountChange(rule, x.total);
+        if (EXCLUDABLE_BENEFICIARY_RULES.has(rule) && rule !== "Possible duplicate name") onFindingCountChange(rule, x.total);
       })
       .catch((e) => {
         if (e.name !== "AbortError") setError(e.message);
@@ -499,6 +507,17 @@ function FindingTable({
     announceLegalCopy(name);
   };
   const visibleRows=(result?.rows||[]).filter((row)=>!ignoreCourtVerdict || !/court verdict|\bother\b|اخرى/i.test(row.typeOfDocument||""));
+  const rowKey = (row: LegalFlag, index: number) => `${row.recordId || row.row}|${row.caseId}|${row.assessmentId}|${row.serviceId}|${row.awarenessId}|${index}`;
+  const isExcludable = (row: LegalFlag) => (dataset === "assessments" && Boolean(row.assessmentId)) || (dataset === "legalservices" && Boolean(row.serviceId)) || (dataset === "awareness" && Boolean(row.awarenessId || row.name)) || (dataset === "beneficiaries" && Boolean(row.caseId));
+  const excludableRows = visibleRows.filter(isExcludable);
+  const selectedRows = visibleRows.filter((row, index) => isExcludable(row) && selectedRowKeys.includes(rowKey(row, index)));
+  const allVisibleSelected = excludableRows.length > 0 && selectedRows.length === excludableRows.length;
+  useEffect(() => {
+    setSelectedRowKeys([]);
+  }, [dataset, rule, search, page, filters, comparisonMonth, nameCompareChars, allowNameVariations, exactMatchesOnly, findingRevision, ignoreCourtVerdict]);
+  useEffect(() => {
+    if (selectVisibleRef.current) selectVisibleRef.current.indeterminate = selectedRows.length > 0 && !allVisibleSelected;
+  }, [selectedRows.length, allVisibleSelected]);
   return (
     <section className="glass finding-table-section">
       <header>
@@ -513,13 +532,20 @@ function FindingTable({
               <span>Only 100% matches</span>
             </label>
           )}
-          {rule === "Duplicate service" && <label className="exact-match-filter"><input type="checkbox" checked={ignoreCourtVerdict} onChange={(event)=>onIgnoreCourtVerdictChange(event.target.checked)}/><span>Ignore Court Verdict and Other</span></label>}
+          {(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <label className="exact-match-filter"><input type="checkbox" checked={ignoreCourtVerdict} onChange={(event)=>onIgnoreCourtVerdictChange(event.target.checked)}/><span>Ignore Court Verdict and Other</span></label>}
           <div className="indicator-total-block finding-total">
             <strong>{visibleRows.length.toLocaleString()}</strong>
             <span>Total</span>
           </div>
         </div>
       </header>
+      {selectedRows.length > 0 && (
+        <div className="review-bulk-action-bar" role="status">
+          <span><b>{selectedRows.length}</b> selected</span>
+          <button className="soft" onClick={() => setSelectedRowKeys([])}>Clear selection</button>
+          <button className="review-bulk-exclude" onClick={() => onBulkExclude(selectedRows)}><Ban /> Exclude selected</button>
+        </div>
+      )}
       {helpOpen && (() => { const method=REVIEW_CHECK_METHODS[rule] || {columns:["Imported source record"],logic:"Flags records matching this review rule."}; return <aside className="finding-check-guidance" role="note"><CircleHelp /><div><strong>Detection methodology</strong><p>{method.logic}</p><div className="finding-method-columns"><span>Columns checked</span>{method.columns.map((column) => <b key={column}>{column}</b>)}</div></div></aside>; })()}
       {error && <div className="error">{error}</div>}
       {!result ? (
@@ -538,6 +564,7 @@ function FindingTable({
             <table>
               <thead>
                 <tr>
+                  <th className="review-selection-column"><input ref={selectVisibleRef} aria-label={`Select visible records for ${displayReviewRule(rule)}`} type="checkbox" disabled={!excludableRows.length} checked={allVisibleSelected} onChange={(event) => setSelectedRowKeys(event.target.checked ? visibleRows.map((row, index) => isExcludable(row) ? rowKey(row, index) : "").filter(Boolean) : [])} /></th>
                   <th>Finding detail</th>
                   <th>Recommended action</th>
                   <th>Lawyer</th>
@@ -552,16 +579,17 @@ function FindingTable({
                   {dataset === "awareness" ? (
                     <><th>Awareness ID</th><th>Session topic</th></>
                   ) : (
-                    <><th>Case ID</th><th>Assessment</th>{dataset === "assessments" && <th>Date of assessment</th>}{rule === "Open counselling-only assessment" && <><th>Assessment status</th><th>Type of Legal Service Needed</th></>}{rule === "Detention/immigration inconsistency" && <><th>Is the beneficiary detained</th><th>Is it an immigration related charge?</th></>}{rule === "Detained beneficiary below 10 years" && <><th>Is the beneficiary detained</th><th>Date of birth</th><th>Current age</th></>}{rule === "Selected month with previous assessment" && <th>Created On</th>}{rule === "Representation while not detained" && <th>Type of documents to be issued</th>}{rule === "Type of document in Assessments vs Services" && <><th>Finding</th><th>Assessment documents</th><th>Service documents</th></>}{rule === "Type of Legal Service in Assessment vs Services" && <><th>Assessment service needed</th><th>Service type provided</th></>}{rule === "Duplicate service" && <><th>Beneficiary ID</th><th>Type of Service Provided</th><th>Type of Document</th><th>Please specify the Court Verdict</th><th>Type of Document if Other</th><th>Legal Concern Specified</th><th>Legal Concern</th></>}<th>Service</th></>
+                    <><th>Case ID</th><th>Assessment</th>{dataset === "assessments" && <th>Date of assessment</th>}{rule === "Open counselling-only assessment" && <><th>Assessment status</th><th>Type of Legal Service Needed</th></>}{rule === "Detention/immigration inconsistency" && <><th>Is the beneficiary detained</th><th>Is it an immigration related charge?</th></>}{rule === "Detained beneficiary below 10 years" && <><th>Is the beneficiary detained</th><th>Date of birth</th><th>Current age</th></>}{rule === "Selected month with previous assessment" && <th>Created On</th>}{rule === "Representation while not detained" && <th>Type of documents to be issued</th>}{rule === "Type of document in Assessments vs Services" && <><th>Finding</th><th>Assessment documents</th><th>Service documents</th></>}{rule === "Type of Legal Service in Assessment vs Services" && <><th>Assessment service needed</th><th>Service type provided</th></>}{(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <><th>Beneficiary ID</th><th>Type of Service Provided</th><th>Type of Document</th><th>Please specify the Court Verdict</th><th>Type of Document if Other</th><th>Legal Concern Specified</th><th>Legal Concern</th></>}<th>Service</th></>
                   )}
                   <th></th>
                 </tr>
               </thead>
               <tbody>
                 {visibleRows.map((r, i) => (
-                  <tr key={`${r.row}-${i}`} className={(rule === "Duplicate service" || rule === "Beneficiary has multiple assessments" || rule === "Duplicate participant in session") && r.duplicateGroup ? "duplicate-service-row" : ""} style={(rule === "Duplicate service" || rule === "Beneficiary has multiple assessments" || rule === "Duplicate participant in session") && r.duplicateGroup ? { background: duplicateColor(r.duplicateGroup) } : undefined} onContextMenu={(event) => {
+                  <tr key={`${r.row}-${i}`} className={(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID" || rule === "Beneficiary has multiple assessments" || rule === "Duplicate participant in session") && r.duplicateGroup ? "duplicate-service-row" : ""} style={(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID" || rule === "Beneficiary has multiple assessments" || rule === "Duplicate participant in session") && r.duplicateGroup ? { background: duplicateColor(r.duplicateGroup) } : undefined} onContextMenu={(event) => {
                     if ((dataset === "assessments" && r.assessmentId) || (dataset === "legalservices" && r.serviceId) || (dataset === "awareness" && (r.awarenessId || r.name)) || (dataset === "beneficiaries" && r.caseId)) onFindingContextMenu(event, r);
                   }}>
+                    <td className="review-selection-column"><input aria-label={`Select ${r.name || r.caseId || r.assessmentId || r.serviceId || r.awarenessId || "record"}`} type="checkbox" disabled={!isExcludable(r)} checked={selectedRowKeys.includes(rowKey(r, i))} onChange={() => setSelectedRowKeys((current) => current.includes(rowKey(r, i)) ? current.filter((key) => key !== rowKey(r, i)) : [...current, rowKey(r, i)])} /></td>
                     <td>{r.detail}</td>
                     <td className="action-cell">{r.action}</td>
                     <td>
@@ -596,7 +624,7 @@ function FindingTable({
                     {dataset === "awareness" ? (
                       <><td>{r.awarenessId || r.recordId || "—"}</td><td>{r.sessionTopic || "—"}</td></>
                     ) : (
-                      <><td>{r.caseId || "—"}</td><td>{r.assessmentId || "—"}</td>{dataset === "assessments" && <td>{r.assessmentDate || "—"}</td>}{rule === "Open counselling-only assessment" && <><td>{r.assessmentStatus || "—"}</td><td>{r.legalServiceNeeded || "—"}</td></>}{rule === "Detention/immigration inconsistency" && <><td>{r.beneficiaryDetained || "—"}</td><td>{r.immigrationRelatedCharge || "—"}</td></>}{rule === "Detained beneficiary below 10 years" && <><td>{r.beneficiaryDetained || "—"}</td><td>{r.dateOfBirth || "—"}</td><td>{r.beneficiaryAge ?? "—"}</td></>}{rule === "Selected month with previous assessment" && <td>{r.createdOn || "—"}</td>}{rule === "Representation while not detained" && <td>{r.typeOfDocument || "—"}</td>}{rule === "Type of document in Assessments vs Services" && <><td>{r.comparisonFinding || "—"}</td><td>{r.assessmentDocuments || "—"}</td><td>{r.serviceDocuments || "—"}</td></>}{rule === "Type of Legal Service in Assessment vs Services" && <><td>{r.requestedServiceTypes || "—"}</td><td>{r.providedServiceTypes || "—"}</td></>}{rule === "Duplicate service" && <><td>{r.caseId || "—"}</td><td>{r.serviceTypeProvided || "—"}</td><td>{r.typeOfDocument || "—"}</td><td>{r.courtVerdictDetail || "—"}</td><td>{r.otherDocumentDetail || "—"}</td><td>{r.legalConcernSpecified || "—"}</td><td>{r.legalConcern || "—"}</td></>}<td>{r.serviceId || "—"}</td></>
+                      <><td>{r.caseId || "—"}</td><td>{r.assessmentId || "—"}</td>{dataset === "assessments" && <td>{r.assessmentDate || "—"}</td>}{rule === "Open counselling-only assessment" && <><td>{r.assessmentStatus || "—"}</td><td>{r.legalServiceNeeded || "—"}</td></>}{rule === "Detention/immigration inconsistency" && <><td>{r.beneficiaryDetained || "—"}</td><td>{r.immigrationRelatedCharge || "—"}</td></>}{rule === "Detained beneficiary below 10 years" && <><td>{r.beneficiaryDetained || "—"}</td><td>{r.dateOfBirth || "—"}</td><td>{r.beneficiaryAge ?? "—"}</td></>}{rule === "Selected month with previous assessment" && <td>{r.createdOn || "—"}</td>}{rule === "Representation while not detained" && <td>{r.typeOfDocument || "—"}</td>}{rule === "Type of document in Assessments vs Services" && <><td>{r.comparisonFinding || "—"}</td><td>{r.assessmentDocuments || "—"}</td><td>{r.serviceDocuments || "—"}</td></>}{rule === "Type of Legal Service in Assessment vs Services" && <><td>{r.requestedServiceTypes || "—"}</td><td>{r.providedServiceTypes || "—"}</td></>}{(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <><td>{r.caseId || "—"}</td><td>{r.serviceTypeProvided || "—"}</td><td>{r.typeOfDocument || "—"}</td><td>{r.courtVerdictDetail || "—"}</td><td>{r.otherDocumentDetail || "—"}</td><td>{r.legalConcernSpecified || "—"}</td><td>{r.legalConcern || "—"}</td></>}<td>{r.serviceId || "—"}</td></>
                     )}
                     <td>
                       {r.caseId && (
@@ -642,7 +670,7 @@ function ReviewPageBody({
     [drawer, setDrawer] = useState(false),
     [excludedDuplicates, setExcludedDuplicates] = useState<DuplicateExclusion[]>([]),
     [excludedManagerOpen, setExcludedManagerOpen] = useState(false),
-    [exclusionCandidate, setExclusionCandidate] = useState<LegalFlag | null>(null),
+    [exclusionCandidates, setExclusionCandidates] = useState<LegalFlag[] | null>(null),
     [exclusionImportOpen, setExclusionImportOpen] = useState(false),
     [exclusionFile, setExclusionFile] = useState<File | null>(null),
     [exclusionImportRules, setExclusionImportRules] = useState<string[]>([]),
@@ -698,7 +726,7 @@ function ReviewPageBody({
         setSummary(result);
         if (!initialized) {
           const beneficiaryDefaults = ["Possible duplicate name", "Possible duplicate contact and name", "Invalid contact number", "Case without assessment", "Invalid age"];
-          const assessmentDeferredDefaults = new Set(["Representation while not detained", "Type of document in Assessments vs Services", "Detention/immigration inconsistency", "Detained beneficiary below 10 years"]);
+          const assessmentDeferredDefaults = new Set(["Representation while not detained", "Detention/immigration inconsistency", "Detained beneficiary below 10 years"]);
           const awarenessDeferredDefaults = new Set(["Possible duplicate participant name"]);
           const defaults = dataset === "beneficiaries"
             ? beneficiaryDefaults.filter((rule) => (result.ruleCounts[rule] || 0) > 0)
@@ -716,7 +744,7 @@ function ReviewPageBody({
     return () => controller.abort();
   }, [dataset, debouncedSearch, filters, comparisonMonth, appliedNameCompareChars, allowNameVariations]);
   const amalProjectOnly = dataset === "assessments" && ((filters.project && /\bamal\b/i.test(filters.project)) || (!filters.project && Boolean(summary?.filterOptions.project?.length) && summary!.filterOptions.project.every((project) => /\bamal\b/i.test(project)))),
-    rules = Object.entries(summary?.ruleCounts || {}).map(([rule, count]) => [rule, EXCLUDABLE_BENEFICIARY_RULES.has(rule) && findingCounts[rule] !== undefined ? findingCounts[rule] : count] as const).filter(([rule]) => !amalProjectOnly || !AMAL_HIDDEN_ASSESSMENT_RULES.has(rule)),
+    rules = Object.entries(summary?.ruleCounts || {}).map(([rule, count]) => [rule, EXCLUDABLE_BENEFICIARY_RULES.has(rule) && rule !== "Possible duplicate name" && findingCounts[rule] !== undefined ? findingCounts[rule] : count] as const).filter(([rule]) => !amalProjectOnly || !AMAL_HIDDEN_ASSESSMENT_RULES.has(rule)),
     orderedRules = dataset === "assessments" ? [...rules.filter(([rule]) => !ASSESSMENT_REVIEW_TAIL_RULES.has(rule)), ...rules.filter(([rule]) => ASSESSMENT_REVIEW_TAIL_RULES.has(rule))] : dataset === "legalservices" ? [...LEGAL_SERVICES_REVIEW_FIRST_RULES.map((rule) => rules.find(([name]) => name === rule)).filter((item): item is typeof rules[number] => Boolean(item)), ...rules.filter(([rule]) => !LEGAL_SERVICES_REVIEW_FIRST_RULES.includes(rule))] : rules,
     activeFilters = Object.values(filters).filter(Boolean).length,
     visibleExcludedFindings = excludedDuplicates.filter((entry) => (entry.dataset || "beneficiaries") === dataset && (!exclusionRuleFilter || entry.rule === exclusionRuleFilter));
@@ -753,15 +781,20 @@ function ReviewPageBody({
       [key]: current[key] === item ? "" : item,
     }));
   const exclusionIdentity = (row: LegalFlag) => dataset === "assessments" ? ["assessmentId",row.assessmentId] : dataset === "legalservices" ? ["serviceId",row.serviceId] : dataset === "awareness" ? ["awarenessId",row.awarenessId || row.name] : ["caseId",row.caseId];
-  const excludeFinding = async () => {
-    if (!exclusionCandidate) return;
+  const excludeFindings = async () => {
+    if (!exclusionCandidates?.length) return;
     setExclusionBusy(true);
     try {
-      const [identifierType,identifierValue]=exclusionIdentity(exclusionCandidate);
-      const result = await createDuplicateExclusion({ caseId: exclusionCandidate.caseId, dataset, identifierType, identifierValue, rule: exclusionCandidate.rule, name: exclusionCandidate.name, project: exclusionCandidate.project, source: `${labels[dataset as LegalPage]} Review` });
+      const records = exclusionCandidates.map((candidate) => {
+        const [identifierType,identifierValue] = exclusionIdentity(candidate);
+        return { caseId: candidate.caseId, dataset, identifierType, identifierValue, rule: candidate.rule, name: candidate.name, project: candidate.project, source: `${labels[dataset as LegalPage]} Review` };
+      });
+      const result = records.length === 1
+        ? await createDuplicateExclusion(records[0])
+        : await createDuplicateExclusionsBulk(records);
       setExcludedDuplicates(result.rows);
-      setFindingRevisions((current) => ({ ...current, [exclusionCandidate.rule]: (current[exclusionCandidate.rule] || 0) + 1 }));
-      setExclusionCandidate(null);
+      setFindingRevisions((current) => ({ ...current, ...Object.fromEntries(exclusionCandidates.map((candidate) => [candidate.rule, (current[candidate.rule] || 0) + 1])) }));
+      setExclusionCandidates(null);
     } finally { setExclusionBusy(false); }
   };
   const restoreExcludedFinding = async (caseId: string, rule: string, item?: DuplicateExclusion) => {
@@ -896,6 +929,7 @@ function ReviewPageBody({
               findingRevision={findingRevisions[rule] || 0}
               onFindingCountChange={(findingRule, count) => setFindingCounts((current) => ({ ...current, [findingRule]: count }))}
               onFindingContextMenu={(event, row) => { event.preventDefault(); setDuplicateMenu({ x: event.clientX, y: event.clientY, row }); }}
+              onBulkExclude={(rows) => setExclusionCandidates(rows)}
             />
           ))}
         </div>
@@ -904,21 +938,21 @@ function ReviewPageBody({
         <>
           <button className="duplicate-context-backdrop" aria-label="Close duplicate actions" onClick={() => setDuplicateMenu(null)} />
           <div className="duplicate-context-menu" style={{ left: duplicateMenu.x, top: duplicateMenu.y }} role="menu">
-            <button role="menuitem" onClick={() => { setExclusionCandidate(duplicateMenu.row); setDuplicateMenu(null); }}>
+            <button role="menuitem" onClick={() => { setExclusionCandidates([duplicateMenu.row]); setDuplicateMenu(null); }}>
               Exclude this record from this finding
             </button>
           </div>
         </>
       )}
-      {exclusionCandidate && (
+      {exclusionCandidates?.length && (
         <div className="duplicate-exclusion-modal">
-          <button className="case-modal-backdrop" aria-label="Cancel exclusion" onClick={() => setExclusionCandidate(null)} />
+          <button className="case-modal-backdrop" aria-label="Cancel exclusion" onClick={() => setExclusionCandidates(null)} />
           <section className="duplicate-exclusion-panel">
             <span className="eyebrow">REVIEW FINDING</span>
-            <h2>Exclude this record?</h2>
-            <p>This record will be hidden only from <strong>{exclusionCandidate.rule}</strong> and its related Excel rows. The source CSV remains unchanged.</p>
-            <dl><div><dt>Finding</dt><dd>{exclusionCandidate.rule}</dd></div><div><dt>Case ID</dt><dd>{exclusionCandidate.caseId}</dd></div><div><dt>Name</dt><dd>{exclusionCandidate.name || "Not provided"}</dd></div><div><dt>Project</dt><dd>{exclusionCandidate.project || "Not provided"}</dd></div></dl>
-            <footer><button className="soft" onClick={() => setExclusionCandidate(null)} disabled={exclusionBusy}>Cancel</button><button className="primary" onClick={excludeFinding} disabled={exclusionBusy}>{exclusionBusy ? "Saving…" : "Exclude record"}</button></footer>
+            <h2>Exclude {exclusionCandidates.length === 1 ? "this record" : `${exclusionCandidates.length} records`}?</h2>
+            <p>{exclusionCandidates.length === 1 ? <>This record will be hidden only from <strong>{exclusionCandidates[0].rule}</strong> and its related Excel rows.</> : <>These records will be hidden only from <strong>{exclusionCandidates[0].rule}</strong> and its related Excel rows.</>} The source CSV remains unchanged.</p>
+            {exclusionCandidates.length === 1 && <dl><div><dt>Finding</dt><dd>{exclusionCandidates[0].rule}</dd></div><div><dt>Case ID</dt><dd>{exclusionCandidates[0].caseId}</dd></div><div><dt>Name</dt><dd>{exclusionCandidates[0].name || "Not provided"}</dd></div><div><dt>Project</dt><dd>{exclusionCandidates[0].project || "Not provided"}</dd></div></dl>}
+            <footer><button className="soft" onClick={() => setExclusionCandidates(null)} disabled={exclusionBusy}>Cancel</button><button className="primary" onClick={excludeFindings} disabled={exclusionBusy}>{exclusionBusy ? "Saving…" : exclusionCandidates.length === 1 ? "Exclude record" : `Exclude ${exclusionCandidates.length} records`}</button></footer>
           </section>
         </div>
       )}

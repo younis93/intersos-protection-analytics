@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import re
 import unicodedata
+from colorsys import hsv_to_rgb
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
@@ -92,6 +93,7 @@ ACTIONS = {
     "Type of document in Assessments vs Services": "Compare the document types requested in the assessment with the document types recorded on linked legal services, then correct the missing side.",
     "Type of Legal Service in Assessment vs Services": "Compare the legal service types requested in the assessment with linked legal services and create or correct the missing service type.",
     "Duplicate service": "Compare the service records and correct or remove the duplicate in the source platform.",
+    "Duplicate service without Assessment ID": "Compare the service records across assessments and correct or remove the duplicate in the source platform.",
     "Missing Type of Document": "Check the service record and complete Type of Document before reporting.",
     "Orphaned assessment relationship": "Correct the Assessment ID or link the service to an existing assessment.",
     "Possible duplicate participant name": "Check whether the matching name belongs to the same person before making any correction.",
@@ -100,7 +102,7 @@ ACTIONS = {
 REGISTERED_RULES = {
     "beneficiaries": ("Possible duplicate name","Possible duplicate contact and name","Invalid contact number","Case without assessment","Invalid age","Marital status below 18","Spouse below 18","Check Community Type vs Nationality"),
     "assessments": ("Beneficiary has multiple assessments","Selected month with previous assessment","Assessment without services","Pending assessment","Open counselling-only assessment","Blank legal service need","Detained beneficiary has counselling only","Adult representation without counselling","Type of Legal Service in Assessment vs Services","Detention/immigration inconsistency","Representation while not detained","Type of document in Assessments vs Services","Detained beneficiary below 10 years","Detention Governorate mismatch","Assessment date after today"),
-    "legalservices": ("Duplicate service","Current and previous month duplicate","Orphaned assessment relationship","Missing Type of Document","Legal service date after today"),
+    "legalservices": ("Duplicate service","Duplicate service without Assessment ID","Current and previous month duplicate","Orphaned assessment relationship","Missing Type of Document","Legal service date after today"),
     "awareness": ("Duplicate participant in session","Invalid contact number","Possible duplicate participant name"),
 }
 REVIEW_EXPORT_PROJECT_SHEETS = {
@@ -501,13 +503,17 @@ class LegalStore:
         # Detention eligibility is driven by the Assessments dataset. Auxiliary
         # files can legitimately retain records from other projects.
         amal_only=self._amal_only_assessment_projects()
+        review_counts={name: sum(not row.get("overviewExcluded",False) for row in rows) for name, rows in self.flags.items()}
+        # The Beneficiaries Review badge follows the exact-name selector rule,
+        # rather than counting prefix-based possible matches.
+        review_counts["beneficiaries"]=sum(self.review("beneficiaries")["ruleCounts"].values())
         self._metadata_cache = {
             "ready": True, "source": self.source, "warnings": self.warnings,
             "availability": {name: name in self.frames for name in FILES},
             "features":{"awareness":any(re.search(r"\bamal\b",value,flags=re.I) for value in project_values),"detention":not amal_only,"deportation":"deportationrecords" in self.frames and not amal_only},
             "sheets": [{"id": name, "name": DISPLAY_NAMES[name], "rows": len(df), "columns": [str(c) for c in df.columns]} for name, df in self.frames.items()],
             "months": self._months(),
-            "reviewCounts": {name: sum(not row.get("overviewExcluded",False) for row in rows) for name, rows in self.flags.items()},
+            "reviewCounts": review_counts,
             "overview": {"beneficiaries":len(self.frames["beneficiaries"]),"assessments":len(self.frames["assessments"]),"services":len(self.frames["legalservices"]),
                          "followups":len(self.frames["followupslogbooks"]) if "followupslogbooks" in self.frames else None,
                          "fees":len(self.frames["legalfees"]) if "legalfees" in self.frames else None,
@@ -647,6 +653,7 @@ class LegalStore:
         # the local save wait for all review data to be rebuilt.
         for key in list(self._review_cache):
             del self._review_cache[key]
+        self._metadata_cache = None
 
     def _excluded_case_ids(self, rule: str) -> set[str]:
         return {row["identifierValue"] for row in self.review_exclusions if row["dataset"] == "beneficiaries" and row["rule"] == rule and row["identifierType"] == "caseId"}
@@ -880,8 +887,10 @@ class LegalStore:
             requested_display=", ".join(dict.fromkeys(requested_documents));delivered_display=", ".join(dict.fromkeys(delivered_documents))
             missing_in_services=[raw for key,raw in requested_document_map.items() if key not in delivered_document_map]
             missing_in_assessment=[raw for key,raw in delivered_document_map.items() if key not in requested_document_map]
-            for finding,missing in (("Missing Type of Document in Services",missing_in_services),("Missing Type of Document in Assessment",missing_in_assessment)):
-                if not missing:continue
+            # Show one actionable finding per assessment.  If both directions
+            # differ, correcting the requested document first takes priority.
+            finding,missing=("Missing Type of Document in Services",missing_in_services) if missing_in_services else ("Missing Type of Document in Assessment",missing_in_assessment)
+            if missing:
                 self._flag(out,"assessments","Type of document in Assessments vs Services","Medium",i,row,f"{finding}: {', '.join(missing)}")
                 out[-1].update({"comparisonFinding":finding,"assessmentDocuments":requested_display,"serviceDocuments":delivered_display,"missingValues":", ".join(missing)})
             requested_types=split_multi_value(row.get(service_needed,"")) if service_needed else []
@@ -1065,16 +1074,28 @@ class LegalStore:
         df=self.frames["legalservices"]; out=[]; sid=_find(list(df.columns),"Service ID")
         out += self._future_date_flags("legalservices","Legal service date after today",("Date of Service Provision","Date Service Completed","Date of Issuance"))
         beneficiary=_find(list(df.columns),"Beneficiary ID"); aid=_find(list(df.columns),"Assessment ID"); provided=_find(list(df.columns),"Type of Service Provided"); document_type=_find(list(df.columns),"Type of Document")
-        if beneficiary and aid and provided and document_type:
-            keys={}
+        if beneficiary and provided and document_type:
+            keys={}; keys_without_assessment={}
             for i,row in df.iterrows():
-                key=(clean_id(row.get(beneficiary,"")),clean_id(row.get(aid,"")),normalize_legal_service_type(row.get(provided,"")),normalize_document_label(row.get(document_type,"")))
-                if all(key): keys.setdefault(key,[]).append(i)
+                common_key=(clean_id(row.get(beneficiary,"")),normalize_legal_service_type(row.get(provided,"")),normalize_document_label(row.get(document_type,"")))
+                if all(common_key):
+                    keys_without_assessment.setdefault(common_key,[]).append(i)
+                    if aid:
+                        key=(common_key[0],clean_id(row.get(aid,"")),common_key[1],common_key[2])
+                        if all(key): keys.setdefault(key,[]).append(i)
             for key,indexes in keys.items():
                 if len(indexes)<2:continue
                 duplicate_group=f"service:{'|'.join(key)}"
                 for i in indexes:
                     self._flag(out,"legalservices","Duplicate service","High",i,df.loc[i],f"Same Beneficiary ID, Assessment ID, Type of Service Provided, and Type of Document occurs {len(indexes)} times")
+                    out[-1]["duplicateGroup"]=duplicate_group
+            duplicate_service_indexes={i for indexes in keys.values() if len(indexes)>=2 for i in indexes}
+            for key,indexes in keys_without_assessment.items():
+                if len(indexes)<2:continue
+                if any(i in duplicate_service_indexes for i in indexes): continue
+                duplicate_group=f"service-without-assessment:{'|'.join(key)}"
+                for i in indexes:
+                    self._flag(out,"legalservices","Duplicate service without Assessment ID","High",i,df.loc[i],f"Same Beneficiary ID, Type of Service Provided, and Type of Document occurs {len(indexes)} times across all Assessment IDs")
                     out[-1]["duplicateGroup"]=duplicate_group
         assessment_id=_find(list(self.frames["assessments"].columns),"Assessment ID")
         if aid and assessment_id:
@@ -1117,8 +1138,10 @@ class LegalStore:
                 rows=[dict(item) for item in self.flags.get(dataset,[])]
                 if dataset=="beneficiaries":
                     rows=[r for r in rows if r["rule"] not in {"Possible duplicate name","Possible duplicate contact and name"}]
-                    rows += self._name_match_flags(bounded_chars,allow_name_variations,excluded_case_ids=self._excluded_case_ids("Possible duplicate name"))
-                    rows += self._contact_name_match_flags(excluded_case_ids=self._excluded_case_ids("Possible duplicate contact and name"))
+                    name_matches=self._name_match_flags(bounded_chars,allow_name_variations,excluded_case_ids=self._excluded_case_ids("Possible duplicate name"))
+                    name_match_rows={item["row"] for item in name_matches}
+                    contact_matches=[item for item in self._contact_name_match_flags(excluded_case_ids=self._excluded_case_ids("Possible duplicate contact and name")) if item["row"] not in name_match_rows]
+                    rows += name_matches + contact_matches
                     rows=[row for row in rows if not self._is_excluded(row)]
                 active_month="";available_months=[]
                 if dataset=="assessments":
@@ -1140,6 +1163,9 @@ class LegalStore:
                             for key,column in (("phone",phone_col),("project",project_col),("location",location_col)):
                                 if not item.get(key) and column:item[key]=clean_id(source.get(column,""))
                 observed=pd.Series([r["rule"] for r in rows],dtype=object).value_counts().to_dict();registered_rules=REGISTERED_RULES.get(dataset,())
+                if dataset=="beneficiaries":
+                    exact_name_matches=self._name_match_flags(exact_only=True,excluded_case_ids=self._excluded_case_ids("Possible duplicate name"))
+                    observed["Possible duplicate name"]=len([row for row in exact_name_matches if not self._is_excluded(row)])
                 if dataset=="assessments" and self._amal_only_assessment_projects(): registered_rules=tuple(name for name in registered_rules if name not in AMAL_HIDDEN_ASSESSMENT_RULES)
                 rule_counts={name:int(observed.get(name,0)) for name in registered_rules}
                 date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate"}.get(dataset,"")
@@ -1173,6 +1199,8 @@ class LegalStore:
         if rule in {"Marital status below 18", "Spouse below 18"}:
             date_key = "spouseDateOfBirth" if rule == "Spouse below 18" else "dateOfBirth"
             rows.sort(key=lambda item: str(item.get(date_key, "")), reverse=True)
+        elif rule=="Duplicate participant in session":
+            rows.sort(key=lambda item:(normalize_name(item.get("name","")),str(item.get("name","")).casefold(),str(item.get("awarenessId","")).casefold()))
         start=(page-1)*page_size
         rules=sorted({r["rule"] for r in self.flags.get(dataset,[])})
         return {"dataset":dataset,"total":len(rows),"page":page,"pageSize":page_size,"rules":list(REGISTERED_RULES.get(dataset,rules)),"ruleCounts":context["ruleCounts"],"filterOptions":context["filterOptions"],"availableMonths":context["availableMonths"],"activeComparisonMonth":context["activeComparisonMonth"],"nameRecordCount":context["nameRecordCount"],"eligibleNameRecordCount":context["eligibleNameRecordCount"],"nameCompareCharsApplied":bounded_chars,"allowNameVariationsApplied":bool(allow_name_variations),"rows":rows[start:start+page_size]}
@@ -1201,34 +1229,91 @@ class LegalStore:
         if search:
             needle=search.lower();flags=[row for row in flags if needle in " ".join(map(str,row.values())).lower()]
         if ignore_court_verdict and dataset=="legalservices":
-            flags=[row for row in flags if not (row.get("rule")=="Duplicate service" and re.search(r"court verdict|\bother\b|اخرى",str(row.get("typeOfDocument", "")),flags=re.I))]
-        frame=self.frames[dataset]; review_columns=["Review Finding","Recommended Action","Review Detail"];columns=review_columns+list(frame.columns)
+            flags=[row for row in flags if not (row.get("rule") in {"Duplicate service","Duplicate service without Assessment ID"} and re.search(r"court verdict|\bother\b|اخرى",str(row.get("typeOfDocument", "")),flags=re.I))]
+        from openpyxl.worksheet.table import Table, TableStyleInfo
+        frame=self.frames[dataset]
+        def columns_for_rule(rule:str)->tuple[list[tuple[str,str,tuple[str,...]]],list[str]]:
+            page_columns:list[tuple[str,str,tuple[str,...]]]=[
+                ("Review Finding","rule",()),("Finding detail","detail",()),("Recommended action","action",()),
+                ("Lawyer","lawyer",("Lawyers","Lawyer","Created By","Created by")),
+                ("Project","project",("Projects -","Project")),("Project location","location",("Project Location","Project location")),
+            ]
+            if rule=="Detention Governorate mismatch": page_columns.append(("Detention Governorate mismatch","detentionGovernorate",("Detention Governorate",)))
+            if dataset in {"beneficiaries","assessments","legalservices"}: page_columns.append(("Case ID","caseId",("Case ID","Beneficiary ID")))
+            if dataset in {"assessments","legalservices"}: page_columns.append(("Assessment","assessmentId",("Assessment ID",)))
+            if dataset=="legalservices": page_columns.append(("Service","serviceId",("Service ID",)))
+            if dataset=="awareness": page_columns.append(("Awareness ID","awarenessId",("Awareness ID",)))
+            page_columns.append(("Name","name",("Name (Filter Color Red)","Participant Name","Name / الأسم")))
+            if rule in {"Marital status below 18","Spouse below 18"}: page_columns.append(("Marital status","maritalStatus",("Marital Statues","Marital Status")))
+            if rule=="Spouse below 18": page_columns.extend([("Spouse name","spouseName",("Spouse name",)),("Spouse date of birth","spouseDateOfBirth",("Spouse DoB",)),("Spouse current age","spouseAge",())])
+            page_columns.append(("Phone number","phone",("Contact Number","Phone Number")))
+            if dataset=="beneficiaries": page_columns.extend([("Date of birth","dateOfBirth",("Date of Birth","DoB")),("Assessment","assessmentId",("Assessment ID",))])
+            elif dataset=="awareness": page_columns.append(("Session topic","sessionTopic",("Session Topic","Topic")))
+            else:
+                if dataset=="assessments": page_columns.append(("Date of assessment","assessmentDate",("Date of Assessment",)))
+                if rule=="Open counselling-only assessment": page_columns.extend([("Assessment status","assessmentStatus",("Assessment Status",)),("Type of Legal Service Needed","legalServiceNeeded",("Type of Legal Service Needed",))])
+                if rule=="Detention/immigration inconsistency": page_columns.extend([("Is the beneficiary detained","beneficiaryDetained",("Is the beneficiary detained",)),("Is it an immigration related charge?","immigrationRelatedCharge",("Is it an immigration related charge",))])
+                if rule=="Detained beneficiary below 10 years": page_columns.extend([("Is the beneficiary detained","beneficiaryDetained",("Is the beneficiary detained",)),("Date of birth","dateOfBirth",("Date of Birth","DoB")),("Current age","beneficiaryAge",())])
+                if rule=="Selected month with previous assessment": page_columns.append(("Created On","createdOn",("Created On",)))
+                if rule=="Representation while not detained": page_columns.append(("Type of documents to be issued","typeOfDocument",("Type of documents to be issued","Type of Document")))
+                if rule=="Type of document in Assessments vs Services": page_columns.extend([("Finding","comparisonFinding",()),("Assessment documents","assessmentDocuments",()),("Service documents","serviceDocuments",())])
+                if rule=="Type of Legal Service in Assessment vs Services": page_columns.extend([("Assessment service needed","requestedServiceTypes",()),("Service type provided","providedServiceTypes",())])
+                if rule in {"Duplicate service","Duplicate service without Assessment ID"}: page_columns.extend([("Beneficiary ID","caseId",("Beneficiary ID",)),("Type of Service Provided","serviceTypeProvided",("Type of Service Provided",)),("Type of Document","typeOfDocument",("Type of Document",)),("Please specify the Court Verdict","courtVerdictDetail",("Please specify the Court Verdict",)),("Type of Document if Other","otherDocumentDetail",('Type of Document if "Other" please specify',)),("Legal Concern Specified","legalConcernSpecified",("Legal Concern Specified",)),("Legal Concern","legalConcern",("Legal Concern",))])
+            unique=[];seen=set()
+            for column in page_columns:
+                if column[0] not in seen: unique.append(column);seen.add(column[0])
+            represented={_find(list(frame.columns),*hints) for _,_,hints in unique if hints}
+            return unique,[column for column in frame.columns if column not in represented]
         workbook=Workbook()
         palette=("FCE8E6","FFF4D6","E7F0FF","E5F5EA","F0E8FA","FFECDD","E3F4F4","F7E8F1")
         rule_colors={rule:palette[i%len(palette)] for i,rule in enumerate(sorted({x["rule"] for x in flags}))}
         duplicate_colors={key:palette[i%len(palette)] for i,key in enumerate(sorted({x.get("duplicateGroup","") for x in flags if x.get("duplicateGroup")}))}
+        projects=sorted({str(flag.get("project","")).strip() for flag in flags if str(flag.get("project","")).strip()},key=str.casefold)
+        project_colors={project:"%02X%02X%02X" % tuple(round(component*255) for component in hsv_to_rgb(index/max(len(projects),1),0.24,1)) for index,project in enumerate(projects)}
         thin=Side(style="thin",color="D9E2EC");name_source=_find(list(frame.columns),"Name (Filter Color Red)")
-        def write_sheet(sheet:Any,items:list[dict[str,Any]])->None:
-            sheet.append([safe_spreadsheet_value(column) for column in columns])
+        table_number=0
+        def write_table(sheet:Any,rule:str,items:list[dict[str,Any]],start_row:int)->int:
+            nonlocal table_number
+            unique_page_columns,source_columns=columns_for_rule(rule)
+            columns=[header for header,_,_ in unique_page_columns]+list(source_columns)
+            header_row=start_row
+            for index,column in enumerate(columns,1): sheet.cell(header_row,index).value=safe_spreadsheet_value(column)
+            for cell in sheet[header_row]:
+                cell.font=Font(bold=True,color="FFFFFF");cell.fill=PatternFill("solid",fgColor="2454C6");cell.alignment=Alignment(vertical="center",wrap_text=True)
+            sheet.row_dimensions[header_row].height=34
             for flag in items:
                 source=frame.iloc[flag["row"]-2] if 0 <= flag["row"]-2 < len(frame) else pd.Series(dtype=object)
-                values=[flag["rule"],flag["action"],flag["detail"]]+[display_value(source.get(c,"")) for c in frame.columns]
+                values=[display_value(flag.get(key,"")) for _,key,_ in unique_page_columns]+[display_value(source.get(c,"")) for c in source_columns]
                 sheet.append([safe_spreadsheet_value(value) for value in values]);row_number=sheet.max_row;sheet.row_dimensions[row_number].height=24
                 sheet.cell(row_number,1).fill=PatternFill("solid",fgColor=rule_colors[flag["rule"]])
+                project_column=next((index for index,column in enumerate(columns,1) if column=="Project"),None)
+                project=str(flag.get("project","")).strip()
+                if project_column and project in project_colors:
+                    sheet.cell(row_number,project_column).fill=PatternFill("solid",fgColor=project_colors[project])
                 if flag.get("duplicateGroup"):
                     exact=flag.get("nameMatchMode")=="exact";color="FDE8E8" if exact else duplicate_colors[flag["duplicateGroup"]]
-                    sheet.cell(row_number,8).fill=PatternFill("solid",fgColor=color)
-                    if exact:sheet.cell(row_number,8).font=Font(bold=True,color="991B1B")
+                    name_column=next((index for index,column in enumerate(columns,1) if column=="Name"),None)
+                    if name_column:
+                        sheet.cell(row_number,name_column).fill=PatternFill("solid",fgColor=color)
+                        if exact:sheet.cell(row_number,name_column).font=Font(bold=True,color="991B1B")
                     if name_source:
-                        source_cell=sheet.cell(row_number,len(review_columns)+1+list(frame.columns).index(name_source));source_cell.fill=PatternFill("solid",fgColor=color)
-                        if exact:source_cell.font=Font(bold=True,color="991B1B")
+                        source_index=next((index for index,column in enumerate(source_columns,1) if column==name_source),None)
+                        if source_index:
+                            source_cell=sheet.cell(row_number,len(unique_page_columns)+source_index);source_cell.fill=PatternFill("solid",fgColor=color)
+                            if exact:source_cell.font=Font(bold=True,color="991B1B")
                 for cell in sheet[row_number]:
                     cell.alignment=Alignment(vertical="center",wrap_text=True);cell.border=Border(bottom=thin)
-            for cell in sheet[1]:
-                cell.font=Font(bold=True,color="FFFFFF");cell.fill=PatternFill("solid",fgColor="2454C6");cell.alignment=Alignment(vertical="center",wrap_text=True)
-            sheet.row_dimensions[1].height=34
-            sheet.freeze_panes="A2";sheet.auto_filter.ref=f"A1:{get_column_letter(len(columns))}{len(items)+1}"
+            table_number+=1
+            table=Table(displayName=f"ReviewTable{table_number}",ref=f"A{header_row}:{get_column_letter(len(columns))}{sheet.max_row}")
+            table.tableStyleInfo=TableStyleInfo(name="TableStyleMedium2",showFirstColumn=False,showLastColumn=False,showRowStripes=False,showColumnStripes=False)
+            sheet.add_table(table)
             for index,name in enumerate(columns,1):sheet.column_dimensions[get_column_letter(index)].width=min(32,max(13,len(str(name))+2))
+            return sheet.max_row+2
+        def write_sheet(sheet:Any,items:list[dict[str,Any]])->None:
+            next_row=1
+            for rule in dict.fromkeys(flag["rule"] for flag in items):
+                rule_items=[flag for flag in items if flag["rule"]==rule]
+                if rule_items: next_row=write_table(sheet,rule,rule_items,next_row)
         if dataset in {"beneficiaries","assessments","legalservices"}:
             grouped={name:[] for name in ("North Iraq","AMAL Camp","South Iraq")};unclassified=[]
             for flag in flags:

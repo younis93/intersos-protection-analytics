@@ -86,6 +86,50 @@ class DuplicateExclusionRegistry:
         rows.append(record); self._write(rows)
         return record, True
 
+    def exclude_records(self, records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int, int]:
+        """Add a group of exclusions with one durable write.
+
+        Existing records are deliberately treated as successful no-ops so a
+        repeated bulk request cannot create duplicate exclusion entries.
+        """
+        rows = self.exclusion_rows()
+        keys = {
+            (str(row.get("dataset", "")).strip(), str(row.get("rule", "")).strip(), str(row.get("identifierType", "")).strip(), str(row.get("identifierValue", "")).strip())
+            for row in rows
+        }
+        created: list[dict[str, Any]] = []
+        duplicates = 0
+        for item in records:
+            dataset = str(item.get("dataset", "")).strip()
+            rule = str(item.get("rule", "")).strip()
+            identifier_type = str(item.get("identifierType", "")).strip()
+            identifier_value = str(item.get("identifierValue", item.get("caseId", ""))).strip()
+            if not all((dataset, rule, identifier_type, identifier_value)):
+                raise ValueError("Dataset, finding rule, identifier type, and identifier value are required.")
+            if identifier_type == "awarenessName":
+                identifier_value = " ".join(identifier_value.casefold().split())
+            key = (dataset, rule, identifier_type, identifier_value)
+            if key in keys:
+                duplicates += 1
+                continue
+            record = {
+                "dataset": dataset,
+                "rule": rule,
+                "identifierType": identifier_type,
+                "identifierValue": identifier_value,
+                "caseId": identifier_value if identifier_type == "caseId" else "",
+                "name": str(item.get("name", "")).strip(),
+                "project": str(item.get("project", "")).strip(),
+                "excludedAt": datetime.now(timezone.utc).isoformat(),
+                "source": str(item.get("source", "")).strip() or "Imported exclusion",
+            }
+            rows.append(record)
+            created.append(record)
+            keys.add(key)
+        if created:
+            self._write(rows)
+        return created, len(created), duplicates
+
     def restore(self, case_id: str, rule: str, dataset: str = "", identifier_type: str = "") -> bool:
         case_id = str(case_id).strip()
         rule = str(rule).strip()

@@ -369,6 +369,11 @@ class DesktopApi:
         return self.process_legal_files([str(path) for path in paths])
 
 def main() -> None:
+    # A local source launch is already running the current checkout. Published
+    # installer release versions are intentionally not compared here, because
+    # a release can have a newer version number while using the same commit.
+    if not getattr(sys, "frozen", False):
+        os.environ["INTERSOS_GITHUB_REPOSITORY"] = ""
     os.environ["UNHCR_UPLOAD_ONLY"] = "1"
     os.environ["UNHCR_STATIC_DIR"] = str(resource_path("frontend", "dist"))
     os.environ["INTERSOS_LOCAL_SESSION_TOKEN"] = secrets.token_urlsafe(32)

@@ -68,13 +68,69 @@ def test_review_export_neutralizes_spreadsheet_formulas():
     assert not any(cell.data_type=="f" for cell in cells)
 
 
-def test_review_export_uses_source_fields_once_without_priority():
+def test_review_export_starts_with_page_fields_and_uses_source_fields_once():
     workbook=load_workbook(io.BytesIO(LegalStore.from_files(required_payload(),"test").review_export("beneficiaries")),read_only=True,data_only=True)
     headers=[cell.value for cell in next(workbook["Unclassified"].iter_rows(min_row=1,max_row=1))]
+    assert headers[:7]==["Review Finding","Finding detail","Recommended action","Lawyer","Project","Project location","Case ID"]
     assert "Priority" not in headers
+    assert headers.index("Case ID") < headers.index("Name")
+    assert headers.count("Name")==1
     assert headers.count("Case ID")==1
-    assert headers.count("Name (Filter Color Red)")==1
-    assert headers[:3]==["Review Finding","Recommended Action","Review Detail"]
+    assert "Name (Filter Color Red)" not in headers
+
+
+def test_review_export_includes_selected_rule_page_fields_before_source_fields():
+    payload=required_payload();payload["legalservices"]=csv(**{
+        "Service ID":["S1","S2"],"Assessment ID":["A1","A2"],"Beneficiary ID":["B1","B1"],
+        "Type of Service Provided":["Legal Assistance","Legal Assistance"],"Type of Document":["National ID","National ID"],
+    })
+    workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("legalservices",selected_rules=["Duplicate service without Assessment ID"])),read_only=True,data_only=True)
+    headers=[cell.value for cell in next(workbook["Unclassified"].iter_rows(min_row=1,max_row=1))]
+    assert headers.index("Service") < headers.index("Name")
+    assert headers.count("Type of Service Provided")==1
+    assert headers.count("Type of Document")==1
+
+
+def test_review_export_places_dataset_identifiers_before_name():
+    payload=required_payload();payload["awareness"]=csv(**{"Awareness ID":["W1"],"Participant Name":["Participant"]})
+    store=LegalStore.from_files(payload,"test")
+    assessment_book=load_workbook(io.BytesIO(store.review_export("assessments")),read_only=True,data_only=True)
+    service_book=load_workbook(io.BytesIO(store.review_export("legalservices")),read_only=True,data_only=True)
+    assessment_headers=[cell.value for cell in next(assessment_book.worksheets[0].iter_rows(min_row=1,max_row=1))]
+    service_headers=[cell.value for cell in next(service_book.worksheets[0].iter_rows(min_row=1,max_row=1))]
+    awareness_headers=[cell.value for cell in next(load_workbook(io.BytesIO(store.review_export("awareness")),read_only=True,data_only=True)["Review findings"].iter_rows(min_row=1,max_row=1))]
+    assert assessment_headers.index("Case ID") < assessment_headers.index("Assessment") < assessment_headers.index("Name")
+    assert service_headers.index("Case ID") < service_headers.index("Assessment") < service_headers.index("Service") < service_headers.index("Name")
+    assert awareness_headers.index("Awareness ID") < awareness_headers.index("Name")
+
+
+def test_review_export_colors_each_project_cell_consistently():
+    payload=required_payload();payload["beneficiaries"]=csv(**{
+        "Case ID":["B1","B2"],"Name (Filter Color Red)":["One","Two"],"Age":[17,120],
+        "Project":["UNHCR 2026 - Erbil","UNHCR 2026 - Gov"],
+    })
+    workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("beneficiaries")))
+    colors={}
+    for sheet in workbook.worksheets:
+        headers=[cell.value for cell in sheet[1]];project_index=headers.index("Project")+1
+        for row in range(2,sheet.max_row+1):
+            project=sheet.cell(row,project_index).value
+            if project: colors[project]=sheet.cell(row,project_index).fill.fgColor.rgb
+    assert colors["UNHCR 2026 - Erbil"] != colors["UNHCR 2026 - Gov"]
+
+
+def test_review_export_separates_selected_issues_into_regional_tables():
+    payload=required_payload();payload["beneficiaries"]=csv(**{
+        "Case ID":["B1"],"Name (Filter Color Red)":["Person One"],"Contact Number":["123"],
+        "# total assessments":[0],"Project":["UNHCR 2026 - Erbil"],
+    })
+    workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("beneficiaries",selected_rules=["Invalid contact number","Case without assessment"])))
+    sheet=workbook["North Iraq"]
+    assert sheet["A1"].value=="Review Finding"
+    assert sheet["A4"].value=="Review Finding"
+    assert sheet.freeze_panes is None
+    assert len(sheet.tables)==2
+    assert all(sheet.cell(int(table.ref.split(":")[0][1:]),1).value=="Review Finding" for table in sheet.tables.values())
 
 
 def test_detention_workbook_rejects_extreme_xlsx_compression_ratio():
@@ -227,6 +283,35 @@ def test_exact_duplicate_mode_remains_exact_when_variations_are_enabled():
     assert {row["duplicateSimilarity"] for row in rows}=={100}
 
 
+def test_duplicate_name_selector_count_uses_only_non_excluded_exact_matches():
+    payload=required_payload();payload["beneficiaries"]=csv(**{
+        "Case ID":["Exact1","Exact2","Similar1","Similar2"],
+        "Name (Filter Color Red)":["Identical Person Long","Identical Person Long","Ahmed Ali Hassani","Ahmad Ali Hassani"],
+        "Project":["UNHCR 2026 - Erbil"]*4,
+    })
+    store=LegalStore.from_files(payload,"test")
+    all_matches=store.review("beneficiaries",rule="Possible duplicate name",name_compare_chars=15,allow_name_variations=True,exact_matches_only=False)
+    exact_table=store.review("beneficiaries",rule="Possible duplicate name",name_compare_chars=15,allow_name_variations=True,exact_matches_only=True)
+    assert all_matches["ruleCounts"]["Possible duplicate name"]==2
+    assert exact_table["ruleCounts"]["Possible duplicate name"]==2
+    assert all_matches["total"] > exact_table["total"]
+    store.set_review_exclusions({("Possible duplicate name","Exact1")})
+    assert store.review("beneficiaries",name_compare_chars=15,allow_name_variations=True)["ruleCounts"]["Possible duplicate name"]==0
+
+
+def test_beneficiaries_navigation_count_uses_exact_non_excluded_name_matches():
+    payload=required_payload();payload["beneficiaries"]=csv(**{
+        "Case ID":["Exact1","Exact2","Similar1","Similar2"],
+        "Name (Filter Color Red)":["Identical Person Long","Identical Person Long","Ahmed Ali Hassani","Ahmad Ali Hassani"],
+        "Project":["UNHCR 2026 - Erbil"]*4,
+    })
+    store=LegalStore.from_files(payload,"test")
+    before=store.metadata()["reviewCounts"]["beneficiaries"]
+    assert before==sum(store.review("beneficiaries")["ruleCounts"].values())
+    store.set_review_exclusions({("Possible duplicate name","Exact1")})
+    assert store.metadata()["reviewCounts"]["beneficiaries"]==before-2
+
+
 def test_duplicate_exclusion_registry_persists_and_restores(tmp_path):
     path=tmp_path/"duplicate-name-exclusions.json"
     registry=DuplicateExclusionRegistry(path)
@@ -236,6 +321,22 @@ def test_duplicate_exclusion_registry_persists_and_restores(tmp_path):
     assert reloaded.entries()[0]["name"]=="Identical Name"
     assert reloaded.restore("B1","Possible duplicate name") is True
     assert DuplicateExclusionRegistry(path).entries()==[]
+
+
+def test_duplicate_exclusion_registry_bulk_adds_once_and_skips_existing_records(tmp_path):
+    registry=DuplicateExclusionRegistry(tmp_path/"exclusions.json")
+    records=[
+        {"dataset":"assessments","rule":"Missing document","identifierType":"assessmentId","identifierValue":"A1","name":"First","source":"Assessments Review"},
+        {"dataset":"assessments","rule":"Missing document","identifierType":"assessmentId","identifierValue":"A2","name":"Second","source":"Assessments Review"},
+    ]
+    created, created_count, duplicates=registry.exclude_records(records)
+    assert created_count==2
+    assert duplicates==0
+    assert {row["identifierValue"] for row in created}=={"A1","A2"}
+    _, created_count, duplicates=registry.exclude_records(records)
+    assert created_count==0
+    assert duplicates==2
+    assert {row["identifierValue"] for row in DuplicateExclusionRegistry(registry.path).entries()}=={"A1","A2"}
 
 
 def test_excluding_case_recalculates_duplicate_groups_and_export():
@@ -589,6 +690,16 @@ def test_awareness_duplicate_priority_uses_name_and_session_and_minor_is_hidden_
     assert store.metadata()["reviewCounts"]["awareness"]==2
 
 
+def test_duplicate_participants_in_session_are_sorted_by_name():
+    payload=required_payload();payload["awareness"]=csv(**{
+        "Awareness ID":["W1","W2","W3","W4"],
+        "Participant Name":["Zain","Zain","Ahmed","Ahmed"],
+        "Session Topic":["Housing","Housing","Housing","Housing"],
+    })
+    rows=LegalStore.from_files(payload,"test").review("awareness",rule="Duplicate participant in session",page_size=100)["rows"]
+    assert [row["name"] for row in rows]==["Ahmed","Ahmed","Zain","Zain"]
+
+
 def test_assessment_review_hides_detention_rules_for_amal_only_projects():
     payload=required_payload();payload["assessments"]=csv(**{
         "Assessment ID":["A1"], "Beneficiary ID":["B1"], "Projects - المشروع":["UNHCR 2026 - AMAL CAMP"],
@@ -784,6 +895,47 @@ def test_legal_services_review_export_applies_filters_and_ignores_court_verdict_
     assert ignored["North Iraq"].max_row==1
 
 
+def test_duplicate_service_without_assessment_id_compares_across_assessments():
+    payload=required_payload();payload["legalservices"]=csv(**{
+        "Service ID":["S1","S2","S3"],
+        "Assessment ID":["A1","A2","A1"],
+        "Beneficiary ID":["B1","B1","B1"],
+        "Type of Service Provided":["Legal Assistance","Legal Assistance","Legal Representation"],
+        "Type of Document":["National ID","National ID","National ID"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    cross_assessment=store.review("legalservices",rule="Duplicate service without Assessment ID",page_size=100)["rows"]
+    within_assessment=store.review("legalservices",rule="Duplicate service",page_size=100)["rows"]
+    assert {row["serviceId"] for row in cross_assessment}=={"S1","S2"}
+    assert not within_assessment
+
+
+def test_duplicate_service_without_assessment_id_excludes_existing_duplicate_service():
+    payload=required_payload();payload["legalservices"]=csv(**{
+        "Service ID":["S1","S2"],
+        "Assessment ID":["A1","A1"],
+        "Beneficiary ID":["B1","B1"],
+        "Type of Service Provided":["Legal Assistance","Legal Assistance"],
+        "Type of Document":["National ID","National ID"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    assert {row["serviceId"] for row in store.review("legalservices",rule="Duplicate service",page_size=100)["rows"]}=={"S1","S2"}
+    assert not store.review("legalservices",rule="Duplicate service without Assessment ID",page_size=100)["rows"]
+
+
+def test_contact_name_duplicates_exclude_existing_name_duplicates():
+    payload=required_payload();payload["beneficiaries"]=csv(**{
+        "Case ID":["B1","B2"],
+        "Name (Filter Color Red)":["Ahmed Ali Hassan Ali","Ahmed Ali Hassan Ali"],
+        "Project":["UNHCR 2026 - Erbil","UNHCR 2026 - Erbil"],
+        "Contact Number":["07701234567","07701234567"],
+        "ID Number":["ID1","ID2"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    assert {row["caseId"] for row in store.review("beneficiaries",rule="Possible duplicate name",page_size=100)["rows"]}=={"B1","B2"}
+    assert not store.review("beneficiaries",rule="Possible duplicate contact and name",page_size=100)["rows"]
+
+
 def test_current_previous_month_service_duplicate_uses_created_on_grace_from_august_2026():
     payload=required_payload();payload["legalservices"]=csv(**{
         "Service ID":["S1","S2","S3","S4","S5","S6","S7","SameMonth1","SameMonth2"],
@@ -838,7 +990,6 @@ def test_assessment_document_and_service_type_reconciliation():
     documents=store.review("assessments",rule="Type of document in Assessments vs Services",page_size=100)["rows"]
     assert {(row["assessmentId"],row["comparisonFinding"],row["missingValues"]) for row in documents}=={
         ("A1","Missing Type of Document in Services","Marriage Certificate عقد زواج"),
-        ("A1","Missing Type of Document in Assessment","Divorce Certificate شهادة الطلاق"),
         ("A2","Missing Type of Document in Assessment","Proof of Marriage اثبات الزواج"),
         ("A4","Missing Type of Document in Services","Passport جواز السفر"),
     }

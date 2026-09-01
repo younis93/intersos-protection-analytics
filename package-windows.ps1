@@ -17,6 +17,31 @@ $BuildWork = Join-Path $PackageTemp 'work'
 $BuildSpec = Join-Path $PackageTemp 'spec'
 $PackagedApp = Join-Path $StagingReleaseRoot 'Iraq Data Analysis.exe'
 
+function Test-FileNewerThan {
+    param([string]$Source, [string]$Reference)
+    if (-not (Test-Path -LiteralPath $Source)) { return $false }
+    if (-not (Test-Path -LiteralPath $Reference)) { return $true }
+    return (Get-Item -LiteralPath $Source).LastWriteTimeUtc -gt (Get-Item -LiteralPath $Reference).LastWriteTimeUtc
+}
+
+function Get-NewestFile {
+    param([string[]]$Paths)
+    $Files = foreach ($Path in $Paths) {
+        if ([string]::IsNullOrWhiteSpace($Path)) { continue }
+        if (Test-Path -LiteralPath $Path -PathType Container) {
+            Get-ChildItem -LiteralPath $Path -File -Recurse
+        } elseif (Test-Path -LiteralPath $Path -PathType Leaf) {
+            Get-Item -LiteralPath $Path
+        }
+    }
+    return $Files | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+}
+
+function Set-InstallMarker {
+    param([string]$MarkerPath)
+    Set-Content -LiteralPath $MarkerPath -Value (Get-Date).ToUniversalTime().ToString('o') -Encoding ascii
+}
+
 function Start-PackagedApplication {
     if (-not (Test-Path -LiteralPath $PackagedApp)) {
         throw "The packaged application was not found at $PackagedApp. Run package-windows.ps1 first."
@@ -54,14 +79,41 @@ if ($LaunchOnly) {
     if (-not (Test-Path -LiteralPath $VenvPythonWindowed)) {
         throw 'The windowed Python launcher was not found. Recreate the local Python environment, then try again.'
     }
-    $FrontendDist = Join-Path $ProjectRoot 'frontend\dist\index.html'
-    $NewestFrontendSource = Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'frontend\src') -File -Recurse |
-        Sort-Object LastWriteTimeUtc -Descending |
-        Select-Object -First 1
+    $FrontendRoot = Join-Path $ProjectRoot 'frontend'
+    $FrontendDist = Join-Path $FrontendRoot 'dist\index.html'
+    $FrontendModules = Join-Path $FrontendRoot 'node_modules'
+    $FrontendLockfile = Join-Path $FrontendRoot 'package-lock.json'
+    $FrontendInstallMarker = Join-Path $FrontendModules '.intersos-package-lock-installed'
+    $PythonRequirements = Join-Path $ProjectRoot 'backend\requirements.txt'
+    $PythonInstallMarker = Join-Path $ProjectRoot '.venv\.intersos-requirements-installed'
+
+    if (Test-FileNewerThan $PythonRequirements $PythonInstallMarker) {
+        Write-Host 'Refreshing changed Python dependencies...' -ForegroundColor Cyan
+        & $VenvPython -m pip install --disable-pip-version-check -r $PythonRequirements
+        if ($LASTEXITCODE -ne 0) { throw 'Python dependency refresh failed.' }
+        Set-InstallMarker $PythonInstallMarker
+    }
+
+    if (-not (Test-Path -LiteralPath $FrontendModules) -or (Test-FileNewerThan $FrontendLockfile $FrontendInstallMarker)) {
+        Write-Host 'Refreshing changed frontend dependencies...' -ForegroundColor Cyan
+        & npm.cmd ci --prefix $FrontendRoot
+        if ($LASTEXITCODE -ne 0) { throw 'Frontend dependency refresh failed.' }
+        Set-InstallMarker $FrontendInstallMarker
+    }
+
+    $FrontendBuildInputs = @(
+        (Join-Path $FrontendRoot 'src'),
+        (Join-Path $FrontendRoot 'public'),
+        (Join-Path $FrontendRoot 'index.html'),
+        (Join-Path $FrontendRoot 'package.json'),
+        $FrontendLockfile
+    ) + (Get-ChildItem -LiteralPath $FrontendRoot -File -Filter 'vite.config.*' -ErrorAction SilentlyContinue).FullName +
+        (Get-ChildItem -LiteralPath $FrontendRoot -File -Filter 'tsconfig*.json' -ErrorAction SilentlyContinue).FullName
+    $NewestFrontendSource = Get-NewestFile $FrontendBuildInputs
     $BuiltFrontend = Get-Item -LiteralPath $FrontendDist -ErrorAction SilentlyContinue
     if (-not $BuiltFrontend -or ($NewestFrontendSource -and $NewestFrontendSource.LastWriteTimeUtc -gt $BuiltFrontend.LastWriteTimeUtc)) {
-        Write-Host 'Building only the changed frontend...' -ForegroundColor Cyan
-        & npm.cmd run build --prefix (Join-Path $ProjectRoot 'frontend')
+        Write-Host 'Building the current frontend...' -ForegroundColor Cyan
+        & npm.cmd run build --prefix $FrontendRoot
         if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
     } else {
         Write-Host 'Frontend is already current; no build is needed.' -ForegroundColor DarkGray
@@ -72,6 +124,10 @@ if ($LaunchOnly) {
     $AppVersionMatch = [regex]::Match($VersionSource, 'APP_VERSION\s*=\s*["''](?<version>[^"'']+)["'']')
     if (-not $AppVersionMatch.Success) { throw 'Unable to read APP_VERSION from backend/version.py.' }
     $WindowTitle = "Iraq Data Analysis $($AppVersionMatch.Groups['version'].Value)"
+    # LaunchOnly runs the current local source tree. Do not compare it to a
+    # published installer release, which can have a different release version
+    # even when it was built from the same source commit.
+    $env:INTERSOS_GITHUB_REPOSITORY = ''
     # pythonw.exe hosts the visible WebView window without creating a second
     # console window for the Python launcher.
     $LaunchProcess = Start-Process -FilePath $VenvPythonWindowed -ArgumentList "`"$LauncherPath`"" -WorkingDirectory $ProjectRoot -PassThru

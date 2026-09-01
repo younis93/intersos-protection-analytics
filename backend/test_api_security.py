@@ -1,7 +1,9 @@
 import asyncio
 import io
 import socket
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -10,9 +12,49 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from backend import main
+from backend.duplicate_exclusions import DuplicateExclusionRegistry
 
 
 class LocalApiSecurityTests(unittest.TestCase):
+    @staticmethod
+    def write_legal_source(folder: Path) -> list[Path]:
+        files = {
+            "beneficiaries.csv": "Case ID,Name (Filter Color Red)\nB1,Person One\n",
+            "assessments.csv": "Assessment ID,Beneficiary ID\nA1,B1\n",
+            "legalservices.csv": "Service ID,Assessment ID,Beneficiary ID\nS1,A1,B1\n",
+        }
+        paths=[]
+        for name, content in files.items():
+            path=folder / name;path.write_text(content,encoding="utf-8");paths.append(path)
+        return paths
+
+    def test_startup_restores_remembered_folder_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory);self.write_legal_source(folder)
+            with patch.object(main,"REMEMBERED_LEGAL_SOURCE_CONFIGURED",True), patch.object(main,"REMEMBERED_LEGAL_SOURCE","folder"), patch.object(main,"REMEMBERED_LEGAL_FOLDER",folder):
+                main.load_initial_legal_store()
+            self.assertIsNotNone(main.legal_store)
+            self.assertEqual(main.legal_store.source,folder.name)
+            self.assertFalse(main.legal_store_loading)
+
+    def test_startup_restores_remembered_individual_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths=self.write_legal_source(Path(directory))
+            with patch.object(main,"REMEMBERED_LEGAL_SOURCE_CONFIGURED",True), patch.object(main,"REMEMBERED_LEGAL_SOURCE","files"), patch.object(main,"REMEMBERED_LEGAL_FILES",paths):
+                main.load_initial_legal_store()
+            self.assertIsNotNone(main.legal_store)
+            self.assertEqual(main.legal_store.source,"Selected Legal Platform CSV files")
+            self.assertFalse(main.legal_store_loading)
+
+    def test_startup_clears_stale_source_when_remembered_files_are_unavailable(self):
+        missing=Path("C:/missing/beneficiaries.csv")
+        with patch.object(main,"REMEMBERED_LEGAL_SOURCE_CONFIGURED",True), patch.object(main,"REMEMBERED_LEGAL_SOURCE","files"), patch.object(main,"REMEMBERED_LEGAL_FILES",[missing]):
+            main.legal_store=object()
+            main.load_initial_legal_store()
+        self.assertIsNone(main.legal_store)
+        self.assertIn("unavailable",main.legal_store_restore_error)
+        self.assertFalse(main.legal_store_loading)
+
     def test_local_session_cookie_is_required_when_desktop_token_is_set(self):
         async def next_response(_request):
             return Response(status_code=200)
@@ -60,6 +102,22 @@ class LocalApiSecurityTests(unittest.TestCase):
         self.assertEqual(sheet["A1"].value, "'=Header")
         self.assertEqual(sheet["A2"].value, "'=1+1")
         self.assertNotEqual(sheet["A2"].data_type, "f")
+
+    def test_bulk_duplicate_exclusions_are_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry=DuplicateExclusionRegistry(Path(directory)/"exclusions.json")
+            request=main.BulkDuplicateExclusionRequest(records=[
+                main.DuplicateExclusionRequest(dataset="assessments",rule="Missing document",identifierType="assessmentId",identifierValue="A1",name="Person"),
+                main.DuplicateExclusionRequest(dataset="assessments",rule="Missing document",identifierType="assessmentId",identifierValue="A2",name="Person"),
+            ])
+            with patch.object(main,"duplicate_exclusions",registry), patch.object(main,"legal_store",None):
+                first=main.create_duplicate_exclusions_bulk(request)
+                repeated=main.create_duplicate_exclusions_bulk(request)
+            self.assertEqual(first["created"],2)
+            self.assertEqual(first["duplicates"],0)
+            self.assertEqual(repeated["created"],0)
+            self.assertEqual(repeated["duplicates"],2)
+            self.assertEqual(repeated["count"],2)
 
     def test_limited_upload_reader_stops_before_unbounded_read(self):
         class FakeUpload:

@@ -213,6 +213,10 @@ class DuplicateExclusionRequest(BaseModel):
     source: str = ""
 
 
+class BulkDuplicateExclusionRequest(BaseModel):
+    records: list[DuplicateExclusionRequest]
+
+
 class IndicatorReportRequest(BaseModel):
     fromDate: str = ""
     toDate: str = ""
@@ -348,6 +352,19 @@ def create_duplicate_exclusion(request: DuplicateExclusionRequest):
     if legal_store:
         legal_store.set_review_exclusions(duplicate_exclusions.exclusion_rows())
     return {"record": record, **duplicate_exclusion_payload()}
+
+
+@app.post("/api/legal/duplicate-exclusions/bulk")
+def create_duplicate_exclusions_bulk(request: BulkDuplicateExclusionRequest):
+    if not request.records:
+        raise HTTPException(400, "Choose at least one record to exclude.")
+    try:
+        _, created, duplicates = duplicate_exclusions.exclude_records([record.model_dump() for record in request.records])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if legal_store:
+        legal_store.set_review_exclusions(duplicate_exclusions.exclusion_rows())
+    return {"created": created, "duplicates": duplicates, **duplicate_exclusion_payload()}
 
 
 @app.delete("/api/legal/duplicate-exclusions/{case_id}")
