@@ -1,0 +1,274 @@
+{
+  "before-10": {
+    "mode": "baseline",
+    "csv_mb": 9.95,
+    "rows": {
+      "beneficiaries": 12151,
+      "assessments": 12151,
+      "legalservices": 12151
+    },
+    "metadata_seconds": 6.8533,
+    "import_ready_seconds": 50.5192,
+    "review_first_seconds": 0.2773,
+    "review_repeat_seconds": 0.2429,
+    "explorer_first_seconds": 0.0057,
+    "search_first_seconds": 0.0901,
+    "search_repeat_seconds": 0.0079,
+    "stages_seconds": {
+      "csv_read": 0.1014,
+      "validation": 31.1148,
+      "review_preparation": 11.8427,
+      "cleaning": 0.5968,
+      "metadata": 6.8533,
+      "total": 50.5192
+    },
+    "peak_process_mb": 182.8,
+    "result_sha256": "042054f485e3bc213f57433f651edec662422e5af88842eef80578488dc97d78"
+  },
+  "before-50": {
+    "mode": "baseline",
+    "csv_mb": 49.73,
+    "rows": {
+      "beneficiaries": 60754,
+      "assessments": 60754,
+      "legalservices": 60754
+    },
+    "metadata_seconds": 34.4338,
+    "import_ready_seconds": 274.2119,
+    "review_first_seconds": 1.3923,
+    "review_repeat_seconds": 1.3062,
+    "explorer_first_seconds": 0.0093,
+    "search_first_seconds": 0.4846,
+    "search_repeat_seconds": 0.0276,
+    "stages_seconds": {},
+    "peak_process_mb": 552.01,
+    "result_sha256": "eb5aa8f348e1a0a1d9309c355f66d4998deabf7ad0965d24e9e0e27f288ce00b"
+  },
+  "after-10": {
+    "mode": "optimized",
+    "csv_mb": 9.95,
+    "rows": {
+      "beneficiaries": 12151,
+      "assessments": 12151,
+      "legalservices": 12151
+    },
+    "metadata_seconds": 0.0,
+    "import_ready_seconds": 7.6707,
+    "review_first_seconds": 0.0548,
+    "review_repeat_seconds": 0.0571,
+    "explorer_first_seconds": 0.0053,
+    "search_first_seconds": 0.0951,
+    "search_repeat_seconds": 0.0083,
+    "stages_seconds": {
+      "csv_read": 0.1046,
+      "cleaning": 0.2466,
+      "validation": 5.8481,
+      "review_preparation": 1.132,
+      "metadata": 0.3393,
+      "total": 7.6707
+    },
+    "peak_process_mb": 200.92,
+    "result_sha256": "042054f485e3bc213f57433f651edec662422e5af88842eef80578488dc97d78"
+  },
+  "after-50": {
+    "mode": "optimized",
+    "csv_mb": 49.73,
+    "rows": {
+      "beneficiaries": 60754,
+      "assessments": 60754,
+      "legalservices": 60754
+    },
+    "metadata_seconds": 0.0,
+    "import_ready_seconds": 37.7517,
+    "review_first_seconds": 0.2728,
+    "review_repeat_seconds": 0.2724,
+    "explorer_first_seconds": 0.0097,
+    "search_first_seconds": 0.4571,
+    "search_repeat_seconds": 0.0288,
+    "stages_seconds": {
+      "csv_read": 0.5575,
+      "cleaning": 1.2571,
+      "validation": 28.9254,
+      "review_preparation": 5.4688,
+      "metadata": 1.5425,
+      "total": 37.7516
+    },
+    "peak_process_mb": 623.9,
+    "result_sha256": "eb5aa8f348e1a0a1d9309c355f66d4998deabf7ad0965d24e9e0e27f288ce00b"
+  },
+  "browser-results": [
+    {
+      "mode": "baseline",
+      "trial": 0,
+      "welcome_ms": 1702,
+      "initial_js": [
+        {
+          "name": "index-Dr0yccn6.js",
+          "bytes": 6001464
+        },
+        {
+          "name": "rolldown-runtime-CbXtAM7H.js",
+          "bytes": 589
+        }
+      ],
+      "review_first_ms": 2597,
+      "explorer_first_ms": 137,
+      "search_ms": 715,
+      "review_repeat_ms": 1622,
+      "review_requests": 7,
+      "errors": []
+    },
+    {
+      "mode": "baseline",
+      "trial": 1,
+      "welcome_ms": 903,
+      "initial_js": [
+        {
+          "name": "index-Dr0yccn6.js",
+          "bytes": 6001464
+        },
+        {
+          "name": "rolldown-runtime-CbXtAM7H.js",
+          "bytes": 589
+        }
+      ],
+      "review_first_ms": 1873,
+      "explorer_first_ms": 101,
+      "search_ms": 546,
+      "review_repeat_ms": 1620,
+      "review_requests": 7,
+      "errors": []
+    },
+    {
+      "mode": "baseline",
+      "trial": 2,
+      "welcome_ms": 922,
+      "initial_js": [
+        {
+          "name": "index-Dr0yccn6.js",
+          "bytes": 6001464
+        },
+        {
+          "name": "rolldown-runtime-CbXtAM7H.js",
+          "bytes": 589
+        }
+      ],
+      "review_first_ms": 2004,
+      "explorer_first_ms": 176,
+      "search_ms": 522,
+      "review_repeat_ms": 1355,
+      "review_requests": 7,
+      "errors": []
+    },
+    {
+      "mode": "optimized",
+      "trial": 0,
+      "welcome_ms": 123,
+      "initial_js": [
+        {
+          "name": "index-NJMKD1lC.js",
+          "bytes": 634144
+        },
+        {
+          "name": "rolldown-runtime-hePW80VL.js",
+          "bytes": 716
+        },
+        {
+          "name": "react-CwJFpaho.js",
+          "bytes": 7532
+        }
+      ],
+      "review_first_ms": 812,
+      "explorer_first_ms": 53,
+      "search_ms": 406,
+      "review_repeat_ms": 71,
+      "review_requests": 1,
+      "errors": []
+    },
+    {
+      "mode": "optimized",
+      "trial": 1,
+      "welcome_ms": 133,
+      "initial_js": [
+        {
+          "name": "index-NJMKD1lC.js",
+          "bytes": 634144
+        },
+        {
+          "name": "rolldown-runtime-hePW80VL.js",
+          "bytes": 716
+        },
+        {
+          "name": "react-CwJFpaho.js",
+          "bytes": 7532
+        }
+      ],
+      "review_first_ms": 792,
+      "explorer_first_ms": 43,
+      "search_ms": 448,
+      "review_repeat_ms": 60,
+      "review_requests": 1,
+      "errors": []
+    },
+    {
+      "mode": "optimized",
+      "trial": 2,
+      "welcome_ms": 127,
+      "initial_js": [
+        {
+          "name": "index-NJMKD1lC.js",
+          "bytes": 634144
+        },
+        {
+          "name": "rolldown-runtime-hePW80VL.js",
+          "bytes": 716
+        },
+        {
+          "name": "react-CwJFpaho.js",
+          "bytes": 7532
+        }
+      ],
+      "review_first_ms": 786,
+      "explorer_first_ms": 53,
+      "search_ms": 423,
+      "review_repeat_ms": 59,
+      "review_requests": 1,
+      "errors": []
+    }
+  ],
+  "browser-functional": {
+    "exports_not_loaded_upfront": true,
+    "png_bytes": 181188,
+    "pdf_bytes": 29713,
+    "studio_chart": true,
+    "out_of_order_search": true,
+    "errors": []
+  },
+  "parity": {
+    "checks": 62,
+    "result": "identical frames, review filters, explorer pages, workbook cells/styles, and indicator reports"
+  },
+  "browser_medians_ms": {
+    "baseline": {
+      "welcome_ms": 922,
+      "review_first_ms": 2004,
+      "explorer_first_ms": 137,
+      "search_ms": 546,
+      "review_repeat_ms": 1620
+    },
+    "optimized": {
+      "welcome_ms": 127,
+      "review_first_ms": 792,
+      "explorer_first_ms": 53,
+      "search_ms": 423,
+      "review_repeat_ms": 60
+    }
+  },
+  "tests": {
+    "backend_passed": 110,
+    "backend_failed": 15,
+    "backend_skipped": 5,
+    "frontend_passed": 26,
+    "new_failures": 0
+  }
+}

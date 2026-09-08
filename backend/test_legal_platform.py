@@ -967,8 +967,10 @@ def test_representation_rules_use_created_on_and_require_requested_counselling()
         "Type of Service Provided":["Legal Representation","Legal Representation","Legal Representation","Legal Assistance"],
     })
     store=LegalStore.from_files(payload,"test")
+    without_services=store.review("assessments",rule="Assessment without services",page_size=100)["rows"]
+    assert {row["assessmentId"] for row in without_services}=={"NoLinkedService","OldNotDetained"}
     adult=store.review("assessments",rule="Adult representation without counselling",page_size=100)["rows"]
-    assert {row["assessmentId"] for row in adult}=={"MissingCounselling","NoLinkedService"}
+    assert {row["assessmentId"] for row in adult}=={"MissingCounselling"}
     not_detained=store.review("assessments",rule="Representation while not detained",page_size=100)["rows"]
     assert {row["assessmentId"] for row in not_detained}=={"NewNotDetained"}
 
@@ -991,10 +993,11 @@ def test_assessment_document_and_service_type_reconciliation():
     assert {(row["assessmentId"],row["comparisonFinding"],row["missingValues"]) for row in documents}=={
         ("A1","Missing Type of Document in Services","Marriage Certificate عقد زواج"),
         ("A2","Missing Type of Document in Assessment","Proof of Marriage اثبات الزواج"),
-        ("A4","Missing Type of Document in Services","Passport جواز السفر"),
     }
     service_types=store.review("assessments",rule="Type of Legal Service in Assessment vs Services",page_size=100)["rows"]
-    assert [(row["assessmentId"],row["missingValues"]) for row in service_types]==[("A4","Legal Representation - تمثيل")]
+    assert service_types==[]
+    without_services=store.review("assessments",rule="Assessment without services",page_size=100)["rows"]
+    assert {row["assessmentId"] for row in without_services}=={"A3","A4"}
 
 
 def test_assessment_reconciliation_ignores_dates_before_2026():
@@ -1033,6 +1036,24 @@ def test_versioned_csv_names_and_detention_page():
     assert empty_month["trend"]==[]
 
 
+def test_detention_page_includes_requested_breakdown_charts_and_governorate_filter():
+    payload=required_payload()
+    payload["assessments"]=csv(**{
+        "Assessment ID":["A1","A2"],"Beneficiary ID":["B1","B2"],
+        "Is the beneficiary detained":["Yes","Yes"],
+        "Detaining Authority":["Police","Court"],"Detention Governorate":["Ninewa","Baghdad"],
+        "Possible Charges":["Residency","Entry"],"Is it an immigration related charge?":["Yes","No"],
+        "Detainee current status":["Detained","Released"],"Type of Released":["Bail","Court order"],
+    })
+    result=LegalStore.from_files(payload,"test").detention_cases()
+    assert [chart["title"] for chart in result["charts"]][-6:]==[
+        "Detention Governorate","Detaining Authority","Possible Charges",
+        "Is it an immigration related charge?","Detainee current status","Type of Released",
+    ]
+    assert all(item["label"]!="Blank" for chart in result["charts"] for item in chart["items"])
+    assert result["filterOptions"]["Detention governorate"]==["Baghdad","Ninewa"]
+
+
 def test_detention_detail_columns_and_monthly_excel_reconciliation():
     payload=required_payload()
     shared={
@@ -1058,7 +1079,7 @@ def test_detention_detail_columns_and_monthly_excel_reconciliation():
         "Lawyer":["Excel Lawyer","L2","L3"],"Identification Date | تاريخ تحديد الحالة":["05/01/2026","06/01/2026","07/01/2026"],
         "Beneficiary ID (Platform Case ID)":["B1","B3","B9"],"Registration Number | رقم التسجيل":["R1","R3","R9"],
         "English Name | الاسم بالإنكليزي":["Ahmed Ali","Sara Hassan","Other"],"Arabic Name | الاسم بالعربي":["أحمد علي","سارة حسن","شخص آخر"],
-        "Date of Birth | تاريخ الميلاد":["01/01/1990"]*3,"Age | العمر":[99]*3,"Sex | الجنس":["Male"]*3,
+        "Date of Birth | تاريخ الميلاد":["01/01/1990"]*3,"Age | العمر":[99]*3,"S\u200bex":["Male"]*3,
         "Date of Arrest | تاريخ الاعتقال":["02/01/2026"]*3,"Detention Governorate | محافظة الاحتجاز":["Ninewa"]*3,
         "Detaining Authority | الجهة المحتجزة":["Police"]*3,"Place of Detention | مكان الاحتجاز":[""]*3,
         "Reason of Arrest | سبب الاعتقال":["Immigration"]*3,"Charges | التهم":["Different charge","Overstay","Overstay"],
@@ -1077,12 +1098,16 @@ def test_detention_detail_columns_and_monthly_excel_reconciliation():
     assert "Date of birth" in result["comparedFields"]
     assert "Detention governorate" in result["comparedFields"]
     assert "Age" not in result["comparedFields"]
+    assert "Gender" in result["comparedFields"]
+    assert not any("Sex" in warning for warning in result["warnings"])
     assert result["rows"][0]["beneficiaryId"]=="B1"
     assert result["rows"][0]["differences"]==[{"field":"Possible charges","assessment":"Overstay","excel":"Different charge"}]
+    assert result["rows"][0]["note"]=="Different: Possible charges"
+    assert "Check charge" not in result["rows"][0]["note"]
     assert result["rows"][1]["beneficiaryId"]=="B9"
     exported=store.detention_reconciliation_export(workbook.getvalue(),"detention.xlsx","2026-01")
     issue_sheet=load_workbook(io.BytesIO(exported))["Comparison issues"]
-    assert [cell.value for cell in issue_sheet[4]]==["Lawyer","Note group","Case ID","Name","Different field","Assessment value","Excel value"]
+    assert [cell.value for cell in issue_sheet[4]]==["Lawyer","Note group","Case ID","Name","Different field","Platform Value","Excel value"]
     assert issue_sheet["A5"].value=="Assessment Lawyer"
     assert issue_sheet["A5"].fill.fgColor.rgb.endswith("E8F1FB")
     multiple=store.detention_reconciliation(workbook.getvalue(),"detention.xlsx","2026-01,2026-02")
@@ -1094,7 +1119,7 @@ def test_detention_detail_columns_and_monthly_excel_reconciliation():
     assert project_result["comparisonRecords"]==3
     assert not any("no Project column" in warning for warning in project_result["warnings"])
     excel_only=next(row for row in project_result["rows"] if row["beneficiaryId"]=="B9")
-    assert excel_only["note"]=="Case ID available in Excel but missing from Assessments"
+    assert excel_only["note"]=="Case ID available in Excel but missing from Platform"
     assert excel_only["caseAvailable"] is False
     projects_result=store.detention_reconciliation(workbook.getvalue(),"detention.xlsx","2026-01",["P1","P2"])
     assert projects_result["projects"]==["P1","P2"]
@@ -1106,6 +1131,32 @@ def test_detention_detail_columns_and_monthly_excel_reconciliation():
     assert LegalStore.detention_workbook_sheets(multi_sheet.getvalue())==["January cases","Reviewed cases"]
     selected_sheet=store.detention_reconciliation(multi_sheet.getvalue(),"detention.xlsx","2026-01","","Reviewed cases")
     assert selected_sheet["sheet"]=="Reviewed cases"
+
+
+def test_detention_reconciliation_ignores_counselling_assessment_when_excel_is_identified():
+    payload=required_payload()
+    payload["assessments"]=csv(**{
+        "Assessment ID":["A1"],"Beneficiary ID":["B1"],"Projects":["P1"],
+        "Is the beneficiary detained":["Yes نعم"],"Date of Assessment":["05/01/2026"],
+        "Type of Legal Service Needed":["Legal Counselling - استشارة"],
+        "Detainee current status":["Detained محتجز"],
+        "Date of the released or deported":[""],
+    })
+    store=LegalStore.from_files(payload,"test")
+    external=pd.DataFrame({
+        "Identification Date":["05/01/2026"],
+        "Beneficiary ID (Platform Case ID)":["B1"],
+        "Type of Service by INTERSOS":["Identified تم تحديده"],
+        "Detainee Current Status":["Released تم إطلاق سراحه"],
+        "Date of Release/Deportation":["15/01/2026"],
+    })
+    workbook=io.BytesIO();external.to_excel(workbook,index=False)
+
+    result=store.detention_reconciliation(workbook.getvalue(),"detention.xlsx","2026-01","P1")
+
+    assert result["matched"]==1
+    assert result["unmatched"]==0
+    assert result["rows"]==[]
 
 
 def test_project_reconciliation_compares_dob_and_normalized_detention_governorate():
@@ -1134,7 +1185,7 @@ def test_project_reconciliation_compares_dob_and_normalized_detention_governorat
     matched_workbook=io.BytesIO();external.to_excel(matched_workbook,index=False)
     matched=store.detention_reconciliation(matched_workbook.getvalue(),"detention.xlsx","2026-01","P1")
     assert matched["matched"]==1
-    assert matched["rows"]==[{"beneficiaryId":"B2","caseAvailable":True,"name":"Person Two","lawyer":"","note":"Case ID available in Excel but missing from Assessments","differences":[{"field":"Case ID","assessment":"Missing","excel":"Present"}]}]
+    assert matched["rows"]==[{"beneficiaryId":"B2","caseAvailable":True,"name":"Person Two","lawyer":"","note":"Case ID available in Excel but missing from Platform","differences":[{"field":"Case ID","assessment":"Missing","excel":"Present"}]}]
 
 
 def test_detention_reconciliation_reports_blank_case_ids_on_both_sides():
@@ -1165,7 +1216,30 @@ def test_service_missing_document_and_generic_review_exclusions(tmp_path):
     _, created=registry.exclude_record("legalservices","Missing Type of Document","serviceId","S1")
     assert created is True
     store.set_review_exclusions(registry.exclusion_rows())
-    assert store.review("legalservices",rule="Missing Type of Document")["total"]==0
+    excluded=store.review("legalservices",rule="Missing Type of Document")
+    assert excluded["total"]==0
+    assert excluded["ruleCounts"]["Missing Type of Document"]==0
+
+
+def test_review_rule_counts_follow_filters_search_exclusions_and_ignore_pagination():
+    payload=required_payload()
+    payload["assessments"]=csv(**{
+        "Assessment ID":["A1","A2","A3"],"Beneficiary ID":["B1","B2","B3"],
+        "Assessment Status":["Pending","Pending","Pending"],"Projects":["P1","P1","P2"],
+        "Lawyer":["L1","L1","L2"],
+    })
+    store=LegalStore.from_files(payload,"test")
+
+    paged=store.review("assessments",page=1,page_size=1)
+    assert paged["ruleCounts"]["Pending assessment"]==3
+    assert len(paged["rows"])==1
+    assert store.review("assessments",project="P2")["ruleCounts"]["Pending assessment"]==1
+    assert store.review("assessments",search="A1")["ruleCounts"]["Pending assessment"]==1
+
+    store.set_review_exclusions([{"dataset":"assessments","rule":"Pending assessment","identifierType":"assessmentId","identifierValue":"A1"}])
+    excluded=store.review("assessments",rule="Pending assessment")
+    assert excluded["total"]==2
+    assert excluded["ruleCounts"]["Pending assessment"]==2
 
 
 def test_awareness_name_exclusion_normalizes_spaces_and_case(tmp_path):

@@ -1,11 +1,30 @@
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-/** Formats a YYYY-MM filter value as a readable reporting month. */
+/** Keeps a YYYY-MM filter value in the standard numeric reporting-month format. */
 export function formatFilterMonth(value: string): string {
   const match = value.match(/^(\d{4})-(\d{2})$/);
   if (!match) return value;
   const month = Number(match[2]);
-  return month >= 1 && month <= 12 ? `${match[1]} - ${MONTHS[month - 1]}` : value;
+  return month >= 1 && month <= 12 ? `${match[1]}-${match[2]}` : value;
+}
+
+/** Formats month and full-date filter values as YYYY-MM without changing their filter value. */
+export function formatStudioDateMonth(value: string): string {
+  const text = value.trim();
+  const iso = text.match(/^(\d{4})-(\d{1,2})(?:-\d{1,2})?(?:[T\s].*)?$/);
+  const dayFirst = text.match(/^\d{1,2}[\/-](\d{1,2})[\/-](\d{4})(?:\s.*)?$/);
+  const year = iso ? iso[1] : dayFirst?.[2];
+  const month = Number(iso ? iso[2] : dayFirst?.[1]);
+  return year && month >= 1 && month <= 12 ? `${year}-${String(month).padStart(2, "0")}` : value;
+}
+
+export function isDateFilterField(field: string): boolean {
+  const normalized = field.replace(/[_-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2");
+  return /\b(date|dob|created on|added on|edited on|paid date|month)\b/i.test(normalized);
+}
+
+export function formatYearMonthFilterValue(field: string, value: string): string {
+  return isDateFilterField(field) ? formatStudioDateMonth(value) : value;
 }
 
 /** Formats recognised calendar dates without changing the original table value. */

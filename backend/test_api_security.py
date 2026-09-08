@@ -103,6 +103,22 @@ class LocalApiSecurityTests(unittest.TestCase):
         self.assertEqual(sheet["A2"].value, "'=1+1")
         self.assertNotEqual(sheet["A2"].data_type, "f")
 
+    def test_interactive_detail_workbook_uses_readable_font_colors(self):
+        response = main.table_workbook(main.TableWorkbookRequest(
+            filename="detention-governorate-pivot.xlsx",
+            columns=["Governorate", "Detained assessments", "Released"],
+            rows=[
+                {"Governorate": "Erbil", "Detained assessments": 12, "Released": 4},
+                {"Governorate": "Total", "Detained assessments": 12, "Released": 4},
+            ],
+        ))
+        sheet = load_workbook(io.BytesIO(response.body)).active
+        self.assertEqual(sheet["A1"].font.color.rgb, "00FFFFFF")
+        self.assertEqual(sheet["A2"].font.color.rgb, "000F2742")
+        self.assertEqual(sheet["B2"].font.color.rgb, "00126FBA")
+        self.assertTrue(sheet["A3"].font.bold)
+        self.assertEqual(sheet["A3"].fill.fgColor.rgb, "00E8F4FC")
+
     def test_bulk_duplicate_exclusions_are_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             registry=DuplicateExclusionRegistry(Path(directory)/"exclusions.json")

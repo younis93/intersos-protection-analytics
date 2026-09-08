@@ -119,20 +119,18 @@ def load_initial_legal_store() -> None:
         use_files=REMEMBERED_LEGAL_SOURCE=="files"
         if REMEMBERED_LEGAL_SOURCE_CONFIGURED:
             if use_files:
-                candidate = LegalStore.from_files(remembered_legal_file_payload(REMEMBERED_LEGAL_FILES), "Selected Legal Platform CSV files") if REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else None
+                candidate = LegalStore.from_files(remembered_legal_file_payload(REMEMBERED_LEGAL_FILES), "Selected Legal Platform CSV files", exclusions=duplicate_exclusions.exclusion_rows()) if REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else None
                 unavailable = "The last selected Legal Platform CSV files are unavailable. Choose a new source."
             else:
-                candidate = LegalStore.from_folder(REMEMBERED_LEGAL_FOLDER) if REMEMBERED_LEGAL_FOLDER and REMEMBERED_LEGAL_FOLDER.is_dir() else None
+                candidate = LegalStore.from_folder(REMEMBERED_LEGAL_FOLDER, exclusions=duplicate_exclusions.exclusion_rows()) if REMEMBERED_LEGAL_FOLDER and REMEMBERED_LEGAL_FOLDER.is_dir() else None
                 unavailable = "The last selected Legal Platform folder is unavailable. Choose a new source."
         else:
-            candidate = LegalStore.from_folder(LEGAL_SAMPLE) if LEGAL_SAMPLE.exists() else None
+            candidate = LegalStore.from_folder(LEGAL_SAMPLE, exclusions=duplicate_exclusions.exclusion_rows()) if LEGAL_SAMPLE.exists() else None
             unavailable = ""
         if candidate is None and unavailable:
             legal_store = None
             legal_store_restore_error = unavailable
             return
-        if candidate:
-            candidate.set_review_exclusions(duplicate_exclusions.exclusion_rows())
         legal_store = candidate
         legal_store_restore_error = ""
     except Exception as exc:
@@ -251,6 +249,7 @@ class TableWorkbookRequest(BaseModel):
     columns: list[str] = []
     rows: list[dict[str, object]] = []
     sheets: list[TableWorkbookSheet] = []
+    style: str = "default"
 
 
 @app.get("/api/health")
@@ -302,8 +301,7 @@ async def legal_upload(files: list[UploadFile] = File(...)):
             total += len(raw)
             if total > MAX_UPLOAD_BYTES: raise HTTPException(413, "Legal Platform files must total 100 MB or smaller.")
             if version >= versions.get(key, -1):payload[key]=raw;versions[key]=version
-        candidate = await run_in_threadpool(LegalStore.from_files, payload, "Selected Legal Platform folder")
-        candidate.set_review_exclusions(duplicate_exclusions.exclusion_rows())
+        candidate = await run_in_threadpool(LegalStore.from_files, payload, "Selected Legal Platform folder", exclusions=duplicate_exclusions.exclusion_rows())
         legal_store = candidate
         return candidate.metadata()
     except HTTPException:
@@ -326,9 +324,10 @@ def legal_review(request: LegalQuery):
 
 
 @app.get("/api/legal/review-export/{dataset}")
-def legal_review_export(dataset:str,comparison_month:str="",name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False,rules:str="",severity:str="",lawyer:str="",project:str="",location:str="",date:str="",search:str="",ignore_court_verdict:bool=False):
+def legal_review_export(dataset:str,comparison_month:str="",name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False,rules:str="",severity:str="",lawyer:str="",project:str="",location:str="",date:str="",search:str="",ignore_court_verdict:bool=False,ignore_court_verdict_rules:str=""):
     selected_rules=[rule.strip() for rule in rules.split(",") if rule.strip()]
-    payload=require_legal_store().review_export(dataset,comparison_month,name_compare_chars,allow_name_variations,exact_matches_only,selected_rules,severity,lawyer,project,location,date,search,ignore_court_verdict)
+    ignored_rules={rule.strip() for rule in ignore_court_verdict_rules.split(",") if rule.strip()}
+    payload=require_legal_store().review_export(dataset,comparison_month,name_compare_chars,allow_name_variations,exact_matches_only,selected_rules,severity,lawyer,project,location,date,search,ignore_court_verdict,ignored_rules)
     return Response(payload,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":f'attachment; filename="{dataset}-review-findings.xlsx"'})
 
 
@@ -520,6 +519,15 @@ def table_workbook(request: TableWorkbookRequest):
         for cell in sheet[1]:
             cell.font=Font(bold=True,color="FFFFFF");cell.fill=PatternFill("solid",fgColor="2563EB");cell.alignment=Alignment(wrap_text=True,vertical="center")
         for row in item.rows: sheet.append([safe_spreadsheet_value(row.get(column,"")) for column in item.columns])
+        if request.style == "interactive-detail" or request.filename == "detention-governorate-pivot.xlsx":
+            for row_index in range(2, sheet.max_row + 1):
+                is_total = str(sheet.cell(row_index, 1).value or "").strip().casefold() == "total"
+                for column_index in range(1, sheet.max_column + 1):
+                    cell = sheet.cell(row_index, column_index)
+                    cell.font = Font(name="Aptos", size=11, bold=is_total, color="0F2742" if column_index == 1 else "126FBA")
+                    cell.alignment = Alignment(vertical="center", horizontal="left" if column_index == 1 else "right")
+                    if is_total: cell.fill = PatternFill("solid", fgColor="E8F4FC")
+                sheet.row_dimensions[row_index].height = 20
         sheet.freeze_panes="A2";sheet.auto_filter.ref=sheet.dimensions
         for index,column in enumerate(item.columns,1):
             values=[str(row.get(column,"") or "") for row in item.rows[:500]]

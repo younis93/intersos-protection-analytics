@@ -1,9 +1,10 @@
 import {useEffect,useMemo,useState} from 'react';
-import Plot from 'react-plotly.js';
+import Plot from './LazyPlot';
 import {ChevronDown,LayoutDashboard,RotateCcw,Search,SlidersHorizontal,Table2,X} from 'lucide-react';
 import {getStudio,getLegalExplorerFilters} from './api';
 import {AppSelect,ExportButtons,formatNumber,formatPercent} from './components';
 import {transformStudioResult,type StudioView} from './studioChart';
+import {formatYearMonthFilterValue} from './dateFormat';
 import type {Filters,Measure,Metadata,StudioChartOptions,StudioLabelMode,StudioOrientation,StudioResult,StudioSort,StudioTopN,StudioValueMode,Theme} from './types';
 
 type ChartType='bar'|'stacked'|'line'|'donut'|'heatmap'|'table';
@@ -13,6 +14,7 @@ const label=(value:string)=>value.replaceAll('_',' ').replace(/\b\w/g,letter=>le
 const palette=['#315ea8','#2f8f68','#d4852f','#7759b8','#c94f68','#16858d','#9b6b35','#526d8d'];
 const defaultText=['#ffffff','#ffffff','#172334','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff'];
 const defaultOptions:StudioChartOptions={sort:'value-desc',topN:'all',valueMode:'count',labelMode:'auto',orientation:'horizontal'};
+const filterValueLabel=formatYearMonthFilterValue;
 
 export default function Studio({metadata,theme,sourceOptions,studioLoader,excludeFields}:{metadata:Metadata;theme:Theme;sourceOptions?:[string,string][];studioLoader?:typeof getStudio;excludeFields?:(field:string)=>boolean}){
   const sources=sourceOptions||[['assessment','Assessments'],['services','Legal Services'],['deportation','Deportation']];
@@ -64,7 +66,7 @@ export default function Studio({metadata,theme,sourceOptions,studioLoader,exclud
     </div>
     {error&&<div className="error glass">{error}</div>}
     <article className="studio-canvas glass"><div className="card-title"><div><h3>{label(row)}{column?` by ${label(column)}`:''}</h3><p>{result?`${formatNumber(result.total)} filtered ${measure==='beneficiaries'?'beneficiaries':'records'} · 2026 YTD`:''}</p></div><div className="chart-actions">{chartType!=='table'&&<ExportButtons graph={graph} title={`${label(row)}${column?` by ${label(column)}`:''}`}/>}<span className="studio-badge"><Table2/>{chartType==='table'?'Pivot':'Interactive chart'}</span></div></div>{busy&&!result?<div className="loading"><div/><span>Building analysis…</span></div>:chartType==='table'?<StudioTable view={view}/>:chart&&<div className="studio-plot"><Plot key={`${source}-${row}-${column}-${chartType}-${theme}`} useResizeHandler onInitialized={(_,graphDiv)=>setGraph(graphDiv)} data={chart.data as any} layout={chart.layout as any} config={{displayModeBar:false,responsive:true,scrollZoom:false,doubleClick:false}} style={{width:'100%',height:'100%'}}/></div>}</article>
-    {drawer&&<><button className="filter-backdrop" aria-label="Close Custom Builder filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer analytics-filter-drawer"><header><div><span className="eyebrow">ANALYTICS STUDIO FILTERS</span><h2>Filter Custom Builder</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header><label className="filter-search"><Search/><input value={filterSearch} onChange={(event)=>setFilterSearch(event.target.value)} placeholder="Search filters"/></label><div className="case-filter-scroll">{Object.entries(availableFilters).filter(([field])=>field.toLowerCase().includes(filterSearch.toLowerCase())).map(([field,values])=><details key={field} open={Boolean(filters[field]?.length)}><summary><span>{label(field)}</span>{filters[field]?.length>0&&<b>{filters[field].length}</b>}<ChevronDown/></summary><div>{values.map((value)=><label key={value}><input type="checkbox" checked={filters[field]?.includes(value)||false} onChange={()=>setFilters(current=>({...current,[field]:current[field]?.includes(value)?current[field].filter((item)=>item!==value):[...(current[field]||[]),value]}))}/><span>{value}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!activeCount} onClick={()=>setFilters({})}>Clear all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {activeCount>0&&`(${activeCount})`}</button></footer></aside></>}
+    {drawer&&<><button className="filter-backdrop" aria-label="Close Custom Builder filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer analytics-filter-drawer"><header><div><span className="eyebrow">ANALYTICS STUDIO FILTERS</span><h2>Filter Custom Builder</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header><label className="filter-search"><Search/><input value={filterSearch} onChange={(event)=>setFilterSearch(event.target.value)} placeholder="Search filters"/></label><div className="case-filter-scroll">{Object.entries(availableFilters).filter(([field])=>field.toLowerCase().includes(filterSearch.toLowerCase())).map(([field,values])=><details key={field} open={Boolean(filters[field]?.length)}><summary><span>{label(field)}</span>{filters[field]?.length>0&&<b>{filters[field].length}</b>}<ChevronDown/></summary><div>{values.map((value)=><label key={value}><input type="checkbox" checked={filters[field]?.includes(value)||false} onChange={()=>setFilters(current=>({...current,[field]:current[field]?.includes(value)?current[field].filter((item)=>item!==value):[...(current[field]||[]),value]}))}/><span>{filterValueLabel(field,value)}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!activeCount} onClick={()=>setFilters({})}>Clear all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {activeCount>0&&`(${activeCount})`}</button></footer></aside></>}
   </>;
 }
 

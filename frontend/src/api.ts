@@ -1,3 +1,4 @@
+import {legalFetch as fetch, setLegalRevision} from "./legalQueryCache";
 import type {
   Dashboard,
   ExplorerFilter,
@@ -21,7 +22,9 @@ async function parse<T>(r: Response): Promise<T> {
     const x = await r.json().catch(() => ({ detail: r.statusText }));
     throw new Error(x.detail || "Request failed");
   }
-  return r.json();
+  const data = await r.json();
+  if (data && typeof data === "object" && "ready" in data && "availability" in data) setLegalRevision(data.revision || null);
+  return data;
 }
 export const getMetadata = () =>
   fetch(`${API}/metadata`, { cache: "no-store" }).then(parse<Metadata>);
@@ -193,6 +196,7 @@ export const uploadLegalFolder = async (
         payload = {};
       }
       if (request.status >= 200 && request.status < 300) {
+        setLegalRevision(payload.revision || null);
         resolve(payload as LegalMetadata);
       } else {
         reject(
@@ -244,9 +248,9 @@ export const legalReviewExportUrl = (
   rules: string[] = [],
   filters: Record<string, string> = {},
   search = "",
-  ignoreCourtVerdict = false,
+  ignoreCourtVerdictRules: string[] = [],
 ) =>
-  `${API}/legal/review-export/${dataset}?comparison_month=${encodeURIComponent(comparisonMonth)}&name_compare_chars=${nameCompareChars}&allow_name_variations=${allowNameVariations}&exact_matches_only=${exactMatchesOnly}&rules=${encodeURIComponent(rules.join(","))}&severity=${encodeURIComponent(filters.severity || "")}&lawyer=${encodeURIComponent(filters.lawyer || "")}&project=${encodeURIComponent(filters.project || "")}&location=${encodeURIComponent(filters.location || "")}&date=${encodeURIComponent(filters.date || "")}&search=${encodeURIComponent(search)}&ignore_court_verdict=${ignoreCourtVerdict}`;
+  `${API}/legal/review-export/${dataset}?comparison_month=${encodeURIComponent(comparisonMonth)}&name_compare_chars=${nameCompareChars}&allow_name_variations=${allowNameVariations}&exact_matches_only=${exactMatchesOnly}&rules=${encodeURIComponent(rules.join(","))}&severity=${encodeURIComponent(filters.severity || "")}&lawyer=${encodeURIComponent(filters.lawyer || "")}&project=${encodeURIComponent(filters.project || "")}&location=${encodeURIComponent(filters.location || "")}&date=${encodeURIComponent(filters.date || "")}&search=${encodeURIComponent(search)}&ignore_court_verdict_rules=${encodeURIComponent(ignoreCourtVerdictRules.join(","))}`;
 export const getDuplicateExclusions = () =>
   fetch(`${API}/legal/duplicate-exclusions`, { cache: "no-store" }).then(parse<{rows: DuplicateExclusion[]; count: number}>);
 export const createDuplicateExclusion = (record: Pick<DuplicateExclusion, "caseId" | "rule" | "name" | "project" | "source"> & Partial<Pick<DuplicateExclusion,"dataset"|"identifierType"|"identifierValue">>) =>
@@ -273,7 +277,7 @@ export const getLegalExplorer = (
   }).then(parse<LegalExplorerResult>);
 export const getLegalExplorerFilters = (dataset: string) =>
   fetch(`${API}/legal/explorer-filters/${dataset}`, { cache: "no-store" }).then(
-    parse<{ columns: { name: string; values: string[] }[] }>,
+    parse<{ columns: { name: string; values: string[]; valueCount?: number; truncated?: boolean }[] }>,
   );
 export const exportLegalExplorer = async (
   format: "csv" | "xlsx",
@@ -302,8 +306,8 @@ export const exportLegalExplorer = async (
   link.click();
   URL.revokeObjectURL(url);
 };
-export const exportTableWorkbook = async (filename:string,columns:string[],rows:Record<string,unknown>[]) => {
-  const response=await fetch(`${API}/table-workbook`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename,columns,rows})});
+export const exportTableWorkbook = async (filename:string,columns:string[],rows:Record<string,unknown>[],style="default") => {
+  const response=await fetch(`${API}/table-workbook`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename,columns,rows,style})});
   if(!response.ok){const issue=await response.json().catch(()=>({detail:response.statusText}));throw new Error(issue.detail||"Excel export failed");}
   const url=URL.createObjectURL(await response.blob()),link=document.createElement("a");link.href=url;link.download=filename.endsWith(".xlsx")?filename:`${filename}.xlsx`;link.click();window.setTimeout(()=>URL.revokeObjectURL(url),1500);
 };
@@ -316,11 +320,13 @@ export const getLegalCase = (
   query: string,
   filters: Record<string, string[]> = {},
   options: {viewMode?: "cards" | "table";page?: number;pageSize?: number;sortColumn?: string;sortDirection?: "asc" | "desc";columns?:string[]} = {},
+  signal?: AbortSignal,
 ) =>
   fetch(`${API}/legal/case`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, filters, ...options }),
+    signal,
   }).then(parse<{ query: string; cases: any[];rows:any[];columns:{key:string;label:string;dataset:string}[];availableColumns:{key:string;label:string;dataset:string}[];totalRows:number;totalCases:number;page:number;pageSize:number }>);
 export const getLegalCaseFilters = () =>
   fetch(`${API}/legal/case-filters`, { cache: "no-store" }).then(

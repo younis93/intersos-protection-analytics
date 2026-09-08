@@ -8,9 +8,12 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 from difflib import SequenceMatcher
+from functools import lru_cache
 from pathlib import Path
 from threading import Lock
+from time import perf_counter
 from typing import Any, Callable
+from uuid import uuid4
 
 import pandas as pd
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -64,7 +67,22 @@ REQUIRED_COLUMNS = {
 }
 SPLIT_NAME = re.compile(r"^Name\s*/.*:\s*(Title|First|Middle|Last)\s*$", re.I)
 SECURED_FILE = "Secured documents Files"
-DATE_HINT = re.compile(r"\b(date|dob|created on|added on|paid date)\b", re.I)
+DATE_HINT = re.compile(r"\b(date|dob|created[ _-]?on|added[ _-]?on|edited[ _-]?on|paid[ _-]?date)\b", re.I)
+YEAR_MONTH = re.compile(r"^\d{4}-\d{2}$")
+
+
+def filter_values(series: pd.Series, column: str) -> list[str]:
+    if DATE_HINT.search(str(column)):
+        months = pd.to_datetime(series, errors="coerce", dayfirst=True).dt.to_period("M").astype(str)
+        return sorted(value for value in months.unique() if value != "NaT")
+    return sorted({str(value).strip() for value in series.dropna() if str(value).strip()}, key=str.casefold)
+
+
+def filter_rows(frame: pd.DataFrame, column: str, selections: list[str]) -> pd.DataFrame:
+    if DATE_HINT.search(str(column)) and selections and all(YEAR_MONTH.fullmatch(str(value)) for value in selections):
+        months = pd.to_datetime(frame[column], errors="coerce", dayfirst=True).dt.to_period("M").astype(str)
+        return frame[months.isin(selections)]
+    return frame[frame[column].fillna("").astype(str).isin(selections)]
 VERSION_SUFFIX = re.compile(r"\s*\((\d+)\)\s*$")
 ACTIONS = {
     "Possible duplicate name": "Verify the potential duplicate with the responsible lawyer. Where duplication is confirmed, notify the IM Officer to arrange deletion of the redundant case. The lawyer must update the physical file and PR record to retain the correct Case ID.",
@@ -127,14 +145,23 @@ AMAL_HIDDEN_ASSESSMENT_RULES = DETENTION_ASSESSMENT_RULES | frozenset((
 
 
 def _find(columns: list[str], *needles: str) -> str | None:
-    lowered = [(column, column.strip().lower()) for column in columns]
+    return _find_cached(tuple(columns), *needles)
+
+
+@lru_cache(maxsize=2048)
+def _find_cached(columns: tuple[str, ...], *needles: str) -> str | None:
+    def normalized_header(value:str)->str:
+        normalized=unicodedata.normalize("NFKC",value)
+        normalized="".join(character for character in normalized if unicodedata.category(character)!="Cf")
+        return re.sub(r"\s+"," ",normalized).strip().casefold()
+    lowered = [(column, normalized_header(column)) for column in columns]
     for needle in needles:
-        wanted = needle.lower()
+        wanted = normalized_header(needle)
         for original, lower in lowered:
             if lower == wanted:
                 return original
     for needle in needles:
-        wanted = needle.lower()
+        wanted = normalized_header(needle)
         for original, lower in lowered:
             if wanted in lower:
                 return original
@@ -291,6 +318,8 @@ class LegalStore:
     dates: dict[str, list[str]] = field(default_factory=dict)
     flags: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     review_exclusions: list[dict[str, Any]] = field(default_factory=list)
+    revision: str = field(default_factory=lambda: uuid4().hex, init=False)
+    import_timings: dict[str, float] = field(default_factory=dict, init=False, repr=False)
     _metadata_cache: dict[str, Any] | None = field(default=None, init=False, repr=False)
     _deportation_dashboard_cache: dict[str, Any] | None = field(default=None, init=False, repr=False)
     _explorer_filter_cache: dict[str, dict[str, Any]] = field(default_factory=dict, init=False, repr=False)
@@ -304,7 +333,7 @@ class LegalStore:
     _cache_lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
     @classmethod
-    def from_folder(cls, path: Path, progress: Callable[[int], None] | None = None) -> "LegalStore":
+    def from_folder(cls, path: Path, progress: Callable[[int], None] | None = None, *, exclusions: Any = ()) -> "LegalStore":
         selected: dict[str, tuple[int, Path]] = {}
         for file in path.glob("*.csv"):
             parsed = versioned_dataset_name(file.name)
@@ -318,10 +347,12 @@ class LegalStore:
         for index, (name, (_, file)) in enumerate(selected.items(), start=1):
             payload[name] = file.read_bytes()
             if progress: progress(round(index / total * 15))
-        return cls.from_files(payload, path.name, progress)
+        return cls.from_files(payload, path.name, progress, exclusions=exclusions)
 
     @classmethod
-    def from_files(cls, payload: dict[str, bytes], source: str, progress: Callable[[int], None] | None = None) -> "LegalStore":
+    def from_files(cls, payload: dict[str, bytes], source: str, progress: Callable[[int], None] | None = None, *, exclusions: Any = ()) -> "LegalStore":
+        started = perf_counter()
+        timings = {"csv_read": 0.0, "cleaning": 0.0}
         missing = [name for name in MANDATORY if name not in payload]
         if missing: raise ValueError("Missing mandatory files: " + ", ".join(f"{x}.csv" for x in missing))
         frames: dict[str, pd.DataFrame] = {}
@@ -329,10 +360,13 @@ class LegalStore:
         warnings = [f"Optional file not loaded: {name}.csv" for name in OPTIONAL if name not in payload]
         supported = [(name, raw) for name, raw in payload.items() if name in FILES]
         for index, (name, raw) in enumerate(supported, start=1):
+            stage = perf_counter()
             try:
                 df = pd.read_csv(io.BytesIO(raw), dtype=object, encoding="utf-8-sig", keep_default_na=True, low_memory=False)
             except UnicodeDecodeError:
                 df = pd.read_csv(io.BytesIO(raw), dtype=object, encoding="cp1252", keep_default_na=True, low_memory=False)
+            timings["csv_read"] += perf_counter() - stage
+            stage = perf_counter()
             df.columns = [str(c).strip() or f"Column {i + 1}" for i, c in enumerate(df.columns)]
             absent = [c for c in REQUIRED_COLUMNS.get(name, ()) if c not in df.columns]
             if absent: raise ValueError(f"{name}.csv is missing required columns: {', '.join(absent)}")
@@ -353,7 +387,12 @@ class LegalStore:
             df = df.drop(columns=drop)
             # Keep the source CSV untouched while using the agreed terminology in
             # every platform view and every export generated from these frames.
-            df = df.apply(lambda column: column.map(replace_legal_assistance) if column.dtype == object else column)
+            # CSV object columns contain strings and missing values. Transform each
+            # distinct value once, preserving missing values and leading-zero IDs.
+            df = df.apply(lambda column: column.map(
+                {value: replace_legal_assistance(value) for value in column.dropna().unique()},
+                na_action="ignore",
+            ) if column.dtype == object else column)
             date_cols = [c for c in df.columns if DATE_HINT.search(c)]
             request_date=_find(list(df.columns),"Date of the Request") if name=="assessments" else None
             for column in date_cols:
@@ -365,20 +404,34 @@ class LegalStore:
                 if parsed.notna().any() and not (name=="beneficiaries" and "spouse dob" in column.casefold() and parsed[supplied].isna().any()): df[column] = parsed
             frames[name] = df
             dates[name] = date_cols
+            timings["cleaning"] += perf_counter() - stage
             if progress: progress(15 + round(index / max(len(supported), 1) * 55))
         result = cls(frames, source, warnings, dates)
+        stage = perf_counter()
         result.flags = result._build_flags()
+        timings["validation"] = perf_counter() - stage
+        # Keep the base validation findings identical to the source import.
+        # Exclusions customize review contexts, which are prepared next.
+        result.set_review_exclusions(exclusions)
         if progress: progress(78)
         # Build the expensive shared review contexts during import so opening a review page is immediate.
         review_datasets=[dataset for dataset in ("beneficiaries", "assessments", "legalservices", "awareness") if dataset in result.frames]
+        stage = perf_counter()
         for index, dataset in enumerate(review_datasets, start=1):
             result.review(dataset)
-            if progress: progress(78 + round(index / max(len(review_datasets), 1) * 22))
+            if progress: progress(78 + round(index / max(len(review_datasets), 1) * 17))
+        timings["review_preparation"] = perf_counter() - stage
         if progress: progress(95)
+        stage = perf_counter()
+        result.metadata()
+        timings["metadata"] = perf_counter() - stage
+        timings["total"] = perf_counter() - started
+        result.import_timings = timings
         return result
 
     def metadata(self) -> dict[str, Any]:
         if self._metadata_cache is not None: return self._metadata_cache
+        revision = self.revision
         all_flags=[row for rows in self.flags.values() for row in rows if not row.get("overviewExcluded")]
         severity=pd.Series([row["severity"] for row in all_flags],dtype=object).value_counts().to_dict()
         rules=pd.Series([row["rule"] for row in all_flags],dtype=object).value_counts().head(12).to_dict()
@@ -507,8 +560,8 @@ class LegalStore:
         # The Beneficiaries Review badge follows the exact-name selector rule,
         # rather than counting prefix-based possible matches.
         review_counts["beneficiaries"]=sum(self.review("beneficiaries")["ruleCounts"].values())
-        self._metadata_cache = {
-            "ready": True, "source": self.source, "warnings": self.warnings,
+        result = {
+            "ready": True, "source": self.source, "warnings": self.warnings, "revision": revision,
             "availability": {name: name in self.frames for name in FILES},
             "features":{"awareness":any(re.search(r"\bamal\b",value,flags=re.I) for value in project_values),"detention":not amal_only,"deportation":"deportationrecords" in self.frames and not amal_only},
             "sheets": [{"id": name, "name": DISPLAY_NAMES[name], "rows": len(df), "columns": [str(c) for c in df.columns]} for name, df in self.frames.items()],
@@ -522,7 +575,12 @@ class LegalStore:
                          "lawyers":len(lawyer_names),"totalFlags":len(all_flags),"severity":severity,"rules":rules,
                          "charts":overview_charts,"representationCompletionRate":representation_completion,"activityTrend":activity_trend,"representationTrend":representation_trend,"locationPerformance":location_performance,"insight":insight,"dataQuality":quality,"deportationsByGovernorate":deportation_rows,"detention2026":{"trend":detention_trend,"map":detention_map}},
         }
-        return self._metadata_cache
+        with self._cache_lock:
+            if self.revision == revision:
+                self._metadata_cache = result
+                return result
+        # An exclusion changed while this overview was being calculated.
+        return self.metadata()
 
     def deportation_dashboard(self, filters:dict[str,list[str]]|None=None) -> dict[str, Any]:
         if not filters and self._deportation_dashboard_cache is not None:return self._deportation_dashboard_cache
@@ -538,9 +596,14 @@ class LegalStore:
                 filter_options[str(column)]=sorted(month for month in months.unique() if month!="NaT")
             else:
                 filter_options[str(column)]=sorted({str(value).strip() for value in source[column].dropna() if str(value).strip()})
+        if source_date:filter_options["Month"]=filter_values(source[source_date],"Date")
         df=source
         for column,values in (filters or {}).items():
             if not values:continue
+            if column=="Month" and source_date:
+                months=pd.to_datetime(df[source_date],errors="coerce",dayfirst=True).dt.to_period("M").astype(str)
+                df=df[months.isin(values)]
+                continue
             if column not in df.columns:continue
             if DATE_HINT.search(str(column)):
                 months=pd.to_datetime(df[column],errors="coerce",dayfirst=True).dt.to_period("M").astype(str)
@@ -645,15 +708,15 @@ class LegalStore:
                 if item["identifierType"] == "awarenessName": item["identifierValue"]=" ".join(item["identifierValue"].casefold().split())
                 else: item["identifierValue"]=clean_id(item["identifierValue"])
             if all(item.values()): normalized.append(item)
-        if normalized == self.review_exclusions:
-            return
-        self.review_exclusions = normalized
-        # Exclusions affect only the duplicate-name result.  Defer that
-        # calculation to the next duplicate-table request instead of making
-        # the local save wait for all review data to be rebuilt.
-        for key in list(self._review_cache):
-            del self._review_cache[key]
-        self._metadata_cache = None
+        with self._cache_lock:
+            if normalized == self.review_exclusions:
+                return
+            self.review_exclusions = normalized
+            self.revision = uuid4().hex
+            # Synchronize invalidation with review preparation so an old
+            # calculation cannot repopulate the cache after a saved exclusion.
+            self._review_cache.clear()
+            self._metadata_cache = None
 
     def _excluded_case_ids(self, rule: str) -> set[str]:
         return {row["identifierValue"] for row in self.review_exclusions if row["dataset"] == "beneficiaries" and row["rule"] == rule and row["identifierType"] == "caseId"}
@@ -1007,6 +1070,10 @@ class LegalStore:
                     if non_idp and not_detained and not only_exempt_documents and not pd.isna(created_on) and created_on >= pd.Timestamp("2026-01-01") and re.search("assistance|representation",actual):
                         self._flag(out,"assessments","Representation while not detained","Medium",i,row,"Non-IDP has Assistance/Representation, was created in 2026 or later, and is not detained")
                         out[-1]["typeOfDocument"]=clean_id(row.get(documents_to_issue,"")) if documents_to_issue else ""
+        without_services_case_ids={item.get("caseId","") for item in out if item.get("rule")=="Assessment without services" and item.get("caseId")}
+        suppressed_when_without_services={"Adult representation without counselling","Type of Legal Service in Assessment vs Services","Type of document in Assessments vs Services"}
+        if without_services_case_ids:
+            out=[item for item in out if not (item.get("rule") in suppressed_when_without_services and item.get("caseId") in without_services_case_ids)]
         return out
 
     def _assessment_month_flags(self, comparison_month: str | None = None) -> tuple[list[dict[str,Any]],str,list[str]]:
@@ -1131,6 +1198,11 @@ class LegalStore:
     def review(self, dataset: str, search: str="", rule: str="", page: int=1, page_size: int=100,
                severity: str="", lawyer: str="", project: str="", location: str="", date: str="", comparison_month:str="",
                name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False) -> dict[str, Any]:
+        @lru_cache(maxsize=256)
+        def row_month(value: str) -> str:
+            parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
+            return "" if pd.isna(parsed) else parsed.strftime("%Y-%m")
+
         bounded_chars=max(10,min(30,name_compare_chars));cache_key=(dataset,comparison_month or "",bounded_chars,bool(allow_name_variations))
         with self._cache_lock:
             context=self._review_cache.get(cache_key)
@@ -1162,15 +1234,11 @@ class LegalStore:
                             if not item.get("name") and name_col:item["name"]=clean_id(source.get(name_col,""))
                             for key,column in (("phone",phone_col),("project",project_col),("location",location_col)):
                                 if not item.get(key) and column:item[key]=clean_id(source.get(column,""))
-                observed=pd.Series([r["rule"] for r in rows],dtype=object).value_counts().to_dict();registered_rules=REGISTERED_RULES.get(dataset,())
-                if dataset=="beneficiaries":
-                    exact_name_matches=self._name_match_flags(exact_only=True,excluded_case_ids=self._excluded_case_ids("Possible duplicate name"))
-                    observed["Possible duplicate name"]=len([row for row in exact_name_matches if not self._is_excluded(row)])
+                registered_rules=REGISTERED_RULES.get(dataset,())
                 if dataset=="assessments" and self._amal_only_assessment_projects(): registered_rules=tuple(name for name in registered_rules if name not in AMAL_HIDDEN_ASSESSMENT_RULES)
-                rule_counts={name:int(observed.get(name,0)) for name in registered_rules}
                 date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate"}.get(dataset,"")
                 options={key:sorted({r.get(key,"") for r in rows if r.get(key,"")}) for key in ("severity","lawyer","project","location")}
-                options["date"]=sorted({pd.to_datetime(r.get(date_field,""),errors="coerce",dayfirst=True).strftime("%Y-%m") for r in rows if date_field and not pd.isna(pd.to_datetime(r.get(date_field,""),errors="coerce",dayfirst=True))})
+                options["date"]=sorted({month for r in rows if date_field and (month := row_month(r.get(date_field,"")))})
                 name_records=0;eligible_name_records=0
                 if dataset=="beneficiaries":
                     name_column=_find(list(self.frames[dataset].columns),"Name (Filter Color Red)")
@@ -1182,20 +1250,28 @@ class LegalStore:
                             recognized_projects={"unhcr 2026 - erbil","unhcr 2026 - mosul & kirkuk","unhcr 2026 - suli","unhcr 2026 - baghdad","unhcr 2026 - gov","unhcr 2026 - amal camp"}
                             projects=self.frames[dataset][project_column].fillna("").astype(str).map(lambda value:re.sub(r"\s+"," ",value).strip().casefold())
                             eligible_name_records=int((normalized_names.str.len().ge(bounded_chars) & projects.isin(recognized_projects)).sum())
-                context={"rows":rows,"ruleCounts":rule_counts,"filterOptions":options,"availableMonths":available_months,"activeComparisonMonth":active_month,"nameRecordCount":name_records,"eligibleNameRecordCount":eligible_name_records}
+                exact_name_rows = self._name_match_flags(exact_only=True, excluded_case_ids=self._excluded_case_ids("Possible duplicate name")) if dataset == "beneficiaries" else []
+                context={"rows":rows,"exactNameRows":exact_name_rows,"registeredRules":registered_rules,"filterOptions":options,"availableMonths":available_months,"activeComparisonMonth":active_month,"nameRecordCount":name_records,"eligibleNameRecordCount":eligible_name_records}
                 self._review_cache[cache_key]=context
-        rows=[row for row in context["rows"] if not self._is_excluded(row)]
-        if exact_matches_only and rule == "Possible duplicate name":
-            rows=self._name_match_flags(exact_only=True, excluded_case_ids=self._excluded_case_ids("Possible duplicate name"))
-        elif rule:
-            rows=[r for r in rows if r["rule"]==rule]
-        for key,selection in (("severity",severity),("lawyer",lawyer),("project",project),("location",location)):
-            if selection: rows=[r for r in rows if r.get(key)==selection]
-        if date:
-            date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate"}.get(dataset,"")
-            rows=[r for r in rows if date_field and not pd.isna(pd.to_datetime(r.get(date_field,""),errors="coerce",dayfirst=True)) and pd.to_datetime(r.get(date_field,""),errors="coerce",dayfirst=True).strftime("%Y-%m")==date]
-        if search:
-            needle=search.lower(); rows=[r for r in rows if needle in " ".join(map(str,r.values())).lower()]
+        def apply_runtime_filters(items:list[dict[str,Any]])->list[dict[str,Any]]:
+            filtered=[item for item in items if not self._is_excluded(item)]
+            for key,selection in (("severity",severity),("lawyer",lawyer),("project",project),("location",location)):
+                if selection: filtered=[item for item in filtered if item.get(key)==selection]
+            if date:
+                date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate"}.get(dataset,"")
+                filtered=[item for item in filtered if date_field and row_month(item.get(date_field,""))==date]
+            if search:
+                needle=search.lower();filtered=[item for item in filtered if needle in " ".join(map(str,item.values())).lower()]
+            return filtered
+        filtered_rows=apply_runtime_filters(context["rows"])
+        observed=pd.Series([item["rule"] for item in filtered_rows],dtype=object).value_counts().to_dict()
+        exact_name_rows:list[dict[str,Any]]=[]
+        if dataset=="beneficiaries":
+            exact_name_rows=apply_runtime_filters(context["exactNameRows"])
+            observed["Possible duplicate name"]=len(exact_name_rows)
+        rule_counts={name:int(observed.get(name,0)) for name in context["registeredRules"]}
+        rows=exact_name_rows if exact_matches_only and rule=="Possible duplicate name" else filtered_rows
+        if rule: rows=[item for item in rows if item["rule"]==rule]
         if rule in {"Marital status below 18", "Spouse below 18"}:
             date_key = "spouseDateOfBirth" if rule == "Spouse below 18" else "dateOfBirth"
             rows.sort(key=lambda item: str(item.get(date_key, "")), reverse=True)
@@ -1203,9 +1279,9 @@ class LegalStore:
             rows.sort(key=lambda item:(normalize_name(item.get("name","")),str(item.get("name","")).casefold(),str(item.get("awarenessId","")).casefold()))
         start=(page-1)*page_size
         rules=sorted({r["rule"] for r in self.flags.get(dataset,[])})
-        return {"dataset":dataset,"total":len(rows),"page":page,"pageSize":page_size,"rules":list(REGISTERED_RULES.get(dataset,rules)),"ruleCounts":context["ruleCounts"],"filterOptions":context["filterOptions"],"availableMonths":context["availableMonths"],"activeComparisonMonth":context["activeComparisonMonth"],"nameRecordCount":context["nameRecordCount"],"eligibleNameRecordCount":context["eligibleNameRecordCount"],"nameCompareCharsApplied":bounded_chars,"allowNameVariationsApplied":bool(allow_name_variations),"rows":rows[start:start+page_size]}
+        return {"dataset":dataset,"total":len(rows),"page":page,"pageSize":page_size,"rules":list(REGISTERED_RULES.get(dataset,rules)),"ruleCounts":rule_counts,"filterOptions":context["filterOptions"],"availableMonths":context["availableMonths"],"activeComparisonMonth":context["activeComparisonMonth"],"nameRecordCount":context["nameRecordCount"],"eligibleNameRecordCount":context["eligibleNameRecordCount"],"nameCompareCharsApplied":bounded_chars,"allowNameVariationsApplied":bool(allow_name_variations),"rows":rows[start:start+page_size]}
 
-    def review_export(self,dataset:str,comparison_month:str="",name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False,selected_rules:list[str]|None=None,severity:str="",lawyer:str="",project:str="",location:str="",date:str="",search:str="",ignore_court_verdict:bool=False)->bytes:
+    def review_export(self,dataset:str,comparison_month:str="",name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False,selected_rules:list[str]|None=None,severity:str="",lawyer:str="",project:str="",location:str="",date:str="",search:str="",ignore_court_verdict:bool=False,ignore_court_verdict_rules:set[str]|None=None)->bytes:
         from openpyxl import Workbook
         from openpyxl.styles import Font,PatternFill,Alignment,Border,Side
         from openpyxl.utils import get_column_letter
@@ -1228,8 +1304,9 @@ class LegalStore:
             flags=[row for row in flags if date_field and not pd.isna(pd.to_datetime(row.get(date_field,""),errors="coerce",dayfirst=True)) and pd.to_datetime(row.get(date_field,""),errors="coerce",dayfirst=True).strftime("%Y-%m")==date]
         if search:
             needle=search.lower();flags=[row for row in flags if needle in " ".join(map(str,row.values())).lower()]
-        if ignore_court_verdict and dataset=="legalservices":
-            flags=[row for row in flags if not (row.get("rule") in {"Duplicate service","Duplicate service without Assessment ID"} and re.search(r"court verdict|\bother\b|اخرى",str(row.get("typeOfDocument", "")),flags=re.I))]
+        ignored_duplicate_rules={"Duplicate service","Duplicate service without Assessment ID"} if ignore_court_verdict else (ignore_court_verdict_rules or set())
+        if ignored_duplicate_rules and dataset=="legalservices":
+            flags=[row for row in flags if not (row.get("rule") in ignored_duplicate_rules and re.search(r"court verdict|\bother\b|اخرى",str(row.get("typeOfDocument", "")),flags=re.I))]
         from openpyxl.worksheet.table import Table, TableStyleInfo
         frame=self.frames[dataset]
         def columns_for_rule(rule:str)->tuple[list[tuple[str,str,tuple[str,...]]],list[str]]:
@@ -1240,6 +1317,8 @@ class LegalStore:
             ]
             if rule=="Detention Governorate mismatch": page_columns.append(("Detention Governorate mismatch","detentionGovernorate",("Detention Governorate",)))
             if dataset in {"beneficiaries","assessments","legalservices"}: page_columns.append(("Case ID","caseId",("Case ID","Beneficiary ID")))
+            if dataset == "beneficiaries" and rule in {"Possible duplicate name", "Possible duplicate contact and name"}:
+                page_columns.extend([("Date of Identification", "identificationDate", ("Date of Identification",)), ("Created On", "createdOn", ("Created On",))])
             if dataset in {"assessments","legalservices"}: page_columns.append(("Assessment","assessmentId",("Assessment ID",)))
             if dataset=="legalservices": page_columns.append(("Service","serviceId",("Service ID",)))
             if dataset=="awareness": page_columns.append(("Awareness ID","awarenessId",("Awareness ID",)))
@@ -1332,8 +1411,8 @@ class LegalStore:
         if dataset in self._explorer_filter_cache:return self._explorer_filter_cache[dataset]
         frame=self.frames[dataset];columns=[]
         for column in frame.columns:
-            values=sorted({str(value).strip() for value in frame[column].dropna().unique() if str(value).strip()})
-            if 0 < len(values) <= 200: columns.append({"name":str(column),"values":values})
+            values=filter_values(frame[column],str(column))
+            columns.append({"name":str(column),"values":values[:500],"valueCount":len(values),"truncated":len(values)>500})
         result={"columns":columns};self._explorer_filter_cache[dataset]=result;return result
 
     def studio(self,dataset:str,row_dimension:str,column_dimension:str="",filters:dict[str,list[str]]|None=None,measure:str="records")->dict[str,Any]:
@@ -1344,7 +1423,7 @@ class LegalStore:
             frame=frame.drop(columns=hidden_columns)
         if row_dimension not in frame.columns or (column_dimension and column_dimension not in frame.columns): raise ValueError("Choose valid source columns.")
         for column,values in (filters or {}).items():
-            if column in frame.columns and values: frame=frame[frame[column].fillna("").astype(str).isin(values)]
+            if column in frame.columns and values: frame=filter_rows(frame,column,values)
         rows=frame[row_dimension].fillna("Not provided").astype(str).str.strip().replace("","Not provided")
         columns=frame[column_dimension].fillna("Not provided").astype(str).str.strip().replace("","Not provided") if column_dimension else pd.Series("Total",index=frame.index)
         identifier=_find(list(frame.columns),"Beneficiary ID","Case ID") if measure=="beneficiaries" else None
@@ -1381,10 +1460,10 @@ class LegalStore:
         # dashboard charts.  Keep every source field available there while the
         # section toolbar exposes just the four most useful quick filters.
         filter_columns=list(dict.fromkeys(original_columns+(["Year","Quarter","Month"] if date_col else [])))
-        filter_options={column:sorted({str(value).strip() for value in frame[column].dropna() if str(value).strip()})[:500] for column in filter_columns}
+        filter_options={column:filter_values(frame[column],column)[:500] for column in filter_columns}
         filtered=frame
         for column,values in (filters or {}).items():
-            if column in filtered.columns and values: filtered=filtered[filtered[column].fillna("").astype(str).isin(values)]
+            if column in filtered.columns and values: filtered=filter_rows(filtered,column,values)
         if search:
             mask=filtered.astype(str).apply(lambda column:column.str.contains(search,case=False,na=False,regex=False)).any(axis=1);filtered=filtered[mask]
         metric=filtered[id_col].map(clean_id) if id_col else pd.Series(filtered.index.astype(str),index=filtered.index); total=int(metric.replace("",pd.NA).nunique())
@@ -1429,7 +1508,7 @@ class LegalStore:
         if filter_column in frame.columns and filter_value:
             frame=frame[frame[filter_column].fillna("").astype(str).str.contains(filter_value,case=False,regex=False)]
         for column,selections in (filters or {}).items():
-            if column in frame.columns and selections: frame=frame[frame[column].fillna("").astype(str).isin(selections)]
+            if column in frame.columns and selections: frame=filter_rows(frame,column,selections)
         if sort_column in frame.columns:
             values=frame[sort_column]
             if DATE_HINT.search(sort_column): values=pd.to_datetime(values,errors="coerce",dayfirst=True)
@@ -1455,7 +1534,7 @@ class LegalStore:
             for column in frame.columns:mask|=frame[column].fillna("").astype(str).str.lower().str.contains(needle,regex=False)
             frame=frame[mask]
         for column,selections in (filters or {}).items():
-            if column in frame.columns and selections:frame=frame[frame[column].fillna("").astype(str).isin(selections)]
+            if column in frame.columns and selections:frame=filter_rows(frame,column,selections)
         frame=_safe_export(frame[source_columns])
         output=io.BytesIO()
         if export_format=="csv":
@@ -1480,8 +1559,9 @@ class LegalStore:
             columns=[]
             for column in self.frames[dataset].columns:
                 series=self.frames[dataset][column].dropna()
-                if series.empty or series.nunique(dropna=True)>200:continue
-                raw=[str(value).strip() for value in series.unique() if str(value).strip()]
+                if series.empty:continue
+                raw=filter_values(series,str(column))
+                if len(raw)>200:continue
                 normalized:dict[str,str]={}
                 for value in raw: normalized.setdefault(value.casefold(),value)
                 values=sorted(normalized.values(),key=str.casefold)
@@ -1515,9 +1595,13 @@ class LegalStore:
             if not selections:continue
             dataset,column=(key.split("::",1) if "::" in key else ("beneficiaries",key));frame=self.frames.get(dataset)
             if frame is None or column not in frame.columns:continue
-            series=frame[column].fillna("").astype(str);mask=pd.Series(False,index=frame.index)
-            for selection in selections:mask|=series.str.contains(str(selection),case=False,regex=False)
-            candidate_ids&=self._case_ids_for_rows(dataset,frame[mask])
+            if DATE_HINT.search(str(column)) and all(YEAR_MONTH.fullmatch(str(value)) for value in selections):
+                matched=filter_rows(frame,column,selections)
+            else:
+                series=frame[column].fillna("").astype(str);mask=pd.Series(False,index=frame.index)
+                for selection in selections:mask|=series.str.contains(str(selection),case=False,regex=False)
+                matched=frame[mask]
+            candidate_ids&=self._case_ids_for_rows(dataset,matched)
         needle=query.strip()
         if needle:
             mask=b[bid].map(clean_id).str.contains(needle,case=False,regex=False)
@@ -2086,7 +2170,7 @@ class LegalStore:
         )
         detail_selected=[(label,_find(list(frame.columns),*hints)) for label,hints in detail_specs]
         columns_by_label=dict(selected)
-        filter_labels=("Gender / age group","Community type","Nationality","Project","Project location","Detention governorate","Detaining authority","Immigration charge","Current status","Lawyer")
+        filter_labels=("Gender / age group","Community type","Nationality","Project","Project location","Detention governorate","Detaining authority","Possible charges","Immigration charge","Current status","Lawyer")
         options={label:sorted({str(value).strip() for value in scoped[column].dropna().unique() if str(value).strip()}) for label,column in selected if label in filter_labels}
         assessment_date=columns_by_label.get("Assessment date")
         release_date=columns_by_label.get("Release/deportation date")
@@ -2151,8 +2235,23 @@ class LegalStore:
         for label in ("Gender / age group","Community type","Nationality","Project","Project location"):
             column=columns_by_label.get(label)
             if not column:continue
-            counts=scoped[column].fillna("Blank").astype(str).str.strip().replace("","Blank").value_counts().head(20)
+            values=scoped[column].fillna("").astype(str).str.strip()
+            counts=values[values.ne("")].value_counts().head(20)
             charts.append({"id":label,"title":label,"items":[{"label":str(item),"count":int(count)} for item,count in counts.items()]})
+        detention_chart_specs=(
+            ("Detention governorate","Detention Governorate"),
+            ("Detaining authority","Detaining Authority"),
+            ("Possible charges","Possible Charges"),
+            ("Immigration charge","Is it an immigration related charge?"),
+            ("Current status","Detainee current status"),
+            ("Release type","Type of Released"),
+        )
+        for filter_label,title in detention_chart_specs:
+            column=columns_by_label.get(filter_label)
+            if not column:continue
+            values=scoped[column].fillna("").astype(str).str.strip()
+            counts=values[values.ne("")].value_counts().head(20)
+            charts.append({"id":"Type of Released" if filter_label=="Release type" else filter_label,"title":title,"items":[{"label":str(item),"count":int(count)} for item,count in counts.items()]})
         governorate_column=columns_by_label.get("Detention governorate")
         governorate_aliases=(
             (("sulayman",),"Al-Sulaimaniyah"),(("ninewa","ninawa","mosul"),"Ninawa"),
@@ -2290,37 +2389,42 @@ class LegalStore:
         def case_available(case_id:str)->bool:
             # The case review needs both the assessment history and beneficiary profile.
             return bool(case_id) and case_id in assessment_case_ids and case_id in beneficiary_case_ids
-        note_external=_find(list(external.columns),"Note","ملاحظات")
         for case_id,source_group in platform_by_id.items():
             target_group=external_by_id.get(case_id)
             source=source_group.iloc[-1]
             name=display_value(source.get(name_platform,"")) if name_platform else ""
             if not name:name=beneficiary_names.get(case_id,"")
             if target_group is None:
-                results.append({"beneficiaryId":case_id,"caseAvailable":case_available(case_id),"name":name,"lawyer":preferred_lawyer(source),"note":"Case ID available in Assessments but missing from Excel","differences":[{"field":"Case ID","assessment":"Present","excel":"Missing"}]});continue
-            best_note=None;best_difference=None;best_target=None
+                results.append({"beneficiaryId":case_id,"caseAvailable":case_available(case_id),"name":name,"lawyer":preferred_lawyer(source),"note":"Case ID available in platform but missing from Excel","differences":[{"field":"Case ID","assessment":"Present","excel":"Missing"}]});continue
+            best_difference=None;best_target=None
             for _,target in target_group.iterrows():
                 differences=[]
+                service_left_column=platform_columns.get("Legal service needed");service_right_column=external_columns.get("Legal service needed")
+                counselling_identified=bool(
+                    service_left_column and service_right_column
+                    and "legal counselling" in comparable(source.get(service_left_column,""),"Legal service needed")
+                    and "identified" in comparable(target.get(service_right_column,""),"Legal service needed")
+                )
                 for label in platform_fields:
                     if label=="Beneficiary ID":continue
                     left_column=platform_columns.get(label);right_column=external_columns.get(label)
                     if not left_column or not right_column:continue
                     left=comparable(source.get(left_column,""),label);right=comparable(target.get(right_column,""),label)
+                    if counselling_identified and label in {"Legal service needed","Current status","Release/deportation date"}:continue
                     if left!=right:differences.append(label)
                 if best_difference is None or len(differences)<len(best_difference):
-                    best_difference=differences;best_note=display_value(target.get(note_external,"")) if note_external else "";best_target=target
+                    best_difference=differences;best_target=target
             if not best_difference: matched+=1;continue
             note="Different: "+", ".join(best_difference)
-            if best_note:note+=f" · Workbook note: {best_note}"
             difference_values=[]
             for label in best_difference:
                 left_column=platform_columns.get(label);right_column=external_columns.get(label)
                 difference_values.append({"field":label,"assessment":display_value(source.get(left_column,"")) if left_column else "","excel":display_value(best_target.get(right_column,"")) if best_target is not None and right_column else ""})
-            results.append({"beneficiaryId":case_id,"caseAvailable":case_available(case_id),"name":name or display_value(target_group.iloc[0].get(name_external,"")),"lawyer":preferred_lawyer(source,best_target),"note":best_note or "Field difference (no workbook note)","differences":difference_values})
+            results.append({"beneficiaryId":case_id,"caseAvailable":case_available(case_id),"name":name or display_value(target_group.iloc[0].get(name_external,"")),"lawyer":preferred_lawyer(source,best_target),"note":note,"differences":difference_values})
         for case_id,target_group in external_by_id.items():
             if case_id in platform_by_id:continue
             target=target_group.iloc[-1]
-            results.append({"beneficiaryId":case_id,"caseAvailable":case_available(case_id),"name":display_value(target.get(name_external,"")) if name_external else "","lawyer":preferred_lawyer(None,target),"note":"Case ID available in Excel but missing from Assessments","differences":[{"field":"Case ID","assessment":"Missing","excel":"Present"}]})
+            results.append({"beneficiaryId":case_id,"caseAvailable":case_available(case_id),"name":display_value(target.get(name_external,"")) if name_external else "","lawyer":preferred_lawyer(None,target),"note":"Case ID available in Excel but missing from Platform","differences":[{"field":"Case ID","assessment":"Missing","excel":"Present"}]})
         for _,source in platform_missing_id.iterrows():
             results.append({"beneficiaryId":"","caseAvailable":False,"name":display_value(source.get(name_platform,"")) if name_platform else "","lawyer":preferred_lawyer(source),"note":"Case ID missing in Assessments","differences":[{"field":"Case ID","assessment":"Missing","excel":"Not comparable"}]})
         for _,target in external_missing_id.iterrows():
@@ -2341,7 +2445,7 @@ class LegalStore:
             sheet["A1"].font=Font(bold=True,color="FFFFFF",size=14);sheet["A1"].fill=PatternFill("solid",fgColor="0B5C95");sheet["A1"].alignment=Alignment(horizontal="left",vertical="center")
             sheet.merge_cells("A2:G2");sheet["A2"]=f"Assessment month(s): {comparison['month']}  |  Project(s): {comparison['project'] or 'All'}  |  Workbook: {comparison['filename']}"
             sheet["A2"].font=Font(italic=True,color="526777");sheet["A2"].alignment=Alignment(wrap_text=True)
-            headers=("Lawyer","Note group","Case ID","Name","Different field","Assessment value","Excel value")
+            headers=("Lawyer","Note group","Case ID","Name","Different field","Platform Value","Excel value")
             for column,header in enumerate(headers,1):
                 cell=sheet.cell(4,column,header);cell.font=Font(bold=True,color="FFFFFF");cell.fill=PatternFill("solid",fgColor="1D4ED8");cell.alignment=Alignment(wrap_text=True,vertical="center")
             row_number=5

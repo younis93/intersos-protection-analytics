@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import Plot from "react-plotly.js";
+import Plot from "./LazyPlot";
 import { formatFilterMonth } from "./dateFormat";
 import {
   Check,
@@ -12,7 +12,6 @@ import {
   X,
 } from "lucide-react";
 import type { Chart, Display, Filters, QualityRow, Row, Theme } from "./types";
-import { exportChart } from "./chartExport";
 import { exportTableWorkbook } from "./api";
 
 export const formatNumber = (n: number) =>
@@ -147,6 +146,11 @@ const chartInk = (theme: Theme) =>
   theme === "glass-dark" ? "#edf7ff" : "#263746";
 const chartGrid = (theme: Theme) =>
   theme === "glass-dark" ? "rgba(190,215,232,.13)" : "rgba(90,115,135,.13)";
+const compactDetentionLabel=(title:string,label:string)=>{
+  if(!["Detaining Authority","Possible Charges"].includes(title))return label;
+  const english=label.replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g,"").replace(/\s*[-–:|/]\s*$/g,"").replace(/\s{2,}/g," ").trim();
+  return english.replace(/Other\s*\(please specify in the comments section\)/i,"Other").replace(/Residency department/i,"Residency Department")||label;
+};
 const categoryPalette = ["#1877c9", "#2f9e68", "#d97706", "#7c5cc4", "#d9485f", "#168a91", "#9a6b35", "#536d88", "#b85c9e", "#6d8f38", "#e06b3c", "#3f73a8"];
 const plotConfig = {
   displayModeBar: false,
@@ -184,7 +188,7 @@ export function ChartCard({
         : `${formatNumber(r.count)} · ${formatPercent(r.percent)}`,
   );
   return (
-    <article className="chart-card glass">
+    <article className={`chart-card glass${chart.kind==="wide-bar"||["Detaining Authority","Possible Charges"].includes(chart.title)?" wide":""}`}>
       <div className="card-title">
         <div>
           <h3>{chart.title}</h3>
@@ -209,7 +213,8 @@ export function ChartCard({
               type: "bar",
               orientation: "h",
               x: values,
-              y: rows.map((r) => r.label),
+              y: rows.map((r) => compactDetentionLabel(chart.title,r.label)),
+              customdata: rows.map((r) => r.filterValue || r.label),
               text,
               textposition: "auto",
               hovertemplate: "%{y}<br>%{text}<extra></extra>",
@@ -244,7 +249,7 @@ export function ChartCard({
           style={{ width: "100%", height: "100%" }}
           onClick={(e) => {
             const p = e.points?.[0];
-            if (p) onSelect(chart.id, String(p.y));
+            if (p) onSelect(chart.id, String(p.customdata || p.y));
           }}
         />
       </div>
@@ -467,6 +472,7 @@ export function ExportButtons({ graph, title }: { graph: any; title: string }) {
     setBusy(true);
     setDone("");
     try {
+      const {exportChart} = await import("./chartExport");
       await exportChart(graph, title, format);
       setDone(format.toUpperCase());
       setTimeout(() => setDone(""), 1800);
