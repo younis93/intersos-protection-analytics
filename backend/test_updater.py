@@ -48,8 +48,16 @@ class UpdaterTests(unittest.TestCase):
         command = updater._installer_command(Path("setup.exe"))
         self.assertIn("/INTERSOSUPDATE", command)
         self.assertIn("/NORESTART", command)
-        self.assertNotIn("/EXTERNALRELAUNCH", command)
-        self.assertNotIn("/RESTARTAPPLICATIONS", command)
+        self.assertIn("/NORESTARTAPPLICATIONS", command)
+        self.assertIn("/EXTERNALRELAUNCH", command)
+
+    def test_external_relauncher_waits_for_the_current_app_and_installer(self):
+        command = updater._relaunch_command(Path("setup.exe"), Path("app.exe"), process_id=1234)
+        script = command[-1]
+        self.assertIn("Get-Process -Id 1234", script)
+        self.assertIn("$process.WaitForExit()", script)
+        self.assertIn("Start-Process -FilePath 'app.exe'", script)
+        self.assertIn("/NORESTARTAPPLICATIONS", script)
 
     def test_status_reports_download_byte_counts(self):
         updater._set(phase="downloading", progress=45, downloadedBytes=45_000_000, totalBytes=100_000_000)
