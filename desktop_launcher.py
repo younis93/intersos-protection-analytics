@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import multiprocessing
 import os
 import secrets
 import socket
@@ -50,6 +51,27 @@ def save_legal_folder(path: Path) -> None:
     settings = load_settings()
     settings["legalFolder"] = str(path)
     settings["legalSource"] = "folder"
+    target.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+
+
+def configured_indicator_master() -> Path | None:
+    try:
+        value = load_settings().get("indicatorMasterWorkbook", "")
+        return Path(value) if value else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def saved_indicator_master() -> Path | None:
+    path = configured_indicator_master()
+    return path if path and path.is_file() and path.suffix.lower() == ".xlsx" else None
+
+
+def save_indicator_master(path: Path) -> None:
+    target = settings_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    settings = load_settings()
+    settings["indicatorMasterWorkbook"] = str(path)
     target.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 
 
@@ -176,6 +198,23 @@ def apply_windows_branding(window_title: str, theme: str = "glass-light") -> Non
         return
 
 
+def initialize_desktop(window_title: str, theme: str) -> None:
+    """Finish native setup without blocking the WebView event loop."""
+    apply_windows_branding(window_title, theme)
+
+
+def start_legal_restore(backend_main: Any) -> threading.Thread:
+    """Load the remembered Legal source without delaying the desktop window."""
+    backend_main.legal_store_loading = True
+    thread = threading.Thread(
+        target=backend_main.load_initial_legal_store,
+        name="restore-legal-data",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 class LocalServer:
     def __init__(self, app: Any, port: int) -> None:
         config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
@@ -204,8 +243,17 @@ class NativeFullscreenController:
         self.fullscreen = False
         self.style = 0
         self.placement: WindowPlacement | None = None
+        self.window: Any | None = None
+
+    def attach_window(self, window: Any) -> None:
+        self.window = window
 
     def toggle(self) -> bool:
+        if self.window is not None:
+            self.window.toggle_fullscreen()
+            self.fullscreen = not self.fullscreen
+            return self.fullscreen
+
         user32 = ctypes.windll.user32
         user32.FindWindowW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
         user32.FindWindowW.restype = ctypes.c_void_p
@@ -287,20 +335,44 @@ class NativeFullscreenController:
 
 class DesktopApi:
     def __init__(self, fullscreen: Any) -> None:
-        self.fullscreen = fullscreen
+        # pywebview recursively exposes public attributes to JavaScript. Keeping
+        # the controller public makes it walk the native WinForms accessibility
+        # graph forever after a window is attached.
+        self._fullscreen = fullscreen
         self._legal_import_progress = 0
 
     def get_legal_import_progress(self) -> int:
         return self._legal_import_progress
 
     def toggle_fullscreen(self) -> bool:
-        return bool(self.fullscreen.toggle())
+        return bool(self._fullscreen.toggle())
 
     def set_title_bar_theme(self, theme: str) -> bool:
-        return bool(self.fullscreen.set_title_bar_theme(theme))
+        return bool(self._fullscreen.set_title_bar_theme(theme))
 
     def get_saved_app_theme(self) -> str:
         return saved_app_theme()
+
+    def choose_indicator_master_workbook(self) -> str | None:
+        previous = configured_indicator_master()
+        initial_folder = previous.parent if previous and previous.parent.is_dir() else ""
+        selection = webview.windows[0].create_file_dialog(webview.FileDialog.OPEN, str(initial_folder), False, "", ("Excel workbooks (*.xlsx)",))
+        return str(Path(selection[0]).resolve()) if selection else None
+
+    def process_indicator_master_workbook(self, selected_path: str) -> dict[str, Any]:
+        path = Path(selected_path).resolve()
+        if not path.is_file() or path.suffix.lower() != ".xlsx":
+            raise ValueError("The selected master workbook is no longer available.")
+        from backend import main as backend_main
+        metadata = backend_main.load_indicator_master_path(path)
+        save_indicator_master(path)
+        return metadata
+
+    def refresh_indicator_master_workbook(self) -> dict[str, Any]:
+        path = saved_indicator_master()
+        if not path:
+            raise ValueError("The previously selected master workbook is unavailable. Choose it again.")
+        return self.process_indicator_master_workbook(str(path))
 
     def choose_legal_folder(self) -> str | None:
         previous = saved_legal_folder()
@@ -384,6 +456,9 @@ def main() -> None:
     remembered_folder = saved_legal_folder()
     if remembered_folder:
         os.environ["INTERSOS_LEGAL_FOLDER"] = str(remembered_folder)
+    indicator_master_path = configured_indicator_master()
+    if indicator_master_path:
+        os.environ["INTERSOS_INDICATOR_MASTER"] = str(indicator_master_path)
     remembered_legal_files = legal_settings.get("legalFiles", [])
     if isinstance(remembered_legal_files, list):
         remembered_legal_files = [path for path in remembered_legal_files if isinstance(path, str)]
@@ -420,8 +495,9 @@ def main() -> None:
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
     try:
         window_title = f"{APP_TITLE} {APP_VERSION}"
-        desktop_api = DesktopApi(NativeFullscreenController(window_title))
-        webview.create_window(
+        fullscreen_controller = NativeFullscreenController(window_title)
+        desktop_api = DesktopApi(fullscreen_controller)
+        window = webview.create_window(
             window_title,
             url,
             width=1440,
@@ -432,10 +508,9 @@ def main() -> None:
             background_color=theme_background(startup_theme),
             js_api=desktop_api,
         )
-        threading.Thread(target=backend_main.load_initial_legal_store, name="restore-legal-data", daemon=True).start()
+        fullscreen_controller.attach_window(window)
+        start_legal_restore(backend_main)
         webview.start(
-            apply_windows_branding,
-            (window_title, startup_theme),
             gui="edgechromium",
             debug=False,
             private_mode=True,
@@ -452,4 +527,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()

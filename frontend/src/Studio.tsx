@@ -18,17 +18,19 @@ const filterValueLabel=formatYearMonthFilterValue;
 
 export default function Studio({metadata,theme,sourceOptions,studioLoader,excludeFields}:{metadata:Metadata;theme:Theme;sourceOptions?:[string,string][];studioLoader?:typeof getStudio;excludeFields?:(field:string)=>boolean}){
   const sources=sourceOptions||[['assessment','Assessments'],['services','Legal Services'],['deportation','Deportation']];
-  const [source,setSource]=useState(sources[0][0]),[row,setRow]=useState('project'),[column,setColumn]=useState(''),[measure,setMeasure]=useState<Measure>('records'),[chartType,setChartType]=useState<ChartType>('bar'),[filters,setFilters]=useState<Filters>({}),[drawer,setDrawer]=useState(false),[filterSearch,setFilterSearch]=useState(''),[availableFilters,setAvailableFilters]=useState<Record<string,string[]>>({}),[result,setResult]=useState<StudioResult|null>(null),[busy,setBusy]=useState(true),[error,setError]=useState(''),[graph,setGraph]=useState<any>(null);
+  const initialSource=sources[0]?.[0]||'',initialRow=metadata.pages[initialSource]?.dimensions?.[0]||'';
+  const [source,setSource]=useState(initialSource),[row,setRow]=useState(initialRow),[column,setColumn]=useState(''),[secondColumn,setSecondColumn]=useState(''),[measure,setMeasure]=useState<Measure>('records'),[chartType,setChartType]=useState<ChartType>('bar'),[filters,setFilters]=useState<Filters>({}),[drawer,setDrawer]=useState(false),[filterSearch,setFilterSearch]=useState(''),[availableFilters,setAvailableFilters]=useState<Record<string,string[]>>({}),[result,setResult]=useState<StudioResult|null>(null),[busy,setBusy]=useState(true),[error,setError]=useState(''),[graph,setGraph]=useState<any>(null);
   const [options,setOptions]=useState<StudioChartOptions>(defaultOptions);
   const [customColors,setCustomColors]=useState(false),[markColors,setMarkColors]=useState<Record<string,string>>({}),[textColors,setTextColors]=useState<Record<string,string>>({});
   const sourceMeta=metadata.pages[source];
-  const dimensions=(sourceMeta?.dimensions||Object.keys(sourceMeta?.filters||{})).filter(field=>!excludeFields?.(field));
+  const dimensions=useMemo(()=>(sourceMeta?.dimensions||Object.keys(sourceMeta?.filters||{})).filter(field=>!excludeFields?.(field)),[sourceMeta,excludeFields]);
   const activeCount=Object.values(filters).reduce((total,values)=>total+values.length,0);
   const hasSeries=Boolean(column);
 
-  useEffect(()=>{setFilters({});setColumn('');setMeasure('records');setRow(metadata.pages[source]?.dimensions?.[0]||'project')},[source,metadata]);
+  useEffect(()=>{if(!sources.some(([id])=>id===source))setSource(sources[0]?.[0]||'')},[sources,source]);
+  useEffect(()=>{setFilters({});setColumn('');setSecondColumn('');setMeasure('records');setResult(null);setRow(metadata.pages[source]?.dimensions?.[0]||'')},[source,metadata]);
   useEffect(()=>{let active=true;getLegalExplorerFilters(source).then((result)=>{if(active)setAvailableFilters(Object.fromEntries(result.columns.filter(column=>!excludeFields?.(column.name)).map((column)=>[column.name,column.values])))}).catch(()=>{if(active)setAvailableFilters(Object.fromEntries(Object.entries(sourceMeta?.filters||{}).filter(([field])=>!excludeFields?.(field))))});return()=>{active=false}},[source,sourceMeta,excludeFields]);
-  useEffect(()=>{if(!row)return;const controller=new AbortController();setBusy(true);setError('');(studioLoader||getStudio)(source,row,column,filters,measure,controller.signal).then(setResult).catch(reason=>{if(reason.name!=='AbortError')setError(reason.message)}).finally(()=>{if(!controller.signal.aborted)setBusy(false)});return()=>controller.abort()},[source,row,column,filters,measure,studioLoader]);
+  useEffect(()=>{const pivotSecond=chartType==='table'?secondColumn:'';if(!source||!row||!dimensions.includes(row)||(column&&!dimensions.includes(column))||(pivotSecond&&!dimensions.includes(pivotSecond))){setBusy(false);return}const controller=new AbortController();setBusy(true);setError('');(studioLoader||getStudio)(source,row,column,filters,measure,controller.signal,pivotSecond).then(setResult).catch(reason=>{if(reason.name!=='AbortError')setError(reason.message)}).finally(()=>{if(!controller.signal.aborted)setBusy(false)});return()=>controller.abort()},[source,row,column,secondColumn,chartType,filters,measure,studioLoader,dimensions]);
   useEffect(()=>{setOptions(current=>({...current,orientation:chartType==='bar'?'horizontal':chartType==='stacked'?'vertical':current.orientation,valueMode:!column&&['percent-row','percent-series'].includes(current.valueMode)?'percent-total':current.valueMode}))},[chartType,column]);
 
   const view=useMemo(()=>result?transformStudioResult(result,options):null,[result,options]);
@@ -41,6 +43,7 @@ export default function Studio({metadata,theme,sourceOptions,studioLoader,exclud
   const showOrientation=chartType==='bar'||chartType==='stacked';
   const showLabels=!['table','heatmap'].includes(chartType);
 
+  if(!sources.length||!sourceMeta)return <div className="legal-empty glass"><LayoutDashboard/><h3>Custom Builder is unavailable</h3><p>No loaded source sheet is available for analysis.</p></div>;
   return <>
     <div className="studio-toolbar glass">
       <div className="studio-heading"><LayoutDashboard/><div><strong>Analysis builder</strong><span>Choose a source, one or two dimensions, and a visual.</span></div></div>
@@ -48,7 +51,8 @@ export default function Studio({metadata,theme,sourceOptions,studioLoader,exclud
         <Select label="Source sheet" value={source} onChange={setSource} options={sources}/>
         <Select label="Rows / X-axis" value={row} onChange={setRow} options={dimensions.map(dimension=>[dimension,label(dimension)])} searchable/>
         <Select label="Columns / Series" value={column} onChange={setColumn} options={[['','None'],...dimensions.filter(dimension=>dimension!==row).map(dimension=>[dimension,label(dimension)] as [string,string])]} searchable/>
-        <Select label="Measure" value={measure} onChange={value=>setMeasure(value as Measure)} options={source==='deportation'?[['records','PN IDs']]:[['records',source==='services'?'Service IDs':'Assessment IDs'],['beneficiaries','Unique beneficiaries']]}/>
+        {chartType==='table'&&<Select label="Second columns" value={secondColumn} onChange={setSecondColumn} options={[['','None'],...dimensions.filter(dimension=>dimension!==row&&dimension!==column).map(dimension=>[dimension,label(dimension)] as [string,string])]} searchable/>}
+        <Select label="Measure" value={measure} onChange={value=>setMeasure(value as Measure)} options={source==='deportationrecords'?[['records','PN IDs']]:[['records',source==='legalservices'?'Service IDs':source==='beneficiaries'?'Case IDs':'Assessment IDs'],['beneficiaries','Unique beneficiaries']]}/>
         <Select label="Output" value={chartType} onChange={value=>setChartType(value as ChartType)} options={[['bar','Ranked bar'],['stacked','Stacked bar'],['line','Line'],['donut','Donut'],['heatmap','Heatmap'],['table','Pivot table']]}/>
       </div>
       <section className="studio-options" aria-label="Chart options">
@@ -73,6 +77,7 @@ export default function Studio({metadata,theme,sourceOptions,studioLoader,exclud
 function Select({label:caption,value,onChange,options,searchable=false}:{label:string;value:string;onChange:(value:string)=>void;options:string[][];searchable?:boolean}){return <AppSelect label={caption} value={value} onChange={onChange} options={options as [string,string][]} searchable={searchable}/>}
 const valueTitle=(mode:StudioValueMode)=>mode==='count'?'Count':mode==='percent-total'?'Percent of filtered total':mode==='percent-series'?'Percent within series':'Percent within row';
 const valueText=(value:number,mode:StudioValueMode)=>mode==='count'?formatNumber(value):`${value.toFixed(1)}%`;
+const shortChartLabel=(value:string,limit=42)=>value.length<=limit?value:`${value.slice(0,limit-1).trimEnd()}…`;
 
 function buildChart(view:StudioView|null,type:ChartType,theme:Theme,options:StudioChartOptions,marks:Record<string,string>,texts:Record<string,string>){
   if(!view||!view.cells.length)return null;
@@ -80,7 +85,7 @@ function buildChart(view:StudioView|null,type:ChartType,theme:Theme,options:Stud
   const cell=(row:string,column:string)=>view.cells.find(item=>item.row===row&&item.column===column)!;
   const percentageAxis=options.valueMode!=='count';
   const axis={gridcolor:grid(theme),fixedrange:true,automargin:true,ticksuffix:percentageAxis?'%':undefined};
-  const common={autosize:true,height:560,margin:{l:90,r:35,t:35,b:90},paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)',font:{family:'DM Sans,Segoe UI,sans-serif',color:ink(theme)},dragmode:false,uirevision:'studio',xaxis:{...axis},yaxis:{...axis},legend:{orientation:'h',y:1.08},showlegend:columns.length>1};
+  const common={autosize:true,height:560,margin:{l:90,r:35,t:35,b:90},paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)',font:{family:'DM Sans,Segoe UI,sans-serif',color:ink(theme)},dragmode:false,uirevision:'studio',xaxis:{...axis},yaxis:{...axis},legend:{orientation:'h',y:1.08,font:{size:10}},showlegend:columns.length>1};
   const custom=(item:ReturnType<typeof cell>)=>[item.count,item.displayPercent*100,item.totalShare*100,item.value];
   const selectedHover=options.valueMode==='count'?'':`<br>${valueTitle(options.valueMode)}: %{customdata[3]:.1f}%`;
   const hover=(series:string,categoryToken:string)=>`${categoryToken}${columns.length>1?`<br>Series: ${series}`:''}<br>Count: %{customdata[0]:,.0f}${selectedHover}<br>Share of filtered total: %{customdata[2]:.1f}%<extra></extra>`;
@@ -92,9 +97,10 @@ function buildChart(view:StudioView|null,type:ChartType,theme:Theme,options:Stud
     const items=rows.map(row=>cell(row,column));
     const values=items.map(item=>item.value);
     const labels=options.labelMode==='hide'?undefined:options.labelMode==='show'||rows.length<=12?values.map(value=>valueText(value,options.valueMode)):undefined;
-    return {type:type==='line'?'scatter':'bar',orientation:horizontal?'h':undefined,mode:type==='line'?'lines+markers+text':undefined,name:column,x:horizontal?values:rows,y:horizontal?rows:values,text:labels,textposition:type==='line'?'top center':horizontal?'outside':'auto',cliponaxis:false,marker:{color:single?rows.map((row,rowIndex)=>marks[row]||palette[rowIndex%palette.length]):marks[column]||palette[index%palette.length]},line:{width:3,color:marks[column]||palette[index%palette.length]},textfont:{color:single?rows.map((row,rowIndex)=>texts[row]||defaultText[rowIndex%defaultText.length]):texts[column]||defaultText[index%defaultText.length]},customdata:items.map(custom),hovertemplate:hover(column,horizontal?'%{y}':'%{x}')};
+    return {type:type==='line'?'scatter':'bar',orientation:horizontal?'h':undefined,mode:type==='line'?'lines+markers+text':undefined,name:shortChartLabel(column,30),x:horizontal?values:rows,y:horizontal?rows:values,text:labels,textposition:type==='line'?'top center':horizontal?'outside':'auto',cliponaxis:false,marker:{color:single?rows.map((row,rowIndex)=>marks[row]||palette[rowIndex%palette.length]):marks[column]||palette[index%palette.length]},line:{width:3,color:marks[column]||palette[index%palette.length]},textfont:{color:single?rows.map((row,rowIndex)=>texts[row]||defaultText[rowIndex%defaultText.length]):texts[column]||defaultText[index%defaultText.length]},customdata:items.map(custom),hovertemplate:hover(column,horizontal?'%{y}':'%{x}')};
   });
-  const layout=horizontal?{...common,margin:{...common.margin,l:150},xaxis:{...axis,title:valueTitle(options.valueMode)},yaxis:{gridcolor:grid(theme),fixedrange:true,automargin:true,autorange:'reversed'},barmode:type==='stacked'?'stack':'group'}:{...common,yaxis:{...axis,title:valueTitle(options.valueMode)},barmode:type==='stacked'?'stack':'group'};
+  const categoryTicks={tickmode:'array',tickvals:rows,ticktext:rows.map(row=>shortChartLabel(row))};
+  const layout=horizontal?{...common,margin:{...common.margin,l:210},xaxis:{...axis,title:valueTitle(options.valueMode)},yaxis:{gridcolor:grid(theme),fixedrange:true,automargin:false,autorange:'reversed',...categoryTicks},barmode:type==='stacked'?'stack':'group'}:{...common,xaxis:{...axis,...categoryTicks,tickangle:rows.some(row=>row.length>18)?-35:0},yaxis:{...axis,title:valueTitle(options.valueMode)},barmode:type==='stacked'?'stack':'group'};
   return {data:traces,layout};
 }
 

@@ -26,6 +26,7 @@ from .legal_platform import LegalStore, FILES, versioned_dataset_name
 from .file_security import safe_spreadsheet_value, validate_xlsx_archive
 from .duplicate_exclusions import DuplicateExclusionRegistry
 from .indicator_reporting import build_indicator_report, build_indicator_workbook, build_narrative_workbook
+from .indicator_reconciliation import IndicatorMasterWorkbook, build_reconciliation_workbook, reconcile as reconcile_indicators
 from . import updater
 
 
@@ -40,6 +41,7 @@ LEGAL_SAMPLE = ROOT / "Legal Platform Data"
 REMEMBERED_LEGAL_FOLDER = Path(os.getenv("INTERSOS_LEGAL_FOLDER", "")) if os.getenv("INTERSOS_LEGAL_FOLDER") else None
 REMEMBERED_LEGAL_SOURCE = os.getenv("INTERSOS_LEGAL_SOURCE", "folder")
 REMEMBERED_LEGAL_SOURCE_CONFIGURED = os.getenv("INTERSOS_LEGAL_SOURCE_CONFIGURED", "").lower() in {"1", "true", "yes"}
+REMEMBERED_INDICATOR_MASTER = Path(os.getenv("INTERSOS_INDICATOR_MASTER", "")) if os.getenv("INTERSOS_INDICATOR_MASTER") else None
 try:
     REMEMBERED_LEGAL_FILES = [Path(value) for value in json.loads(os.getenv("INTERSOS_LEGAL_FILES", "[]"))]
 except (json.JSONDecodeError, TypeError):
@@ -108,6 +110,8 @@ def remembered_legal_file_payload(paths: list[Path]) -> dict[str, bytes]:
 
 duplicate_exclusions = DuplicateExclusionRegistry()
 legal_store: LegalStore | None = None
+indicator_master: IndicatorMasterWorkbook | None = None
+indicator_master_restore_error = ""
 legal_store_loading = False
 legal_store_restore_error = ""
 
@@ -143,6 +147,12 @@ if os.getenv("INTERSOS_DEFER_LEGAL_LOAD", "").lower() in {"1", "true", "yes"}:
     legal_store_loading = True
 else:
     load_initial_legal_store()
+
+if REMEMBERED_INDICATOR_MASTER:
+    try:
+        indicator_master = IndicatorMasterWorkbook.from_path(REMEMBERED_INDICATOR_MASTER)
+    except Exception as exc:
+        indicator_master_restore_error = f"Unable to restore the selected master workbook: {exc}"
 
 app = FastAPI(title="Iraq Data Analysis API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -187,6 +197,7 @@ class LegalStudioRequest(BaseModel):
     dataset: str
     rowDimension: str
     columnDimension: str = ""
+    secondColumnDimension: str = ""
     filters: dict[str, list[str]] = {}
     measure: str = "records"
 
@@ -283,6 +294,13 @@ def legal_deportation_dashboard():
 def legal_deportation_dashboard_filtered(request:LegalQuery):
     try:return require_legal_store().deportation_dashboard(request.filters)
     except ValueError as exc: raise HTTPException(400,str(exc)) from exc
+
+
+@app.post("/api/legal/hotline-dashboard")
+def legal_hotline_dashboard(request: LegalQuery):
+    from .hotline import dashboard
+    try: return dashboard(require_legal_store().frames.get("legalhotlines"), request.filters)
+    except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
 
 @app.post("/api/legal/upload")
@@ -444,7 +462,7 @@ def legal_explorer(request: LegalQuery):
 
 @app.post("/api/legal/studio")
 def legal_studio(request: LegalStudioRequest):
-    try: return require_legal_store().studio(request.dataset,request.rowDimension,request.columnDimension,request.filters,request.measure)
+    try: return require_legal_store().studio(request.dataset,request.rowDimension,request.columnDimension,request.filters,request.measure,request.secondColumnDimension)
     except ValueError as exc: raise HTTPException(400,str(exc)) from exc
 
 @app.post("/api/legal/analytics-dashboard")
@@ -582,6 +600,76 @@ def legal_indicators_export(request:IndicatorReportRequest):
 def legal_indicators_narrative_export(request:IndicatorReportRequest):
     payload=build_narrative_workbook(legal_indicators(request))
     return Response(payload,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":'attachment; filename="indicator-narrative-report.xlsx"'})
+
+
+def load_indicator_master_path(path: Path) -> dict[str, Any]:
+    global indicator_master, indicator_master_restore_error
+    candidate = IndicatorMasterWorkbook.from_path(path)
+    indicator_master = candidate
+    indicator_master_restore_error = ""
+    return candidate.metadata()
+
+
+@app.get("/api/legal/indicators/reconciliation/metadata")
+def indicator_reconciliation_metadata():
+    if indicator_master is not None:
+        return indicator_master.metadata()
+    return {"ready": False, "filename": "", "sheet": "", "availableSheets": [], "months": [], "loadedAt": "", "remembered": bool(REMEMBERED_INDICATOR_MASTER), "warnings": [indicator_master_restore_error] if indicator_master_restore_error else []}
+
+
+@app.post("/api/legal/indicators/reconciliation/import")
+async def indicator_reconciliation_import(file: UploadFile = File(...)):
+    global indicator_master, indicator_master_restore_error
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(400, "Upload an .xlsx master workbook.")
+    try:
+        raw = await read_upload_limited(file)
+        candidate = await run_in_threadpool(IndicatorMasterWorkbook, raw, file.filename)
+        indicator_master = candidate
+        indicator_master_restore_error = ""
+        return candidate.metadata()
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    finally:
+        await file.close()
+
+
+@app.post("/api/legal/indicators/reconciliation/sheet")
+def indicator_reconciliation_sheet(sheet: str = Query(..., min_length=1)):
+    global indicator_master, indicator_master_restore_error
+    current = require_indicator_master()
+    try:
+        candidate = IndicatorMasterWorkbook(current.raw, current.filename, current.source_path, sheet)
+        indicator_master = candidate
+        indicator_master_restore_error = ""
+        return candidate.metadata()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+def require_indicator_master() -> IndicatorMasterWorkbook:
+    if indicator_master is None:
+        raise HTTPException(409, indicator_master_restore_error or "Choose a master reporting workbook first.")
+    return indicator_master
+
+
+@app.post("/api/legal/indicators/reconciliation")
+def indicator_reconciliation(request: IndicatorReportRequest):
+    try:
+        return reconcile_indicators(require_indicator_master(), require_legal_store().frames, request)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/legal/indicators/reconciliation/export")
+def indicator_reconciliation_export(request: IndicatorReportRequest):
+    result = indicator_reconciliation(request)
+    payload = build_reconciliation_workbook(result)
+    return Response(payload, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": 'attachment; filename="indicator-reporting-check.xlsx"'})
 
 
 @app.post("/api/legal/detention")

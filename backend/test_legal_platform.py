@@ -25,7 +25,7 @@ def required_payload():
 def test_optional_files_are_not_required_and_cleanup_is_applied():
     store=LegalStore.from_files(required_payload(),"test")
     assert store.metadata()["availability"]["awareness"] is False
-    assert len(store.warnings)==4
+    assert len(store.warnings)==5
     assert not any(column.endswith(": First") for column in store.frames["beneficiaries"].columns)
     assert "Secured documents Files  الرجاء ارفاق الوثيقة الصادرة" not in store.frames["legalservices"].columns
     dates=store.explorer("beneficiaries")["rows"]
@@ -55,6 +55,24 @@ def test_representation_case_load_uses_service_status_and_the_correct_event_mont
         {"lawyer":"Lawyer A","document":"ID Card","month":"2026-02","count":1},
         {"lawyer":"Lawyer A","document":"Passport","month":"2026-03","count":1},
     ]
+
+
+def test_overview_location_performance_splits_open_and_closed_representation_services():
+    payload=required_payload()
+    payload["assessments"]=csv(**{
+        "Assessment ID":["A1","A2"],"Beneficiary ID":["B1","B2"],"Project Location":["L1","L2"],
+    })
+    payload["legalservices"]=csv(**{
+        "Service ID":["S1","S2","S3","S4","S5"],"Assessment ID":["A1"]*5,"Beneficiary ID":["B1"]*5,
+        "Project Location":["L1"]*5,"Type of Service Provided":["Legal Representation"]*4+["Legal Counselling"],
+        "Service Status":["Closed","Completed","In-Process","","Closed"],
+    })
+    rows=LegalStore.from_files(payload,"test").metadata()["overview"]["locationPerformance"]
+    location=next(row for row in rows if row["location"]=="L1")
+    assert location["representationServices"]==4
+    assert location["closedRepresentationServices"]==2
+    assert location["openRepresentationServices"]==2
+    assert location["completionRate"]==0.5
 
 
 def test_review_export_neutralizes_spreadsheet_formulas():
@@ -611,10 +629,11 @@ def test_overview_representation_trend_includes_legal_assistance():
         "Assessment ID":["A1","A1","A2","A2"],
         "Beneficiary ID":["B1","B1","B1","B1"],
         "Type of Service Provided":["Legal Representation","Legal Assistance","Legal Counselling","Legal Representation"],
+        "Service Status":["Open","Completed","Open","Closed"],
         "Date of Service Provision":["10/01/2026","15/01/2026","20/02/2026","20/02/2026"],
     })
     trend=LegalStore.from_files(payload,"test").metadata()["overview"]["representationTrend"]
-    assert trend==[{"month":"2026-01","representation":2},{"month":"2026-02","representation":1}]
+    assert trend==[{"month":"2026-01","representation":2,"open":1,"closed":1},{"month":"2026-02","representation":1,"open":0,"closed":1}]
 
 
 def test_intelligence_integrates_distinct_records_and_keeps_awareness_separate():
@@ -822,6 +841,23 @@ def test_multiple_assessments_flags_same_month_or_two_open_assessments_only():
     assert {row["assessmentId"] for row in rows}=={"M1","M2","O1","O2"}
     assert "2 assessments in 2026-08" in next(row["detail"] for row in rows if row["assessmentId"]=="M1")
     assert "2 Open assessments" in next(row["detail"] for row in rows if row["assessmentId"]=="O1")
+
+
+def test_open_assessment_with_all_services_closed_is_ready_to_close():
+    payload=required_payload();payload["assessments"]=csv(**{
+        "Assessment ID":["READY","ACTIVE","EMPTY","CLOSED"],
+        "Beneficiary ID":["B1","B2","B3","B4"],
+        "Assessment Status":["Open","Open","Open","Closed"],
+    });payload["legalservices"]=csv(**{
+        "Service ID":["S1","S2","S3","S4","S5"],
+        "Assessment ID":["READY","READY","ACTIVE","ACTIVE","CLOSED"],
+        "Beneficiary ID":["B1","B1","B2","B2","B4"],
+        "Service Status":["Closed","Completed","Closed","In-Process","Closed"],
+    })
+    rows=LegalStore.from_files(payload,"test").review("assessments",rule="Open assessment with all services closed",page_size=100)["rows"]
+    assert [row["assessmentId"] for row in rows]==["READY"]
+    assert rows[0]["linkedServiceCount"]==2
+    assert rows[0]["linkedServiceStatuses"]=="Closed, Completed"
 
 
 def test_selected_month_previous_assessment_uses_created_on_grace_from_august_2026():
@@ -1266,6 +1302,10 @@ def test_analytics_dashboard_filters_sorting_pagination_and_chart_counts():
     assert result["rows"][0]["Assessment ID"]=="A2"
     assert next(chart for chart in result["charts"] if chart["title"]=="Project")["rows"]==[{"label":"P1","count":2,"percent":1.0}]
     assert result["trend"]==[{"label":"2026-01","count":2,"percent":1.0}]
+    assert result["statusTrends"]==[
+        {"label":"Closed","rows":[{"label":"2026-01","count":1}]},
+        {"label":"Open","rows":[{"label":"2026-01","count":1}]},
+    ]
 
 
 def test_analytics_dashboard_includes_detained_immigration_and_uncompleted_service_kpis():
@@ -1290,6 +1330,19 @@ def test_services_analytics_joins_assessment_need_and_handles_missing_optional_c
     assert result["rows"][0]["Service ID"]=="S1"
     assert any(chart["title"]=="Assessment legal-service need" for chart in result["charts"])
     assert any("source column not available" in warning for warning in result["warnings"])
+
+
+def test_services_analytics_includes_monthly_service_status_hover_counts():
+    payload=required_payload()
+    payload["legalservices"]=csv(**{
+        "Service ID":["S1","S2","S3"],"Assessment ID":["A1","A1","A2"],"Beneficiary ID":["B1","B1","B2"],
+        "Date of Service Provision":["01/01/2026","02/01/2026","01/02/2026"],
+        "Service Status":["Open","Completed","In process"],
+    })
+    result=LegalStore.from_files(payload,"test").analytics_dashboard("legalservices")
+    assert {item["label"] for item in result["statusTrends"]}=={"Open","Completed","In process"}
+    open_status=next(item for item in result["statusTrends"] if item["label"]=="Open")
+    assert open_status["rows"]==[{"label":"2026-01","count":1},{"label":"2026-02","count":0}]
 
 
 def test_analytics_export_applies_derived_month_filter():

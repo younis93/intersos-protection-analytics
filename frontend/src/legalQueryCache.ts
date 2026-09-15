@@ -1,29 +1,52 @@
 // Session-only response cache. Never cache exports, mutations, or source files.
 type Payload = {body: string; status: number; statusText: string; headers: [string, string][]};
-type Entry = {payload: Payload; expires: number; bytes: number};
+type Entry = {payload: Payload; bytes: number};
 type Pending = {controller: AbortController; promise: Promise<Payload>; users: number};
-const readable = /^\/api\/legal\/(review|explorer|explorer-filters\/[^/]+|case|case-filters|studio|analytics-dashboard|deportation-dashboard|indicators|lawyers|intelligence\/[^/]+|representation-case-load\/(open|closed)|detention)$/;
+export type LegalFetchPriority = "foreground" | "background";
+type ActivityListener = (active: boolean) => void;
+const readable = /^\/api\/legal\/(review|explorer|explorer-filters\/[^/]+|case|case-filters|studio|analytics-dashboard|deportation-dashboard|hotline-dashboard|indicators(?:\/reconciliation\/metadata)?|lawyers|intelligence\/[^/]+|representation-case-load\/(open|closed)|detention)$/;
 const entries = new Map<string, Entry>();
 const pending = new Map<string, Pending>();
-const MAX_BYTES = 16 * 1024 * 1024;
-const MAX_ENTRIES = 64;
+const activityListeners = new Set<ActivityListener>();
+export type LegalQueryInvalidationReason = "manual" | "revision";
+const invalidationListeners = new Set<(reason:LegalQueryInvalidationReason) => void>();
+const MAX_BYTES = 32 * 1024 * 1024;
+const MAX_ENTRIES = 96;
 let bytes = 0;
 let revision: string | null = null;
 let generation = 0;
+let requestPriority: LegalFetchPriority = "foreground";
 const aborted = () => new DOMException("Request superseded", "AbortError");
 
-export function invalidateLegalQueries() {
+export function withLegalFetchPriority<T>(priority: LegalFetchPriority, run: () => T): T {
+  const previous = requestPriority;
+  requestPriority = priority;
+  try { return run(); } finally { requestPriority = previous; }
+}
+
+export function subscribeLegalFetchActivity(listener: ActivityListener) {
+  activityListeners.add(listener);
+  return () => { activityListeners.delete(listener); };
+}
+
+export function subscribeLegalQueryInvalidation(listener: (reason:LegalQueryInvalidationReason) => void) {
+  invalidationListeners.add(listener);
+  return () => { invalidationListeners.delete(listener); };
+}
+
+export function invalidateLegalQueries(reason:LegalQueryInvalidationReason="manual") {
   generation++;
   entries.clear();
   bytes = 0;
   for (const request of pending.values()) request.controller.abort();
   pending.clear();
+  invalidationListeners.forEach((listener) => listener(reason));
 }
 
 export function setLegalRevision(next: string | null) {
   if (next === revision) return;
   revision = next;
-  invalidateLegalQueries();
+  invalidateLegalQueries("revision");
 }
 
 function canonical(value: unknown): unknown {
@@ -46,7 +69,7 @@ function retain(key: string, payload: Payload) {
     bytes -= entries.get(oldest)!.bytes;
     entries.delete(oldest);
   }
-  entries.set(key, {payload, expires: Date.now() + 60_000, bytes: size});
+  entries.set(key, {payload, bytes: size});
   bytes += size;
 }
 
@@ -64,11 +87,8 @@ export async function legalFetch(url: string, init: RequestInit = {}): Promise<R
   const entry = entries.get(key);
   if (entry) {
     entries.delete(key);
-    if (entry.expires > Date.now()) {
-      entries.set(key, entry);
-      return response(entry.payload);
-    }
-    bytes -= entry.bytes;
+    entries.set(key, entry);
+    return response(entry.payload);
   }
   let request = pending.get(key);
   if (!request) {
@@ -86,6 +106,8 @@ export async function legalFetch(url: string, init: RequestInit = {}): Promise<R
   }
   const shared = request;
   shared.users++;
+  const foreground = requestPriority === "foreground";
+  if (foreground) activityListeners.forEach((listener) => listener(true));
   return new Promise<Response>((resolve, reject) => {
     let finished = false;
     const finish = (error?: unknown, payload?: Payload) => {
@@ -93,6 +115,7 @@ export async function legalFetch(url: string, init: RequestInit = {}): Promise<R
       finished = true;
       init.signal?.removeEventListener("abort", onAbort);
       shared.users--;
+      if (foreground) activityListeners.forEach((listener) => listener(false));
       if (!shared.users && pending.get(key) === shared) {
         pending.delete(key);
         shared.controller.abort();

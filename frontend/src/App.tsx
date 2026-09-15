@@ -270,7 +270,7 @@ export default function App() {
                 onClick={() => {
                   setPage(n.id);
                   window.location.hash = `/${n.id}`;
-                  window.scrollTo({ top: 0, behavior: "auto" });
+                  document.querySelector<HTMLElement>(".analytics-shell > main")?.scrollTo({ top: 0, behavior: "auto" });
                 }}
               >
                 <Icon />

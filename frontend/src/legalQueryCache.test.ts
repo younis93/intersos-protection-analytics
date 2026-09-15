@@ -75,15 +75,23 @@ describe("legal query cache", () => {
     expect(await (await next).json()).toEqual({rows: ["new"]});
   });
 
-  it("expires cached results and bounds entries and response memory", async () => {
+  it("keeps results for the revision and bounds entries and response memory", async () => {
     vi.useFakeTimers();
     const network = vi.fn(async () => json({rows: []})); vi.stubGlobal("fetch", network);
-    await legalFetch(url, query()); vi.advanceTimersByTime(60_001);
-    await legalFetch(url, query()); expect(network).toHaveBeenCalledTimes(2);
-    for (let page = 2; page <= 65; page++) await legalFetch(url, query({dataset: "beneficiaries", page}));
-    await legalFetch(url, query()); expect(network).toHaveBeenCalledTimes(67);
-    invalidateLegalQueries(); network.mockImplementation(async () => json({text: "x".repeat(9 * 1024 * 1024)}));
+    await legalFetch(url, query()); vi.advanceTimersByTime(5 * 60_000);
+    await legalFetch(url, query()); expect(network).toHaveBeenCalledTimes(1);
+    for (let page = 2; page <= 97; page++) await legalFetch(url, query({dataset: "beneficiaries", page}));
+    await legalFetch(url, query()); expect(network).toHaveBeenCalledTimes(98);
+    invalidateLegalQueries(); network.mockImplementation(async () => json({text: "x".repeat(17 * 1024 * 1024)}));
     await legalFetch(url, query()); await legalFetch(url, query());
-    expect(network).toHaveBeenCalledTimes(69);
+    expect(network).toHaveBeenCalledTimes(100);
+  });
+
+  it("caches the hotline dashboard for background page warming", async () => {
+    const network=vi.fn(async()=>json({kpis:[]}));vi.stubGlobal("fetch",network);
+    const init={method:"POST",body:JSON.stringify({dataset:"legalhotlines",filters:{}})};
+    await legalFetch("/api/legal/hotline-dashboard",init);
+    await legalFetch("/api/legal/hotline-dashboard",init);
+    expect(network).toHaveBeenCalledTimes(1);
   });
 });

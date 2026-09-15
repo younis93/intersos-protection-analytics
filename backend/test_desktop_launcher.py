@@ -1,12 +1,15 @@
 import threading
 import time
 import unittest
+import pickle
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import desktop_launcher
+from backend.legal_platform import LegalStore
+from backend.test_legal_platform import required_payload
 
 
 class FakeServer:
@@ -39,6 +42,21 @@ class DesktopLauncherTests(unittest.TestCase):
         self.assertFalse(api.toggle_fullscreen())
         self.assertEqual(fullscreen.calls, 2)
 
+    def test_native_fullscreen_controller_uses_attached_window(self):
+        class FakeWindow:
+            calls = 0
+
+            def toggle_fullscreen(self):
+                self.calls += 1
+
+        window = FakeWindow()
+        fullscreen = desktop_launcher.NativeFullscreenController("Test window")
+        fullscreen.attach_window(window)
+
+        self.assertTrue(fullscreen.toggle())
+        self.assertFalse(fullscreen.toggle())
+        self.assertEqual(window.calls, 2)
+
     def test_local_server_starts_and_stops(self):
         with patch.object(desktop_launcher.uvicorn, "Config", return_value=object()), patch.object(
             desktop_launcher.uvicorn, "Server", side_effect=lambda config: FakeServer(config)
@@ -62,6 +80,33 @@ class DesktopLauncherTests(unittest.TestCase):
         port = desktop_launcher.available_port()
         self.assertGreater(port, 0)
         self.assertLessEqual(port, 65535)
+
+    def test_desktop_initialization_only_applies_branding(self):
+        with patch.object(desktop_launcher, "apply_windows_branding") as branding:
+            desktop_launcher.initialize_desktop("Iraq Data Analysis", "glass-light")
+
+        branding.assert_called_once_with("Iraq Data Analysis", "glass-light")
+
+    def test_deferred_legal_restore_starts_background_loader(self):
+        backend_main = SimpleNamespace(legal_store_loading=False, load_initial_legal_store=lambda: None)
+        fake_thread = SimpleNamespace(start=Mock())
+        with patch.object(desktop_launcher.threading, "Thread", return_value=fake_thread) as thread_class:
+            result = desktop_launcher.start_legal_restore(backend_main)
+
+        self.assertTrue(backend_main.legal_store_loading)
+        thread_class.assert_called_once_with(
+            target=backend_main.load_initial_legal_store,
+            name="restore-legal-data",
+            daemon=True,
+        )
+        fake_thread.start.assert_called_once_with()
+        self.assertIs(result, fake_thread)
+
+    def test_legal_store_can_cross_the_restore_process_boundary(self):
+        store = LegalStore.from_files(required_payload(), "test")
+        restored = pickle.loads(pickle.dumps(store))
+        self.assertEqual(restored.metadata()["overview"]["beneficiaries"], 2)
+        self.assertIsNotNone(restored._cache_lock)
 
     def test_last_legal_folder_is_saved_and_reloaded(self):
         with TemporaryDirectory() as temporary:

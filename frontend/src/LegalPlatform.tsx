@@ -1,7 +1,9 @@
+import {getLegalHotlineDashboard} from "./api";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { jsPDF } from "jspdf";
 import {setLegalRevision} from "./legalQueryCache";
+import {legalLoadScheduler,type LoadStatus} from "./legalLoadScheduler";
 import {useDebouncedValue} from "./useDebouncedValue";
 import {
   AlertTriangle,
@@ -23,6 +25,8 @@ import {
   Download,
   Expand,
   Eraser,
+  Eye,
+  EyeOff,
   FileText,
   FileQuestion,
   FolderOpen,
@@ -50,6 +54,7 @@ import {
   exportLegalExplorer,
   exportLegalIndicators,
   exportLegalNarrative,
+  exportIndicatorReconciliation,
   exportTableWorkbook,
   exportTableWorkbookSheets,
   checkForUpdates,
@@ -66,6 +71,7 @@ import {
   getLegalStudio,
   getLegalAnalyticsDashboard,
   getLegalIndicators,
+  getIndicatorReconciliationMetadata,
   getLegalIntelligence,
   getLegalReview,
   getUpdateStatus,
@@ -81,17 +87,21 @@ import {
   legalExportUrl,
   legalReviewExportUrl,
   reconcileLegalDetention,
+  reconcileLegalIndicators,
+  uploadIndicatorMasterWorkbook,
+  selectIndicatorMasterSheet,
   uploadLegalFolder,
 } from "./api";
 import Studio from "./LazyStudio";
 import type { LegalIntelligence, RepresentationCaseLoad, RepresentationCaseLoadService } from "./api";
-import type { Dashboard, DuplicateExclusion, IndicatorReport, IndicatorReportGroup, IndicatorReportItem, IndicatorSection, LegalAnalyticsDashboard, LegalExplorerResult, LegalFlag, LegalMetadata, LegalReview, Metadata, Theme, UpdateCheck, UpdateStatus } from "./types";
+import type { Dashboard, DuplicateExclusion, IndicatorReconciliation, IndicatorReconciliationMetadata, IndicatorReport, IndicatorReportGroup, IndicatorReportItem, IndicatorSection, LegalAnalyticsDashboard, LegalExplorerResult, LegalFlag, LegalMetadata, LegalReview, Metadata, Theme, UpdateCheck, UpdateStatus } from "./types";
 import { ActiveFilters, AppSelect, ChartCard, CheckboxMultiSelect, ExcelDownloadButton, FilterDrawer, formatProjectLabel, KpiCard, TrendCard } from "./components";
 import {formatFilterMonth, formatTableValue, formatYearMonthFilterValue} from "./dateFormat";
 import {mapIntensity,projectGovernorates,type MapFeature} from "./iraqMap";
 const exportSvgChart: typeof import("./chartExport").exportSvgChart = async (...args) => (await import("./chartExport")).exportSvgChart(...args);
 
 type LegalPage =
+  | "hotline"
   | "overview"
   | "beneficiaries"
   | "assessments"
@@ -120,6 +130,7 @@ const AMAL_HIDDEN_ASSESSMENT_RULES = new Set([
   "Detained beneficiary below 10 years",
 ]);
 const ASSESSMENT_REVIEW_TAIL_RULES = new Set([
+  "Open assessment with all services closed",
   "Pending assessment",
   "Type of document in Assessments vs Services",
   "Representation while not detained",
@@ -140,6 +151,7 @@ const EXCLUSION_RULE_OPTIONS = [
 ];
 const exclusionRuleClass = (rule: string) => rule === "Possible duplicate name" || rule === "Possible duplicate contact and name" ? "duplicates" : rule === "Invalid contact number" ? "contacts" : rule === "Marital status below 18" ? "marital" : "spouse";
 const labels: Record<LegalPage, string> = {
+  hotline: "Hotline",
   overview: "Overview",
   beneficiaries: "Beneficiaries Review",
   assessments: "Assessments Review",
@@ -158,6 +170,7 @@ const displayReviewRule = (rule: string) => rule === "Possible duplicate contact
   : rule;
 const announceLegalCopy = (value: string) => window.dispatchEvent(new CustomEvent<string>("legal-copy", { detail: value }));
 const descriptions: Record<LegalPage, string> = {
+  hotline: "Hotline contacts, detention, referrals and requests by contact date.",
   overview:
     "A clear picture of data volume, review priorities and the issues requiring attention.",
   beneficiaries:
@@ -192,6 +205,7 @@ const REVIEW_CHECK_METHODS: Record<string, { columns: string[]; logic: string }>
   "Assessment without services": { columns: ["# Total Services", "Assessment ID", "Legal Services: Assessment ID"], logic: "Flags zero Total Services; when that column is unavailable, flags assessments with no linked service." },
   "Pending assessment": { columns: ["Assessment Status"], logic: "Filters Assessment Status values containing Pending." },
   "Open counselling-only assessment": { columns: ["Assessment Status", "Type of Legal Service Needed"], logic: "Filters Open assessments whose requested service includes counselling but not assistance or representation." },
+  "Open assessment with all services closed": { columns: ["Assessment Status", "Assessment ID", "Legal Services: Assessment ID", "Legal Services: Service Status"], logic: "Flags Open assessments that have at least one linked legal service and every linked service has a closed or completed status." },
   "Detention/immigration inconsistency": { columns: ["Community Type", "Date of Assessment", "Is the beneficiary detained", "Is it an immigration related charge"], logic: "Applies to 2026+ refugee assessments and flags inconsistent detention and immigration-charge responses." },
   "Blank legal service need": { columns: ["Type of Legal Service Needed"], logic: "Flags blank or whitespace-only legal-service-need values." },
   "Detained beneficiary has counselling only": { columns: ["Assessment ID", "Is the beneficiary detained", "Is it an immigration related charge", "Legal Services: Type of Service Provided"], logic: "Flags detained immigration cases with linked services containing counselling only." },
@@ -246,6 +260,7 @@ const legalRouteFromUrl = () => {
 const legalPageFromUrl = (): LegalPage => legalRouteFromUrl().page;
 const nav: [LegalPage, any][] = [
   ["overview", LayoutDashboard],
+  ["hotline", Megaphone],
   ["indicators", ChartColumnIncreasing],
   ["beneficiaries", Users],
   ["assessments", ShieldCheck],
@@ -282,6 +297,7 @@ const latestLegalFiles = (files: File[]) => {
     "legalfees",
     "awareness",
     "deportationrecords",
+    "legalhotlines",
   ]);
   const latest = new Map<string, { file: File; version: number }>();
   files.forEach((file) => {
@@ -400,20 +416,6 @@ function LegalSkeleton({
       <span className="sr-only">Loading content</span>
     </section>
   );
-}
-
-function AppStartupLoadingScreen() {
-  return <section className="app-startup-loading" role="status" aria-live="polite" aria-label="Starting Iraq Data Analysis">
-    <div className="app-startup-loading-ambient" />
-    <div className="app-startup-loading-card glass">
-      <div className="app-startup-loading-mark"><img src="/intersos-symbol-clear.png" alt="INTERSOS" /></div>
-      <span className="eyebrow">IRAQ DATA ANALYSIS</span>
-      <h1>Preparing your workspace</h1>
-      <p>Starting the secure local application.</p>
-      <div className="app-startup-loading-progress" aria-hidden="true"><i /></div>
-      <footer><ShieldCheck /><span>Local and private data workspace</span></footer>
-    </div>
-  </section>;
 }
 
 function ReviewPage({
@@ -612,6 +614,7 @@ function FindingTable({
                   ) : (
                     <><th>Case ID</th>{(rule === "Possible duplicate name" || rule === "Possible duplicate contact and name") && <><th>Date of Identification</th><th>Created On</th></>}<th>Assessment</th>{dataset === "assessments" && <th>Date of assessment</th>}{rule === "Open counselling-only assessment" && <><th>Assessment status</th><th>Type of Legal Service Needed</th></>}{rule === "Detention/immigration inconsistency" && <><th>Is the beneficiary detained</th><th>Is it an immigration related charge?</th></>}{rule === "Detained beneficiary below 10 years" && <><th>Is the beneficiary detained</th><th>Date of birth</th><th>Current age</th></>}{rule === "Selected month with previous assessment" && <th>Created On</th>}{rule === "Representation while not detained" && <th>Type of documents to be issued</th>}{rule === "Type of document in Assessments vs Services" && <><th>Finding</th><th>Assessment documents</th><th>Service documents</th></>}{rule === "Type of Legal Service in Assessment vs Services" && <><th>Assessment service needed</th><th>Service type provided</th></>}{(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <><th>Beneficiary ID</th><th>Type of Service Provided</th><th>Type of Document</th><th>Please specify the Court Verdict</th><th>Type of Document if Other</th><th>Legal Concern Specified</th><th>Legal Concern</th></>}<th>Service</th></>
                   )}
+                  {rule === "Open assessment with all services closed" && <><th>Assessment status</th><th>Linked services</th><th>Service statuses</th></>}
                   <th></th>
                 </tr>
               </thead>
@@ -657,6 +660,7 @@ function FindingTable({
                     ) : (
                       <><td>{r.caseId || "-"}</td>{(rule === "Possible duplicate name" || rule === "Possible duplicate contact and name") && <><td>{r.identificationDate || "-"}</td><td>{r.createdOn || "-"}</td></>}<td>{r.assessmentId || "—"}</td>{dataset === "assessments" && <td>{r.assessmentDate || "—"}</td>}{rule === "Open counselling-only assessment" && <><td>{r.assessmentStatus || "—"}</td><td>{r.legalServiceNeeded || "—"}</td></>}{rule === "Detention/immigration inconsistency" && <><td>{r.beneficiaryDetained || "—"}</td><td>{r.immigrationRelatedCharge || "—"}</td></>}{rule === "Detained beneficiary below 10 years" && <><td>{r.beneficiaryDetained || "—"}</td><td>{r.dateOfBirth || "—"}</td><td>{r.beneficiaryAge ?? "—"}</td></>}{rule === "Selected month with previous assessment" && <td>{r.createdOn || "—"}</td>}{rule === "Representation while not detained" && <td>{r.typeOfDocument || "—"}</td>}{rule === "Type of document in Assessments vs Services" && <><td>{r.comparisonFinding || "—"}</td><td>{r.assessmentDocuments || "—"}</td><td>{r.serviceDocuments || "—"}</td></>}{rule === "Type of Legal Service in Assessment vs Services" && <><td>{r.requestedServiceTypes || "—"}</td><td>{r.providedServiceTypes || "—"}</td></>}{(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <><td>{r.caseId || "—"}</td><td>{r.serviceTypeProvided || "—"}</td><td>{r.typeOfDocument || "—"}</td><td>{r.courtVerdictDetail || "—"}</td><td>{r.otherDocumentDetail || "—"}</td><td>{r.legalConcernSpecified || "—"}</td><td>{r.legalConcern || "—"}</td></>}<td>{r.serviceId || "—"}</td></>
                     )}
+                    {rule === "Open assessment with all services closed" && <><td>{r.assessmentStatus || "-"}</td><td>{r.linkedServiceCount ?? 0}</td><td>{r.linkedServiceStatuses || "-"}</td></>}
                     <td>
                       {r.caseId && (
                         <button
@@ -1281,6 +1285,39 @@ function LegalDeportationDashboard({metadata,theme}:{metadata:LegalMetadata;them
   return <section className={`legal-deportation-dashboard dashboard-content ${refreshing?"refreshing":""}`}><LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={clear}><div className="toolbar deportation-top-toolbar"><div className="deportation-quick-filters">{quickFields.map((field)=><CheckboxMultiSelect key={field} hideLabel label={quickLabel(field)} values={dashboardFilterOptions[field]||[]} selected={filters[field]||[]} onChange={(items)=>setFilters((current)=>({...current,[field]:items}))}/>)}</div><div className="deportation-toolbar-actions"><button className="soft detention-filter-clear" onClick={clear} disabled={!activeCount}><RotateCcw/>Clear</button><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button></div><div className="toolbar-metrics"><AppSelect label="Display" value={display} onChange={(value)=>setDisplay(value as "both"|"count"|"percent")} options={[["both","# + %"],["count","Count #"],["percent","Percentage %"]]}/></div></div></LegalScrollControls><ActiveFilters filters={filters} onRemove={(field,value)=>setFilters((current)=>({...current,[field]:current[field].filter((item)=>item!==value)}))}/><div className="refresh-indicator">Updating filters…</div><div className="kpi-grid">{dash.kpis.map((item)=><KpiCard key={item.label} {...item}/>)}</div><div className="dashboard-grid"><TrendCard rows={dash.trend} display={display} theme={theme} selected={filters.Month||[]} onSelect={(months,replace)=>setFilters((current)=>({...current,Month:replace?months:Array.from(new Set([...(current.Month||[]),...months]))}))} onRemove={(month)=>setFilters((current)=>({...current,Month:(current.Month||[]).filter((item)=>item!==month)}))} title="Activity over time" subtitle="Date of deportation"/>{dash.charts.map((chart)=><ChartCard key={chart.id} chart={chart} display={display} theme={theme} onSelect={selectChart}/>)}</div><DeportationRecordsTable filters={filters}/><FilterDrawer open={drawer} available={dashboardFilterOptions} filters={filters} onClose={()=>setDrawer(false)} onChange={setFilters} onReset={clear}/></section>;
 }
 
+function HotlineDashboard({metadata,theme}:{metadata:LegalMetadata;theme:Theme}) {
+  const [dash,setDash]=useState<(Omit<Dashboard,"trend"> & {trend:{label:string;count:number;percent:number;detained:number;notDetained:number}[];missingContactDates:number;map:{items:{label:string;count:number;detained:number;notDetained:number;values:string[]}[]}})|null>(null),[filters,setFilters]=useState<Record<string,string[]>>({}),[drawer,setDrawer]=useState(false),[error,setError]=useState(""),[busy,setBusy]=useState(false),[retry,setRetry]=useState(0);
+  useEffect(()=>{if(!metadata.availability.legalhotlines)return;let active=true;setBusy(true);setError("");getLegalHotlineDashboard(filters).then(data=>{if(active)setDash(data)}).catch(reason=>{if(active)setError(reason.message||"Unable to load Hotline.")}).finally(()=>{if(active)setBusy(false)});return()=>{active=false}},[metadata.revision,metadata.source,metadata.availability.legalhotlines,filters,retry]);
+  const clear=()=>setFilters({}),activeCount=Object.values(filters).reduce((sum,items)=>sum+items.length,0);
+  const select=(field:string,label:string)=>setFilters(current=>({...current,[field]:current[field]?.includes(label)?current[field].filter(item=>item!==label):[...(current[field]||[]),label]}));
+  if(!metadata.availability.legalhotlines)return <section className="glass legal-empty"><Megaphone/><h2>Load hotline data</h2><p>Add legalhotlines.csv alongside the required datasets using the Data source folder or multiple-file selector.</p></section>;
+  if(error)return <section className="glass legal-empty" role="alert"><h2>Unable to load Hotline</h2><p>{error}</p><button className="primary" onClick={()=>setRetry(n=>n+1)}>Retry</button></section>;
+  if(!dash)return <LegalSkeleton variant="deportation"/>;
+  const available=dash.filterOptions||{},quickFields=["Contact Date","Is the beneficiary detained","Has the beneficiary referred to the helpline?","Governorate of detention","Priority"];
+  return <section className="hotline-dashboard dashboard-content" aria-busy={busy}>
+    <LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={clear}><div className="toolbar hotline-filter-bar">{quickFields.map(field=><CheckboxMultiSelect key={field} hideLabel label={field==="Contact Date"?"Contact Date (month)":field} values={available[field]||[]} selected={filters[field]||[]} onChange={items=>setFilters(current=>({...current,[field]:items}))}/>)}<button className="soft" onClick={clear} disabled={!activeCount}><RotateCcw/>Clear all</button></div></LegalScrollControls>
+    <ActiveFilters filters={filters} onRemove={(field,label)=>setFilters(current=>({...current,[field]:current[field].filter(item=>item!==label)}))}/>
+    {busy&&<p role="status">Updating hotline data...</p>}
+    <div className="kpi-grid">{dash.kpis.map(item=><KpiCard key={item.label} {...item}/>)}</div>
+    {dash.total===0&&<p className="glass legal-empty">No hotline records match these filters.</p>}
+    <TrendCard rows={dash.trend} hoverMetrics={[{label:"Detained",icon:"●",color:"#d4852f",rows:dash.trend.map(row=>({label:row.label,count:row.detained}))},{label:"Not detained",icon:"✓",color:"#2f9e68",rows:dash.trend.map(row=>({label:row.label,count:row.notDetained}))}]} primaryLabel="Hotline contacts" display="both" theme={theme} title="Monthly hotline contacts" subtitle="Records by Contact Date" selected={filters["Contact Date"]||[]} onSelect={(months,replace)=>setFilters(current=>({...current,"Contact Date":replace?months:Array.from(new Set([...(current["Contact Date"]||[]),...months]))}))} onRemove={month=>setFilters(current=>({...current,"Contact Date":(current["Contact Date"]||[]).filter(item=>item!==month)}))}/>
+    {dash.missingContactDates>0&&<p role="note">{dash.missingContactDates.toLocaleString()} records have missing or invalid Contact Dates and are excluded from the timeline.</p>}
+    <IraqDetentionMapMetrics mode="hotline" items={(dash.map?.items||[]).filter(item=>item.detained>0).map(item=>({...item,count:item.detained,released:0}))} selected={filters["Governorate of detention"]||[]} onSelect={(values)=>{const current=filters["Governorate of detention"]||[],remove=values.length>0&&values.every(value=>current.includes(value));setFilters(existing=>({...existing,"Governorate of detention":remove?current.filter(value=>!values.includes(value)):Array.from(new Set([...current,...values]))}))}}/>
+    <div className="overview-analysis-grid">{dash.charts.map(chart=><ChartCard key={chart.id} chart={chart} display="both" theme={theme} onSelect={select}/>)}</div>
+    <HotlineRecordsTable filters={filters}/>
+    {drawer&&<><button className="filter-backdrop" aria-label="Close hotline filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer"><header><div><span className="eyebrow">HOTLINE FILTERS</span><h2>Filter hotline records</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header><div className="case-filter-scroll review-checkbox-filters">{Object.entries(available).map(([label,values])=><details key={label} open={Boolean(filters[label]?.length)}><summary><span>{label}</span>{filters[label]?.length>0&&<b>{filters[label].length}</b>}<ChevronDown/></summary><div>{values.map((item)=><label key={item}><input type="checkbox" checked={filters[label]?.includes(item)||false} onChange={()=>setFilters(current=>({...current,[label]:current[label]?.includes(item)?current[label].filter(value=>value!==item):[...(current[label]||[]),item]}))}/><span>{/date/i.test(label)?formatFilterMonth(item):item}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!activeCount} onClick={clear}>Clear all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {activeCount>0&&`(${activeCount})`}</button></footer></aside></>}
+  </section>;
+}
+
+function HotlineRecordsTable({filters}:{filters:Record<string,string[]>}){
+  const [result,setResult]=useState<LegalExplorerResult|null>(null),[search,setSearch]=useState(""),[page,setPage]=useState(1),[sortColumn,setSortColumn]=useState(""),[sortDirection,setSortDirection]=useState<"asc"|"desc">("asc"),[selected,setSelected]=useState<Map<string,Record<string,unknown>>>(new Map());
+  const [error,setError]=useState(""),[busy,setBusy]=useState(false),[retry,setRetry]=useState(0);
+  const debouncedSearch=useDebouncedValue(search);
+  useEffect(()=>{setPage(1);setSelected(new Map())},[filters,debouncedSearch]);
+  useEffect(()=>{let active=true;setBusy(true);setError("");getLegalExplorer("legalhotlines",debouncedSearch,page,filters,sortColumn,sortDirection).then(data=>{if(active)setResult(data)}).catch((reason)=>{if(active){setResult(null);setError(reason.message||"Unable to load hotline records.")}}).finally(()=>{if(active)setBusy(false)});return()=>{active=false}},[filters,debouncedSearch,page,sortColumn,sortDirection,retry]);
+  return <section className="glass legal-table-card deportation-records-table hotline-records-table"><div className="legal-card-heading"><label className="detention-table-search"><Search/><input className="table-search-input" value={search} onChange={(event)=>{setSearch(event.target.value);setPage(1)}} placeholder="Search hotline records"/></label><div className="indicator-total-block detention-table-total"><strong>{result?.total.toLocaleString()||0}</strong><span>Total</span></div><TableSelectionActions selected={selected} filename="selected-hotline-records.xlsx" onClear={()=>setSelected(new Map())} onDownloadAll={()=>exportLegalExplorer("xlsx","legalhotlines",debouncedSearch,filters)} iconOnly/>{result&&<Pager compact page={page} total={result.total} onChange={setPage}/>}</div>{error&&<div className="error" role="alert">{error}<button className="soft" onClick={()=>setRetry(n=>n+1)}>Retry</button></div>}{busy&&<p role="status">Loading records...</p>}{!busy&&!error&&result?.total===0&&<p>No hotline records match these filters.</p>}<div className="legal-table-wrap" aria-busy={busy}><table><thead><tr><th><input aria-label="Select visible hotline records" type="checkbox" checked={Boolean(result?.rows.length)&&result!.rows.every((row:any)=>selected.has(String(row.__rowKey)))} onChange={(event)=>setSelected((current)=>{const next=new Map(current);result?.rows.forEach((row:any)=>{const key=String(row.__rowKey);if(event.target.checked)next.set(key,row);else next.delete(key)});return next})}/></th>{result?.columns.map((column)=><th key={column}><button className={sortColumn===column?"active":""} onClick={()=>{setSortColumn(column);setSortDirection(sortColumn===column&&sortDirection==="asc"?"desc":"asc");setPage(1)}}><span>{column}</span><b>{sortColumn===column?(sortDirection==="asc"?"▲":"▼"):"↕"}</b></button></th>)}</tr></thead><tbody>{result?.rows.map((row:any,index)=><tr key={String(row.__rowKey??index)}><td><input aria-label="Select hotline record" type="checkbox" checked={selected.has(String(row.__rowKey))} onChange={()=>setSelected((current)=>{const next=new Map(current),key=String(row.__rowKey);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td>{result.columns.map((column)=>{const cell=value(row[column]),priority=/^priority\b/i.test(column)?String(cell).match(/high|عالية/i)?"high":String(cell).match(/medium|متوسطة/i)?"medium":String(cell).match(/low|منخفضة/i)?"low":"unknown":"";return <td key={column}>{priority?<span className={`hotline-priority hotline-priority-${priority}`}>{cell}</span>:cell}</td>})}</tr>)}</tbody></table></div></section>;
+}
+
 function DeportationRecordsTable({filters}:{filters:Record<string,string[]>}){
   const [result,setResult]=useState<LegalExplorerResult|null>(null),[search,setSearch]=useState(""),[page,setPage]=useState(1),[sortColumn,setSortColumn]=useState(""),[sortDirection,setSortDirection]=useState<"asc"|"desc">("asc"),[selected,setSelected]=useState<Map<string,Record<string,unknown>>>(new Map());
   const debouncedSearch=useDebouncedValue(search);
@@ -1292,14 +1329,14 @@ function LegalAnalyticsStudio({metadata,theme,onOpenCase}:{metadata:LegalMetadat
   const sectionIcons:Record<string,ReactNode>={assessments:<CheckCheck/>,legalservices:<BriefcaseBusiness/>,beneficiaries:<Users/>,awareness:<Megaphone/>,builder:<BarChart3/>};
   const sections=[...["assessments","legalservices","beneficiaries"].map((id)=>[id,labels[id as LegalPage].replace(" Review","")] as [string,string]),...(metadata.availability.awareness?[["awareness","Awareness"] as [string,string]]:[]),["builder","Custom Builder"] as [string,string]];
   const [section,setSection]=useState("assessments"),[sectionState,setSectionState]=useState<Record<string,{filters:Record<string,string[]>;search:string;page:number;sortColumn:string;sortDirection:"asc"|"desc"}>>({});
-  const sheets=metadata.sheets;
   const hideDetentionInfo=metadata.features?.detention===false;
-  const isDetentionField=(field:string)=>/detain|immigration related charge/i.test(field);
-  const studioSheets=sheets.map((sheet)=>sheet.id==="assessments"&&hideDetentionInfo?{...sheet,columns:sheet.columns.filter((column)=>!isDetentionField(column))}:sheet);
-  const studioMetadata:Metadata={ready:true,source:metadata.source,loadedAt:null,pages:Object.fromEntries(studioSheets.map((sheet)=>[sheet.id,{rows:sheet.rows,filters:Object.fromEntries(sheet.columns.map((column)=>[column,[]])),dimensions:sheet.columns}]))};
+  const isDetentionField=useCallback((field:string)=>/detain|immigration related charge/i.test(field),[]);
+  const studioSheets=useMemo(()=>metadata.sheets.map((sheet)=>sheet.id==="assessments"&&hideDetentionInfo?{...sheet,columns:sheet.columns.filter((column)=>!isDetentionField(column))}:sheet),[metadata.sheets,hideDetentionInfo,isDetentionField]);
+  const studioMetadata=useMemo<Metadata>(()=>({ready:true,source:metadata.source,loadedAt:null,pages:Object.fromEntries(studioSheets.map((sheet)=>[sheet.id,{rows:sheet.rows,filters:Object.fromEntries(sheet.columns.map((column)=>[column,[]])),dimensions:sheet.columns}]))}),[metadata.source,studioSheets]);
+  const studioSourceOptions=useMemo<[string,string][]>(()=>studioSheets.map((sheet)=>[sheet.id,sheet.name]),[studioSheets]);
   const state=sectionState[section]||{filters:{},search:"",page:1,sortColumn:"",sortDirection:"asc" as const};
   const update=(patch:Partial<typeof state>)=>setSectionState((current)=>({...current,[section]:{...state,...patch}}));
-  return <div className="legal-analytics-studio"><nav className="glass studio-section-tabs" aria-label="Analytics Studio sections">{sections.map(([id,label])=><button className={section===id?"active":""} key={id} onClick={()=>setSection(id)}>{sectionIcons[id]}<span>{label}</span></button>)}</nav>{section==="builder"?<Studio metadata={studioMetadata} theme={theme} sourceOptions={studioSheets.map((sheet)=>[sheet.id,sheet.name])} studioLoader={getLegalStudio} excludeFields={hideDetentionInfo?isDetentionField:undefined}/>:<LegalAnalyticsSection dataset={section} theme={theme} state={state} update={update} onOpenCase={onOpenCase}/>}</div>;
+  return <div className="legal-analytics-studio"><nav className="glass studio-section-tabs" aria-label="Analytics Studio sections">{sections.map(([id,label])=><button className={section===id?"active":""} key={id} onClick={()=>{legalLoadScheduler.promotePage("studio",id);setSection(id)}}>{sectionIcons[id]}<span>{label}</span></button>)}</nav>{section==="builder"?<Studio metadata={studioMetadata} theme={theme} sourceOptions={studioSourceOptions} studioLoader={getLegalStudio} excludeFields={hideDetentionInfo?isDetentionField:undefined}/>:<LegalAnalyticsSection dataset={section} theme={theme} state={state} update={update} onOpenCase={onOpenCase}/>}</div>;
 }
 
 function LegacyLegalAnalyticsSection({dataset,theme,state,update}:{dataset:string;theme:Theme;state:{filters:Record<string,string[]>;search:string;page:number;sortColumn:string;sortDirection:"asc"|"desc"};update:(patch:Partial<typeof state>)=>void}){
@@ -1323,6 +1360,8 @@ function LegalAnalyticsSection({dataset,theme,state,update,onOpenCase}:{dataset:
   const optionKeys=Object.keys(data?.filterOptions||{}),quick=(hints[dataset]||[]).map((hint)=>optionKeys.find((key)=>key.trim().toLowerCase()===hint||key.trim().toLowerCase().includes(hint))).filter((key):key is string=>Boolean(key));
   const kpi=(item:{value:number;format:string})=>item.format==="percent"?`${(item.value*100).toFixed(1)}%`:item.value.toLocaleString();
   const toolbarFilterLabel=(column:string)=>column.replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/g,"").replace(/\s*[-–,:/]\s*$/,"").replace(/\s{2,}/g," ").trim()||"Filter";
+  const statusColors=["#d4852f","#2f9e68","#8b5cf6","#e05252","#1683d8","#64748b"];
+  const statusHoverMetrics=(data?.statusTrends||[]).map((status,index)=>({label:status.label,icon:"●",color:statusColors[index%statusColors.length],rows:status.rows}));
   return <section className={`studio-fixed-section ${busy?"refreshing":""}`}>
     <LegalScrollControls filterLabel="All filters" onFilters={()=>setDrawer(true)} activeCount={active} onClear={clear}>
       <div className="glass studio-quick-toolbar">
@@ -1333,7 +1372,7 @@ function LegalAnalyticsSection({dataset,theme,state,update,onOpenCase}:{dataset:
     {error&&<div className="error glass">{error}</div>}
     {busy&&data&&<div className="studio-section-refreshing" role="status"><span/><span>Updating analysis…</span></div>}
     {busy&&!data?<div className="glass studio-section-loading" role="status"><div/><span>Loading analysis…</span></div>:data&&<><div className="legal-kpis">{data.kpis.map((item)=><div className="glass legal-kpi" key={item.label}><span>{item.label}</span><strong>{kpi(item)}</strong><small>Active filters</small></div>)}</div>
-    <div className="dashboard-grid"><TrendCard rows={data.trend} display="both" theme={theme} selected={state.filters.Month||[]} onSelect={(months,replace)=>setFilter("Month",replace?months:Array.from(new Set([...(state.filters.Month||[]),...months])))} title="Activity over time" subtitle="Based on the section source date"/>{data.charts.map((chart)=><ChartCard key={`${chart.id}-${chart.title}`} chart={chart} display="both" theme={theme} onSelect={(field,item)=>setFilter(field,state.filters[field]?.includes(item)?state.filters[field].filter((value)=>value!==item):[...(state.filters[field]||[]),item])}/>)}</div>
+    <div className="dashboard-grid"><TrendCard rows={data.trend} hoverMetrics={dataset==="assessments"||dataset==="legalservices"?statusHoverMetrics:undefined} primaryLabel={dataset==="assessments"?"Assessments":dataset==="legalservices"?"Legal services":undefined} display="both" theme={theme} selected={state.filters.Month||[]} onSelect={(months,replace)=>setFilter("Month",replace?months:Array.from(new Set([...(state.filters.Month||[]),...months])))} title={dataset==="assessments"?"Monthly Assessment":dataset==="legalservices"?"Monthly Legal Services":"Activity over time"} subtitle="Based on the section source date"/>{data.charts.map((chart)=><ChartCard key={`${chart.id}-${chart.title}`} chart={chart} display="both" theme={theme} onSelect={(field,item)=>setFilter(field,state.filters[field]?.includes(item)?state.filters[field].filter((value)=>value!==item):[...(state.filters[field]||[]),item])}/>)}</div>
     <div className="glass legal-table-card studio-records-table"><div className="legal-card-heading"><label className="studio-table-search"><Search/><input value={state.search} placeholder={`Search ${dataset} data`} onChange={(event)=>update({search:event.target.value,page:1})}/></label><div className="indicator-total-block detention-table-total"><strong>{data.matchedRows.toLocaleString()}</strong><span>Total</span></div><TableSelectionActions selected={selected} filename={`${dataset}-selected.xlsx`} onClear={()=>setSelected(new Map())} iconOnly/><Pager compact page={state.page} total={data.matchedRows} onChange={(page)=>update({page})}/></div><div className="legal-table-wrap"><table><thead><tr><th><input type="checkbox" aria-label="Select visible records" checked={Boolean(data.rows.length)&&data.rows.every((row:any)=>selected.has(String(row.__rowKey)))} onChange={(event)=>setSelected((current)=>{const next=new Map(current);data.rows.forEach((row:any)=>{const key=String(row.__rowKey);if(event.target.checked)next.set(key,row);else next.delete(key)});return next})}/></th>{data.columns.map((column)=><th key={column}><button onClick={()=>update({page:1,sortColumn:column,sortDirection:state.sortColumn===column&&state.sortDirection==="asc"?"desc":"asc"})}>{column} {state.sortColumn===column?(state.sortDirection==="asc"?"▲":"▼"):"↕"}</button></th>)}</tr></thead><tbody>{data.rows.map((row:any,index)=><tr key={index}><td><input type="checkbox" aria-label="Select record" checked={selected.has(String(row.__rowKey))} onChange={()=>setSelected((current)=>{const next=new Map(current),key=String(row.__rowKey);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td>{data.columns.map((column)=><td key={column}>{column==="Beneficiary ID"||column==="Case ID"?<button className="table-action" onClick={()=>onOpenCase(String(row[column]||""))}>{value(row[column])}<ArrowRight/></button>:value(row[column])}</td>)}</tr>)}</tbody></table></div></div></>}
     {drawer&&<><button className="filter-backdrop" aria-label="Close Analytics Studio filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer analytics-filter-drawer"><header><div><span className="eyebrow">ANALYTICS STUDIO FILTERS</span><h2>Filter {dataset==="legalservices"?"Legal Services":dataset[0].toUpperCase()+dataset.slice(1)}</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header><label className="filter-search"><Search/><input value={filterSearch} onChange={(event)=>setFilterSearch(event.target.value)} placeholder="Search filters"/></label><div className="case-filter-scroll">{Object.entries(data?.filterOptions||{}).filter(([column])=>column.toLowerCase().includes(filterSearch.toLowerCase())).map(([column,values])=><details key={column} open={Boolean(state.filters[column]?.length)}><summary><span>{column}</span>{state.filters[column]?.length>0&&<b>{state.filters[column].length}</b>}<ChevronDown/></summary><div>{values.map((item)=><label key={item}><input type="checkbox" checked={state.filters[column]?.includes(item)||false} onChange={()=>setFilter(column,state.filters[column]?.includes(item)?state.filters[column].filter((value)=>value!==item):[...(state.filters[column]||[]),item])}/><span>{formatYearMonthFilterValue(column,item)}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!active} onClick={clear}>Clear all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {active>0&&`(${active})`}</button></footer></aside></>}
   </section>;
@@ -1401,7 +1440,7 @@ function Explorer({
     if (dataset) getLegalExplorerFilters(dataset).then(x => {if(active)setOptions(x.columns)}).catch(reason => {if(active)setError(reason.message)});
     return () => {active = false};
   }, [dataset]);
-  const datasetOrder=["beneficiaries","assessments","legalservices","followupslogbooks","legalfees","deportationrecords","awareness"],
+  const datasetOrder=["beneficiaries","assessments","legalservices","followupslogbooks","legalfees","deportationrecords","legalhotlines","awareness"],
     orderedSheets=[...metadata.sheets].sort((left,right)=>datasetOrder.indexOf(left.id)-datasetOrder.indexOf(right.id)),
     activeCount = Object.values(filters).reduce((n, x) => n + x.length, 0),
     toggle = (column: string, item: string) => {
@@ -2011,8 +2050,8 @@ function DetentionCases({
       )}
       {error && <div className="error glass">{error}</div>}
       <nav className="glass detention-tabs" aria-label="Detention views">
-        <button className={tab==="analysis"?"active":""} onClick={()=>setTab("analysis")}><BarChart3/>Analysis</button>
-        <button className={tab==="records"?"active":""} onClick={()=>setTab("records")}><TableProperties/>Detention detail table</button>
+        <button className={tab==="analysis"?"active":""} onClick={()=>{legalLoadScheduler.promotePage("detention","analysis");setTab("analysis")}}><BarChart3/>Analysis</button>
+        <button className={tab==="records"?"active":""} onClick={()=>{legalLoadScheduler.promotePage("detention","records");setTab("records")}}><TableProperties/>Detention detail table</button>
         <button className={tab==="reconcile"?"active":""} onClick={()=>setTab("reconcile")}><ShieldCheck/>Platform and Excel Comparison</button>
       </nav>
       {tab!=="reconcile"&&<LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={()=>{setFilters({});setPage(1)}}>
@@ -2101,7 +2140,7 @@ function DetentionCases({
           </div>
           {comparisonResult.warnings.length>0&&<details className="reconciliation-warnings"><summary>{comparisonResult.warnings.length} workbook column warning{comparisonResult.warnings.length===1?"":"s"}</summary>{comparisonResult.warnings.map((warning)=><p key={warning}>{warning}</p>)}</details>}
           <div className="legal-table-wrap reconciliation-table"><table><thead><tr><th className="no-sort">Note group</th><th className="no-sort">Beneficiary ID</th><th className="no-sort">Name</th><th className="no-sort">Different field</th><th className="no-sort">Platform Value</th><th className="no-sort">Excel value</th><th className="no-sort">Action</th></tr></thead><tbody>{comparisonResult.rows.length?Array.from(new Set(comparisonResult.rows.map((row)=>row.note))).flatMap((note,groupIndex)=>{
-            const groupRows=comparisonResult.rows.filter((row)=>row.note===note);
+          const groupRows=comparisonResult.rows.filter((row)=>row.note===note);
             const groupLineCount=groupRows.reduce((count,row)=>count+Math.max(1,row.differences?.length||0),0);
             let firstGroupLine=true;
             return groupRows.flatMap((row)=>{
@@ -2125,12 +2164,13 @@ function DetentionCases({
   );
 }
 
-function IraqDetentionMapMetrics({items,selected,onSelect,showFooter=true,expandable=true,showHeader=true}:{items:{label:string;count:number;detained:number;released:number;values:string[]}[];selected:string[];onSelect:(values:string[])=>void;showFooter?:boolean;expandable?:boolean;showHeader?:boolean}) {
+function IraqDetentionMapMetrics({items,selected,onSelect,showFooter=true,expandable=true,showHeader=true,mode="detention"}:{items:{label:string;count:number;detained:number;released:number;values:string[]}[];selected:string[];onSelect:(values:string[])=>void;showFooter?:boolean;expandable?:boolean;showHeader?:boolean;mode?:"detention"|"hotline"}) {
   const [geojson,setGeojson]=useState<any>(null),[error,setError]=useState(""),[hover,setHover]=useState<{name:string;x:number;y:number;below:boolean}|null>(null),[expanded,setExpanded]=useState(false),[pivotOpen,setPivotOpen]=useState(false);
   useEffect(()=>{if(!expanded)return;const previous=document.body.style.overflow;document.body.style.overflow="hidden";const close=(event:KeyboardEvent)=>{if(event.key==="Escape")setExpanded(false)};window.addEventListener("keydown",close);return()=>{document.body.style.overflow=previous;window.removeEventListener("keydown",close)}},[expanded]);
   const stageRef=useRef<HTMLDivElement>(null);
   useEffect(()=>{fetch("/iraq-governorates.geojson").then((response)=>{if(!response.ok)throw new Error("Map boundaries could not be loaded.");return response.json()}).then(setGeojson).catch((reason)=>setError(reason.message||"Map boundaries could not be loaded."))},[]);
-  if(error)return <section className="glass detention-map detention-trend-empty"><div><strong>Detention cases by governorate</strong><span>{error}</span></div></section>;
+  const hotline=mode==="hotline",title=hotline?"Hotline detainee records by governorate":"Detention cases by governorate",primaryLabel=hotline?"Detainee":"Detained assessments",secondaryLabel="Released";
+  if(error)return <section className="glass detention-map detention-trend-empty"><div><strong>{title}</strong><span>{error}</span></div></section>;
   if(!geojson)return <section className="glass detention-map detention-map-loading"><div className="button-spinner"/><span>Loading Iraq governorate map…</span></section>;
   const shapes=projectGovernorates((geojson.features||[]) as MapFeature[]),byName=new Map(items.map((item)=>[item.label,item])),max=Math.max(1,...items.map((item)=>item.detained));
   const detainedTotal=items.reduce((sum,item)=>sum+item.detained,0);
@@ -2139,17 +2179,17 @@ function IraqDetentionMapMetrics({items,selected,onSelect,showFooter=true,expand
   const showKeyboard=(name:string,label:[number,number])=>{const bounds=stageRef.current?.getBoundingClientRect();if(!bounds)return;const rawY=bounds.height*label[1]/700;setHover({name,x:Math.max(112,Math.min(bounds.width-112,bounds.width*label[0]/760)),y:Math.max(28,rawY),below:rawY<190})};
   const hoveredItem=hover?byName.get(hover.name):undefined;
   return <><section className="glass detention-map">
-    {showHeader&&<header><div><h3>Detention cases by governorate</h3><p>2026 only · Detained uses assessment date; Released uses release date and a current status containing Released</p></div><div className="detention-map-header-actions"><strong>{items.reduce((sum,item)=>sum+item.detained,0).toLocaleString()}</strong><div className="chart-actions"><div className="export-buttons"><button onClick={()=>{const svg=stageRef.current?.querySelector("svg");if(svg)void exportSvgChart(svg,"detention-cases-by-governorate","png")}}><Download/>PNG</button><button onClick={()=>{const svg=stageRef.current?.querySelector("svg");if(svg)void exportSvgChart(svg,"detention-cases-by-governorate","pdf")}}><FileText/>PDF</button></div><button className="expand-button map-pivot-button" onClick={()=>setPivotOpen(true)}><Expand/>Pivot table</button>{expandable&&<button className="expand-button" onClick={()=>setExpanded(true)}><Maximize2/>Expand</button>}</div></div></header>}
+    {showHeader&&<header><div><h3>{title}</h3><p>{hotline?"Based on Governorate of detention · Counts include explicit Yes detention answers only":"2026 only · Detained uses assessment date; Released uses release date and a current status containing Released"}</p></div><div className="detention-map-header-actions">{hotline?<div className="hotline-map-totals"><span><b>{items.reduce((sum,item)=>sum+item.detained,0).toLocaleString()}</b>Detainee</span></div>:<strong>{items.reduce((sum,item)=>sum+item.detained,0).toLocaleString()}</strong>}<div className="chart-actions"><div className="export-buttons"><button onClick={()=>{const svg=stageRef.current?.querySelector("svg");if(svg)void exportSvgChart(svg,hotline?"hotline-detainees-by-governorate":"detention-cases-by-governorate","png")}}><Download/>PNG</button><button onClick={()=>{const svg=stageRef.current?.querySelector("svg");if(svg)void exportSvgChart(svg,hotline?"hotline-detainees-by-governorate":"detention-cases-by-governorate","pdf")}}><FileText/>PDF</button></div><button className="expand-button map-pivot-button" onClick={()=>setPivotOpen(true)}><Expand/>Pivot table</button>{expandable&&<button className="expand-button" onClick={()=>setExpanded(true)}><Maximize2/>Expand</button>}</div></div></header>}
     <div className="detention-map-stage" ref={stageRef}>
-      <svg className="detention-map-svg" viewBox="0 0 760 700" role="img" aria-label="Detained assessments and qualifying releases by Iraq governorate">
-        <g className="detention-map-paths">{shapes.map((shape)=>{const item=byName.get(shape.name),detained=item?.detained||0,released=item?.released||0,interactive=Boolean(item?.values?.length),active=Boolean(item?.values?.some((value)=>selected.includes(value)));return <path key={shape.name} className={`detention-map-region map-intensity-${mapIntensity(detained,max)} ${interactive?"interactive":""} ${active?"selected":""}`} d={shape.path} fillRule="evenodd" role={interactive?"button":undefined} tabIndex={interactive?0:undefined} aria-label={`${shape.name}: ${detained} detained assessments and ${released} released${active?", selected":""}`} aria-pressed={interactive?active:undefined} onPointerEnter={(event)=>showPointer(shape.name,event)} onPointerMove={(event)=>showPointer(shape.name,event)} onPointerLeave={()=>setHover(null)} onFocus={()=>showKeyboard(shape.name,shape.label)} onBlur={()=>setHover(null)} onClick={()=>interactive&&activate(shape.name)} onKeyDown={(event)=>{if(interactive&&(event.key==="Enter"||event.key===" ")){event.preventDefault();activate(shape.name)}}}><title>{shape.name}: {detained.toLocaleString()} detained assessments; {released.toLocaleString()} released</title></path>})}</g>
-        <g className="detention-map-labels" aria-hidden="true">{shapes.map((shape)=>{const detained=byName.get(shape.name)?.detained||0;return <text key={shape.name} x={shape.label[0]} y={shape.label[1]} textAnchor="middle"><tspan x={shape.label[0]}>{shape.name}</tspan>{detained>0&&<tspan className="map-count" x={shape.label[0]} dy="13">{detained.toLocaleString()}</tspan>}</text>})}</g>
+      <svg className="detention-map-svg" viewBox="0 0 760 700" role="img" aria-label={hotline?"Hotline detainee records by Iraq governorate":`${primaryLabel} and ${secondaryLabel} records by Iraq governorate`}>
+        <g className="detention-map-paths">{shapes.map((shape)=>{const item=byName.get(shape.name),detained=item?.detained||0,released=item?.released||0,interactive=Boolean(item?.values?.length),active=Boolean(item?.values?.some((value)=>selected.includes(value)));return <path key={shape.name} className={`detention-map-region map-intensity-${mapIntensity(detained,max)} ${interactive?"interactive":""} ${active?"selected":""}`} d={shape.path} fillRule="evenodd" role={interactive?"button":undefined} tabIndex={interactive?0:undefined} aria-label={hotline?`${shape.name}: ${detained} detainee records${active?", selected":""}`:`${shape.name}: ${detained} ${primaryLabel.toLowerCase()} and ${released} ${secondaryLabel.toLowerCase()}${active?", selected":""}`} aria-pressed={interactive?active:undefined} onPointerEnter={(event)=>showPointer(shape.name,event)} onPointerMove={(event)=>showPointer(shape.name,event)} onPointerLeave={()=>setHover(null)} onFocus={()=>showKeyboard(shape.name,shape.label)} onBlur={()=>setHover(null)} onClick={()=>interactive&&activate(shape.name)} onKeyDown={(event)=>{if(interactive&&(event.key==="Enter"||event.key===" ")){event.preventDefault();activate(shape.name)}}}><title>{hotline?`${shape.name}: ${detained.toLocaleString()} detainee records`:`${shape.name}: ${detained.toLocaleString()} ${primaryLabel.toLowerCase()}; ${released.toLocaleString()} ${secondaryLabel.toLowerCase()}`}</title></path>})}</g>
+        <g className="detention-map-labels" aria-hidden="true">{shapes.map((shape)=>{const item=byName.get(shape.name),detained=item?.detained||0;return <text key={shape.name} x={shape.label[0]} y={shape.label[1]} textAnchor="middle"><tspan x={shape.label[0]}>{shape.name}</tspan>{detained>0&&<tspan className={`map-count${hotline?" hotline-map-count":""}`} x={shape.label[0]} dy="13">{detained.toLocaleString()}</tspan>}</text>})}</g>
       </svg>
-      {hover&&<div className={`detention-map-tooltip${hover.below?" below":""}`} style={{left:hover.x,top:hover.y}} role="status"><strong>{hover.name}</strong><div><span className="assessment"><i/>Detained assessments<b>{(hoveredItem?.detained||0).toLocaleString()}</b></span><small>Based on Date of Assessment</small></div><div><span className="release"><i/>Released<b>{(hoveredItem?.released||0).toLocaleString()}</b></span><small>Release date + Released status</small></div></div>}
-      <div className="detention-map-legend" aria-label="Detained assessment color scale"><span>Detained assessments</span>{[0,1,2,3,4,5].map((level)=><i key={level} className={`map-intensity-${level}`}/>)}<small>Low</small><small>High</small></div>
+      {hover&&<div className={`detention-map-tooltip${hover.below?" below":""}`} style={{left:hover.x,top:hover.y}} role="status"><strong>{hover.name}</strong><div><span className="assessment"><i/>{primaryLabel}<b>{(hoveredItem?.detained||0).toLocaleString()}</b></span><small>{hotline?"Explicit Yes response":"Based on Date of Assessment"}</small></div>{!hotline&&<div><span className="release"><i/>{secondaryLabel}<b>{(hoveredItem?.released||0).toLocaleString()}</b></span><small>Release date + Released status</small></div>}</div>}
+      <div className="detention-map-legend" aria-label={`${primaryLabel} color scale`}><span>{primaryLabel}</span>{[0,1,2,3,4,5].map((level)=><i key={level} className={`map-intensity-${level}`}/>)}<small>Low</small><small>High</small></div>
     </div>
     {showFooter&&<footer>{selected.length?<span>{selected.length} governorate value{selected.length===1?"":"s"} selected</span>:<span>All governorates</span>}</footer>}
-  </section>{pivotOpen&&createPortal(<div className="indicator-modal" role="dialog" aria-modal="true" aria-label="Detention governorate pivot table"><button className="case-modal-backdrop" aria-label="Close pivot table" onClick={()=>setPivotOpen(false)}/><section className="indicator-modal-panel map-pivot-modal"><header><div><span>INTERACTIVE DETAIL</span><h2>Detention cases by governorate</h2><p>Counts and percentages use the active detention filters.</p></div><div className="pivot-actions"><ExcelDownloadButton className="primary pivot-download" onClick={()=>exportTableWorkbook("detention-governorate-pivot.xlsx",["Governorate","Detained assessments","Released","Share of detained assessments"],items.map((item)=>({Governorate:item.label,"Detained assessments":item.detained,Released:item.released,"Share of detained assessments":`${(item.detained/Math.max(detainedTotal,1)*100).toFixed(1)}%`})))}>Excel</ExcelDownloadButton><button className="icon" onClick={()=>setPivotOpen(false)} aria-label="Close pivot table"><X/></button></div></header><div className="indicator-modal-scroll"><div className="table-wrap"><table><thead><tr><th>Governorate</th><th>Detained assessments</th><th>Released</th><th>Share of detained assessments</th></tr></thead><tbody>{items.map((item)=><tr key={item.label}><td>{item.label}</td><td>{item.detained.toLocaleString()}</td><td>{item.released.toLocaleString()}</td><td>{(item.detained/Math.max(detainedTotal,1)*100).toFixed(1)}%</td></tr>)}<tr className="indicator-analysis-total"><td>Total</td><td>{detainedTotal.toLocaleString()}</td><td>{items.reduce((sum,item)=>sum+item.released,0).toLocaleString()}</td><td>{detainedTotal?"100.0%":"0.0%"}</td></tr></tbody></table></div></div></section></div>,document.body)}{expanded&&createPortal(<div className="indicator-modal expanded-map-modal" role="dialog" aria-modal="true" aria-label="Expanded detention governorate map"><button className="case-modal-backdrop" aria-label="Close map" onClick={()=>setExpanded(false)}/><section className="indicator-modal-panel"><header><div><span>2026 DETENTION ANALYSIS</span><h2>Detention cases by governorate</h2><p>Hover a governorate for detained assessments and released cases.</p></div><button className="icon" onClick={()=>setExpanded(false)} aria-label="Close map"><X/></button></header><div className="indicator-modal-scroll"><IraqDetentionMapMetrics items={items} selected={selected} onSelect={onSelect} showFooter={false} expandable={false} showHeader={false}/></div></section></div>,document.body)}</>;
+  </section>{pivotOpen&&createPortal(<div className="indicator-modal" role="dialog" aria-modal="true" aria-label={`${title} pivot table`}><button className="case-modal-backdrop" aria-label="Close pivot table" onClick={()=>setPivotOpen(false)}/><section className="indicator-modal-panel map-pivot-modal"><header><div><span>INTERACTIVE DETAIL</span><h2>{title}</h2><p>Counts and percentages use the active {hotline?"hotline":"detention"} filters.</p></div><div className="pivot-actions"><ExcelDownloadButton className="primary pivot-download" onClick={()=>exportTableWorkbook(hotline?"hotline-detainees-governorate-pivot.xlsx":"detention-governorate-pivot.xlsx",hotline?["Governorate",primaryLabel,`Share of ${primaryLabel.toLowerCase()}`]:["Governorate",primaryLabel,secondaryLabel,`Share of ${primaryLabel.toLowerCase()}`],items.map((item)=>hotline?({Governorate:item.label,[primaryLabel]:item.detained,[`Share of ${primaryLabel.toLowerCase()}`]:`${(item.detained/Math.max(detainedTotal,1)*100).toFixed(1)}%`}):({Governorate:item.label,[primaryLabel]:item.detained,[secondaryLabel]:item.released,[`Share of ${primaryLabel.toLowerCase()}`]:`${(item.detained/Math.max(detainedTotal,1)*100).toFixed(1)}%`})))}>Excel</ExcelDownloadButton><button className="icon" onClick={()=>setPivotOpen(false)} aria-label="Close pivot table"><X/></button></div></header><div className="indicator-modal-scroll"><div className="table-wrap"><table><thead><tr><th>Governorate</th><th>{primaryLabel}</th>{!hotline&&<th>{secondaryLabel}</th>}<th>Share of {primaryLabel.toLowerCase()}</th></tr></thead><tbody>{items.map((item)=><tr key={item.label}><td>{item.label}</td><td>{item.detained.toLocaleString()}</td>{!hotline&&<td>{item.released.toLocaleString()}</td>}<td>{(item.detained/Math.max(detainedTotal,1)*100).toFixed(1)}%</td></tr>)}<tr className="indicator-analysis-total"><td>Total</td><td>{detainedTotal.toLocaleString()}</td>{!hotline&&<td>{items.reduce((sum,item)=>sum+item.released,0).toLocaleString()}</td>}<td>{detainedTotal?"100.0%":"0.0%"}</td></tr></tbody></table></div></div></section></div>,document.body)}{expanded&&createPortal(<div className="indicator-modal expanded-map-modal" role="dialog" aria-modal="true" aria-label={`Expanded ${title}`}><button className="case-modal-backdrop" aria-label="Close map" onClick={()=>setExpanded(false)}/><section className="indicator-modal-panel"><header><div><span>{hotline?"HOTLINE ANALYSIS":"2026 DETENTION ANALYSIS"}</span><h2>{title}</h2><p>{hotline?"Hover a governorate for detainee counts.":`Hover a governorate for ${primaryLabel.toLowerCase()} and ${secondaryLabel.toLowerCase()} counts.`}</p></div><button className="icon" onClick={()=>setExpanded(false)} aria-label="Close map"><X/></button></header><div className="indicator-modal-scroll"><IraqDetentionMapMetrics mode={mode} items={items} selected={selected} onSelect={onSelect} showFooter={false} expandable={false} showHeader={false}/></div></section></div>,document.body)}</>;
 }
 
 function IraqDetentionMap({items,selected,onSelect}:{items:{label:string;count:number;values:string[]}[];selected:string[];onSelect:(values:string[])=>void}) {
@@ -2329,7 +2369,7 @@ function Cases({
           <span className="view-switch case-view-switch" aria-label="View mode">
             <button
               className={viewMode === "cards" ? "active" : ""}
-              onClick={() => {setViewMode("cards");setTablePage(1);run(query,filters,"cards",1)}}
+              onClick={() => {legalLoadScheduler.promotePage("cases","cards");setViewMode("cards");setTablePage(1);run(query,filters,"cards",1)}}
               aria-label="Card view"
               title="Card view"
             >
@@ -2337,7 +2377,7 @@ function Cases({
             </button>
             <button
               className={viewMode === "table" ? "active" : ""}
-              onClick={() => {setViewMode("table");setTablePage(1);run(query,filters,"table",1)}}
+              onClick={() => {legalLoadScheduler.promotePage("cases","table");setViewMode("table");setTablePage(1);run(query,filters,"table",1)}}
               aria-label="Table view"
               title="Table view"
             >
@@ -3009,7 +3049,7 @@ function RepresentationCaseLoadTable({filters}:{filters:Record<string,string[]>}
   const exportWorkbook=async()=>{const [open,closed]=await Promise.all([getRepresentationCaseLoad("open",filters),getRepresentationCaseLoad("closed",filters)]);await exportTableWorkbookSheets("representation-caseload.xlsx",[workbookSheet("open",open),workbookSheet("closed",closed)])};
   const workloadMax=Math.max(1,...table.rows.map((row)=>row.total));
   const openDrill=(title:string,services:RepresentationCaseLoadService[])=>setDrill({title,services});
-  return <><section className={`glass intelligence-panel lawyer-section representation-case-load ${showDocuments?"":"documents-hidden"}`}><header><div><span className="eyebrow">LEGAL SERVICES CASELOAD</span><h3>Representation caseload by lawyer</h3></div><div className="pivot-actions"><button className={status==="open"?"primary":"soft"} onClick={()=>setStatus("open")}>Open cases</button><button className={status==="closed"?"primary":"soft"} onClick={()=>setStatus("closed")}>Closed cases</button><button className="soft" onClick={()=>setShowDocuments((value)=>!value)}>{showDocuments?"Hide Documents":"Show Documents"}</button><ExcelDownloadButton className="primary" onClick={exportWorkbook} disabled={busy}/></div></header><small>{status==="open"?"Open representation services, grouped by the month the service was provided. Select a number to view its services.":"Completed or closed representation services, grouped by the month the service was closed. Select a number to view its services."}</small>{error&&<div className="error">{error}</div>}<div className="legal-table-wrap"><table><thead><tr><th>Lawyer Name</th>{showDocuments&&<th>Type of Documents</th>}{table.months.map((month)=><th key={month}>{month}</th>)}<th>{totalLabel}</th><th>Average / month</th><th>Workload signal</th></tr></thead><tbody>{table.rows.map((row)=><tr key={`${row.lawyer}-${row.document}`}><td><strong>{row.lawyer}</strong></td>{showDocuments&&<td>{row.document}</td>}{table.months.map((month)=><td key={month}>{row.values[month]?<button className="caseload-count" onClick={()=>openDrill(`${row.lawyer} - ${month}`,row.services.filter((service)=>service.month===month))}>{row.values[month]}</button>:""}</td>)}<td><button className="caseload-count" onClick={()=>openDrill(row.lawyer,row.services)}><strong>{row.total}</strong></button></td><td>{(row.total/Math.max(table.months.length,1)).toFixed(1)}</td><td><i className="score-bar"><b style={{width:`${row.total/workloadMax*100}%`}}/></i></td></tr>)}{!busy&&!table.rows.length&&<tr><td colSpan={4+table.months.length+(showDocuments?1:0)}>No matching representation services.</td></tr>}</tbody></table></div></section>{drill&&createPortal(<div className="indicator-modal" role="dialog" aria-modal="true" aria-label="Representation service details"><button className="case-modal-backdrop" aria-label="Close service details" onClick={()=>setDrill(null)}/><section className="indicator-modal-panel"><header><div><span>LEGAL SERVICES DRILL-DOWN</span><h2>Matching representation services</h2><p>{drill.title} - {drill.services.length.toLocaleString()} service{drill.services.length===1?"":"s"}</p></div><button className="icon" onClick={()=>setDrill(null)} aria-label="Close service details"><X/></button></header><div className="indicator-modal-scroll"><table><thead><tr><th>Service ID</th><th>Beneficiary ID</th><th>Assessment ID</th><th>Lawyer</th><th>Document</th><th>Status</th><th>Service provided</th><th>Service closed</th></tr></thead><tbody>{drill.services.map((service)=><tr key={service.serviceId}><td>{service.serviceId}</td><td>{service.beneficiaryId}</td><td>{service.assessmentId}</td><td>{service.lawyer}</td><td>{service.document}</td><td>{service.status}</td><td>{service.provisionDate}</td><td>{service.closeDate}</td></tr>)}</tbody></table></div></section></div>,document.body)}</>;
+  return <><section className={`glass intelligence-panel lawyer-section representation-case-load ${showDocuments?"":"documents-hidden"}`}><header><div><span className="eyebrow">LEGAL SERVICES CASELOAD</span><h3>Representation caseload by lawyer</h3></div><div className="pivot-actions"><button className={status==="open"?"primary":"soft"} onClick={()=>{legalLoadScheduler.promotePage("lawyer-intelligence","open");setStatus("open")}}><FolderOpen/>Open cases</button><button className={status==="closed"?"primary":"soft"} onClick={()=>{legalLoadScheduler.promotePage("lawyer-intelligence","closed");setStatus("closed")}}><CheckCircle2/>Closed cases</button><button className="soft" onClick={()=>setShowDocuments((value)=>!value)}>{showDocuments?<EyeOff/>:<Eye/>}{showDocuments?"Hide Documents":"Show Documents"}</button><ExcelDownloadButton className="primary" onClick={exportWorkbook} disabled={busy}/></div></header><small>{status==="open"?"Open representation services, grouped by the month the service was provided. Select a number to view its services.":"Completed or closed representation services, grouped by the month the service was closed. Select a number to view its services."}</small>{error&&<div className="error">{error}</div>}<div className="legal-table-wrap"><table><thead><tr><th>Lawyer Name</th>{showDocuments&&<th>Type of Documents</th>}{table.months.map((month)=><th key={month}>{month}</th>)}<th>{totalLabel}</th><th>Average / month</th><th>Workload signal</th></tr></thead><tbody>{table.rows.map((row)=><tr key={`${row.lawyer}-${row.document}`}><td><strong>{row.lawyer}</strong></td>{showDocuments&&<td>{row.document}</td>}{table.months.map((month)=><td key={month}>{row.values[month]?<button className="caseload-count" onClick={()=>openDrill(`${row.lawyer} - ${month}`,row.services.filter((service)=>service.month===month))}>{row.values[month]}</button>:""}</td>)}<td><button className="caseload-count" onClick={()=>openDrill(row.lawyer,row.services)}><strong>{row.total}</strong></button></td><td>{(row.total/Math.max(table.months.length,1)).toFixed(1)}</td><td><i className="score-bar"><b style={{width:`${row.total/workloadMax*100}%`}}/></i></td></tr>)}{!busy&&!table.rows.length&&<tr><td colSpan={4+table.months.length+(showDocuments?1:0)}>No matching representation services.</td></tr>}</tbody></table></div></section>{drill&&createPortal(<div className="indicator-modal" role="dialog" aria-modal="true" aria-label="Representation service details"><button className="case-modal-backdrop" aria-label="Close service details" onClick={()=>setDrill(null)}/><section className="indicator-modal-panel"><header><div><span>LEGAL SERVICES DRILL-DOWN</span><h2>Matching representation services</h2><p>{drill.title} - {drill.services.length.toLocaleString()} service{drill.services.length===1?"":"s"}</p></div><button className="icon" onClick={()=>setDrill(null)} aria-label="Close service details"><X/></button></header><div className="indicator-modal-scroll"><table><thead><tr><th>Service ID</th><th>Beneficiary ID</th><th>Assessment ID</th><th>Lawyer</th><th>Document</th><th>Status</th><th>Service provided</th><th>Service closed</th></tr></thead><tbody>{drill.services.map((service)=><tr key={service.serviceId}><td>{service.serviceId}</td><td>{service.beneficiaryId}</td><td>{service.assessmentId}</td><td>{service.lawyer}</td><td>{service.document}</td><td>{service.status}</td><td>{service.provisionDate}</td><td>{service.closeDate}</td></tr>)}</tbody></table></div></section></div>,document.body)}</>;
 }
 
 function Lawyers({ data, workload, showAwareness, filters }: { data: Pick<LawyerData,"rows"|"monthlyAssessments"|"charts">; workload:LegalIntelligence["lawyers"]; showAwareness:boolean; filters:Record<string,string[]> }) {
@@ -3263,6 +3303,19 @@ function IndicatorTrendChart({title,months,series}:{title:string;months:string[]
   return <div className="indicator-analysis-chart"><button className="soft indicator-chart-download" onClick={downloadPng} title="Download high-quality PNG"><Download/>PNG</button><svg ref={chartRef} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Monthly indicator trend" style={{fontFamily:"Arial, sans-serif"}}><rect width={width} height={height} rx="18" fill="var(--panel-strong)"/>{[0,.25,.5,.75,1].map((ratio)=>{const lineY=height-padding.bottom-ratio*plotHeight,value=Math.round(maximum*ratio);return <g key={ratio}><line x1={padding.left} x2={width-padding.right} y1={lineY} y2={lineY} stroke="var(--line)" strokeDasharray={ratio===0?"":"4 6"}/><text x={padding.left-12} y={lineY+4} textAnchor="end" fill="var(--muted)" fontSize="12">{value.toLocaleString()}</text></g>})}{months.map((month,index)=><text key={month} x={x(index)} y={height-25} textAnchor="middle" fill="var(--muted)" fontSize="12" fontWeight="600">{month}</text>)}{series.map((item,seriesIndex)=>{return <g key={item.label}><polyline points={item.values.map((number,index)=>`${x(index)},${y(number)}`).join(" ")} fill="none" stroke={item.color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>{item.values.map((number,index)=>{const label=number.toLocaleString(),labelWidth=Math.max(30,label.length*8+12),labelY=Math.max(26,Math.min(height-padding.bottom-16,y(number)-22-seriesIndex*10));return <g key={index}><circle cx={x(index)} cy={y(number)} r="6" fill="var(--panel-strong)" stroke={item.color} strokeWidth="4"/><rect x={x(index)-labelWidth/2} y={labelY-15} width={labelWidth} height="20" rx="10" fill="var(--panel-strong)" stroke={item.color} strokeOpacity=".7"/><text x={x(index)} y={labelY-1} textAnchor="middle" fill={item.color} fontSize="12" fontWeight="700">{label}</text></g>})}</g>})}</svg><footer>{series.map((item)=><span key={item.label}><i style={{background:item.color}}/>{item.label}</span>)}</footer></div>;
 }
 
+function LazyIndicatorTrendChart(props:{title:string;months:string[];series:{label:string;values:number[];color:string}[]}){
+  const host=useRef<HTMLDivElement>(null),[visible,setVisible]=useState(false);
+  useEffect(()=>{
+    if(visible)return;
+    const element=host.current;
+    if(!element)return;
+    const observer=new IntersectionObserver(([entry])=>{if(entry.isIntersecting){setVisible(true);observer.disconnect()}},{rootMargin:"500px 0px"});
+    observer.observe(element);
+    return()=>observer.disconnect();
+  },[visible]);
+  return <div ref={host} style={{minHeight:360}}>{visible?<IndicatorTrendChart {...props}/>:null}</div>;
+}
+
 function addIndicatorAnalysisPdfPage(pdf:jsPDF,title:string,months:string[],series:{label:string;values:number[];color:string}[]){
   const pageWidth=pdf.internal.pageSize.getWidth(),pageHeight=pdf.internal.pageSize.getHeight();
   const margin=12,tableX=margin,tableWidth=112,chartX=tableX+tableWidth+12,chartWidth=pageWidth-chartX-margin,chartY=42,chartHeight=112;
@@ -3297,35 +3350,83 @@ async function downloadAllIndicatorAnalysisPdf(cards:{item:IndicatorReportItem;s
 }
 
 function IndicatorAnalysis({report,monthlyReports,loading}:{report:IndicatorReport;monthlyReports:{month:string;report:IndicatorReport}[];loading:boolean}){
-  const monthLabel=(month:string)=>new Date(`${month}-01T00:00:00Z`).toLocaleDateString("en-US",{month:"short",year:"numeric",timeZone:"UTC"});
-  const allEntries=(source:IndicatorReport)=>Object.fromEntries(source.groups.flatMap((group)=>group.indicators.flatMap((item)=>[item,...item.children])).map((item)=>[item.id,item]));
-  const orderedReports=[...monthlyReports].sort((left,right)=>left.month.localeCompare(right.month)),current=allEntries(report),months=orderedReports.map(({month})=>monthLabel(month));
-  const cardFor=(item:IndicatorReportItem)=>{
-    const sectionIds=new Set(item.sections.map((section)=>section.id));
-    const populations=[...(sectionIds.has("syrian-refugee")||sectionIds.has("non-syrian-refugee")?[{label:"Refugees",ids:new Set(["syrian-refugee","non-syrian-refugee"]),color:"#1687d9"}]:[]),...(sectionIds.has("idp")?[{label:"IDP",ids:new Set(["idp"]),color:"#16a394"}]:[])];
-    const series=populations.map((population)=>({label:population.label,color:population.color,values:orderedReports.map(({report:monthly})=>{const entry=allEntries(monthly)[item.id];return entry?entry.sections.filter((section)=>population.ids.has(section.id)).reduce((total,section)=>total+section.total,0):0})}));
-    // The heading total is intentionally calculated from the same monthly
-    // series used by the visible pivot table and chart. This keeps every view
-    // aligned even when the selected reporting period changes.
-    return {item,series,total:series.reduce((sum,population)=>sum+population.values.reduce((subtotal,value)=>subtotal+value,0),0)};
-  };
-  const groups=report.groups.map((group)=>({group,cards:group.indicators.flatMap((item)=>[item,...item.children]).map(cardFor)}));
+  const {groups,months}=useMemo(()=>{
+    const monthLabel=(month:string)=>new Date(`${month}-01T00:00:00Z`).toLocaleDateString("en-US",{month:"short",year:"numeric",timeZone:"UTC"});
+    const allEntries=(source:IndicatorReport)=>Object.fromEntries(source.groups.flatMap((group)=>group.indicators.flatMap((item)=>[item,...item.children])).map((item)=>[item.id,item])) as Record<string,IndicatorReportItem>;
+    const orderedReports=[...monthlyReports].sort((left,right)=>left.month.localeCompare(right.month));
+    // Build each monthly lookup once. Previously this rebuilt the complete
+    // indicator index inside every card, population, and month iteration.
+    const monthlyEntries=orderedReports.map(({month,report:monthly})=>({month,entries:allEntries(monthly)}));
+    const months=monthlyEntries.map(({month})=>monthLabel(month));
+    const cardFor=(item:IndicatorReportItem)=>{
+      const sectionIds=new Set(item.sections.map((section)=>section.id));
+      const populations=[...(sectionIds.has("syrian-refugee")||sectionIds.has("non-syrian-refugee")?[{label:"Refugees",ids:new Set(["syrian-refugee","non-syrian-refugee"]),color:"#1687d9"}]:[]),...(sectionIds.has("idp")?[{label:"IDP",ids:new Set(["idp"]),color:"#16a394"}]:[])];
+      const series=populations.map((population)=>({label:population.label,color:population.color,values:monthlyEntries.map(({entries})=>{const entry=entries[item.id];return entry?entry.sections.filter((section)=>population.ids.has(section.id)).reduce((total,section)=>total+section.total,0):0})}));
+      return {item,series,total:series.reduce((sum,population)=>sum+population.values.reduce((subtotal,value)=>subtotal+value,0),0)};
+    };
+    return {months,groups:report.groups.map((group)=>({group,cards:group.indicators.flatMap((item)=>[item,...item.children]).map(cardFor)}))};
+  },[report,monthlyReports]);
   return <section className="indicator-analysis-page">
     <header><div><h2>Monthly indicator trends</h2></div><div className="indicator-analysis-page-actions"><button className="soft indicator-analysis-pdf" disabled={!monthlyReports.length} onClick={()=>downloadAllIndicatorAnalysisPdf(groups.flatMap(({cards})=>cards),months)} title="Download every selected pivot table and chart"><FileText/>Download all PDF</button>{loading&&<small className="analysis-loading-state"><RefreshCw/><span>Loading selected months</span><i>Updating charts</i></small>}</div></header>
     {!monthlyReports.length?<div className="legal-empty"><ChartColumnIncreasing/><h3>{loading?"Preparing the first month of analysis…":"No months are available for this selection."}</h3></div>:<div className="indicator-groups indicator-analysis-groups">{groups.map(({group,cards})=><details className={`indicator-group indicator-group-${group.id}`} open key={group.id}>
       <summary><div><span>{group.label}</span><strong>Monthly indicator analysis</strong></div><b>{cards.length} indicator{cards.length===1?"":"s"}</b><ChevronDown/></summary>
       <div className="indicator-analysis-list">{cards.map(({item,series,total})=><article className="glass indicator-analysis-card" key={item.id}>
         <header><div><span>{item.source}</span><h3>{item.title}</h3></div><div className="indicator-analysis-actions"><strong>{total.toLocaleString()}<small>selected total</small></strong><button className="soft indicator-analysis-pdf" onClick={()=>downloadIndicatorAnalysisPdf(item.title,months,series)} title="Download pivot table and chart as PDF"><FileText/>PDF</button></div></header>
-        <div className="indicator-analysis-content"><div className="indicator-analysis-table-wrap"><table><thead><tr><th>Month</th>{series.map((item)=><th key={item.label}>{item.label}</th>)}</tr></thead><tbody>{months.map((month,index)=><tr key={month}><td>{month}</td>{series.map((item)=><td key={item.label}>{item.values[index]?item.values[index].toLocaleString():""}</td>)}</tr>)}<tr className="indicator-analysis-total"><td>Total</td>{series.map((item)=><td key={item.label}>{item.values.reduce((sum,value)=>sum+value,0).toLocaleString()}</td>)}</tr></tbody></table></div><IndicatorTrendChart title={item.title} months={months} series={series}/></div>
+        <div className="indicator-analysis-content"><div className="indicator-analysis-table-wrap"><table><thead><tr><th>Month</th>{series.map((item)=><th key={item.label}>{item.label}</th>)}</tr></thead><tbody>{months.map((month,index)=><tr key={month}><td>{month}</td>{series.map((item)=><td key={item.label}>{item.values[index]?item.values[index].toLocaleString():""}</td>)}</tr>)}<tr className="indicator-analysis-total"><td>Total</td>{series.map((item)=><td key={item.label}>{item.values.reduce((sum,value)=>sum+value,0).toLocaleString()}</td>)}</tr></tbody></table></div><LazyIndicatorTrendChart title={item.title} months={months} series={series}/></div>
       </article>)}</div>
     </details>)}</div>}
   </section>;
 }
 
+function IndicatorReportingCheck({projects,months,projectOptions,monthOptions}:{projects:string[];months:string[];projectOptions:string[];monthOptions:string[]}){
+  const [metadata,setMetadata]=useState<IndicatorReconciliationMetadata|null>(null),[result,setResult]=useState<IndicatorReconciliation|null>(null),[busy,setBusy]=useState(false),[importBusy,setImportBusy]=useState(false),[exportBusy,setExportBusy]=useState(false),[error,setError]=useState(""),[query,setQuery]=useState(""),[mode,setMode]=useState<"issues"|"all">("issues"),[page,setPage]=useState(1);
+  const [checkProjects,setCheckProjects]=useState<string[]>(projects),[checkMonths,setCheckMonths]=useState<string[]>(months);
+  const fileInput=useRef<HTMLInputElement|null>(null),pageSize=100;
+  useEffect(()=>{getIndicatorReconciliationMetadata().then(setMetadata).catch((reason)=>setError(reason.message))},[]);
+  const availableMonths=useMemo(()=>metadata?.months?.length?monthOptions.filter((month)=>metadata.months.includes(month)):monthOptions,[metadata,monthOptions]);
+  useEffect(()=>setCheckMonths((current)=>current.filter((month)=>availableMonths.includes(month))),[availableMonths]);
+  const changeProjects=(next:string[])=>{setCheckProjects(next);setResult(null)};
+  const changeMonths=(next:string[])=>{setCheckMonths(next);setResult(null)};
+  const run=async()=>{setBusy(true);setError("");try{setResult(await reconcileLegalIndicators(checkProjects,[],[],checkMonths,[]));setPage(1)}catch(reason:any){setError(reason?.message||"Unable to compare the reporting tools.")}finally{setBusy(false)}};
+  const acceptMetadata=(next:IndicatorReconciliationMetadata)=>{setMetadata(next);setResult(null);setError("")};
+  const importBrowserFile=async(file:File|null)=>{if(!file)return;setImportBusy(true);setError("");try{acceptMetadata(await uploadIndicatorMasterWorkbook(file))}catch(reason:any){setError(reason?.message||"Unable to read the master workbook.")}finally{setImportBusy(false)}};
+  const chooseWorkbook=async()=>{const desktopApi=(window as any).pywebview?.api;if(!desktopApi?.choose_indicator_master_workbook||!desktopApi?.process_indicator_master_workbook){fileInput.current?.click();return}setImportBusy(true);setError("");try{const path=await desktopApi.choose_indicator_master_workbook();if(path)acceptMetadata(await desktopApi.process_indicator_master_workbook(path))}catch(reason:any){setError(reason?.message||"Unable to read the master workbook.")}finally{setImportBusy(false)}};
+  const refreshWorkbook=async()=>{const desktopApi=(window as any).pywebview?.api;if(!desktopApi?.refresh_indicator_master_workbook){fileInput.current?.click();return}setImportBusy(true);setError("");try{acceptMetadata(await desktopApi.refresh_indicator_master_workbook())}catch(reason:any){setError(reason?.message||"Unable to refresh the master workbook.")}finally{setImportBusy(false)}};
+  const changeSheet=async(sheet:string)=>{setImportBusy(true);setError("");try{acceptMetadata(await selectIndicatorMasterSheet(sheet))}catch(reason:any){setError(reason?.message||"Unable to read the selected worksheet.")}finally{setImportBusy(false)}};
+  const exportResults=async()=>{setExportBusy(true);setError("");try{await exportIndicatorReconciliation(checkProjects,[],[],checkMonths,[])}catch(reason:any){setError(reason?.message||"Unable to export the reporting check.")}finally{setExportBusy(false)}};
+  const filtered=useMemo(()=>{const needle=query.trim().toLowerCase();return (result?.rows||[]).filter((row)=>(mode==="all"||row.status!=="matched")&&(!needle||[row.indicator,row.month,row.project,row.location,row.population,row.sex,row.ageGroup,row.status].some(value=>value.toLowerCase().includes(needle))))},[result,mode,query]);
+  const pageCount=Math.max(1,Math.ceil(filtered.length/pageSize)),visible=filtered.slice((page-1)*pageSize,page*pageSize);
+  useEffect(()=>setPage(1),[query,mode]);
+  const statusLabel=(status:string)=>({matched:"Matched",different:"Different","workbook-only":"Workbook only","platform-only":"Platform only","missing-workbook":"Missing workbook value"}[status]||status);
+  return <section className="indicator-reconciliation-page">
+    <div className="glass indicator-reconciliation-source">
+      <div><span className="eyebrow">MASTER WORKBOOK</span><h2>Reporting Tool comparison</h2><p>Compare cached values from the workbook's Reporting Tool sheet with the platform at month, project/location, population, sex and age level.</p></div>
+      <div className="indicator-reconciliation-file"><input ref={fileInput} hidden type="file" accept=".xlsx" onChange={(event)=>{void importBrowserFile(event.target.files?.[0]||null);event.currentTarget.value=""}}/><span>{metadata?.ready?"Current workbook":"No workbook selected"}</span><strong>{metadata?.filename||"Choose the master reporting workbook"}</strong>{metadata?.ready&&<><label><span>Worksheet</span><select value={metadata.sheet} disabled={importBusy} onChange={(event)=>{void changeSheet(event.target.value)}}>{metadata.availableSheets.map((sheet)=><option value={sheet} key={sheet}>{sheet}</option>)}</select></label><small>{metadata.sheet} · {metadata.months.length} month{metadata.months.length===1?"":"s"}</small></>}</div>
+      <div className="indicator-reconciliation-source-actions"><button className="soft" disabled={importBusy} onClick={chooseWorkbook}><FolderOpen/>{metadata?.ready?"Replace":"Choose workbook"}</button>{metadata?.remembered&&<button className="soft" disabled={importBusy} onClick={refreshWorkbook}><RefreshCw/>Refresh</button>}<button className="primary" disabled={!metadata?.ready||busy||importBusy} onClick={run}>{busy?<><span className="button-spinner"/>Comparing...</>:<><CheckCheck/>Run check</>}</button></div>
+      <div className="indicator-reconciliation-filters"><CheckboxMultiSelect label="Projects" values={projectOptions} selected={checkProjects} onChange={changeProjects}/><CheckboxMultiSelect label="Months" values={availableMonths} selected={checkMonths} onChange={changeMonths}/><small>Leave a filter empty to compare all available values.</small></div>
+    </div>
+    {error&&<div className="error glass"><span>{error}</span></div>}
+    {(metadata?.warnings?.length||0)>0&&!result&&<details className="reconciliation-warnings"><summary>{metadata!.warnings.length} workbook warning{metadata!.warnings.length===1?"":"s"}</summary>{metadata!.warnings.map((warning)=><p key={warning}>{warning}</p>)}</details>}
+    {result&&<>
+      <div className="reconciliation-summary indicator-reconciliation-summary">
+        <div className="matched"><span>Matched</span><strong>{result.summary.matched.toLocaleString()}</strong></div><div className={result.summary.different?"unmatched":"matched"}><span>Different</span><strong>{result.summary.different.toLocaleString()}</strong></div><div className={result.summary.workbookOnly?"unmatched":"matched"}><span>Workbook only</span><strong>{result.summary.workbookOnly.toLocaleString()}</strong></div><div className={result.summary.platformOnly?"unmatched":"matched"}><span>Platform only</span><strong>{result.summary.platformOnly.toLocaleString()}</strong></div><div className={result.summary.missingWorkbook?"unmatched":"matched"}><span>Missing workbook</span><strong>{result.summary.missingWorkbook.toLocaleString()}</strong></div><div className={result.summary.warnings?"unmatched":"matched"}><span>Warnings</span><strong>{result.summary.warnings.toLocaleString()}</strong></div>
+      </div>
+      <div className="glass indicator-reconciliation-results">
+        <header><div><span className="eyebrow">COMPARISON RESULTS</span><h3>{filtered.length.toLocaleString()} displayed values</h3><p>{result.months.map(formatFilterMonth).join(", ")}</p></div><div className="indicator-reconciliation-result-actions"><div className="indicator-reconciliation-mode"><button className={mode==="issues"?"active":""} onClick={()=>setMode("issues")}>Differences only</button><button className={mode==="all"?"active":""} onClick={()=>setMode("all")}>All values</button></div><label><Search/><input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search results"/></label><ExcelDownloadButton busy={exportBusy} onClick={exportResults}/></div></header>
+        {result.warnings.length>0&&<details className="reconciliation-warnings"><summary>{result.warnings.length} mapping or workbook warning{result.warnings.length===1?"":"s"}</summary>{result.warnings.map((warning)=><p key={warning}>{warning}</p>)}</details>}
+        <div className="legal-table-wrap indicator-reconciliation-table"><table><thead><tr><th>Indicator</th><th>Month</th><th>Project / location</th><th>Population</th><th>Sex / age</th><th>Platform</th><th>Excel</th><th>Variance</th><th>Status</th></tr></thead><tbody>{visible.length?visible.map((row,index)=><tr key={`${row.indicatorId}-${row.month}-${row.project}-${row.location}-${row.population}-${row.sex}-${row.ageGroup}-${index}`}><td><strong>{row.indicator}</strong></td><td>{formatFilterMonth(row.month)}</td><td><strong>{formatProjectLabel(row.project)}</strong><small>{row.location}</small></td><td>{row.population.replaceAll("-"," ")}</td><td>{row.sex} · {row.ageGroup}</td><td>{row.platformValue===null?"Missing":row.platformValue.toLocaleString()}</td><td>{row.workbookValue===null?"Missing":row.workbookValue.toLocaleString()}</td><td>{row.variance===null?"-":row.variance.toLocaleString()}</td><td><span className={`indicator-reconciliation-status ${row.status}`}>{statusLabel(row.status)}</span></td></tr>):<tr><td colSpan={9}><div className="reconciliation-empty"><CheckCircle2/><strong>No differences match the current search.</strong></div></td></tr>}</tbody></table></div>
+        <footer className="legal-pager"><button className="soft" disabled={page<=1} onClick={()=>setPage((value)=>value-1)}><ChevronLeft/>Previous</button><span>Page {page} of {pageCount}</span><button className="soft" disabled={page>=pageCount} onClick={()=>setPage((value)=>value+1)}>Next<ChevronRight/></button></footer>
+      </div>
+    </>}
+  </section>;
+}
+
 function IndicatorReporting(){
-  const [report,setReport]=useState<IndicatorReport|null>(null),[projects,setProjects]=useState<string[]>([]),[locations,setLocations]=useState<string[]>([]),[quarters,setQuarters]=useState<string[]>([]),[months,setMonths]=useState<string[]>([]),[communityTypes,setCommunityTypes]=useState<string[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState(""),[toast,setToast]=useState(""),[filterDrawer,setFilterDrawer]=useState(false),[fullView,setFullView]=useState<IndicatorReportItem|null>(null),[idDrill,setIdDrill]=useState<{ids:string[];count:number;title:string}|null>(null),[view,setView]=useState<"report"|"analysis">("report"),[monthlyReports,setMonthlyReports]=useState<{month:string;report:IndicatorReport}[]>([]),[analysisLoading,setAnalysisLoading]=useState(false),[exporting,setExporting]=useState(false),[narrativeExporting,setNarrativeExporting]=useState(false);
-  const toastTimer=useRef<number|undefined>(undefined);
-  useEffect(()=>{let active=true;setLoading(true);setError("");getLegalIndicators(projects,locations,[],quarters,months,communityTypes).then((next)=>{if(active)setReport(next)}).catch((reason)=>{if(active)setError(reason.message)}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[projects,locations,quarters,months,communityTypes]);
+  const [report,setReport]=useState<IndicatorReport|null>(null),[projects,setProjects]=useState<string[]>([]),[locations,setLocations]=useState<string[]>([]),[quarters,setQuarters]=useState<string[]>([]),[months,setMonths]=useState<string[]>([]),[communityTypes,setCommunityTypes]=useState<string[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState(""),[toast,setToast]=useState(""),[filterDrawer,setFilterDrawer]=useState(false),[fullView,setFullView]=useState<IndicatorReportItem|null>(null),[idDrill,setIdDrill]=useState<{ids:string[];count:number;title:string}|null>(null),[view,setView]=useState<"report"|"analysis"|"check">("report"),[monthlyReports,setMonthlyReports]=useState<{month:string;report:IndicatorReport}[]>([]),[analysisLoading,setAnalysisLoading]=useState(false),[exporting,setExporting]=useState(false),[narrativeExporting,setNarrativeExporting]=useState(false);
+  const toastTimer=useRef<number|undefined>(undefined),analysisCache=useRef(new Map<string,IndicatorReport>());
+  const indicatorQuery=useMemo(()=>({projects,locations,quarters,months,communityTypes}),[projects,locations,quarters,months,communityTypes]);
+  const debouncedQuery=useDebouncedValue(indicatorQuery,180);
+  useEffect(()=>{const controller=new AbortController();setLoading(true);setError("");getLegalIndicators(debouncedQuery.projects,debouncedQuery.locations,[],debouncedQuery.quarters,debouncedQuery.months,debouncedQuery.communityTypes,controller.signal).then(setReport).catch((reason)=>{if(reason.name!=="AbortError")setError(reason.message)}).finally(()=>{if(!controller.signal.aborted)setLoading(false)});return()=>controller.abort()},[debouncedQuery]);
   const locationOptions=useMemo(()=>!report?[]:projects.length?Array.from(new Set(projects.flatMap((project)=>report.filterOptions.locationsByProject[project]||[]))):report.filterOptions.locations,[report,projects]);
   const communityTypeOptions=useMemo(()=>!report?[]:report.filterOptions.communityTypes.filter((type)=>type!=="IDP"||!projects.length||projects.includes("UNHCR 2026 - AMAL CAMP")),[report,projects]);
   useEffect(()=>setLocations((current)=>{
@@ -3335,7 +3436,27 @@ function IndicatorReporting(){
   const quarterOptions=useMemo(()=>report?.filterOptions.quarters||[],[report]);
   const monthOptions=useMemo(()=>report?.filterOptions.months.filter((month)=>{if(quarters.length){const quarter=`${month.slice(0,4)}-Q${Math.ceil(Number(month.slice(5,7))/3)}`;if(!quarters.includes(quarter))return false}return true})||[],[report,quarters]);
   const analysisMonths=useMemo(()=>[...(months.length?months:monthOptions)].filter((month)=>month.startsWith("2026-")).sort((left,right)=>right.localeCompare(left)),[months,monthOptions]);
-  useEffect(()=>{if(loading||!report||!analysisMonths.length){setMonthlyReports([]);setAnalysisLoading(false);return;}let active=true;setMonthlyReports([]);setAnalysisLoading(true);Promise.all(analysisMonths.map(async(month)=>({month,report:await getLegalIndicators(projects,locations,[],[],[month],communityTypes)}))).then((reports)=>{if(active)setMonthlyReports(reports)}).catch((reason)=>{if(active)setError(reason instanceof Error?reason.message:"Unable to load monthly analysis")}).finally(()=>{if(active)setAnalysisLoading(false)});return()=>{active=false};},[loading,report,analysisMonths,projects,locations,communityTypes]);
+  useEffect(()=>{
+    // Wait until the Indicators request is complete, then preload Analysis in
+    // the background so opening the tab can reuse already completed months.
+    if(view!=="analysis"||loading||!report||!analysisMonths.length){setMonthlyReports([]);setAnalysisLoading(false);return;}
+    const controller=new AbortController();
+    setMonthlyReports([]);setAnalysisLoading(true);
+    const loadMonth=async(month:string)=>{
+      const key=JSON.stringify([projects,locations,communityTypes,month]),cached=analysisCache.current.get(key);
+      if(cached)return {month,report:cached};
+      const monthly=months.length===1&&months[0]===month?report:await getLegalIndicators(projects,locations,[],[],[month],communityTypes,controller.signal);
+      analysisCache.current.set(key,monthly);
+      return {month,report:monthly};
+    };
+    // Limit concurrent CPU-heavy report builds and reveal each completed month
+    // immediately instead of leaving the Analysis page blank until all finish.
+    let cursor=0;
+    const worker=async()=>{while(!controller.signal.aborted){const index=cursor++;if(index>=analysisMonths.length)return;const next=await loadMonth(analysisMonths[index]);if(!controller.signal.aborted)setMonthlyReports((current)=>[...current.filter(({month})=>month!==next.month),next])}};
+    const concurrency=view==="analysis"?2:1;
+    Promise.all(Array.from({length:Math.min(concurrency,analysisMonths.length)},worker)).catch((reason)=>{if(reason.name!=="AbortError")setError(reason instanceof Error?reason.message:"Unable to load monthly analysis")}).finally(()=>{if(!controller.signal.aborted)setAnalysisLoading(false)});
+    return()=>controller.abort();
+  },[view,loading,report,analysisMonths,projects,locations,months,communityTypes]);
   useEffect(()=>setQuarters((current)=>{const next=current.filter((value)=>quarterOptions.includes(value));return next.length===current.length?current:next}),[quarterOptions]);
   useEffect(()=>setMonths((current)=>{const next=current.filter((value)=>monthOptions.includes(value));return next.length===current.length?current:next}),[monthOptions]);
   useEffect(()=>setCommunityTypes((current)=>{const next=current.filter((value)=>communityTypeOptions.includes(value));return next.length===current.length?current:next}),[communityTypeOptions]);
@@ -3356,7 +3477,7 @@ function IndicatorReporting(){
   const filterControls=<><CheckboxMultiSelect label="Projects" values={report?.filterOptions.projects||[]} selected={projects} onChange={setProjects}/><CheckboxMultiSelect label="Project locations" values={locationOptions} selected={locations} onChange={setLocations}/><CheckboxMultiSelect label="Community type" values={communityTypeOptions} selected={communityTypes} onChange={setCommunityTypes}/><CheckboxMultiSelect label="Quarters" values={quarterOptions} selected={quarters} onChange={setQuarters}/><CheckboxMultiSelect label="Months" values={monthOptions} selected={months} onChange={setMonths}/></>;
   const filterBar=<>{filterControls}<button className="soft indicator-filter-clear" disabled={!activeFilters} onClick={clearFilters}><RotateCcw/>Clear</button><ExcelDownloadButton className="soft narrative-export-button" disabled={!report||loading} busy={narrativeExporting} onClick={exportNarrative}>Narrative</ExcelDownloadButton><ExcelDownloadButton disabled={!report||loading} busy={exporting} onClick={exportAll}/></>;
   const openIds=(ids:string[],count:number,title:string)=>setIdDrill({ids,count,title});
-  return <div className="indicator-reporting"><nav className="indicator-subnav" aria-label="Indicator reporting views"><button className={view==="report"?"active":""} onClick={()=>setView("report")}><TableProperties/>Indicators</button><button className={view==="analysis"?"active":""} onClick={()=>setView("analysis")}><ChartColumnIncreasing/>Analysis</button></nav><LegalScrollControls onFilters={()=>setFilterDrawer(true)} activeCount={activeFilters} onClear={clearFilters} compactFilters={<><div className="indicator-header-project"><CheckboxMultiSelect label="Projects" values={report?.filterOptions.projects||[]} selected={projects} onChange={setProjects}/></div><div className="indicator-header-month"><CheckboxMultiSelect label="Months" values={monthOptions} selected={months} onChange={setMonths}/></div></>}><div className="indicator-filter-bar">{filterBar}</div></LegalScrollControls>{filterDrawer&&<><button className="indicator-filter-drawer-backdrop" aria-label="Close indicator filters" onClick={()=>setFilterDrawer(false)}/><aside className="indicator-filter-drawer glass"><header><div><span>INDICATOR FILTERS</span><h2>Filter indicator reporting</h2></div><button className="icon" onClick={()=>setFilterDrawer(false)} aria-label="Close filters"><X/></button></header><div className="indicator-filter-drawer-controls">{filterControls}</div><footer><button className="soft" disabled={!activeFilters} onClick={clearFilters}>Clear all</button></footer></aside></>}{error&&<div className="error glass">{error}</div>}{loading&&!report?<LegalSkeleton variant="indicator"/>:report&&(view==="report"?<div className={loading?"indicator-groups refreshing":"indicator-groups"}>{report.groups.map((group)=><ExpandedIndicatorGroup key={group.id} group={group} ageGroups={report.ageGroups} achievementLabel={achievementLabel} onCopy={copyItem} onCopyTitle={copyTitle} onView={setFullView} onOpenIds={openIds}/>)}</div>:<IndicatorAnalysis report={report} monthlyReports={monthlyReports} loading={analysisLoading}/>)}{report&&view==="report"&&<IdpDurableSolutions report={report}/>} {fullView&&<IndicatorFullView item={fullView} ageGroups={report?.ageGroups||[]} onClose={()=>setFullView(null)} onOpenIds={openIds}/>} {idDrill&&<BeneficiaryIdModal {...idDrill} onClose={()=>setIdDrill(null)} onCopy={copyText}/>} {toast&&<div className="legal-copy-toast"><CheckCircle2/><span>Copied</span><strong>{toast}</strong></div>}</div>;
+  return <div className="indicator-reporting"><nav className="indicator-subnav" aria-label="Indicator reporting views"><button className={view==="report"?"active":""} onClick={()=>setView("report")}><TableProperties/>Indicators</button><button className={view==="analysis"?"active":""} onClick={()=>setView("analysis")}><ChartColumnIncreasing/>Analysis</button><button className={view==="check"?"active":""} onClick={()=>setView("check")}><CheckCheck/>Reporting Check</button></nav><LegalScrollControls onFilters={()=>setFilterDrawer(true)} activeCount={activeFilters} onClear={clearFilters} compactFilters={<><div className="indicator-header-project"><CheckboxMultiSelect label="Projects" values={report?.filterOptions.projects||[]} selected={projects} onChange={setProjects}/></div><div className="indicator-header-month"><CheckboxMultiSelect label="Months" values={monthOptions} selected={months} onChange={setMonths}/></div></>}><div className="indicator-filter-bar">{filterBar}</div></LegalScrollControls>{filterDrawer&&<><button className="indicator-filter-drawer-backdrop" aria-label="Close indicator filters" onClick={()=>setFilterDrawer(false)}/><aside className="indicator-filter-drawer glass"><header><div><span>INDICATOR FILTERS</span><h2>Filter indicator reporting</h2></div><button className="icon" onClick={()=>setFilterDrawer(false)} aria-label="Close filters"><X/></button></header><div className="indicator-filter-drawer-controls">{filterControls}</div><footer><button className="soft" disabled={!activeFilters} onClick={clearFilters}>Clear all</button></footer></aside></>}{error&&<div className="error glass">{error}</div>}{view==="check"?<IndicatorReportingCheck projects={projects} months={months} projectOptions={report?.filterOptions.projects||[]} monthOptions={report?.filterOptions.months||[]}/>:loading&&!report?<LegalSkeleton variant="indicator"/>:report&&(view==="report"?<div className={loading?"indicator-groups refreshing":"indicator-groups"}>{report.groups.map((group)=><ExpandedIndicatorGroup key={group.id} group={group} ageGroups={report.ageGroups} achievementLabel={achievementLabel} onCopy={copyItem} onCopyTitle={copyTitle} onView={setFullView} onOpenIds={openIds}/>)}</div>:<IndicatorAnalysis report={report} monthlyReports={monthlyReports} loading={analysisLoading}/>)}{report&&view==="report"&&<IdpDurableSolutions report={report}/>} {fullView&&<IndicatorFullView item={fullView} ageGroups={report?.ageGroups||[]} onClose={()=>setFullView(null)} onOpenIds={openIds}/>} {idDrill&&<BeneficiaryIdModal {...idDrill} onClose={()=>setIdDrill(null)} onCopy={copyText}/>} {toast&&<div className="legal-copy-toast"><CheckCircle2/><span>Copied</span><strong>{toast}</strong></div>}</div>;
 }
 
 function CaseReviewModal({ caseId, metadata, onClose }: { caseId: string; metadata: LegalMetadata; onClose: () => void }) {
@@ -3386,19 +3507,36 @@ function CaseReviewModal({ caseId, metadata, onClose }: { caseId: string; metada
   </div>;
 }
 
-export default function LegalPlatform() {
+function NavLoadStatus({label,status}:{label:string;status:LoadStatus}) {
+  const [visibility,setVisibility] = useState<"visible"|"exiting"|"hidden">("visible");
+  useEffect(() => {
+    setVisibility("visible");
+    if (status !== "ready") return;
+    const exitTimer = window.setTimeout(() => setVisibility("exiting"), 5000);
+    const hideTimer = window.setTimeout(() => setVisibility("hidden"), 5350);
+    return () => {
+      window.clearTimeout(exitTimer);
+      window.clearTimeout(hideTimer);
+    };
+  }, [status]);
+  if (status === "idle" || visibility === "hidden") return null;
+  return <i className={`nav-load-status nav-load-${status}${visibility === "exiting" ? " nav-load-exiting" : ""}`} title={`${label}: ${status}`} aria-label={`${label} ${status}`}>{status === "ready" ? <CheckCircle2/> : status === "error" ? <AlertTriangle/> : null}</i>;
+}
+
+export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void}) {
   const [metadata, setMetadataState] = useState<LegalMetadata | null>(null),
     [metadataLoading, setMetadataLoading] = useState(true),
     [page, setPageState] = useState<LegalPage>(legalPageFromUrl),
     [caseQuery, setCaseQuery] = useState(() => legalRouteFromUrl().caseId),
     [reviewCaseId, setReviewCaseId] = useState(""),
     [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("legal-sidebar-collapsed") === "true"),
-    [theme, setTheme] = useState(() => localStorage.getItem("legal-platform-theme") || localStorage.getItem("app-theme") || "glass-light"),
+    [theme, setTheme] = useState(() => localStorage.getItem("legal-platform-theme") || localStorage.getItem("app-theme") || new URLSearchParams(window.location.search).get("appTheme") || "glass-light"),
     [fullscreen, setFullscreen] = useState(false),
     [dataMenuOpen, setDataMenuOpen] = useState(false),
     [error, setError] = useState(""),
     [uploading, setUploading] = useState(false),
     [dataRevision, setDataRevision] = useState(0),
+    [loadStatuses,setLoadStatuses] = useState<Record<string,LoadStatus>>({}),
     [uploadProgress, setUploadProgress] = useState(0),
     [uploadPhase, setUploadPhase] = useState<"uploading" | "processing">(
       "uploading",
@@ -3415,6 +3553,7 @@ export default function LegalPlatform() {
   const legalShell = useRef<HTMLDivElement>(null);
   const copiedTimer = useRef<number | null>(null);
   const [copiedValue, setCopiedValue] = useState("");
+  useEffect(()=>legalLoadScheduler.subscribe(setLoadStatuses),[]);
   useEffect(() => {
     const showCopied = (event: Event) => {
       const text = (event as CustomEvent<string>).detail?.trim();
@@ -3501,16 +3640,32 @@ export default function LegalPlatform() {
     return()=>{root.removeEventListener("click",copyCell);if(copiedTimer.current!==null)window.clearTimeout(copiedTimer.current)};
   },[]);
   const setPage = (next: LegalPage) => {
+    legalLoadScheduler.promotePage(next);
     setPageState(next);
     window.location.hash = `/legal/${next}`;
-    window.scrollTo({ top: 0, behavior: "auto" });
+    legalShell.current?.querySelector<HTMLElement>(":scope > main")?.scrollTo({ top: 0, behavior: "auto" });
   };
   useEffect(() => {
-    getLegalMetadata()
-      .then(setMetadata)
-      .catch((e) => setError(e.message))
-      .finally(() => setMetadataLoading(false));
-  }, []);
+    let cancelled=false;
+    const load=async()=>{
+      let lastError:unknown;
+      for(let attempt=0;attempt<3&&!cancelled;attempt++){
+        const controller=new AbortController();
+        const timeout=window.setTimeout(()=>controller.abort(),3000);
+        try{
+          const next=await getLegalMetadata(controller.signal);
+          if(!cancelled)setMetadata(next);
+          return;
+        }catch(reason){
+          lastError=reason;
+          if(attempt<2)await new Promise(resolve=>window.setTimeout(resolve,250*(attempt+1)));
+        }finally{window.clearTimeout(timeout)}
+      }
+      if(!cancelled)setError(lastError instanceof Error&&lastError.name!=="AbortError"?lastError.message:"The local service did not respond. Restart the app and try again.");
+    };
+    void load().finally(()=>{if(!cancelled){setMetadataLoading(false);onStartupReady?.()}});
+    return()=>{cancelled=true};
+  }, [onStartupReady]);
   useEffect(()=>{
     if(metadataLoading||metadata?.ready||!metadata?.loading)return;
     let cancelled=false;
@@ -3613,19 +3768,28 @@ export default function LegalPlatform() {
     catch (reason: any) { setError(reason?.message || "Unable to refresh the selected CSV files."); }
     finally { setUploading(false);setUploadProgress(0); }
   };
-  const availableNav = nav.filter(([id]) =>
-    (id !== "awareness" || metadata?.availability.awareness) &&
-    (id !== "deportation" || metadata?.features?.deportation) &&
-    (id !== "detention" || metadata?.features?.detention),
-  );
+  const coreAvailable=Boolean(metadata&&["beneficiaries","assessments","legalservices"].every(dataset=>metadata.availability[dataset]));
+  const hotlineOnly=Boolean(metadata?.availability.legalhotlines&&!coreAvailable);
+  const availableNav = nav.filter(([id]) => {
+    if(hotlineOnly)return id==="hotline";
+    if(!coreAvailable)return false;
+    return (id !== "hotline" || Boolean(metadata?.availability.legalhotlines)) &&
+      (id !== "awareness" || Boolean(metadata?.availability.awareness)) &&
+      (id !== "deportation" || Boolean(metadata?.features?.deportation)) &&
+      (id !== "detention" || Boolean(metadata?.features?.detention));
+  });
+  useEffect(()=>{if(metadata?.ready)legalLoadScheduler.start(metadata,page)},[metadata?.ready,metadata?.revision]);
+  useEffect(()=>{if(metadata?.ready)legalLoadScheduler.promotePage(page)},[metadata?.ready,page]);
   useEffect(()=>{
     if(!metadata?.ready)return;
+    if(hotlineOnly&&page!=="hotline"){setPage("hotline");return}
+    if(!hotlineOnly&&page==="hotline"&&!metadata.availability.legalhotlines){setPage("overview");return}
     if(page==="deportation"&&!metadata.features?.deportation)setPage("overview");
     if(page==="detention"&&!metadata.features?.detention)setPage("overview");
-  },[metadata?.ready,metadata?.features?.deportation,metadata?.features?.detention,page]);
+  },[metadata?.ready,metadata?.availability.legalhotlines,metadata?.features?.deportation,metadata?.features?.detention,hotlineOnly,page]);
   const openReviewCase = (id: string) => setReviewCaseId(id);
   return (
-    <div ref={legalShell} className={`app-shell legal-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <div ref={legalShell} className={`app-shell legal-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`} onWheel={(event)=>{if(event.target!==event.currentTarget)return;event.currentTarget.querySelector("main")?.scrollBy({top:event.deltaY,left:0,behavior:"auto"})}}>
       <aside className="sidebar glass">
         <div className="brand">
           <img src="/intersos-symbol-clear.png" alt="INTERSOS" />
@@ -3635,7 +3799,7 @@ export default function LegalPlatform() {
           </div>
         </div>
         <div className="sidebar-workspace-controls"><button className="soft sidebar-fullscreen" onClick={toggleFullscreen} title={fullscreen ? "Exit full screen" : "Enter full screen"} aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}>{fullscreen ? <Minimize2/> : <Maximize2/>}<span>Full screen</span></button><div className={`data-source-control app-select app-select-theme ${dataMenuOpen?"open":""}`}><Database className="app-select-icon"/><span className="app-select-label">Data source</span><button className="app-select-trigger" disabled={uploading} aria-busy={uploading} aria-haspopup="menu" aria-expanded={dataMenuOpen} onClick={() => setDataMenuOpen((current)=>!current)}><span>{uploading ? uploadPhase === "uploading" ? `Uploading ${uploadProgress}%` : "Processing records…" : "Choose source"}</span><ChevronDown/></button>{dataMenuOpen&&<><button className="data-source-backdrop" aria-label="Close data source menu" onClick={()=>setDataMenuOpen(false)}/><div className="app-select-menu data-source-menu" role="menu"><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFolder()}}><FolderOpen/><span><strong>Select folder</strong><small>Load all supported CSV files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_folder&&<button className="data-source-refresh" aria-label="Refresh selected folder" title="Refresh selected folder" onClick={()=>{setDataMenuOpen(false);refreshSelectedFolder()}}><RefreshCw/></button>}</div><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFiles()}}><Database/><span><strong>Select multiple CSV files</strong><small>Choose individual source files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_files&&<button className="data-source-refresh" aria-label="Refresh selected CSV files" title="Refresh selected CSV files" onClick={()=>{setDataMenuOpen(false);refreshSelectedFiles()}}><RefreshCw/></button>}</div><footer><span>Current source</span><strong>{metadata?.source||"No folder loaded"}</strong></footer></div></>}</div></div>
-        <div className="legal-sidebar-utilities"><button aria-label="Home" title="Home" onClick={() => {window.location.hash="/"}}><Home/><span>Home</span></button><button aria-label={sidebarCollapsed ? "Expand sidebar" : "Minimize sidebar"} title={sidebarCollapsed ? "Expand sidebar" : "Minimize"} onClick={() => setSidebarCollapsed((current) => {const next=!current;localStorage.setItem("legal-sidebar-collapsed",String(next));return next})}><ArrowLeft/><span>{sidebarCollapsed ? "Expand" : "Minimize"}</span></button></div>
+        <div className="legal-sidebar-utilities"><button aria-label="Home" title="Home" onClick={() => {window.location.hash="/"}}><Home/><span>Home</span></button><button className="legal-menu-slide-toggle" aria-label={sidebarCollapsed ? "Expand menu" : "Slide menu left"} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? "Expand menu" : "Slide menu left"} onClick={() => {setDataMenuOpen(false);setSidebarCollapsed((current) => {const next=!current;localStorage.setItem("legal-sidebar-collapsed",String(next));return next})}}><ArrowLeft/><span>{sidebarCollapsed ? "Expand" : "Slide left"}</span></button></div>
         <nav>
           {availableNav.map(([id, Icon]) => (
             <button
@@ -3645,9 +3809,7 @@ export default function LegalPlatform() {
             >
               <Icon />
               <span>{labels[id]}</span>
-              {metadata?.reviewCounts[id] !== undefined && (
-                <b className="nav-count">{metadata.reviewCounts[id]}</b>
-              )}
+              {loadStatuses[id]&&<NavLoadStatus label={labels[id]} status={loadStatuses[id]}/>}
             </button>
           ))}
         </nav>
@@ -3694,9 +3856,7 @@ export default function LegalPlatform() {
               <button onClick={() => setError("")}>Dismiss</button>
             </div>
           )}
-          {metadataLoading ? (
-            <AppStartupLoadingScreen />
-          ) : !metadata?.ready && metadata?.loading ? (
+          {metadataLoading || (!metadata?.ready && metadata?.loading) ? (
             <LegalSkeleton variant="overview" />
           ) : !metadata?.ready ? (
             <section className="glass legal-import-source" aria-labelledby="import-data-source-title">
@@ -3720,7 +3880,7 @@ export default function LegalPlatform() {
                   <ArrowRight/>
                 </button>
               </div>
-              <footer><CheckCircle2/><span><strong>Required files:</strong> beneficiaries, assessments, and legal services. Add optional files whenever available.</span></footer>
+              <footer><CheckCircle2/><span>Import <strong>legalhotlines.csv</strong> by itself for Hotline, or import beneficiaries, assessments, and legal services for the full platform.</span></footer>
             </section>
           ) : page === "overview" ? (
             <Overview metadata={metadata} theme={theme as Theme} />
@@ -3733,6 +3893,8 @@ export default function LegalPlatform() {
             <ReviewPage key={`${page}-${dataRevision}`} dataset={page} onOpenCase={openReviewCase} />
           ) : page === "explorer" ? (
             <Explorer metadata={metadata} onOpenCase={openReviewCase} />
+          ) : page === "hotline" ? (
+            <HotlineDashboard key={`hotline-${dataRevision}`} metadata={metadata} theme={theme as Theme}/>
           ) : page === "deportation" ? (
             <LegalDeportationDashboard metadata={metadata} theme={theme as Theme}/>
           ) : page === "studio" ? (
@@ -3827,8 +3989,8 @@ function Overview({
           </div>
         ))}
       </section>
-      <TrendCard rows={(o?.activityTrend||[]).map((row)=>({label:row.month,count:row.assessments,percent:0}))} primaryLabel="Assessments" display="count" theme={theme} title="Monthly assessments" subtitle="2026 only · Assessment workload by month"/>
-      <TrendCard rows={(o?.representationTrend||[]).map((row)=>({label:row.month,count:row.representation,percent:0}))} primaryLabel="Representation services" display="count" theme={theme} title="Monthly representation services" subtitle="2026 only · Legal Representation and Legal Assistance services by provision month"/>
+      <TrendCard rows={(o?.activityTrend||[]).map((row)=>({label:row.month,count:row.assessments,percent:0}))} hoverMetrics={[{label:"Open assessments",icon:"●",color:"#d4852f",rows:(o?.activityTrend||[]).map(row=>({label:row.month,count:row.open}))},{label:"Closed assessments",icon:"✓",color:"#2f9e68",rows:(o?.activityTrend||[]).map(row=>({label:row.month,count:row.closed}))}]} primaryLabel="Assessments" display="count" theme={theme} title="Monthly Assessment" subtitle="2026 only · Assessment workload by month"/>
+      <TrendCard rows={(o?.representationTrend||[]).map((row)=>({label:row.month,count:row.representation,percent:0}))} hoverMetrics={[{label:"Open representation",icon:"●",color:"#d4852f",rows:(o?.representationTrend||[]).map(row=>({label:row.month,count:row.open}))},{label:"Closed representation",icon:"✓",color:"#2f9e68",rows:(o?.representationTrend||[]).map(row=>({label:row.month,count:row.closed}))}]} primaryLabel="Representation services" display="count" theme={theme} title="Monthly representation services" subtitle="2026 only · Legal Representation and Legal Assistance services by provision month"/>
       <section className="overview-analysis-grid" aria-label="Operational analysis">
         <ChartCard chart={overviewChart("assessment-status","Assessment status",o?.charts?.assessmentStatus||[])} display="count" theme={theme} onSelect={()=>{}}/>
         <ChartCard chart={overviewChart("representation-status","Representation service status",o?.charts?.representationServiceStatus||[])} display="count" theme={theme} onSelect={()=>{}}/>
@@ -3840,7 +4002,7 @@ function Overview({
         {metadata.features?.deportation && <ChartCard chart={overviewChart("deportation-governorate","Deportations by governorate",o?.deportationsByGovernorate||[])} display="count" theme={theme} onSelect={()=>{}}/>}
         <IraqDetentionMapMetrics items={o?.detention2026?.map||[]} selected={[]} onSelect={()=>{}} showFooter={false}/>
       </section>}
-      <section className="glass overview-location-performance"><header><div><span className="eyebrow">LOCATION PERFORMANCE</span><h3>Operational activity by project location</h3></div></header><div className="legal-table-wrap"><table><thead><tr><th>Project location</th><th>Assessments</th><th>Representation services</th>{showDetentionDetails && <><th>Detained (2026)</th><th>Released (2026)</th></>}<th>Representation completion</th></tr></thead><tbody>{(o?.locationPerformance||[]).map((row)=><tr key={row.location}><td><strong>{row.location}</strong></td><td>{row.assessments.toLocaleString()}</td><td>{row.representationServices.toLocaleString()}</td>{showDetentionDetails && <><td>{row.detained.toLocaleString()}</td><td>{row.released.toLocaleString()}</td></>}<td>{row.representationServices?`${(row.completionRate*100).toFixed(1)}%`:"—"}</td></tr>)}</tbody></table></div></section>
+      <section className="glass overview-location-performance"><header><div><span className="eyebrow">LOCATION PERFORMANCE</span><h3>Operational activity by project location</h3></div></header><div className="legal-table-wrap"><table><thead><tr><th>Project location</th><th>Assessments</th><th>Representation services</th><th>Representation services closed</th><th>Representation services open</th><th>Representation completion</th>{showDetentionDetails && <><th>Detained (2026)</th><th>Released (2026)</th></>}</tr></thead><tbody>{(o?.locationPerformance||[]).map((row)=><tr key={row.location}><td><strong>{row.location}</strong></td><td>{row.assessments.toLocaleString()}</td><td>{row.representationServices.toLocaleString()}</td><td>{row.closedRepresentationServices.toLocaleString()}</td><td>{row.openRepresentationServices.toLocaleString()}</td><td>{row.representationServices?`${(row.completionRate*100).toFixed(1)}%`:"—"}</td>{showDetentionDetails && <><td>{row.detained.toLocaleString()}</td><td>{row.released.toLocaleString()}</td></>}</tr>)}</tbody></table></div></section>
     </div>
   );
 }

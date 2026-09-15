@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Plot from "./LazyPlot";
-import { formatFilterMonth } from "./dateFormat";
+import { formatFilterMonth, formatYearMonthFilterValue } from "./dateFormat";
 import {
   Check,
   ChevronDown,
@@ -146,7 +146,13 @@ const chartInk = (theme: Theme) =>
   theme === "glass-dark" ? "#edf7ff" : "#263746";
 const chartGrid = (theme: Theme) =>
   theme === "glass-dark" ? "rgba(190,215,232,.13)" : "rgba(90,115,135,.13)";
+const wrapAxisLabel=(label:string,max=30)=>{
+  const words=label.trim().split(/\s+/),lines:string[]=[];
+  for(const word of words){const last=lines.at(-1);if(!last||last.length+word.length+1>max)lines.push(word);else lines[lines.length-1]=`${last} ${word}`}
+  return lines.join("<br>");
+};
 const compactDetentionLabel=(title:string,label:string)=>{
+  if(title==="Detaining Authority")return wrapAxisLabel(label);
   if(!["Detaining Authority","Possible Charges"].includes(title))return label;
   const english=label.replace(/[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]+/g,"").replace(/\s*[-–:|/]\s*$/g,"").replace(/\s{2,}/g," ").trim();
   return english.replace(/Other\s*\(please specify in the comments section\)/i,"Other").replace(/Residency department/i,"Residency Department")||label;
@@ -179,6 +185,7 @@ export function ChartCard({
   const [modal, setModal] = useState(false),
     [graph, setGraph] = useState<any>(null);
   const rows = [...chart.rows].reverse();
+  const priorityColors:Record<string,string>={High:"#dc2626",Medium:"#d97706",Low:"#16a34a","Not recorded":"#94a3b8"};
   const values = rows.map((r) => (display === "percent" ? r.percent : r.count));
   const text = rows.map((r) =>
     display === "count"
@@ -219,7 +226,7 @@ export function ChartCard({
               textposition: "auto",
               hovertemplate: "%{y}<br>%{text}<extra></extra>",
               marker: {
-                color: theme === "multicolor" ? rows.map((_, index) => categoryPalette[index % categoryPalette.length]) : "#1683d8",
+                color: chart.title === "Priority" ? rows.map((row)=>priorityColors[row.label]||"#64748b") : theme === "multicolor" ? rows.map((_, index) => categoryPalette[index % categoryPalette.length]) : "#1683d8",
                 line: { color: "rgba(255,255,255,.55)", width: 1 },
               },
             },
@@ -227,7 +234,7 @@ export function ChartCard({
           layout={{
             autosize: true,
             height: Math.max(290, rows.length * 34),
-            margin: { l: 18, r: 16, t: 8, b: 36 },
+            margin: { l: chart.title === "Detaining Authority" ? 260 : 18, r: 16, t: 8, b: 36 },
             paper_bgcolor: "rgba(0,0,0,0)",
             plot_bgcolor: "rgba(0,0,0,0)",
             font: {
@@ -267,6 +274,7 @@ export function ChartCard({
 export function TrendCard({
   rows,
   comparisonRows,
+  hoverMetrics,
   primaryLabel,
   comparisonLabel = "Completed",
   display,
@@ -279,6 +287,7 @@ export function TrendCard({
 }: {
   rows: Row[];
   comparisonRows?: Row[];
+  hoverMetrics?: {label:string;icon:string;color:string;rows:{label:string;count:number}[]}[];
   primaryLabel?: string;
   comparisonLabel?: string;
   display: Display;
@@ -294,6 +303,9 @@ export function TrendCard({
   const dragAnchor = useRef<number | null>(null);
   const vals = rows.map((r) => (display === "percent" ? r.percent : r.count));
   const comparisonByMonth = new Map((comparisonRows || []).map((r) => [r.label, r]));
+  const hoverMetricMaps = (hoverMetrics || []).map((metric) => new Map(metric.rows.map((row) => [row.label, row.count])));
+  const hoverValues = rows.map((row) => hoverMetricMaps.map((metric) => metric.get(row.label) || 0));
+  const hoverMetricTemplate = (hoverMetrics || []).map((metric,index) => `<span style="color:${metric.color}">${metric.icon}</span>&nbsp; ${metric.label}&nbsp;&nbsp;<b>%{customdata[${index}]:,.0f}</b>`).join("<br>");
   const comparisonVals = rows.map((r) => {
     const match = comparisonByMonth.get(r.label);
     return display === "percent" ? (match?.percent || 0) : (match?.count || 0);
@@ -349,7 +361,10 @@ export function TrendCard({
               },
               fill: "tozeroy",
               fillcolor: "rgba(22,131,216,.10)",
-              hovertemplate: `<b>${primaryLabel || (comparisonRows ? "Started" : title)}</b><br>%{y:,.0f}<extra></extra>`,
+              customdata: hoverMetrics?.length ? hoverValues : undefined,
+              hovertemplate: hoverMetrics?.length
+                ? `<b>${primaryLabel || title}</b>&nbsp;&nbsp;%{y:,.0f}<br>${hoverMetricTemplate}<extra></extra>`
+                : `<b>${primaryLabel || (comparisonRows ? "Started" : title)}</b><br>%{y:,.0f}<extra></extra>`,
               text: vals.map((value) => display === "percent" ? formatPercent(value) : formatNumber(value)),
               textposition: "top center",
               textfont: { color: chartInk(theme), size: 12 },
@@ -615,7 +630,7 @@ export function FilterDrawer({
           <span>{reviewStyle ? "REVIEW FILTERS" : "Dashboard controls"}</span>
           <h2>{reviewStyle ? "Filter all deportation records" : "Filters"}</h2>
         </div>
-        <button className="icon" onClick={onClose}>
+        <button className="icon" onClick={onClose} aria-label="Close filters">
           <X />
         </button>
       </div>
@@ -691,7 +706,7 @@ function FilterGroup({
                 }
               />
               <span className="box">{selected.includes(v) && <Check />}</span>
-              <span>{v}</span>
+              <span>{formatYearMonthFilterValue(field,v)}</span>
             </label>
           ))}
         </div>

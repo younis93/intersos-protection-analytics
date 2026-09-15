@@ -6,9 +6,10 @@ export interface StudioView {rows:string[];columns:string[];cells:StudioViewCell
 const sum=(values:number[])=>values.reduce((total,value)=>total+value,0);
 
 export function transformStudioResult(result:StudioResult,options:StudioChartOptions):StudioView{
-  const sourceRows=[...new Set(result.cells.map(cell=>cell.row))];
-  const columns=[...new Set(result.cells.map(cell=>cell.column))];
-  const lookup=new Map(result.cells.map(cell=>[`${cell.row}\u0000${cell.column}`,cell.count]));
+  const normalizedCells=result.cells.map(cell=>({...cell,column:cell.column2?`${cell.column} / ${cell.column2}`:cell.column}));
+  const sourceRows=[...new Set(normalizedCells.map(cell=>cell.row))];
+  const columns=[...new Set(normalizedCells.map(cell=>cell.column))];
+  const lookup=new Map(normalizedCells.map(cell=>[`${cell.row}\u0000${cell.column}`,cell.count]));
   const count=(row:string,column:string)=>lookup.get(`${row}\u0000${column}`)||0;
   const rowTotal=(row:string)=>sum(columns.map(column=>count(row,column)));
   const ranked=[...sourceRows].sort((a,b)=>rowTotal(b)-rowTotal(a)||a.localeCompare(b));
