@@ -1,2 +1,2 @@
-APP_VERSION = "1.0.42"
+APP_VERSION = "1.0.43"
 DEFAULT_GITHUB_REPOSITORY = "younis93/intersos-protection-analytics"
