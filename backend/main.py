@@ -115,6 +115,7 @@ indicator_master: IndicatorMasterWorkbook | None = None
 indicator_master_restore_error = ""
 legal_store_loading = False
 legal_store_restore_error = ""
+indicator_master_loading = False
 
 def load_initial_legal_store() -> None:
     """Restore the remembered Legal data outside the desktop window startup path."""
@@ -149,11 +150,21 @@ if os.getenv("INTERSOS_DEFER_LEGAL_LOAD", "").lower() in {"1", "true", "yes"}:
 else:
     load_initial_legal_store()
 
-if REMEMBERED_INDICATOR_MASTER:
+def load_initial_indicator_master() -> None:
+    global indicator_master, indicator_master_restore_error, indicator_master_loading
+    indicator_master_loading = True
     try:
-        indicator_master = IndicatorMasterWorkbook.from_path(REMEMBERED_INDICATOR_MASTER)
+        indicator_master = IndicatorMasterWorkbook.from_path(REMEMBERED_INDICATOR_MASTER) if REMEMBERED_INDICATOR_MASTER else None
+        indicator_master_restore_error = ""
     except Exception as exc:
+        indicator_master = None
         indicator_master_restore_error = f"Unable to restore the selected master workbook: {exc}"
+    finally:
+        indicator_master_loading = False
+
+
+if os.getenv("INTERSOS_DEFER_LEGAL_LOAD", "").lower() not in {"1", "true", "yes"}:
+    load_initial_indicator_master()
 
 app = FastAPI(title="Iraq Data Analysis API", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
