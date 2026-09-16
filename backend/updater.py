@@ -24,6 +24,104 @@ _lock = threading.Lock()
 _state: dict[str, Any] = {"phase": "idle", "progress": 0, "error": None, "downloadedBytes": 0, "totalBytes": 0}
 _available: dict[str, Any] | None = None
 
+UPDATE_RUNNER = r'''param(
+    [Parameter(Mandatory=$true)][int]$ApplicationProcessId,
+    [Parameter(Mandatory=$true)][string]$ApplicationPath,
+    [Parameter(Mandatory=$true)][string]$InstallerPath,
+    [Parameter(Mandatory=$true)][string]$ExpectedVersion
+)
+
+$ErrorActionPreference = 'Stop'
+$UpdateRoot = Split-Path -Parent $InstallerPath
+$InstallDirectory = Split-Path -Parent $ApplicationPath
+$RunnerLog = Join-Path $UpdateRoot 'update-runner.log'
+$InstallerLog = Join-Path $UpdateRoot 'update-installer.log'
+
+function Write-UpdateLog([string]$Message) {
+    Add-Content -LiteralPath $RunnerLog -Value "$(Get-Date -Format o) $Message" -Encoding UTF8
+}
+
+function Test-ApplicationRunning {
+    $ExpectedPath = [IO.Path]::GetFullPath($ApplicationPath)
+    $ProcessName = [IO.Path]::GetFileNameWithoutExtension($ApplicationPath)
+    foreach ($Process in @(Get-Process -Name $ProcessName -ErrorAction SilentlyContinue)) {
+        try {
+            if ($Process.Path -and ([IO.Path]::GetFullPath($Process.Path) -ieq $ExpectedPath)) {
+                return $true
+            }
+        } catch {
+            if ($Process.Id -eq $ApplicationProcessId) { return $true }
+        }
+    }
+    return $false
+}
+
+function Show-UpdateFailure([string]$Message) {
+    if ($env:INTERSOS_UPDATE_NO_DIALOG -eq '1') { return }
+    try {
+        Add-Type -AssemblyName PresentationFramework
+        [System.Windows.MessageBox]::Show(
+            "$Message`n`nDiagnostic log:`n$RunnerLog",
+            'Iraq Data Analysis update failed',
+            'OK',
+            'Error'
+        ) | Out-Null
+    } catch {}
+}
+
+try {
+    Write-UpdateLog "Runner started for version $ExpectedVersion."
+    $Deadline = (Get-Date).AddSeconds(120)
+    while (Test-ApplicationRunning) {
+        if ((Get-Date) -ge $Deadline) {
+            throw 'The running application did not close within 120 seconds.'
+        }
+        Start-Sleep -Milliseconds 250
+    }
+
+    Write-UpdateLog 'Application process closed. Starting the installer.'
+    $InstallerArguments = @(
+        '/VERYSILENT',
+        '/SUPPRESSMSGBOXES',
+        '/CLOSEAPPLICATIONS',
+        '/NORESTARTAPPLICATIONS',
+        '/NORESTART',
+        '/INTERSOSUPDATE',
+        '/EXTERNALRELAUNCH',
+        "/DIR=$InstallDirectory",
+        "/LOG=$InstallerLog"
+    )
+    & $InstallerPath @InstallerArguments
+    $InstallerExitCode = $LASTEXITCODE
+    Write-UpdateLog "Installer exited with code $InstallerExitCode."
+    if ($InstallerExitCode -notin @(0, 3010)) {
+        throw "The installer failed with exit code $InstallerExitCode."
+    }
+
+    $VersionMarker = Join-Path $InstallDirectory 'app-version.txt'
+    if (-not (Test-Path -LiteralPath $VersionMarker)) {
+        throw 'The installed version marker was not created.'
+    }
+    $InstalledVersion = (Get-Content -LiteralPath $VersionMarker -Raw).Trim()
+    if ($InstalledVersion -ne $ExpectedVersion) {
+        throw "Installed version $InstalledVersion does not match expected version $ExpectedVersion."
+    }
+    if (-not (Test-Path -LiteralPath $ApplicationPath)) {
+        throw 'The updated application executable was not found.'
+    }
+
+    Write-UpdateLog "Version $InstalledVersion verified. Relaunching the application."
+    Start-Process -FilePath $ApplicationPath -WorkingDirectory $InstallDirectory
+    Write-UpdateLog 'Update completed successfully.'
+    exit 0
+} catch {
+    $Failure = $_.Exception.Message
+    Write-UpdateLog "ERROR: $Failure"
+    Show-UpdateFailure $Failure
+    exit 1
+}
+'''
+
 
 def _version(value: str) -> tuple[int, ...]:
     clean = value.strip().lstrip("v").split("-", 1)[0]
@@ -82,25 +180,38 @@ def _installer_command(target: Path, install_directory: Path | None = None, log_
     return command
 
 
-def _relaunch_command(target: Path, application: Path, process_id: int | None = None) -> list[str]:
-    installer = str(target).replace("'", "''")
-    app = str(application).replace("'", "''")
-    app_directory = str(application.parent).replace("'", "''")
-    current_process_id = process_id if process_id is not None else os.getpid()
-    update_log = target.with_suffix(".log")
-    arguments = ",".join(
-        "'\"{}\"'".format(argument.replace("'", "''"))
-        for argument in _installer_command(target, application.parent, update_log)[1:]
-    )
-    script = (
-        f"$deadline=(Get-Date).AddSeconds(90); while (Get-Process -Id {current_process_id} -ErrorAction SilentlyContinue) {{ "
-        "if ((Get-Date) -ge $deadline) { exit 1 }; Start-Sleep -Milliseconds 250 }; "
-        f"$process=Start-Process -FilePath '{installer}' -ArgumentList @({arguments}) -PassThru; "
-        "$process.WaitForExit(); "
-        f"if ($process.ExitCode -in @(0,3010)) {{ Start-Sleep -Seconds 2; Start-Process -FilePath '{app}' -WorkingDirectory '{app_directory}'; exit 0 }}; "
-        "exit $process.ExitCode"
-    )
-    return ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script]
+def _write_update_runner(target: Path) -> Path:
+    runner = target.with_name("run-update.ps1")
+    runner.write_text(UPDATE_RUNNER, encoding="utf-8-sig")
+    return runner
+
+
+def _relaunch_command(
+    target: Path,
+    application: Path,
+    expected_version: str,
+    process_id: int | None = None,
+) -> list[str]:
+    runner = _write_update_runner(target)
+    return [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-WindowStyle",
+        "Hidden",
+        "-File",
+        str(runner),
+        "-ApplicationProcessId",
+        str(process_id if process_id is not None else os.getpid()),
+        "-ApplicationPath",
+        str(application),
+        "-InstallerPath",
+        str(target),
+        "-ExpectedVersion",
+        expected_version,
+    ]
 
 
 def _cleanup_stale_downloads() -> None:
@@ -168,9 +279,13 @@ def _download_and_install(manifest: dict[str, Any]) -> None:
         _set(phase="installing", progress=98)
         creation_flags = 0
         if os.name == "nt":
-            creation_flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            creation_flags = (
+                subprocess.DETACHED_PROCESS
+                | subprocess.CREATE_NEW_PROCESS_GROUP
+                | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
+            )
         command = (
-            _relaunch_command(target, Path(sys.executable), os.getpid())
+            _relaunch_command(target, Path(sys.executable), str(manifest["version"]), os.getpid())
             if os.name == "nt" and getattr(sys, "frozen", False)
             else _installer_command(target)
         )

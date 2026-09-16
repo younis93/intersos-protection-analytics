@@ -28,7 +28,11 @@ PrivilegesRequired=lowest
 OutputDir={#MyOutputDir}
 OutputBaseFilename=Iraq-Data-Analysis-Setup-{#MyAppVersion}
 SetupIconFile=..\intersos-protection-analytics.ico
+#ifdef UiTestBuild
 Compression=lzma2/fast
+#else
+Compression=lzma2/ultra64
+#endif
 SolidCompression=yes
 CloseApplications=yes
 RestartApplications=yes
@@ -47,6 +51,10 @@ SetupLogging=yes
 Source: "..\packaging-temp\dist\Iraq Data Analysis\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "INTERSOS-Code-Signing.cer"; Flags: dontcopy
 Source: "MicrosoftEdgeWebview2Setup.exe"; Flags: dontcopy
+
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\_internal"
+Type: files; Name: "{app}\INTERSOS Legal Platform.exe"
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -96,14 +104,11 @@ begin
 end;
 
 function CertificateInstalled(const StoreName: String): Boolean;
-var
-  ResultCode: Integer;
 begin
-  Result := Exec(
-    ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-    '-NoProfile -NonInteractive -Command "if (Test-Path -LiteralPath ''Cert:\CurrentUser\' +
-      StoreName + '\{#SigningCertificateThumbprint}'') { exit 0 } else { exit 1 }"',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+  Result := RegKeyExists(
+    HKCU,
+    'Software\Microsoft\SystemCertificates\' + StoreName +
+      '\Certificates\{#SigningCertificateThumbprint}');
 end;
 
 function UpdateTrustReady: Boolean;
@@ -299,7 +304,10 @@ begin
       WizardForm.StatusLabel.Caption := 'Installing {#MyAppName}...';
   end;
   if CurStep = ssPostInstall then
+  begin
+    SaveStringToFile(ExpandConstant('{app}\app-version.txt'), '{#MyAppVersion}', False);
     WizardForm.StatusLabel.Caption := 'Finishing setup...';
+  end;
   if CurStep = ssDone then
     WizardForm.StatusLabel.Caption := 'Installation complete.';
 end;
