@@ -1127,5 +1127,10 @@ html,body,#root{height:100%;overflow-x:hidden}
 /* Open the first Indicator Reporting menu inward so the content viewport cannot clip it. */
 .indicator-reporting .indicator-filter-bar>.checkbox-multi-select:first-child .checkbox-multi-menu{left:0;right:auto}
 
+/* Keep the first wide filter menu inside the main content viewport. */
+.legal-deportation-dashboard .deportation-quick-filters>.checkbox-multi-select:first-child .checkbox-multi-menu,
+.lawyer-overview-page .lawyer-overview-filter-bar>.checkbox-multi-select:first-child .checkbox-multi-menu,
+.legal-analytics-studio .studio-quick-fields>.checkbox-multi-select:first-child .checkbox-multi-menu{left:0;right:auto}
+
 /* Lawyer Overview uses the application main pane as its vertical scroll owner. */
 .legal-shell main:has(.lawyer-overview-page){height:100dvh;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior-y:contain}
