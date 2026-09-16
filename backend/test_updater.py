@@ -70,7 +70,10 @@ class UpdaterTests(unittest.TestCase):
     def test_runner_waits_installs_verifies_and_relaunches(self):
         script = updater.UPDATE_RUNNER
         self.assertIn("while (Test-ApplicationRunning)", script)
-        self.assertIn("& $InstallerPath @InstallerArguments", script)
+        self.assertIn("Start-Process -FilePath $InstallerPath", script)
+        self.assertIn("-Wait -PassThru", script)
+        self.assertIn("$InstallerExitCode = $InstallerProcess.ExitCode", script)
+        self.assertNotIn("$InstallerExitCode = $LASTEXITCODE", script)
         self.assertIn("$InstallerExitCode -notin @(0, 3010)", script)
         self.assertIn("$InstalledVersion -ne $ExpectedVersion", script)
         self.assertIn("Start-Process -FilePath $ApplicationPath", script)

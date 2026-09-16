@@ -91,8 +91,11 @@ try {
         "/DIR=$InstallDirectory",
         "/LOG=$InstallerLog"
     )
-    & $InstallerPath @InstallerArguments
-    $InstallerExitCode = $LASTEXITCODE
+    $QuotedInstallerArguments = @($InstallerArguments | ForEach-Object {
+        '"' + $_.Replace('"', '\"') + '"'
+    })
+    $InstallerProcess = Start-Process -FilePath $InstallerPath -ArgumentList $QuotedInstallerArguments -Wait -PassThru
+    $InstallerExitCode = $InstallerProcess.ExitCode
     Write-UpdateLog "Installer exited with code $InstallerExitCode."
     if ($InstallerExitCode -notin @(0, 3010)) {
         throw "The installer failed with exit code $InstallerExitCode."
