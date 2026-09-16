@@ -12,6 +12,6 @@ The application also checks every six hours while it remains open. Periodic chec
 
 Starting with version 1.0.4, the setup executable contains only the public INTERSOS code-signing certificate and installs it into the current user's Root and Trusted Publishers stores after explicit confirmation. The PFX and its password remain only in GitHub Actions secrets.
 
-Users install the 1.0.18 Legal Platform setup once. Windows will show an unknown-publisher warning before the certificate is trusted. After that bootstrap installation, signed updates can be installed through the application.
+Users install the setup once. Windows will show an unknown-publisher warning before the certificate is trusted. After that bootstrap installation, signed updates can be installed through the application. In-app updates explicitly reuse the directory of the running application, so installations in a custom or previously renamed folder are upgraded in place.
 
 The public repository contains application code and release binaries only. Uploaded workbooks never leave the client computer.

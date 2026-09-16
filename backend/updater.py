@@ -64,8 +64,8 @@ def _set(**values: Any) -> None:
         _state.update(values)
 
 
-def _installer_command(target: Path) -> list[str]:
-    return [
+def _installer_command(target: Path, install_directory: Path | None = None, log_path: Path | None = None) -> list[str]:
+    command = [
         str(target),
         "/VERYSILENT",
         "/SUPPRESSMSGBOXES",
@@ -75,20 +75,30 @@ def _installer_command(target: Path) -> list[str]:
         "/INTERSOSUPDATE",
         "/EXTERNALRELAUNCH",
     ]
+    if install_directory is not None:
+        command.append(f"/DIR={install_directory}")
+    if log_path is not None:
+        command.append(f"/LOG={log_path}")
+    return command
 
 
 def _relaunch_command(target: Path, application: Path, process_id: int | None = None) -> list[str]:
     installer = str(target).replace("'", "''")
     app = str(application).replace("'", "''")
+    app_directory = str(application.parent).replace("'", "''")
     current_process_id = process_id if process_id is not None else os.getpid()
-    arguments = ",".join("'{}'".format(argument.replace("'", "''")) for argument in _installer_command(target)[1:])
+    update_log = target.with_suffix(".log")
+    arguments = ",".join(
+        "'\"{}\"'".format(argument.replace("'", "''"))
+        for argument in _installer_command(target, application.parent, update_log)[1:]
+    )
     script = (
         f"$deadline=(Get-Date).AddSeconds(90); while (Get-Process -Id {current_process_id} -ErrorAction SilentlyContinue) {{ "
         "if ((Get-Date) -ge $deadline) { exit 1 }; Start-Sleep -Milliseconds 250 }; "
         f"$process=Start-Process -FilePath '{installer}' -ArgumentList @({arguments}) -PassThru; "
         "$process.WaitForExit(); "
-        f"if ($process.ExitCode -in @(0,3010)) {{ Start-Sleep -Seconds 2; Start-Process -FilePath '{app}'; exit 0 }}; "
-        f"Start-Process -FilePath '{app}'; exit $process.ExitCode"
+        f"if ($process.ExitCode -in @(0,3010)) {{ Start-Sleep -Seconds 2; Start-Process -FilePath '{app}' -WorkingDirectory '{app_directory}'; exit 0 }}; "
+        "exit $process.ExitCode"
     )
     return ["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script]
 

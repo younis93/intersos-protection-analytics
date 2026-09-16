@@ -52,12 +52,21 @@ class UpdaterTests(unittest.TestCase):
         self.assertIn("/EXTERNALRELAUNCH", command)
 
     def test_external_relauncher_waits_for_the_current_app_and_installer(self):
-        command = updater._relaunch_command(Path("setup.exe"), Path("app.exe"), process_id=1234)
+        command = updater._relaunch_command(Path("update/setup.exe"), Path("installed/app.exe"), process_id=1234)
         script = command[-1]
         self.assertIn("Get-Process -Id 1234", script)
         self.assertIn("$process.WaitForExit()", script)
-        self.assertIn("Start-Process -FilePath 'app.exe'", script)
+        self.assertIn("Start-Process -FilePath 'installed\\app.exe'", script)
         self.assertIn("/NORESTARTAPPLICATIONS", script)
+        self.assertIn("/DIR=installed", script)
+        self.assertIn("/LOG=update\\setup.log", script)
+
+    def test_update_installs_over_the_running_application_directory(self):
+        command = updater._installer_command(
+            Path("setup.exe"), Path(r"C:\Users\Person\App Folder"), Path(r"C:\Temp\update.log")
+        )
+        self.assertIn(r"/DIR=C:\Users\Person\App Folder", command)
+        self.assertIn(r"/LOG=C:\Temp\update.log", command)
 
     def test_status_reports_download_byte_counts(self):
         updater._set(phase="downloading", progress=45, downloadedBytes=45_000_000, totalBytes=100_000_000)
