@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+def _normalize_identifier(identifier_type: str, value: object) -> str:
+    text = str(value).strip()
+    if identifier_type == "awarenessName":
+        return " ".join(text.casefold().split())
+    return text[:-2] if re.fullmatch(r"\d+\.0", text) else text
 
 
 class DuplicateExclusionRegistry:
@@ -33,6 +41,9 @@ class DuplicateExclusionRegistry:
             normalized.setdefault("identifierValue", str(normalized.get("caseId", "")).strip())
             normalized.setdefault("identifierType", "caseId")
             normalized.setdefault("dataset", "beneficiaries")
+            normalized["identifierValue"] = _normalize_identifier(str(normalized["identifierType"]), normalized["identifierValue"])
+            if normalized["identifierType"] == "caseId":
+                normalized["caseId"] = normalized["identifierValue"]
             rows.append(normalized)
         return sorted(rows, key=lambda row: str(row.get("excludedAt", "")), reverse=True)
 
@@ -73,11 +84,9 @@ class DuplicateExclusionRegistry:
 
     def exclude_record(self, dataset: str, rule: str, identifier_type: str, identifier_value: str, name: str = "", project: str = "", source: str = "") -> tuple[dict[str, Any], bool]:
         dataset, rule, identifier_type = (str(value).strip() for value in (dataset, rule, identifier_type))
-        identifier_value = str(identifier_value).strip()
+        identifier_value = _normalize_identifier(identifier_type, identifier_value)
         if not all((dataset, rule, identifier_type, identifier_value)):
             raise ValueError("Dataset, finding rule, identifier type, and identifier value are required.")
-        if identifier_type == "awarenessName":
-            identifier_value = " ".join(identifier_value.casefold().split())
         rows=self.exclusion_rows()
         key=(dataset, rule, identifier_type, identifier_value)
         if any((str(row.get("dataset")), str(row.get("rule")), str(row.get("identifierType")), str(row.get("identifierValue"))) == key for row in rows):
@@ -103,11 +112,9 @@ class DuplicateExclusionRegistry:
             dataset = str(item.get("dataset", "")).strip()
             rule = str(item.get("rule", "")).strip()
             identifier_type = str(item.get("identifierType", "")).strip()
-            identifier_value = str(item.get("identifierValue", item.get("caseId", ""))).strip()
+            identifier_value = _normalize_identifier(identifier_type, item.get("identifierValue", item.get("caseId", "")))
             if not all((dataset, rule, identifier_type, identifier_value)):
                 raise ValueError("Dataset, finding rule, identifier type, and identifier value are required.")
-            if identifier_type == "awarenessName":
-                identifier_value = " ".join(identifier_value.casefold().split())
             key = (dataset, rule, identifier_type, identifier_value)
             if key in keys:
                 duplicates += 1

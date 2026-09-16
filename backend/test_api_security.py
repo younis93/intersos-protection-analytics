@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 from openpyxl import load_workbook
 from starlette.requests import Request
 from starlette.responses import Response
@@ -36,6 +36,52 @@ class LocalApiSecurityTests(unittest.TestCase):
             self.assertIsNotNone(main.legal_store)
             self.assertEqual(main.legal_store.source,folder.name)
             self.assertFalse(main.legal_store_loading)
+
+    def test_exclusion_import_normalizes_numeric_ids_and_extended_headers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = DuplicateExclusionRegistry(Path(directory) / "exclusions.json")
+            upload = UploadFile(
+                filename="assessment-exclusions.csv",
+                file=io.BytesIO("Assessment ID / معرّف التقييم\n123.0\n123\n\n".encode("utf-8")),
+            )
+            with patch.object(main, "duplicate_exclusions", registry), patch.object(main, "legal_store", None):
+                result = asyncio.run(main.import_duplicate_exclusions(
+                    upload,
+                    "assessments",
+                    "assessmentId",
+                    "Assessment date after today",
+                ))
+            self.assertEqual(result["imported"], 1)
+            self.assertEqual(result["duplicates"], 0)
+            self.assertEqual(result["identifierType"], "assessmentId")
+            self.assertEqual(result["rows"][0]["identifierValue"], "123")
+
+    def test_exclusion_import_uses_detected_identifier_type(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = DuplicateExclusionRegistry(Path(directory) / "exclusions.json")
+            upload = UploadFile(filename="beneficiaries.csv", file=io.BytesIO(b"Beneficiary ID\nB-42\n"))
+            with patch.object(main, "duplicate_exclusions", registry), patch.object(main, "legal_store", None):
+                result = asyncio.run(main.import_duplicate_exclusions(
+                    upload,
+                    "beneficiaries",
+                    "incorrectType",
+                    "Invalid age",
+                ))
+            self.assertEqual(result["identifierType"], "caseId")
+            self.assertEqual(result["rows"][0]["identifierValue"], "B-42")
+
+    def test_exclusion_import_rejects_rule_from_another_review_page(self):
+        upload = UploadFile(filename="assessments.csv", file=io.BytesIO(b"Assessment ID\nA1\n"))
+        with self.assertRaises(HTTPException) as raised:
+            asyncio.run(main.import_duplicate_exclusions(upload, "assessments", "assessmentId", "Invalid age"))
+        self.assertEqual(raised.exception.status_code, 400)
+
+    def test_existing_numeric_exclusion_ids_are_repaired_when_loaded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "exclusions.json"
+            path.write_text('[{"dataset":"assessments","rule":"Pending assessment","identifierType":"assessmentId","identifierValue":"123.0"}]', encoding="utf-8")
+            rows = DuplicateExclusionRegistry(path).entries()
+            self.assertEqual(rows[0]["identifierValue"], "123")
 
     def test_startup_restores_remembered_individual_files(self):
         with tempfile.TemporaryDirectory() as directory:

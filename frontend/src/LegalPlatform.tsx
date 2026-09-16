@@ -710,6 +710,7 @@ function ReviewPageBody({
     [exclusionFile, setExclusionFile] = useState<File | null>(null),
     [exclusionImportRules, setExclusionImportRules] = useState<string[]>([]),
     [exclusionImportResult, setExclusionImportResult] = useState(""),
+    [exclusionImportError, setExclusionImportError] = useState(""),
     [duplicateMenu, setDuplicateMenu] = useState<{x:number;y:number;row:LegalFlag} | null>(null),
     [findingRevisions, setFindingRevisions] = useState<Record<string, number>>({}),
     [reviewActionsOpen, setReviewActionsOpen] = useState(false),
@@ -882,7 +883,7 @@ function ReviewPageBody({
                 </button>
                 {reviewActionsOpen && <div className="review-actions-menu finding-exclusion-menu" role="menu">
                   <button className="all-findings" role="menuitem" onClick={() => { setExclusionRuleFilter(""); setSelectedExcludedFindings([]); setReviewActionsOpen(false); setExcludedManagerOpen(true); void loadExcludedDuplicates(); }}>Excluded findings for this page <b>{visibleExcludedFindings.length}</b></button>
-                  <button className="all-findings" role="menuitem" onClick={() => { setExclusionImportRules([]); setReviewActionsOpen(false); setExclusionImportOpen(true); }}>Import exclusions</button>
+                  <button className="all-findings" role="menuitem" onClick={() => { setExclusionImportRules([]); setExclusionImportResult(""); setExclusionImportError(""); setReviewActionsOpen(false); setExclusionImportOpen(true); }}>Import exclusions</button>
                 </div>}
               </div>
             )}
@@ -1015,9 +1016,10 @@ function ReviewPageBody({
             <p>Choose the finding tables to exclude from, then upload CSV or Excel. The app automatically uses {dataset === "beneficiaries" ? "Case ID or Beneficiary ID" : dataset === "assessments" ? "Assessment ID" : dataset === "legalservices" ? "Service ID" : "Awareness ID"} from the file.</p>
             <div className="exclusion-import-rules"><span>Exclude from these tables</span>{orderedRules.map(([rule]) => <label key={rule}><input type="checkbox" checked={exclusionImportRules.includes(rule)} onChange={() => setExclusionImportRules((current) => current.includes(rule) ? current.filter((item) => item !== rule) : [...current, rule])} /><span>{rule}</span></label>)}</div>
             <label className="exclusion-file-picker" htmlFor="exclusion-import-file"><span>Choose file</span><small>{exclusionFile?.name || "CSV, XLSX, or XLS"}</small></label>
-            <input id="exclusion-import-file" className="exclusion-file-input" type="file" accept=".csv,.xlsx,.xls" onChange={(event) => { setExclusionFile(event.target.files?.[0] || null); setExclusionImportResult(""); }} />
+            <input id="exclusion-import-file" className="exclusion-file-input" type="file" accept=".csv,.xlsx,.xls" onChange={(event) => { setExclusionFile(event.target.files?.[0] || null); setExclusionImportResult(""); setExclusionImportError(""); }} />
             {exclusionImportResult && <p className="exclusion-import-success" role="status"><CheckCircle2 />{exclusionImportResult}</p>}
-            <footer><button className="soft" onClick={() => setExclusionImportOpen(false)}>Cancel</button><button className="primary" disabled={!exclusionFile || !exclusionImportRules.length || exclusionBusy} onClick={async () => { if (!exclusionFile) return; setExclusionBusy(true); try { const type=dataset === "assessments" ? "assessmentId" : dataset === "legalservices" ? "serviceId" : dataset === "awareness" ? "awarenessId" : "caseId"; const result=await importDuplicateExclusions(exclusionFile,dataset,type,exclusionImportRules); setExcludedDuplicates(result.rows); setExclusionImportResult(`Successfully imported ${result.imported} exclusion${result.imported === 1 ? "" : "s"} from ${result.column}. ${result.duplicates} already existed; ${result.invalid} invalid.`); setFindingRevisions((current)=>Object.fromEntries(exclusionImportRules.map((rule)=>[rule,(current[rule]||0)+1]))); } finally { setExclusionBusy(false); } }}>{exclusionBusy ? "Importing…" : "Import exclusions"}</button></footer>
+            {exclusionImportError && <p className="error" role="alert">{exclusionImportError}</p>}
+            <footer><button className="soft" onClick={() => setExclusionImportOpen(false)}>Cancel</button><button className="primary" disabled={!exclusionFile || !exclusionImportRules.length || exclusionBusy} onClick={async () => { if (!exclusionFile) return; setExclusionBusy(true); setExclusionImportError(""); setExclusionImportResult(""); try { const type=dataset === "assessments" ? "assessmentId" : dataset === "legalservices" ? "serviceId" : dataset === "awareness" ? "awarenessId" : "caseId"; const result=await importDuplicateExclusions(exclusionFile,dataset,type,exclusionImportRules); setExcludedDuplicates(result.rows); setExclusionImportResult(`Successfully imported ${result.imported} exclusion${result.imported === 1 ? "" : "s"} from ${result.column}. ${result.duplicates} already existed; ${result.invalid} invalid.`); setFindingRevisions((current)=>({...current,...Object.fromEntries(exclusionImportRules.map((rule)=>[rule,(current[rule]||0)+1]))})); } catch (reason) { setExclusionImportError(reason instanceof Error ? reason.message : "The exclusion file could not be imported."); } finally { setExclusionBusy(false); } }}>{exclusionBusy ? "Importing…" : "Import exclusions"}</button></footer>
           </section>
         </div>, document.body,
       )}

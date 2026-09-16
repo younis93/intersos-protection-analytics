@@ -8,6 +8,7 @@ import re
 import secrets
 import socket
 import sys
+import unicodedata
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -22,7 +23,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from .legal_platform import LegalStore, FILES, versioned_dataset_name
+from .legal_platform import LegalStore, FILES, REGISTERED_RULES, clean_id, versioned_dataset_name
 from .file_security import safe_spreadsheet_value, validate_xlsx_archive
 from .duplicate_exclusions import DuplicateExclusionRegistry
 from .indicator_reporting import build_indicator_report, build_indicator_workbook, build_narrative_workbook
@@ -393,12 +394,42 @@ def restore_duplicate_exclusion(case_id: str, rule: str, dataset: str = "", iden
     return duplicate_exclusion_payload()
 
 
+def _normalized_import_header(value: object) -> str:
+    text = unicodedata.normalize("NFKC", str(value))
+    text = "".join(character for character in text if unicodedata.category(character) != "Cf")
+    return re.sub(r"[^\w]+", " ", text.casefold(), flags=re.UNICODE).strip()
+
+
+def _exclusion_import_column(frame, dataset: str, requested_identifier_type: str):
+    aliases = {
+        "beneficiaries": (("case id", "caseId"), ("beneficiary id", "caseId")),
+        "assessments": (("assessment id", "assessmentId"),),
+        "legalservices": (("service id", "serviceId"),),
+        "awareness": (("awareness id", "awarenessId"),),
+    }
+    allowed_types = {identifier_type for _, identifier_type in aliases[dataset]}
+    normalized_columns = [(_normalized_import_header(column), column) for column in frame.columns]
+    for alias, identifier_type in aliases[dataset]:
+        for normalized, column in normalized_columns:
+            if normalized == alias or normalized.startswith(f"{alias} "):
+                return column, identifier_type
+    for normalized, column in normalized_columns:
+        if normalized == "identifier value":
+            if requested_identifier_type not in allowed_types:
+                raise ValueError("The Identifier value column does not match this review page.")
+            return column, requested_identifier_type
+    expected = aliases[dataset][0][0].title()
+    raise ValueError(f"No {expected} column was found in the uploaded file.")
+
+
 @app.post("/api/legal/duplicate-exclusions/import")
 async def import_duplicate_exclusions(file: UploadFile = File(...), dataset: str = Form(...), identifier_type: str = Form(...), rules: str = Form(...)):
     if dataset not in {"assessments", "legalservices", "awareness", "beneficiaries"}:
         raise HTTPException(400, "Unsupported review page.")
     selected_rules=[item.strip() for item in rules.split(",") if item.strip()]
     if not selected_rules: raise HTTPException(400, "Choose at least one finding table.")
+    unsupported_rules = [rule for rule in selected_rules if rule not in REGISTERED_RULES[dataset]]
+    if unsupported_rules: raise HTTPException(400, f"Unsupported finding for this review page: {unsupported_rules[0]}")
     raw=await file.read(MAX_UPLOAD_BYTES + 1)
     if len(raw)>MAX_UPLOAD_BYTES: raise HTTPException(413, "Exclusion file must be 100 MB or smaller.")
     try:
@@ -408,25 +439,20 @@ async def import_duplicate_exclusions(file: UploadFile = File(...), dataset: str
         if suffix==".xlsx": validate_xlsx_archive(raw)
         frame=pd.read_excel(source, dtype=object) if suffix in {".xlsx", ".xls"} else pd.read_csv(source, dtype=object, encoding="utf-8-sig")
         if frame.empty or not len(frame.columns): raise ValueError("The exclusion file has no identifier column.")
-        expected_columns={
-            "beneficiaries": ("case id", "beneficiary id"),
-            "assessments": ("assessment id",),
-            "legalservices": ("service id",),
-            "awareness": ("awareness id",),
-        }
-        normalized_columns={re.sub(r"\s+", " ", str(column).strip().casefold()): column for column in frame.columns}
-        column=next((normalized_columns[name] for name in expected_columns[dataset] if name in normalized_columns), None)
-        if column is None:
-            raise ValueError(f"No {expected_columns[dataset][0].title()} column was found in the uploaded file.")
-        values=frame[column].dropna().astype(str).map(str.strip).tolist()
-        imported=duplicates=invalid=0
-        for value in values:
+        column, effective_identifier_type = _exclusion_import_column(frame, dataset, identifier_type)
+        values=[]; invalid=0; seen=set()
+        for raw_value in frame[column].tolist():
+            if pd.isna(raw_value): invalid+=1; continue
+            value = clean_id(raw_value)
             if not value: invalid+=1; continue
-            for rule in selected_rules:
-                _, created=duplicate_exclusions.exclude_record(dataset, rule, identifier_type, value, source=f"Imported from {Path(file.filename or 'file').name}")
-                imported += int(created); duplicates += int(not created)
+            if value in seen: continue
+            seen.add(value); values.append(value)
+        source_name = Path(file.filename or "file").name
+        records=[{"dataset":dataset,"rule":rule,"identifierType":effective_identifier_type,"identifierValue":value,"source":f"Imported from {source_name}"} for value in values for rule in selected_rules]
+        _, imported, duplicates = duplicate_exclusions.exclude_records(records)
         if legal_store: legal_store.set_review_exclusions(duplicate_exclusions.exclusion_rows())
-        return {"imported":imported,"duplicates":duplicates,"invalid":invalid,"column":str(column),"rows":duplicate_exclusions.entries(),"count":len(duplicate_exclusions.entries())}
+        rows=duplicate_exclusions.entries()
+        return {"imported":imported,"duplicates":duplicates,"invalid":invalid,"column":str(column),"identifierType":effective_identifier_type,"rows":rows,"count":len(rows)}
     except ValueError as exc: raise HTTPException(400, str(exc)) from exc
     finally: await file.close()
 
