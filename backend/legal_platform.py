@@ -2253,11 +2253,18 @@ class LegalStore:
         detail_selected=[(label,_find(list(frame.columns),*hints)) for label,hints in detail_specs]
         columns_by_label=dict(selected)
         filter_labels=("Gender / age group","Community type","Nationality","Project","Project location","Detention governorate","Detaining authority","Possible charges","Immigration charge","Current status","Lawyer")
-        options={label:sorted({str(value).strip() for value in scoped[column].dropna().unique() if str(value).strip()}) for label,column in selected if label in filter_labels}
+        filter_columns={label:column for label,column in selected if label in filter_labels}
+        # The filter drawer is also the field browser for detention assessments,
+        # so expose every source column instead of limiting it to chart fields.
+        for column in frame.columns:
+            filter_columns.setdefault(str(column), column)
+        options={label:sorted({str(value).strip() for value in scoped[column].dropna().unique() if str(value).strip()}) for label,column in filter_columns.items()}
         assessment_date=columns_by_label.get("Assessment date")
+        detention_date=columns_by_label.get("Detention date")
         release_date=columns_by_label.get("Release/deportation date")
         month_options=lambda column: sorted({str(value) for value in pd.to_datetime(scoped[column],errors="coerce",dayfirst=True).dt.to_period("M").dropna()},reverse=True) if column else []
         options["Date of Assessment"]=month_options(assessment_date)
+        options["Date of Detention"]=month_options(detention_date)
         options["Date of the released"]=month_options(release_date)
         options["Type of Released"]=sorted({str(value).strip() for value in scoped[columns_by_label["Release type"]].dropna().unique() if str(value).strip()}) if columns_by_label.get("Release type") else []
         for label,values in (filters or {}).items():
@@ -2265,10 +2272,13 @@ class LegalStore:
             if label=="Date of Assessment" and assessment_date and values:
                 scoped=scoped[pd.to_datetime(scoped[assessment_date],errors="coerce",dayfirst=True).dt.to_period("M").astype(str).isin(values)]
                 continue
+            if label=="Date of Detention" and detention_date and values:
+                scoped=scoped[pd.to_datetime(scoped[detention_date],errors="coerce",dayfirst=True).dt.to_period("M").astype(str).isin(values)]
+                continue
             if label=="Date of the released" and release_date and values:
                 scoped=scoped[pd.to_datetime(scoped[release_date],errors="coerce",dayfirst=True).dt.to_period("M").astype(str).isin(values)]
                 continue
-            column=columns_by_label.get("Release type" if label=="Type of Released" else label)
+            column=columns_by_label.get("Release type" if label=="Type of Released" else label) or filter_columns.get(label)
             if column and values:scoped=scoped[scoped[column].fillna("").astype(str).isin(values)]
         trend_scope=scoped.copy()
         month_values=(filters or {}).get("month",[])

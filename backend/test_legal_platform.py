@@ -1062,6 +1062,11 @@ def test_versioned_csv_names_and_detention_page():
     assert result["total"]==2
     assert result["rows"][0]["caseId"]=="B1"
     assert result["filterOptions"]["Detention governorate"]==["Baghdad","Ninewa"]
+    assert result["filterOptions"]["Date of Detention"]==["2026-01"]
+    assert "Assessment ID" in result["filterOptions"]
+    assert "Beneficiary ID" in result["filterOptions"]
+    assert store.detention_cases(filters={"Date of Detention":["2026-01"]})["total"]==2
+    assert store.detention_cases(filters={"Date of Detention":["2026-02"]})["total"]==0
     assert result["map"]=={"items":[{"label":"Ninawa","count":1,"detained":1,"released":0,"values":["Ninewa"]},{"label":"Baghdad","count":1,"detained":1,"released":1,"values":["Baghdad"]}]}
     assert result["trend"]==[{"month":"2026-01","detainedAssessments":2,"released":0},{"month":"2026-02","detainedAssessments":0,"released":1}]
     february=store.detention_cases(filters={"month":["2026-02"]})
