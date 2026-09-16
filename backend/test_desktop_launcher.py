@@ -168,8 +168,23 @@ class DesktopLauncherTests(unittest.TestCase):
         self.assertGreaterEqual(focus.call_count, 2)
 
     def test_loading_view_uses_saved_theme_and_failure_message(self):
-        self.assertIn("#07131e", launcher.startup_html("glass-dark"))
-        self.assertIn("Preparing your legal analysis workspace", launcher.startup_html("glass-light"))
+        expected_backgrounds = {
+            "glass-light": "#eef5fb",
+            "glass-dark": "#07131e",
+            "unhcr": "#f3f7fa",
+            "executive": "#f4f2ed",
+            "multicolor": "#f3f5f9",
+        }
+        for theme, background in expected_backgrounds.items():
+            with self.subTest(theme=theme):
+                html = launcher.startup_html(theme, startup_epoch_ms=1_000)
+                self.assertIn(f'data-theme="{theme}"', html)
+                self.assertIn(background, html)
+                self.assertIn("Preparing your workspace", html)
+                self.assertIn("Starting the secure local application.", html)
+                self.assertIn('class="startup"', html)
+                self.assertIn("data:image/png;base64,", html)
+                self.assertIn("@keyframes orbit", html)
         self.assertIn("Unable to start Iraq Data Analysis", launcher.startup_html("glass-light", failed=True))
 
     def test_runtime_failure_replaces_loading_view_and_stops_cleanly(self):

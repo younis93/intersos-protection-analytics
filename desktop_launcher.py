@@ -1,6 +1,7 @@
 """Native Windows launcher for Iraq Data Analysis."""
 from __future__ import annotations
 
+import base64
 import ctypes
 import json
 import multiprocessing
@@ -242,21 +243,39 @@ def theme_background(theme: str) -> str:
     }.get(theme, "#eef5fb")
 
 
-def startup_html(theme: str, failed: bool = False) -> str:
-    dark = theme == "glass-dark"
-    background = theme_background(theme)
-    ink = "#edf7ff" if dark else "#122234"
-    muted = "#9db0c2" if dark else "#667b8f"
-    blue = "#38a7ef" if dark else "#1687d9"
+def startup_logo_data_uri() -> str:
+    for path in (
+        resource_path("frontend", "dist", "intersos-symbol-transparent.png"),
+        resource_path("frontend", "public", "intersos-symbol-transparent.png"),
+    ):
+        if path.is_file():
+            return f"data:image/png;base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
+    return ""
+
+
+def startup_html(theme: str, failed: bool = False, startup_epoch_ms: int | None = None) -> str:
+    palettes = {
+        "glass-light": ("#1683d8", "#eef5fb", "#122334", "#637586", "rgba(255,255,255,.68)", "rgba(255,255,255,.9)", "rgba(255,255,255,.78)"),
+        "glass-dark": ("#1683d8", "#07131e", "#edf7ff", "#9eb3c5", "rgba(18,39,56,.66)", "rgba(22,45,63,.94)", "rgba(255,255,255,.12)"),
+        "unhcr": ("#0072bc", "#f3f7fa", "#172b3a", "#607789", "#fff", "#fff", "#d7e3eb"),
+        "executive": ("#9b722a", "#f4f2ed", "#202a30", "#6d7376", "#fff", "#fff", "#d9d5cc"),
+        "multicolor": ("#315ea8", "#f3f5f9", "#182637", "#647286", "rgba(255,255,255,.84)", "#fff", "#dbe2ec"),
+    }
+    blue, background, ink, muted, panel, panel_strong, line = palettes.get(theme, palettes["glass-light"])
+    epoch = startup_epoch_ms if startup_epoch_ms is not None else int(time.time() * 1000)
+    animation_offset = max(0, int(time.time() * 1000) - epoch)
     heading = "Unable to start Iraq Data Analysis" if failed else "Iraq Data Analysis"
     detail = (
         "Startup failed. Close the app and review startup.log in the INTERSOS Legal Platform data folder."
-        if failed else "Preparing your legal analysis workspace"
+        if failed else "Starting the secure local application."
     )
-    spinner = "" if failed else '<div class="spinner" aria-hidden="true"></div>'
-    return f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:{background};color:{ink};font-family:'Segoe UI',sans-serif}}main{{display:grid;justify-items:center;gap:16px;padding:36px;text-align:center}}.mark{{display:grid;place-items:center;width:68px;height:68px;border:2px solid {blue};border-radius:18px;background:color-mix(in srgb,{blue} 9%,transparent);color:{blue};font-size:34px}}h1{{margin:0;font-size:25px}}p{{margin:0;color:{muted};font-size:13px}}.spinner{{width:30px;height:30px;margin-top:8px;border:3px solid color-mix(in srgb,{blue} 22%,transparent);border-top-color:{blue};border-radius:50%;animation:spin .75s linear infinite}}@keyframes spin{{to{{transform:rotate(360deg)}}}}@media(prefers-reduced-motion:reduce){{.spinner{{animation-duration:2s}}}}</style></head>
-<body><main><div class="mark">◈</div><h1>{heading}</h1><p>{detail}</p>{spinner}</main></body></html>"""
+    logo_uri = startup_logo_data_uri()
+    logo = f'<img src="{logo_uri}" alt="INTERSOS">' if logo_uri else '<b aria-label="INTERSOS">I</b>'
+    progress = "" if failed else '<div class="progress" aria-hidden="true"><i></i></div>'
+    orbit = "" if failed else '<span class="orbit"></span>'
+    return f"""<!doctype html><html data-theme="{theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>:root{{--blue:{blue};--bg:{background};--ink:{ink};--muted:{muted};--panel:{panel};--panel-strong:{panel_strong};--line:{line};--startup-offset:-{animation_offset}ms}}*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;color:var(--ink);background:var(--bg);font-family:'Segoe UI',sans-serif}}.startup{{position:fixed;inset:0;display:grid;place-items:center;overflow:hidden;background:var(--bg);isolation:isolate}}.startup:before{{content:"";position:absolute;inset:0;background-image:linear-gradient(color-mix(in srgb,var(--blue) 4%,transparent) 1px,transparent 1px),linear-gradient(90deg,color-mix(in srgb,var(--blue) 4%,transparent) 1px,transparent 1px);background-size:48px 48px;mask-image:radial-gradient(circle at center,#000,transparent 72%);opacity:.55}}.ambient{{position:absolute;border-radius:50%;filter:blur(26px);opacity:.9;will-change:transform}}.one{{width:min(64vw,800px);height:min(64vw,800px);top:-36%;right:-12%;background:radial-gradient(circle,color-mix(in srgb,var(--blue) 25%,transparent),transparent 68%);animation:ambient-one 7s ease-in-out infinite alternate;animation-delay:var(--startup-offset)}}.two{{width:min(56vw,680px);height:min(56vw,680px);left:-15%;bottom:-40%;background:radial-gradient(circle,color-mix(in srgb,#8b78e6 18%,transparent),transparent 68%);animation:ambient-two 8s ease-in-out infinite alternate;animation-delay:var(--startup-offset)}}.card{{position:relative;z-index:1;display:grid;justify-items:center;width:min(440px,calc(100vw - 48px));padding:44px 42px 34px;border:1px solid var(--line);border-radius:28px;background:var(--panel);box-shadow:0 28px 80px color-mix(in srgb,var(--ink) 14%,transparent),inset 0 1px 0 color-mix(in srgb,#fff 75%,transparent);backdrop-filter:blur(24px) saturate(145%);text-align:center;animation:card-enter .58s cubic-bezier(.22,1,.36,1) both}}.mark{{position:relative;isolation:isolate;display:grid;place-items:center;width:76px;height:76px;margin-bottom:22px;border:1px solid color-mix(in srgb,var(--blue) 24%,var(--line));border-radius:24px;background:color-mix(in srgb,var(--blue) 8%,var(--panel-strong));animation:breathe 2.4s ease-in-out infinite;animation-delay:var(--startup-offset)}}.mark:before{{content:"";position:absolute;z-index:-1;inset:-9px;border:1px solid color-mix(in srgb,var(--blue) 25%,transparent);border-radius:31px;opacity:.55}}.mark img{{position:relative;z-index:2;display:block;width:54px;height:54px;object-fit:contain}}.mark b{{position:relative;z-index:2;color:var(--blue);font-size:34px}}.orbit{{position:absolute;z-index:1;inset:-14px;border:1px solid color-mix(in srgb,var(--blue) 28%,transparent);border-radius:34px;animation:orbit 3.8s linear infinite;animation-delay:var(--startup-offset)}}.orbit:after{{content:"";position:absolute;width:7px;height:7px;top:5px;right:6px;border-radius:50%;background:var(--blue);box-shadow:0 0 14px color-mix(in srgb,var(--blue) 72%,transparent)}}.eyebrow{{color:var(--blue);font-size:9px;font-weight:700;letter-spacing:.15em}}h1{{margin:7px 0 8px;font-size:28px;letter-spacing:-.035em}}p{{margin:0;color:var(--muted);font-size:13px}}.progress{{position:relative;width:100%;height:7px;margin:30px 0 25px;overflow:hidden;border-radius:99px;background:color-mix(in srgb,var(--muted) 13%,transparent)}}.progress:after{{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 1px 2px color-mix(in srgb,var(--ink) 8%,transparent)}}.progress i{{display:block;width:38%;height:100%;border-radius:inherit;background:linear-gradient(90deg,color-mix(in srgb,var(--blue) 55%,#fff),var(--blue),color-mix(in srgb,var(--blue) 55%,#fff));animation:progress 1.2s ease-in-out infinite;animation-delay:var(--startup-offset)}}footer{{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px}}footer svg{{width:15px;color:var(--blue)}}@keyframes card-enter{{from{{opacity:0;transform:translateY(14px) scale(.985)}}to{{opacity:1;transform:none}}}}@keyframes breathe{{0%,100%{{transform:scale(1);box-shadow:0 14px 34px color-mix(in srgb,var(--blue) 16%,transparent)}}50%{{transform:scale(1.035);box-shadow:0 18px 42px color-mix(in srgb,var(--blue) 25%,transparent)}}}}@keyframes orbit{{to{{transform:rotate(360deg)}}}}@keyframes progress{{0%{{transform:translateX(-110%)}}100%{{transform:translateX(290%)}}}}@keyframes ambient-one{{to{{transform:translate(-6%,8%) scale(1.08)}}}}@keyframes ambient-two{{to{{transform:translate(8%,-6%) scale(1.1)}}}}html[data-theme=glass-dark] .startup:before{{opacity:.32}}html[data-theme=unhcr] .two,html[data-theme=executive] .two{{opacity:.35}}@media(max-width:560px){{.card{{width:min(420px,calc(100vw - 32px));padding:37px 25px 29px;border-radius:24px}}h1{{font-size:25px}}}}@media(prefers-reduced-motion:reduce){{.card,.mark,.orbit,.ambient{{animation:none!important}}.progress i{{animation-duration:2s}}}}</style></head>
+<body><section class="startup" role="status" aria-live="polite" aria-label="Starting Iraq Data Analysis" aria-busy="true"><div class="ambient one"></div><div class="ambient two"></div><div class="card"><div class="mark">{orbit}{logo}</div><span class="eyebrow">IRAQ DATA ANALYSIS</span><h1>{heading if failed else 'Preparing your workspace'}</h1><p>{detail}</p>{progress}<footer><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><path d="m9 12 2 2 4-4"/></svg><span>Local and private data workspace</span></footer></div></section></body></html>"""
 
 
 def saved_legal_files() -> list[Path]:
@@ -716,7 +735,8 @@ def main() -> None:
     # Private WebView profiles intentionally do not retain localStorage. Put the
     # native persisted theme in the initial URL so React cannot reset it to light
     # while the bridge is still starting.
-    url = f"http://127.0.0.1:{port}/?appTheme={startup_theme}#/legal/overview"
+    startup_epoch_ms = int(time.time() * 1000)
+    url = f"http://127.0.0.1:{port}/?appTheme={startup_theme}&startupEpoch={startup_epoch_ms}#/legal/overview"
     runtime = StartupRuntime(startup_theme)
 
     webview.settings["ALLOW_DOWNLOADS"] = True
@@ -727,7 +747,7 @@ def main() -> None:
         desktop_api = DesktopApi(fullscreen_controller)
         window = webview.create_window(
             window_title,
-            html=startup_html(startup_theme),
+            html=startup_html(startup_theme, startup_epoch_ms=startup_epoch_ms),
             width=1440,
             height=900,
             min_size=(1100, 700),

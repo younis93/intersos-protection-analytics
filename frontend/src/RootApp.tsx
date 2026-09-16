@@ -1,4 +1,4 @@
-import {useCallback,useEffect,useRef,useState} from 'react';
+import {type CSSProperties,useCallback,useEffect,useRef,useState} from 'react';
 import {ShieldCheck} from 'lucide-react';
 import Welcome from './Welcome';
 import {GUARDIAN_FOX_STORAGE_KEY} from './GuardianFox';
@@ -12,7 +12,10 @@ const STARTUP_MAXIMUM_MS=8000;
 const workspaceFromUrl=():Workspace=>{const hash=window.location.hash;if(!hash||hash==='#'||hash==='#/')return 'welcome';if(!hash.startsWith('#/legal'))window.history.replaceState(null,'',`${window.location.pathname}${window.location.search}#/legal/overview`);return 'legal'};
 
 function StartupScreen({phase}:{phase:Exclude<StartupPhase,'hidden'>}){
- return <section className={`app-startup-loading ${phase==='exiting'?'is-exiting':''}`} role="status" aria-live="polite" aria-label="Starting Iraq Data Analysis" aria-busy="true">
+ const startupEpoch=Number(new URLSearchParams(window.location.search).get('startupEpoch'));
+ const startupOffset=Number.isFinite(startupEpoch)&&startupEpoch>0?Math.max(0,Date.now()-startupEpoch):0;
+ const style={'--startup-offset':`-${startupOffset}ms`} as CSSProperties;
+ return <section className={`app-startup-loading ${startupEpoch?'is-handoff ':''}${phase==='exiting'?'is-exiting':''}`} style={style} role="status" aria-live="polite" aria-label="Starting Iraq Data Analysis" aria-busy="true">
   <div className="app-startup-loading-ambient ambient-one"/><div className="app-startup-loading-ambient ambient-two"/>
   <div className="app-startup-loading-card glass">
    <div className="app-startup-loading-mark"><span className="app-startup-loading-orbit"/><img src="/intersos-symbol-transparent.png" alt="INTERSOS"/></div>
