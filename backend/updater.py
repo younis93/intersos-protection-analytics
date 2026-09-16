@@ -214,6 +214,31 @@ def _relaunch_command(
     ]
 
 
+def _start_update_runner(command: list[str], target: Path) -> subprocess.Popen:
+    # PowerShell silently exits without executing -File under DETACHED_PROCESS.
+    # Give it a hidden console and valid standard handles instead.
+    process = subprocess.Popen(
+        command,
+        close_fds=True,
+        creationflags=(subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+                       | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    log = target.with_name("update-runner.log")
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if log.exists() and log.stat().st_size:
+            return process
+        if process.poll() is not None:
+            raise RuntimeError(f"Update runner exited before starting (code {process.returncode}). The application has not been closed.")
+        time.sleep(0.1)
+    process.terminate()
+    process.wait(timeout=5)
+    raise RuntimeError("Update runner did not confirm startup. The application has not been closed.")
+
+
 def _cleanup_stale_downloads() -> None:
     cutoff = time.time() - 24 * 60 * 60
     for directory in Path(tempfile.gettempdir()).glob("intersos-update-*"):
@@ -277,23 +302,11 @@ def _download_and_install(manifest: dict[str, Any]) -> None:
                 target.unlink(missing_ok=True)
                 raise ValueError("The update installer is not signed by the expected INTERSOS certificate")
         _set(phase="installing", progress=98)
-        creation_flags = 0
-        if os.name == "nt":
-            creation_flags = (
-                subprocess.DETACHED_PROCESS
-                | subprocess.CREATE_NEW_PROCESS_GROUP
-                | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
-            )
-        command = (
-            _relaunch_command(target, Path(sys.executable), str(manifest["version"]), os.getpid())
-            if os.name == "nt" and getattr(sys, "frozen", False)
-            else _installer_command(target)
-        )
-        subprocess.Popen(
-            command,
-            close_fds=True,
-            creationflags=creation_flags,
-        )
+        if os.name == "nt" and getattr(sys, "frozen", False):
+            command = _relaunch_command(target, Path(sys.executable), str(manifest["version"]), os.getpid())
+            _start_update_runner(command, target)
+        else:
+            subprocess.Popen(_installer_command(target), close_fds=True)
         _set(phase="restarting", progress=100)
         if getattr(sys, "frozen", False):
             time.sleep(3)

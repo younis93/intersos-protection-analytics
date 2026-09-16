@@ -106,10 +106,12 @@ class UpdaterTests(unittest.TestCase):
                 "INTERSOS_TEST_INSTALL_DIR": str(application.parent),
                 "INTERSOS_UPDATE_NO_DIALOG": "1",
             }
-            result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=30, check=False)
+            with patch.dict(os.environ, environment):
+                result = updater._start_update_runner(command, installer)
+            result.wait(timeout=30)
             sleeper.wait(timeout=5)
             log_path = installer.parent / "update-runner.log"
-            diagnostics = log_path.read_text(encoding="utf-8-sig") if log_path.exists() else result.stderr
+            diagnostics = log_path.read_text(encoding="utf-8-sig") if log_path.exists() else "Runner never started"
             self.assertEqual(result.returncode, 0, diagnostics)
             self.assertEqual((application.parent / "app-version.txt").read_text().strip(), "9.8.7")
             runner_log = (installer.parent / "update-runner.log").read_text(encoding="utf-8-sig")
