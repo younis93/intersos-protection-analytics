@@ -10,6 +10,7 @@ import socket
 import sys
 import unicodedata
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -117,6 +118,17 @@ legal_store_loading = False
 legal_store_restore_error = ""
 indicator_master_loading = False
 
+
+def synchronize_duplicate_exclusions(store: LegalStore) -> None:
+    resolver = getattr(store, "duplicate_contexts_for_exclusions", None)
+    if not callable(resolver):
+        return
+    rows = duplicate_exclusions.exclusion_rows()
+    contexts = resolver(rows)
+    reconciled, changed = duplicate_exclusions.reconcile_duplicate_contexts(contexts)
+    if changed:
+        store.set_review_exclusions(reconciled)
+
 def load_initial_legal_store() -> None:
     """Restore the remembered Legal data outside the desktop window startup path."""
     global legal_store, legal_store_loading, legal_store_restore_error
@@ -137,6 +149,8 @@ def load_initial_legal_store() -> None:
             legal_store = None
             legal_store_restore_error = unavailable
             return
+        if candidate:
+            synchronize_duplicate_exclusions(candidate)
         legal_store = candidate
         legal_store_restore_error = ""
     except Exception as exc:
@@ -232,6 +246,7 @@ class DuplicateExclusionRequest(BaseModel):
     name: str = ""
     project: str = ""
     source: str = ""
+    duplicateContext: dict[str, Any] | None = None
 
 
 class BulkDuplicateExclusionRequest(BaseModel):
@@ -332,6 +347,7 @@ async def legal_upload(files: list[UploadFile] = File(...)):
             if total > MAX_UPLOAD_BYTES: raise HTTPException(413, "Legal Platform files must total 100 MB or smaller.")
             if version >= versions.get(key, -1):payload[key]=raw;versions[key]=version
         candidate = await run_in_threadpool(LegalStore.from_files, payload, "Selected Legal Platform folder", exclusions=duplicate_exclusions.exclusion_rows())
+        synchronize_duplicate_exclusions(candidate)
         legal_store = candidate
         return candidate.metadata()
     except HTTPException:
@@ -375,11 +391,12 @@ def list_duplicate_exclusions():
 def create_duplicate_exclusion(request: DuplicateExclusionRequest):
     try:
         value=request.identifierValue or request.caseId
-        record, _ = duplicate_exclusions.exclude_record(request.dataset, request.rule, request.identifierType, value, request.name, request.project, request.source)
+        record, _ = duplicate_exclusions.exclude_record(request.dataset, request.rule, request.identifierType, value, request.name, request.project, request.source, request.duplicateContext)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if legal_store:
         legal_store.set_review_exclusions(duplicate_exclusions.exclusion_rows())
+        synchronize_duplicate_exclusions(legal_store)
     return {"record": record, **duplicate_exclusion_payload()}
 
 
@@ -393,6 +410,7 @@ def create_duplicate_exclusions_bulk(request: BulkDuplicateExclusionRequest):
         raise HTTPException(400, str(exc)) from exc
     if legal_store:
         legal_store.set_review_exclusions(duplicate_exclusions.exclusion_rows())
+        synchronize_duplicate_exclusions(legal_store)
     return {"created": created, "duplicates": duplicates, **duplicate_exclusion_payload()}
 
 
@@ -461,7 +479,9 @@ async def import_duplicate_exclusions(file: UploadFile = File(...), dataset: str
         source_name = Path(file.filename or "file").name
         records=[{"dataset":dataset,"rule":rule,"identifierType":effective_identifier_type,"identifierValue":value,"source":f"Imported from {source_name}"} for value in values for rule in selected_rules]
         _, imported, duplicates = duplicate_exclusions.exclude_records(records)
-        if legal_store: legal_store.set_review_exclusions(duplicate_exclusions.exclusion_rows())
+        if legal_store:
+            legal_store.set_review_exclusions(duplicate_exclusions.exclusion_rows())
+            synchronize_duplicate_exclusions(legal_store)
         rows=duplicate_exclusions.entries()
         return {"imported":imported,"duplicates":duplicates,"invalid":invalid,"column":str(column),"identifierType":effective_identifier_type,"rows":rows,"count":len(rows)}
     except ValueError as exc: raise HTTPException(400, str(exc)) from exc

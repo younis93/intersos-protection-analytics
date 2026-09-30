@@ -124,6 +124,17 @@ REGISTERED_RULES = {
     "legalservices": ("Duplicate service","Duplicate service without Assessment ID","Current and previous month duplicate","Orphaned assessment relationship","Missing Type of Document","Legal service date after today"),
     "awareness": ("Duplicate participant in session","Invalid contact number","Possible duplicate participant name"),
 }
+DUPLICATE_RECHECK_RULES = {
+    "Possible duplicate name",
+    "Possible duplicate contact and name",
+    "Beneficiary has multiple assessments",
+    "Selected month with previous assessment",
+    "Duplicate service",
+    "Duplicate service without Assessment ID",
+    "Current and previous month duplicate",
+    "Duplicate participant in session",
+    "Possible duplicate participant name",
+}
 REVIEW_EXPORT_PROJECT_SHEETS = {
     "unhcr 2026 - erbil": "North Iraq",
     "unhcr 2026 - suli": "North Iraq",
@@ -729,6 +740,27 @@ class LegalStore:
                      "linkedServiceCount":0, "linkedServiceStatuses":"",
                      "action":ACTIONS.get(rule,"Review the source record, verify the information, and document the correction.")})
 
+    @staticmethod
+    def _duplicate_context(key: str, members: list[str] | set[str], settings: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "key": str(key).strip(),
+            "members": sorted({clean_id(member) for member in members if clean_id(member)}),
+            "settings": dict(sorted((settings or {}).items())),
+        }
+
+    @staticmethod
+    def _finding_identifier(row: dict[str, Any], identifier_type: str) -> str:
+        fields = {
+            "caseId": "caseId",
+            "assessmentId": "assessmentId",
+            "serviceId": "serviceId",
+            "awarenessId": "awarenessId",
+            "awarenessName": "name",
+        }
+        value = clean_id(row.get(fields.get(identifier_type, identifier_type), ""))
+        return " ".join(value.casefold().split()) if identifier_type == "awarenessName" else value
+
     def _build_flags(self) -> dict[str, list[dict[str, Any]]]:
         if not all(name in self.frames for name in MANDATORY):
             return {}
@@ -747,6 +779,9 @@ class LegalStore:
                 item={"dataset":str(entry.get("dataset", "beneficiaries")).strip(),"rule":str(entry.get("rule", "")).strip(),"identifierType":str(entry.get("identifierType", "caseId")).strip(),"identifierValue":str(entry.get("identifierValue", entry.get("caseId", ""))).strip()}
                 if item["identifierType"] == "awarenessName": item["identifierValue"]=" ".join(item["identifierValue"].casefold().split())
                 else: item["identifierValue"]=clean_id(item["identifierValue"])
+                if isinstance(entry.get("duplicateContext"),dict): item["duplicateContext"]=entry["duplicateContext"]
+                if entry.get("pendingRecheck"): item["pendingRecheck"]=True
+                if entry.get("pendingSince"): item["pendingSince"]=str(entry["pendingSince"])
             if all(item.values()): normalized.append(item)
         with self._cache_lock:
             if normalized == self.review_exclusions:
@@ -759,11 +794,44 @@ class LegalStore:
             self._metadata_cache = None
 
     def _excluded_case_ids(self, rule: str) -> set[str]:
-        return {row["identifierValue"] for row in self.review_exclusions if row["dataset"] == "beneficiaries" and row["rule"] == rule and row["identifierType"] == "caseId"}
+        return {row["identifierValue"] for row in self.review_exclusions if row["dataset"] == "beneficiaries" and row["rule"] == rule and row["identifierType"] == "caseId" and not row.get("pendingRecheck")}
 
     def _is_excluded(self, row: dict[str, Any]) -> bool:
         fields={"caseId":clean_id(row.get("caseId", "")),"assessmentId":clean_id(row.get("assessmentId", "")),"serviceId":clean_id(row.get("serviceId", "")),"awarenessId":clean_id(row.get("awarenessId", "")),"awarenessName":" ".join(str(row.get("name", "")).casefold().split())}
-        return any(entry["dataset"] == row.get("dataset") and entry["rule"] == row.get("rule") and fields.get(entry["identifierType"], "") == entry["identifierValue"] for entry in self.review_exclusions)
+        matching=[entry for entry in self.review_exclusions if entry["dataset"] == row.get("dataset") and entry["rule"] == row.get("rule") and fields.get(entry["identifierType"], "") == entry["identifierValue"]]
+        if any(entry.get("pendingRecheck") for entry in matching):
+            row["duplicateRecheck"] = True
+        return any(not entry.get("pendingRecheck") for entry in matching)
+
+    def duplicate_contexts_for_exclusions(self, exclusions: list[dict[str, Any]]) -> dict[tuple[str, str, str, str], dict[str, Any]]:
+        """Resolve current duplicate groups without applying saved exclusions."""
+        resolved:dict[tuple[str,str,str,str],dict[str,Any]]={}
+        cache:dict[tuple[Any,...],list[dict[str,Any]]]={}
+        for entry in exclusions:
+            dataset=str(entry.get("dataset","beneficiaries"));rule=str(entry.get("rule",""))
+            if rule not in DUPLICATE_RECHECK_RULES:
+                continue
+            identifier_type=str(entry.get("identifierType","caseId"));identifier_value=str(entry.get("identifierValue",entry.get("caseId",""))).strip()
+            saved_context=entry.get("duplicateContext") if isinstance(entry.get("duplicateContext"),dict) else {}
+            settings=saved_context.get("settings",{}) if isinstance(saved_context.get("settings",{}),dict) else {}
+            cache_key=(dataset,rule,tuple(sorted(settings.items())))
+            rows=cache.get(cache_key)
+            if rows is None:
+                if dataset=="beneficiaries" and rule=="Possible duplicate name":
+                    rows=self._name_match_flags(int(settings.get("nameCompareChars",15)),bool(settings.get("allowNameVariations",False)),bool(settings.get("exactMatchesOnly",False)))
+                elif dataset=="beneficiaries" and rule=="Possible duplicate contact and name":
+                    rows=self._contact_name_match_flags()
+                elif dataset=="assessments" and rule=="Selected month with previous assessment":
+                    rows=self._assessment_month_flags(str(settings.get("comparisonMonth","")))[0]
+                elif dataset=="legalservices" and rule=="Current and previous month duplicate":
+                    rows=self._service_month_flags(str(settings.get("comparisonMonth","")))[0]
+                else:
+                    rows=[row for row in self.flags.get(dataset,[]) if row.get("rule")==rule]
+                cache[cache_key]=rows
+            current=next((row.get("duplicateContext") for row in rows if self._finding_identifier(row,identifier_type)==identifier_value and isinstance(row.get("duplicateContext"),dict)),None)
+            if current:
+                resolved[(dataset,rule,identifier_type,identifier_value)]=current
+        return resolved
 
     def _beneficiary_flags(self) -> list[dict[str, Any]]:
         df = self.frames["beneficiaries"]; out: list[dict[str, Any]] = self._name_match_flags(excluded_case_ids=self._excluded_case_ids("Possible duplicate name"))
@@ -874,7 +942,7 @@ class LegalStore:
                 buckets[bucket].append((i,prefix))
         out=[]
         mode="with small spelling differences allowed" if allow_variations else "exactly"
-        components:dict[int,str]={};visited:set[int]=set()
+        components:dict[int,str]={};component_members:dict[int,set[int]]={};visited:set[int]=set()
         for start in matches:
             if start in visited: continue
             stack=[start];members:set[int]=set()
@@ -883,7 +951,9 @@ class LegalStore:
                 if current in members: continue
                 members.add(current);stack.extend(matches[current])
             visited.update(members);group_key=f"{eligible[start][0]}:{min(members)}"
-            for member in members: components[member]=group_key
+            for member in members:
+                components[member]=group_key
+                component_members[member]=members
         for i, peers in matches.items():
             project_group=eligible[i][0]
             detail=f"{project_group}: full normalized name exactly matches {len(peers)} other record(s)" if exact_only else f"{project_group}: first {bounded_chars} normalized characters match {mode} with {len(peers)} other record(s)"
@@ -891,6 +961,13 @@ class LegalStore:
             out[-1]["duplicateGroup"]=components[i]
             out[-1]["nameMatchMode"]="exact" if any(normalized[peer] == normalized[i] for peer in peers) else "variation"
             out[-1]["duplicateSimilarity"]=round(max(SequenceMatcher(None,normalized[i],normalized[peer]).ratio() for peer in peers)*100)
+            member_ids=[clean_id(df.loc[member,case_id]) if case_id else f"row:{member + 2}" for member in component_members[i]]
+            out[-1]["duplicateContext"]=self._duplicate_context(
+                f"{project_group}:{eligible[i][1]}",
+                member_ids,
+                {"nameCompareChars":bounded_chars,"allowNameVariations":bool(allow_variations),"exactMatchesOnly":bool(exact_only)},
+            )
+        self._add_beneficiary_duplicate_context(out)
         return out
 
     def _contact_name_match_flags(self, excluded_case_ids: set[str] | None = None) -> list[dict[str, Any]]:
@@ -941,7 +1018,7 @@ class LegalStore:
                     if SequenceMatcher(None,eligible[i][2],eligible[j][2]).ratio() >= .90:
                         matches[i].add(j)
                         matches[j].add(i)
-        components:dict[int,str]={};visited:set[int]=set()
+        components:dict[int,str]={};component_members:dict[int,set[int]]={};visited:set[int]=set()
         for start in matches:
             if start in visited:
                 continue
@@ -956,6 +1033,7 @@ class LegalStore:
             group_key=f"contact-name:{eligible[start][0]}:{eligible[start][1]}:{min(members)}"
             for member in members:
                 components[member]=group_key
+                component_members[member]=members
         out=[]
         for i,peers in matches.items():
             project_group,contact_number,normalized_name=eligible[i]
@@ -964,7 +1042,81 @@ class LegalStore:
             out[-1]["duplicateGroup"]=components[i]
             out[-1]["nameMatchMode"]="contact-and-name"
             out[-1]["duplicateSimilarity"]=strongest
+            member_ids=[clean_id(df.loc[member,case_id]) if case_id else f"row:{member + 2}" for member in component_members[i]]
+            out[-1]["duplicateContext"]=self._duplicate_context(f"{project_group}:{contact_number}",member_ids)
+        self._add_beneficiary_duplicate_context(out)
         return out
+
+    def _add_beneficiary_duplicate_context(self, rows: list[dict[str, Any]]) -> None:
+        """Attach assessment needs and linked legal-fee details to duplicate beneficiary rows."""
+        if not rows:
+            return
+
+        def append_unique(mapping: dict[str, list[str]], key: str, value: Any) -> None:
+            cleaned=clean_id(value)
+            if key and cleaned and cleaned not in mapping[key]:
+                mapping[key].append(cleaned)
+
+        assessment_ids:dict[str,list[str]]=defaultdict(list)
+        legal_needs:dict[str,list[str]]=defaultdict(list)
+        assessments=self.frames.get("assessments")
+        if assessments is not None:
+            beneficiary_column=_find(list(assessments.columns),"Beneficiary ID","Case ID")
+            assessment_column=_find(list(assessments.columns),"Assessment ID")
+            need_column=_find(list(assessments.columns),"Type of Legal Service Needed")
+            if beneficiary_column:
+                for _,assessment in assessments.iterrows():
+                    case_id=clean_id(assessment.get(beneficiary_column,""))
+                    if not case_id:
+                        continue
+                    if assessment_column:
+                        append_unique(assessment_ids,case_id,assessment.get(assessment_column,""))
+                    if need_column:
+                        append_unique(legal_needs,case_id,assessment.get(need_column,""))
+
+        service_ids:dict[str,list[str]]=defaultdict(list)
+        services=self.frames.get("legalservices")
+        if services is not None:
+            service_column=_find(list(services.columns),"Service ID")
+            beneficiary_column=_find(list(services.columns),"Beneficiary ID","Case ID")
+            assessment_column=_find(list(services.columns),"Assessment ID")
+            assessment_to_cases={assessment_id:case_id for case_id,values in assessment_ids.items() for assessment_id in values}
+            for _,service in services.iterrows():
+                case_id=clean_id(service.get(beneficiary_column,"")) if beneficiary_column else ""
+                if not case_id and assessment_column:
+                    case_id=assessment_to_cases.get(clean_id(service.get(assessment_column,"")),"")
+                if case_id and service_column:
+                    append_unique(service_ids,case_id,service.get(service_column,""))
+
+        fee_ids:dict[str,list[str]]=defaultdict(list)
+        amounts:dict[str,list[str]]=defaultdict(list)
+        fees=self.frames.get("legalfees")
+        if fees is not None:
+            fee_column=_find(list(fees.columns),"Fee ID","Legal Fee ID")
+            amount_column=_find(list(fees.columns),"Amount Spent (IQD)","Amount Spent","Total Cost")
+            beneficiary_column=_find(list(fees.columns),"Beneficiary ID","Case ID")
+            assessment_column=_find(list(fees.columns),"Assessment ID")
+            service_column=_find(list(fees.columns),"Legal Service ID","Service ID")
+            assessment_to_cases={assessment_id:case_id for case_id,values in assessment_ids.items() for assessment_id in values}
+            service_to_cases={service_id:case_id for case_id,values in service_ids.items() for service_id in values}
+            for _,fee in fees.iterrows():
+                case_id=clean_id(fee.get(beneficiary_column,"")) if beneficiary_column else ""
+                if not case_id and assessment_column:
+                    case_id=assessment_to_cases.get(clean_id(fee.get(assessment_column,"")),"")
+                if not case_id and service_column:
+                    case_id=service_to_cases.get(clean_id(fee.get(service_column,"")),"")
+                if not case_id:
+                    continue
+                if fee_column:
+                    append_unique(fee_ids,case_id,fee.get(fee_column,""))
+                if amount_column:
+                    append_unique(amounts,case_id,display_value(fee.get(amount_column,"")))
+
+        for row in rows:
+            case_id=clean_id(row.get("caseId",""))
+            row["feeId"] = ", ".join(fee_ids.get(case_id,[]))
+            row["amountSpentIqd"] = ", ".join(amounts.get(case_id,[]))
+            row["legalServiceNeeded"] = ", ".join(legal_needs.get(case_id,[]))
 
     def _assessment_reconciliation_flags(self, df: pd.DataFrame, services: pd.DataFrame) -> list[dict[str, Any]]:
         assessment_id=_find(list(df.columns),"Assessment ID");service_assessment=_find(list(services.columns),"Assessment ID")
@@ -1039,6 +1191,9 @@ class LegalStore:
                 if reasons:
                     self._flag(out,"assessments","Beneficiary has multiple assessments","Medium",i,df.loc[i],"; ".join(reasons))
                     out[-1]["duplicateGroup"]=f"assessment-beneficiary:{ids[i]}"
+                    related={j for j in df.index if ids[j] == ids[i] and ((pd.notna(assessment_months[i]) and assessment_months[j] == assessment_months[i]) or (isinstance(open_status,pd.Series) and bool(open_status[i]) and bool(open_status[j])))}
+                    member_ids=[clean_id(df.loc[j,assessment]) if assessment else f"row:{j + 2}" for j in related]
+                    out[-1]["duplicateContext"]=self._duplicate_context(f"assessment-beneficiary:{ids[i]}",member_ids)
         total = _find(list(df.columns), "# Total Services")
         if total:
             for i in df.index[pd.to_numeric(df[total],errors="coerce").fillna(0).eq(0)]: self._flag(out,"assessments","Assessment without services","High",i,df.loc[i],"# Total Services is 0")
@@ -1139,7 +1294,10 @@ class LegalStore:
         active=comparison_month if comparison_month in available else (available[-1] if available else "")
         if not active:return [],active,available
         selected=pd.Period(active,freq="M");ids=df[beneficiary].map(clean_id);created=pd.to_datetime(df[created_col],errors="coerce",dayfirst=True) if created_col else pd.Series(pd.NaT,index=df.index);earlier:dict[str,list[tuple[pd.Timestamp,pd.Period]]]=defaultdict(list)
-        for i in df.index[(months<selected)&ids.ne("")]:earlier[ids[i]].append((dates[i],months[i]))
+        earlier_indexes:dict[str,list[int]]=defaultdict(list)
+        for i in df.index[(months<selected)&ids.ne("")]:
+            earlier[ids[i]].append((dates[i],months[i]))
+            earlier_indexes[ids[i]].append(int(i))
         out=[]
         for i in df.index[(months==selected)&ids.isin(earlier.keys())]:
             created_on=created[i]
@@ -1155,6 +1313,10 @@ class LegalStore:
                 continue
             history_dates=[item[0] for item in history]
             self._flag(out,"assessments","Selected month with previous assessment","High",i,df.loc[i],f"Selected month {active}; {len(history_dates)} earlier assessment(s), from {history_dates[0].strftime('%d/%m/%Y')} to {history_dates[-1].strftime('%d/%m/%Y')}; created on {created_on.strftime('%d/%m/%Y')}")
+            assessment_id=_find(list(df.columns),"Assessment ID")
+            member_indexes=[int(i),*earlier_indexes[ids[i]]]
+            member_ids=[clean_id(df.loc[j,assessment_id]) if assessment_id else f"row:{j + 2}" for j in member_indexes]
+            out[-1]["duplicateContext"]=self._duplicate_context(f"assessment-history:{ids[i]}",member_ids,{"comparisonMonth":active})
         return out,active,available
 
     def _amal_only_assessment_projects(self) -> bool:
@@ -1175,7 +1337,10 @@ class LegalStore:
         active=comparison_month if comparison_month in available else (available[-1] if available else "")
         if not active:return [],active,available
         selected=pd.Period(active,freq="M");ids=df[beneficiary].map(clean_id);created=pd.to_datetime(df[created_col],errors="coerce",dayfirst=True) if created_col else pd.Series(pd.NaT,index=df.index);earlier:dict[str,list[tuple[pd.Timestamp,pd.Period]]]=defaultdict(list)
-        for i in df.index[(months<selected)&ids.ne("")]:earlier[ids[i]].append((dates[i],months[i]))
+        earlier_indexes:dict[str,list[int]]=defaultdict(list)
+        for i in df.index[(months<selected)&ids.ne("")]:
+            earlier[ids[i]].append((dates[i],months[i]))
+            earlier_indexes[ids[i]].append(int(i))
         out=[]
         for i in df.index[(months==selected)&ids.isin(earlier.keys())]:
             created_on=created[i]
@@ -1191,6 +1356,10 @@ class LegalStore:
                 continue
             history_dates=[item[0] for item in history]
             self._flag(out,"legalservices","Current and previous month duplicate","High",i,df.loc[i],f"Selected month {active}; {len(history_dates)} earlier service(s), from {history_dates[0].strftime('%d/%m/%Y')} to {history_dates[-1].strftime('%d/%m/%Y')}; created on {created_on.strftime('%d/%m/%Y')}")
+            service_id=_find(list(df.columns),"Service ID")
+            member_indexes=[int(i),*earlier_indexes[ids[i]]]
+            member_ids=[clean_id(df.loc[j,service_id]) if service_id else f"row:{j + 2}" for j in member_indexes]
+            out[-1]["duplicateContext"]=self._duplicate_context(f"service-history:{ids[i]}",member_ids,{"comparisonMonth":active})
         return out,active,available
 
     def _service_flags(self) -> list[dict[str, Any]]:
@@ -1209,17 +1378,21 @@ class LegalStore:
             for key,indexes in keys.items():
                 if len(indexes)<2:continue
                 duplicate_group=f"service:{'|'.join(key)}"
+                member_ids=[clean_id(df.loc[j,sid]) if sid else f"row:{j + 2}" for j in indexes]
                 for i in indexes:
                     self._flag(out,"legalservices","Duplicate service","High",i,df.loc[i],f"Same Beneficiary ID, Assessment ID, Type of Service Provided, and Type of Document occurs {len(indexes)} times")
                     out[-1]["duplicateGroup"]=duplicate_group
+                    out[-1]["duplicateContext"]=self._duplicate_context(duplicate_group,member_ids)
             duplicate_service_indexes={i for indexes in keys.values() if len(indexes)>=2 for i in indexes}
             for key,indexes in keys_without_assessment.items():
                 if len(indexes)<2:continue
                 if any(i in duplicate_service_indexes for i in indexes): continue
                 duplicate_group=f"service-without-assessment:{'|'.join(key)}"
+                member_ids=[clean_id(df.loc[j,sid]) if sid else f"row:{j + 2}" for j in indexes]
                 for i in indexes:
                     self._flag(out,"legalservices","Duplicate service without Assessment ID","High",i,df.loc[i],f"Same Beneficiary ID, Type of Service Provided, and Type of Document occurs {len(indexes)} times across all Assessment IDs")
                     out[-1]["duplicateGroup"]=duplicate_group
+                    out[-1]["duplicateContext"]=self._duplicate_context(duplicate_group,member_ids)
         assessment_id=_find(list(self.frames["assessments"].columns),"Assessment ID")
         if aid and assessment_id:
             valid=set(self.frames["assessments"][assessment_id].map(clean_id))
@@ -1235,14 +1408,22 @@ class LegalStore:
             vals=df[name].map(normalize_name); name_counts=vals[vals.ne("")].value_counts(); topic=_find(list(df.columns),"Session Topic","Topic")
             topics=df[topic].fillna("").astype(str).str.strip().str.lower() if topic else pd.Series("",index=df.index)
             pairs=pd.Series(list(zip(vals,topics)),index=df.index);pair_counts=pairs[vals.ne("") & topics.ne("")].value_counts()
+            awareness_id=_find(list(df.columns),"Awareness ID")
             for i in df.index[vals.map(name_counts).fillna(0).ge(2)]:
                 same_session=int(pair_counts.get((vals[i],topics[i]),0)) if topics[i] else 0
                 if same_session >= 2:
                     self._flag(out,"awareness","Duplicate participant in session","High",i,df.loc[i],f"Name and session topic occur {same_session} times")
                     out[-1]["duplicateGroup"]=f"awareness:{vals[i]}|{topics[i]}"
+                    indexes=[int(j) for j in df.index[(vals == vals[i]) & (topics == topics[i])]]
+                    members=[clean_id(df.loc[j,awareness_id]) for j in indexes] if awareness_id else [f"name:{vals[i]}|topic:{topics[i]}|count:{len(indexes)}"]
+                    out[-1]["duplicateContext"]=self._duplicate_context(out[-1]["duplicateGroup"],members)
                 else:
                     self._flag(out,"awareness","Possible duplicate participant name","Minor",i,df.loc[i],f"Name occurs {int(name_counts[vals[i]])} times across different sessions")
                     out[-1]["overviewExcluded"]=True
+                    indexes=[int(j) for j in df.index[vals == vals[i]]]
+                    members=[clean_id(df.loc[j,awareness_id]) for j in indexes] if awareness_id else [f"name:{vals[i]}|topic:{topic_value}|count:{sum(1 for j in indexes if topics[j] == topic_value)}" for topic_value in sorted({topics[j] for j in indexes})]
+                    out[-1]["duplicateGroup"]=f"awareness-name:{vals[i]}"
+                    out[-1]["duplicateContext"]=self._duplicate_context(out[-1]["duplicateGroup"],members)
         phone=_find(list(df.columns),"Phone Number")
         if phone:
             for i,v in df[phone].items():
@@ -1374,7 +1555,13 @@ class LegalStore:
             if rule=="Detention Governorate mismatch": page_columns.append(("Detention Governorate mismatch","detentionGovernorate",("Detention Governorate",)))
             if dataset in {"beneficiaries","assessments","legalservices"}: page_columns.append(("Case ID","caseId",("Case ID","Beneficiary ID")))
             if dataset == "beneficiaries" and rule in {"Possible duplicate name", "Possible duplicate contact and name"}:
-                page_columns.extend([("Date of Identification", "identificationDate", ("Date of Identification",)), ("Created On", "createdOn", ("Created On",))])
+                page_columns.extend([
+                    ("Date of Identification", "identificationDate", ("Date of Identification",)),
+                    ("Created On", "createdOn", ("Created On",)),
+                    ("Fee ID", "feeId", ()),
+                    ("Amount Spent (IQD)", "amountSpentIqd", ()),
+                    ("Type of Legal Service Needed", "legalServiceNeeded", ()),
+                ])
             if dataset in {"assessments","legalservices"}: page_columns.append(("Assessment","assessmentId",("Assessment ID",)))
             if dataset=="legalservices": page_columns.append(("Service","serviceId",("Service ID",)))
             if dataset=="awareness": page_columns.append(("Awareness ID","awarenessId",("Awareness ID",)))

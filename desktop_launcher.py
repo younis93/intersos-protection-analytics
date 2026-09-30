@@ -633,6 +633,7 @@ class DesktopApi:
         from backend.legal_platform import LegalStore
         self._legal_import_progress = 0
         candidate = LegalStore.from_folder(folder, lambda percent: setattr(self, "_legal_import_progress", percent), exclusions=backend_main.duplicate_exclusions.exclusion_rows())
+        backend_main.synchronize_duplicate_exclusions(candidate)
         metadata = candidate.metadata()
         backend_main.legal_store = candidate
         save_legal_folder(folder)
@@ -670,6 +671,7 @@ class DesktopApi:
         payload = {name: path.read_bytes() for name, (_, path) in selected.items()}
         self._legal_import_progress = 15
         candidate = LegalStore.from_files(payload, "Selected Legal Platform CSV files", lambda percent: setattr(self, "_legal_import_progress", percent), exclusions=backend_main.duplicate_exclusions.exclusion_rows())
+        backend_main.synchronize_duplicate_exclusions(candidate)
         metadata = candidate.metadata()
         backend_main.legal_store = candidate
         save_legal_files(paths)

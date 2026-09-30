@@ -279,6 +279,42 @@ def test_contact_and_name_duplicate_requires_matching_contact_markers_and_projec
         assert all(row[finding_index]!="Possible duplicate contact and name" for row in sheet.iter_rows(min_row=2,values_only=True))
 
 
+def test_beneficiary_duplicate_rows_include_legal_need_and_linked_fee_columns():
+    payload=required_payload()
+    payload["beneficiaries"]=csv(**{
+        "Case ID":["B1","B2"],
+        "Name (Filter Color Red)":["Identical Beneficiary Name"]*2,
+        "Project":["UNHCR 2026 - Erbil"]*2,
+    })
+    payload["assessments"]=csv(**{
+        "Assessment ID":["A1","A2"],
+        "Beneficiary ID":["B1","B2"],
+        "Type of Legal Service Needed":["Legal Counselling","Legal Representation"],
+    })
+    payload["legalservices"]=csv(**{
+        "Service ID":["S1","S2"],
+        "Assessment ID":["A1","A2"],
+        "Beneficiary ID":["B1","B2"],
+    })
+    payload["legalfees"]=csv(**{
+        "Fee ID":["F1","F2"],
+        "Legal Service ID":["S1","S2"],
+        "Amount Spent (IQD)":["10,000","25,000"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    rows=store.review("beneficiaries",rule="Possible duplicate name",exact_matches_only=True,page_size=100)["rows"]
+    by_case={row["caseId"]:row for row in rows}
+    assert by_case["B1"]["feeId"]=="F1"
+    assert by_case["B1"]["amountSpentIqd"]=="10,000"
+    assert by_case["B1"]["legalServiceNeeded"]=="Legal Counselling"
+    assert by_case["B2"]["feeId"]=="F2"
+    workbook=load_workbook(io.BytesIO(store.review_export("beneficiaries",selected_rules=["Possible duplicate name"],exact_matches_only=True)),read_only=True,data_only=True)
+    headers=[cell.value for cell in next(workbook["North Iraq"].iter_rows(min_row=1,max_row=1))]
+    assert "Fee ID" in headers
+    assert "Amount Spent (IQD)" in headers
+    assert "Type of Legal Service Needed" in headers
+
+
 def test_invalid_age_includes_invalid_and_future_spouse_dates_without_flagging_blank_dates():
     payload=required_payload();future=(date.today()+timedelta(days=1)).strftime("%d/%m/%Y")
     payload["beneficiaries"]=csv(**{
@@ -384,6 +420,140 @@ def test_rule_specific_exclusion_keeps_other_beneficiary_findings_visible():
     store.set_review_exclusions({("Invalid contact number","B1")})
     assert store.review("beneficiaries",rule="Invalid contact number")["total"]==0
     assert store.review("beneficiaries",rule="Marital status below 18")["total"]==1
+
+
+def test_changed_duplicate_context_reopens_excluded_case_and_can_be_excluded_again(tmp_path):
+    def duplicate_payload(case_ids):
+        payload=required_payload();payload["beneficiaries"]=csv(**{
+            "Case ID":case_ids,
+            "Name (Filter Color Red)": ["Identical Beneficiary Name"]*len(case_ids),
+            "Project":["UNHCR 2026 - Erbil"]*len(case_ids),
+        })
+        return payload
+
+    registry=DuplicateExclusionRegistry(tmp_path/"exclusions.json")
+    original=LegalStore.from_files(duplicate_payload(["B1","B2"]),"test")
+    b1=next(row for row in original.review("beneficiaries",rule="Possible duplicate name",exact_matches_only=True)["rows"] if row["caseId"]=="B1")
+    registry.exclude_record("beneficiaries",b1["rule"],"caseId","B1",duplicate_context=b1["duplicateContext"])
+    original.set_review_exclusions(registry.exclusion_rows())
+    assert original.review("beneficiaries",rule="Possible duplicate name",exact_matches_only=True)["total"]==0
+
+    unchanged=LegalStore.from_files(duplicate_payload(["B2","B1"]),"test",exclusions=registry.exclusion_rows())
+    contexts=unchanged.duplicate_contexts_for_exclusions(registry.exclusion_rows())
+    rows,changed=registry.reconcile_duplicate_contexts(contexts)
+    assert changed is False
+    assert rows[0]["pendingRecheck"] is False
+
+    expanded=LegalStore.from_files(duplicate_payload(["B1","B2","B3"]),"test",exclusions=registry.exclusion_rows())
+    contexts=expanded.duplicate_contexts_for_exclusions(registry.exclusion_rows())
+    rows,changed=registry.reconcile_duplicate_contexts(contexts)
+    assert changed is True
+    assert rows[0]["pendingRecheck"] is True
+    expanded.set_review_exclusions(rows)
+    reopened=expanded.review("beneficiaries",rule="Possible duplicate name",exact_matches_only=True)["rows"]
+    assert {row["caseId"] for row in reopened}=={"B1","B2","B3"}
+    assert next(row for row in reopened if row["caseId"]=="B1")["duplicateRecheck"] is True
+    exported=load_workbook(io.BytesIO(expanded.review_export("beneficiaries",exact_matches_only=True)),read_only=True,data_only=True)
+    exported_rows=[row for sheet in exported.worksheets for row in sheet.iter_rows(values_only=True)]
+    assert any("Possible duplicate name" in row and "B1" in row for row in exported_rows)
+
+    current_b1=next(row for row in reopened if row["caseId"]=="B1")
+    registry.exclude_record("beneficiaries",current_b1["rule"],"caseId","B1",duplicate_context=current_b1["duplicateContext"])
+    refreshed=registry.exclusion_rows()
+    assert refreshed[0]["pendingRecheck"] is False
+    expanded.set_review_exclusions(refreshed)
+    assert {row["caseId"] for row in expanded.review("beneficiaries",rule="Possible duplicate name",exact_matches_only=True)["rows"]}=={"B2","B3"}
+
+
+def test_removing_a_member_from_a_remaining_duplicate_group_triggers_recheck(tmp_path):
+    def duplicate_payload(case_ids):
+        payload=required_payload();payload["beneficiaries"]=csv(**{
+            "Case ID":case_ids,"Name (Filter Color Red)":["Identical Beneficiary Name"]*len(case_ids),
+            "Project":["UNHCR 2026 - Erbil"]*len(case_ids),
+        })
+        return payload
+    registry=DuplicateExclusionRegistry(tmp_path/"exclusions.json")
+    original=LegalStore.from_files(duplicate_payload(["B1","B2","B3"]),"test")
+    b1=next(row for row in original.review("beneficiaries",rule="Possible duplicate name",exact_matches_only=True)["rows"] if row["caseId"]=="B1")
+    registry.exclude_record("beneficiaries",b1["rule"],"caseId","B1",duplicate_context=b1["duplicateContext"])
+    reduced=LegalStore.from_files(duplicate_payload(["B1","B2"]),"test",exclusions=registry.exclusion_rows())
+    contexts=reduced.duplicate_contexts_for_exclusions(registry.exclusion_rows())
+    rows,changed=registry.reconcile_duplicate_contexts(contexts)
+    assert changed is True
+    assert rows[0]["pendingRecheck"] is True
+
+
+def test_legacy_duplicate_exclusion_gets_baseline_without_reopening(tmp_path):
+    payload=required_payload();payload["beneficiaries"]=csv(**{
+        "Case ID":["B1","B2"],"Name (Filter Color Red)":["Identical Beneficiary Name"]*2,
+        "Project":["UNHCR 2026 - Erbil"]*2,
+    })
+    registry=DuplicateExclusionRegistry(tmp_path/"exclusions.json")
+    registry.exclude_record("beneficiaries","Possible duplicate name","caseId","B1")
+    store=LegalStore.from_files(payload,"test",exclusions=registry.exclusion_rows())
+    contexts=store.duplicate_contexts_for_exclusions(registry.exclusion_rows())
+    rows,changed=registry.reconcile_duplicate_contexts(contexts)
+    assert changed is True
+    assert rows[0]["duplicateContext"]["members"]==["B1","B2"]
+    assert rows[0]["pendingRecheck"] is False
+    store.set_review_exclusions(rows)
+    assert store.review("beneficiaries",rule="Possible duplicate name",exact_matches_only=True)["total"]==0
+
+
+def test_non_duplicate_exclusion_never_becomes_pending(tmp_path):
+    registry=DuplicateExclusionRegistry(tmp_path/"exclusions.json")
+    registry.exclude_record("beneficiaries","Invalid contact number","caseId","B1")
+    payload=required_payload();payload["beneficiaries"]=csv(**{
+        "Case ID":["B1"],"Name (Filter Color Red)":["Person"],"Contact Number":["123"],
+    })
+    store=LegalStore.from_files(payload,"test",exclusions=registry.exclusion_rows())
+    contexts=store.duplicate_contexts_for_exclusions(registry.exclusion_rows())
+    rows,changed=registry.reconcile_duplicate_contexts(contexts)
+    assert changed is False
+    assert rows[0]["pendingRecheck"] is False
+    assert store.review("beneficiaries",rule="Invalid contact number")["total"]==0
+
+
+def test_duplicate_contexts_cover_assessment_service_and_awareness_groups():
+    payload=required_payload()
+    payload["assessments"]=csv(**{
+        "Assessment ID":["A1","A2"],"Beneficiary ID":["B1","B1"],
+        "Date of Assessment":["10/01/2026","11/01/2026"],"Assessment Status":["Open","Open"],
+    })
+    payload["legalservices"]=csv(**{
+        "Service ID":["S1","S2"],"Assessment ID":["A1","A1"],"Beneficiary ID":["B1","B1"],
+        "Type of Service Provided":["Legal Representation","Legal Representation"],"Type of Document":["National ID","National ID"],
+    })
+    payload["awareness"]=csv(**{
+        "Awareness ID":["W1","W2"],"Participant Name":["Same Participant","Same Participant"],"Session Topic":["Rights","Rights"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    checks=(
+        ("assessments","Beneficiary has multiple assessments",{"A1","A2"}),
+        ("legalservices","Duplicate service",{"S1","S2"}),
+        ("awareness","Duplicate participant in session",{"W1","W2"}),
+    )
+    for dataset,rule,members in checks:
+        rows=store.review(dataset,rule=rule,page_size=100)["rows"]
+        assert rows
+        assert all(set(row["duplicateContext"]["members"])==members for row in rows)
+
+
+def test_month_based_duplicate_contexts_include_current_and_previous_records():
+    payload=required_payload()
+    payload["assessments"]=csv(**{
+        "Assessment ID":["A-old","A-current"],"Beneficiary ID":["B1","B1"],
+        "Date of Assessment":["10/07/2026","10/08/2026"],"Created On":["10/07/2026","10/09/2026"],
+    })
+    payload["legalservices"]=csv(**{
+        "Service ID":["S-old","S-current"],"Assessment ID":["A-old","A-current"],"Beneficiary ID":["B1","B1"],
+        "Date of Service Provision":["12/07/2026","12/08/2026"],"Created On":["12/07/2026","10/09/2026"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    assessment=store.review("assessments",rule="Selected month with previous assessment",comparison_month="2026-08")["rows"]
+    service=store.review("legalservices",rule="Current and previous month duplicate",comparison_month="2026-08")["rows"]
+    assert assessment[0]["duplicateContext"]=={"version":1,"key":"assessment-history:B1","members":["A-current","A-old"],"settings":{"comparisonMonth":"2026-08"}}
+    assert service[0]["duplicateContext"]=={"version":1,"key":"service-history:B1","members":["S-current","S-old"],"settings":{"comparisonMonth":"2026-08"}}
 
 
 def test_duplicate_similarity_uses_each_rows_strongest_peer():
