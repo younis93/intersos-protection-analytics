@@ -25,9 +25,22 @@ const item = (sections: IndicatorSection[], children: IndicatorReportItem[] = []
 }) satisfies IndicatorReportItem;
 
 describe("indicator clipboard rows", () => {
+  it("copies blanks for zero counts and activity columns while preserving demographic counts", () => {
+    const sections = [section("syrian", [["North", "Erbil", 1]]), section("non-syrian", [["North", "Erbil", 4]])];
+    sections[0].rows[0].values = [...Array.from({length: 12}, (_, index) => index + 1), 78];
+    sections[1].rows[0].values[12] = 4;
+    const source = item(sections);
+
+    const values = indicatorLines(source, {projects: [], locations: []})[0].split("\t");
+
+    expect(values).toEqual([...Array.from({length: 12}, (_, index) => String(index + 1)), "", "4", ...Array(12).fill("")]);
+    expect(source.sections[0].rows[0].values[12]).toBe(78);
+    expect(source.sections[1].rows[0].values[12]).toBe(4);
+  });
+
   it("copies only the selected project and location", () => {
     const source=item([section("refugee", [["North", "Erbil", 1], ["South", "Baghdad", 2]])]);
-    expect(indicatorLines(source, {projects:["North"], locations:["Erbil"]})).toEqual([`1${"\t0".repeat(12)}`]);
+    expect(indicatorLines(source, {projects:["North"], locations:["Erbil"]})).toEqual([`1${"\t".repeat(12)}`]);
   });
 
   it("aligns populations by project and location instead of row position", () => {

@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 from openpyxl import load_workbook
 
-from backend.legal_platform import DETENTION_ASSESSMENT_RULES, LegalStore, normalize_name, phone_digits, versioned_dataset_name
+from backend.legal_platform import DETENTION_ASSESSMENT_RULES, REGISTERED_RULES, REVIEW_FINDING_ARABIC, LegalStore, normalize_name, phone_digits, versioned_dataset_name
 from backend.duplicate_exclusions import DuplicateExclusionRegistry
 
 
@@ -89,12 +89,52 @@ def test_review_export_neutralizes_spreadsheet_formulas():
 def test_review_export_starts_with_page_fields_and_uses_source_fields_once():
     workbook=load_workbook(io.BytesIO(LegalStore.from_files(required_payload(),"test").review_export("beneficiaries")),read_only=True,data_only=True)
     headers=[cell.value for cell in next(workbook["Unclassified"].iter_rows(min_row=1,max_row=1))]
-    assert headers[:7]==["Review Finding","Finding detail","Recommended action","Lawyer","Project","Project location","Case ID"]
+    assert headers[:8]==["Review Finding","نتيجة المراجعة","Finding detail","Recommended action","Lawyer","Project","Project location","Case ID"]
     assert "Priority" not in headers
     assert headers.index("Case ID") < headers.index("Name")
     assert headers.count("Name")==1
     assert headers.count("Case ID")==1
     assert "Name (Filter Color Red)" not in headers
+
+
+def test_review_finding_arabic_translations_cover_registered_rules():
+    assert all(REVIEW_FINDING_ARABIC.get(rule,"").strip() for rules in REGISTERED_RULES.values() for rule in rules)
+
+
+@pytest.mark.parametrize("dataset,rule",[
+    ("beneficiaries","Invalid age"),
+    ("assessments","Assessment without services"),
+    ("legalservices","Missing Type of Document"),
+    ("awareness","Invalid contact number"),
+])
+def test_review_export_arabic_column_in_every_table(dataset,rule):
+    payload=required_payload()
+    payload["awareness"]=csv(**{"Awareness ID":["W1"],"Participant Name":["Participant"]})
+    store=LegalStore.from_files(payload,"test")
+    projects=["UNHCR 2026 - Erbil","UNHCR 2026 - AMAL CAMP","UNHCR 2026 - Gov","Unknown"]
+    store.flags[dataset]=[{"rule":rule,"row":2,"project":project,"detail":"Finding detail","action":"Recommended action"} for project in projects]
+    book=load_workbook(io.BytesIO(store.review_export(dataset,selected_rules=[rule])))
+    expected_sheets={"Review findings"} if dataset=="awareness" else {"North Iraq","AMAL Camp","South Iraq","Unclassified"}
+    assert set(book.sheetnames)==expected_sheets
+    exported_rows=0
+    for sheet in book.worksheets:
+        for table in sheet.tables.values():
+            from openpyxl.utils.cell import range_boundaries
+            _,header_row,_,last_row=range_boundaries(table.ref)
+            assert sheet.cell(header_row,1).value=="Review Finding"
+            assert sheet.cell(header_row,2).value=="نتيجة المراجعة"
+            for row in range(header_row,last_row+1):
+                cell=sheet.cell(row,2)
+                assert cell.alignment.horizontal=="right"
+                assert cell.alignment.readingOrder==2
+                assert cell.alignment.wrap_text is True
+                if row>header_row:
+                    exported_rows+=1
+                    assert cell.value==REVIEW_FINDING_ARABIC[rule]
+                    assert sheet.cell(row,1).value==rule
+                    assert sheet.cell(row,3).value=="Finding detail"
+                    assert sheet.cell(row,4).value=="Recommended action"
+    assert exported_rows==4
 
 
 def test_review_export_includes_selected_rule_page_fields_before_source_fields():
@@ -659,7 +699,8 @@ def test_review_export_uses_consistent_rows_and_duplicate_name_colors():
     workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("beneficiaries")))
     sheet=workbook["South Iraq"]
     header=[cell.value for cell in sheet[1]];name_column=header.index("Name")+1
-    duplicate_rows=[row for row in range(2,sheet.max_row+1) if sheet.cell(row,2).value=="Possible duplicate name"]
+    finding_column=header.index("Review Finding")+1
+    duplicate_rows=[row for row in range(2,sheet.max_row+1) if sheet.cell(row,finding_column).value=="Possible duplicate name"]
     assert {sheet.row_dimensions[row].height for row in duplicate_rows}=={24.0}
     assert len({sheet.cell(row,name_column).fill.fgColor.rgb for row in duplicate_rows})==1
     assert {sheet.cell(row,name_column).fill.fgColor.rgb for row in duplicate_rows}=={"00FDE8E8"}
@@ -1397,6 +1438,42 @@ def test_project_reconciliation_compares_dob_and_normalized_detention_governorat
     matched=store.detention_reconciliation(matched_workbook.getvalue(),"detention.xlsx","2026-01","P1")
     assert matched["matched"]==1
     assert matched["rows"]==[{"beneficiaryId":"B2","caseAvailable":True,"name":"Person Two","lawyer":"","note":"Case ID available in Excel but missing from Platform","differences":[{"field":"Case ID","assessment":"Missing","excel":"Present"}]}]
+
+
+def test_detention_reconciliation_notes_not_detained_cases_within_selected_filters():
+    payload=required_payload()
+    payload["assessments"]=csv(**{
+        "Assessment ID":[f"A{i}" for i in range(10)],
+        "Beneficiary ID":[" B1 ","B2","B3","B4","B5","B6","B6","B7","B8","B9"],
+        "Projects":["P1","P1","P1","P2","P1","P1","P1","P1","P1","P1"],
+        "Is the beneficiary detained":["No","No لا","لا","No","No","No","Yes نعم","","Unknown","Not known"],
+        "Date of Assessment":["05/01/2026"]*4+["05/02/2026"]+["05/01/2026"]*5,
+    })
+    store=LegalStore.from_files(payload,"test")
+    workbook=io.BytesIO()
+    pd.DataFrame({
+        "Identification Date":["05/01/2026"]*10,
+        "Beneficiary ID (Platform Case ID)":[f"B{i}" for i in range(1,11)],
+    }).to_excel(workbook,index=False)
+    raw=workbook.getvalue()
+    result=store.detention_reconciliation(raw,"detention.xlsx","2026-01","P1")
+    rows={row["beneficiaryId"]:row for row in result["rows"]}
+    new_note="Case is not detained in the platform"
+    old_note="Case ID available in Excel but missing from Platform"
+    assert {case_id for case_id,row in rows.items() if row["note"]==new_note}=={"B1","B2","B3"}
+    assert all(rows[case_id]["note"]==old_note for case_id in ("B4","B5","B7","B8","B9","B10"))
+    assert "B6" not in rows
+    assert result["platformRecords"]==1
+    assert result["comparisonRecords"]==10
+    assert result["matched"]==1
+    assert result["unmatched"]==9
+    assert rows["B1"]["caseAvailable"] is True
+    assert rows["B1"]["differences"]==[{"field":"Case ID","assessment":"Missing","excel":"Present"}]
+    expanded=store.detention_reconciliation(raw,"detention.xlsx","2026-01,2026-02",["P1","P2"])
+    assert {row["beneficiaryId"] for row in expanded["rows"] if row["note"]==new_note}=={"B1","B2","B3","B4","B5"}
+    exported=store.detention_reconciliation_export(raw,"detention.xlsx","2026-01","P1")
+    issue_sheet=load_workbook(io.BytesIO(exported))["Comparison issues"]
+    assert sum(row[1]==new_note for row in issue_sheet.iter_rows(min_row=5,values_only=True))==3
 
 
 def test_detention_reconciliation_reports_blank_case_ids_on_both_sides():

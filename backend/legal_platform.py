@@ -118,13 +118,54 @@ ACTIONS = {
     "Possible duplicate participant name": "Check whether the matching name belongs to the same person before making any correction.",
     "Duplicate participant in session": "Verify the participant and session topic, then remove or correct the confirmed duplicate record.",
 }
+REVIEW_FINDING_ARABIC = {
+    "Possible duplicate name": "اشتباه في تكرار الاسم",
+    "Possible duplicate contact and name": "اشتباه في تكرار رقم الاتصال والاسم",
+    "Invalid contact number": "رقم اتصال غير صالح",
+    "Case without assessment": "حالة دون تقييم",
+    "Invalid age": "عمر غير صالح",
+    "Marital status below 18": "حالة اجتماعية تستدعي المراجعة لشخص دون سن 18 عاماً",
+    "Spouse below 18": "عمر الزوج أو الزوجة أقل من 18 عاماً",
+    "Check Community Type vs Nationality": "مراجعة توافق نوع المجتمع مع الجنسية",
+    "Beneficiary has multiple assessments": "لدى المستفيد تقييمات متعددة",
+    "Selected month with previous assessment": "تقييم في الشهر المحدد مع وجود تقييم سابق",
+    "Assessment without services": "تقييم دون خدمات",
+    "Pending assessment": "تقييم قيد الانتظار",
+    "Open counselling-only assessment": "تقييم مفتوح يقتصر على الاستشارة القانونية",
+    "Open assessment with all services closed": "تقييم مفتوح وجميع الخدمات المرتبطة به مغلقة",
+    "Blank legal service need": "الحاجة إلى الخدمة القانونية غير محددة",
+    "Detained beneficiary has counselling only": "مستفيد محتجز تلقى استشارة قانونية فقط",
+    "Adult representation without counselling": "تمثيل قانوني لشخص بالغ دون استشارة قانونية",
+    "Type of Legal Service in Assessment vs Services": "مراجعة توافق نوع الخدمة القانونية بين التقييم والخدمات",
+    "Detention/immigration inconsistency": "عدم اتساق بيانات الاحتجاز والتهم المتعلقة بالإقامة",
+    "Representation while not detained": "تمثيل قانوني لمستفيد غير محتجز",
+    "Type of document in Assessments vs Services": "مراجعة توافق نوع الوثيقة بين التقييمات والخدمات",
+    "Detained beneficiary below 10 years": "مستفيد محتجز دون سن 10 سنوات",
+    "Detention Governorate mismatch": "عدم تطابق محافظة الاحتجاز",
+    "Assessment date after today": "تاريخ التقييم لاحق لتاريخ اليوم",
+    "Duplicate service": "خدمة مكررة",
+    "Duplicate service without Assessment ID": "خدمة مكررة دون مطابقة معرّف التقييم",
+    "Current and previous month duplicate": "تكرار الخدمة بين الشهر الحالي وشهر سابق",
+    "Orphaned assessment relationship": "خدمة مرتبطة بتقييم غير موجود",
+    "Missing Type of Document": "نوع الوثيقة غير محدد",
+    "Legal service date after today": "تاريخ الخدمة القانونية لاحق لتاريخ اليوم",
+    "Duplicate participant in session": "مشارك مكرر في الجلسة",
+    "Possible duplicate participant name": "اشتباه في تكرار اسم المشارك",
+}
 REGISTERED_RULES = {
     "beneficiaries": ("Possible duplicate name","Possible duplicate contact and name","Invalid contact number","Case without assessment","Invalid age","Marital status below 18","Spouse below 18","Check Community Type vs Nationality"),
     "assessments": ("Beneficiary has multiple assessments","Selected month with previous assessment","Assessment without services","Pending assessment","Open counselling-only assessment","Open assessment with all services closed","Blank legal service need","Detained beneficiary has counselling only","Adult representation without counselling","Type of Legal Service in Assessment vs Services","Detention/immigration inconsistency","Representation while not detained","Type of document in Assessments vs Services","Detained beneficiary below 10 years","Detention Governorate mismatch","Assessment date after today"),
     "legalservices": ("Duplicate service","Duplicate service without Assessment ID","Current and previous month duplicate","Orphaned assessment relationship","Missing Type of Document","Legal service date after today"),
     "awareness": ("Duplicate participant in session","Invalid contact number","Possible duplicate participant name"),
 }
+from .hotline_review import RULES as HOTLINE_REVIEW_RULES
+REGISTERED_RULES["legalhotlines"] = HOTLINE_REVIEW_RULES
+REVIEW_FINDING_ARABIC.update(dict(zip(HOTLINE_REVIEW_RULES[:6], (
+    "تكرار اسم الشخص المعتقل", "تشابه اسم الشخص المعتقل", "اسم الشخص المعتقل يطابق اسم المتصل",
+    "مستفيد موقوف دون إحالة إلى محام", "مستفيد غير موقوف وغير محال إلى خط المساعدة", "أولوية عالية دون إحالة إلى محام",
+))))
 DUPLICATE_RECHECK_RULES = {
+    "Duplicate detained-person name", "Similar detained-person name",
     "Possible duplicate name",
     "Possible duplicate contact and name",
     "Beneficiary has multiple assessments",
@@ -761,10 +802,16 @@ class LegalStore:
         value = clean_id(row.get(fields.get(identifier_type, identifier_type), ""))
         return " ".join(value.casefold().split()) if identifier_type == "awarenessName" else value
 
+    def _hotline_flags(self, compare_chars: int = 15, allow_variations: bool = True):
+        from .hotline_review import findings
+        return findings(self, compare_chars, allow_variations)
+
     def _build_flags(self) -> dict[str, list[dict[str, Any]]]:
         if not all(name in self.frames for name in MANDATORY):
-            return {}
+            from .hotline_review import findings
+            return {"legalhotlines": findings(self)[0]} if "legalhotlines" in self.frames else {}
         return {
+            **({"legalhotlines": self._hotline_flags()[0]} if "legalhotlines" in self.frames else {}),
             "beneficiaries": self._beneficiary_flags(), "assessments": self._assessment_flags(),
             "legalservices": self._service_flags(),
             **({"awareness": self._awareness_flags()} if "awareness" in self.frames else {}),
@@ -797,7 +844,7 @@ class LegalStore:
         return {row["identifierValue"] for row in self.review_exclusions if row["dataset"] == "beneficiaries" and row["rule"] == rule and row["identifierType"] == "caseId" and not row.get("pendingRecheck")}
 
     def _is_excluded(self, row: dict[str, Any]) -> bool:
-        fields={"caseId":clean_id(row.get("caseId", "")),"assessmentId":clean_id(row.get("assessmentId", "")),"serviceId":clean_id(row.get("serviceId", "")),"awarenessId":clean_id(row.get("awarenessId", "")),"awarenessName":" ".join(str(row.get("name", "")).casefold().split())}
+        fields={"hotlineId":clean_id(row.get("hotlineId", "")),"caseId":clean_id(row.get("caseId", "")),"assessmentId":clean_id(row.get("assessmentId", "")),"serviceId":clean_id(row.get("serviceId", "")),"awarenessId":clean_id(row.get("awarenessId", "")),"awarenessName":" ".join(str(row.get("name", "")).casefold().split())}
         matching=[entry for entry in self.review_exclusions if entry["dataset"] == row.get("dataset") and entry["rule"] == row.get("rule") and fields.get(entry["identifierType"], "") == entry["identifierValue"]]
         if any(entry.get("pendingRecheck") for entry in matching):
             row["duplicateRecheck"] = True
@@ -817,7 +864,9 @@ class LegalStore:
             cache_key=(dataset,rule,tuple(sorted(settings.items())))
             rows=cache.get(cache_key)
             if rows is None:
-                if dataset=="beneficiaries" and rule=="Possible duplicate name":
+                if dataset=="legalhotlines":
+                    rows=self._hotline_flags(int(settings.get("nameCompareChars",15)),bool(settings.get("allowNameVariations",True)))[0]
+                elif dataset=="beneficiaries" and rule=="Possible duplicate name":
                     rows=self._name_match_flags(int(settings.get("nameCompareChars",15)),bool(settings.get("allowNameVariations",False)),bool(settings.get("exactMatchesOnly",False)))
                 elif dataset=="beneficiaries" and rule=="Possible duplicate contact and name":
                     rows=self._contact_name_match_flags()
@@ -1437,7 +1486,7 @@ class LegalStore:
                name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False) -> dict[str, Any]:
         @lru_cache(maxsize=256)
         def row_month(value: str) -> str:
-            parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
+            parsed = pd.to_datetime(value, errors="coerce", dayfirst=dataset!="legalhotlines", format="mixed")
             return "" if pd.isna(parsed) else parsed.strftime("%Y-%m")
 
         bounded_chars=max(10,min(30,name_compare_chars));cache_key=(dataset,comparison_month or "",bounded_chars,bool(allow_name_variations))
@@ -1445,6 +1494,9 @@ class LegalStore:
             context=self._review_cache.get(cache_key)
             if context is None:
                 rows=[dict(item) for item in self.flags.get(dataset,[])]
+                unavailable_rules={}
+                if dataset=="legalhotlines":
+                    rows,unavailable_rules=self._hotline_flags(bounded_chars,allow_name_variations)
                 if dataset=="beneficiaries":
                     rows=[r for r in rows if r["rule"] not in {"Possible duplicate name","Possible duplicate contact and name"}]
                     name_matches=self._name_match_flags(bounded_chars,allow_name_variations,excluded_case_ids=self._excluded_case_ids("Possible duplicate name"))
@@ -1473,7 +1525,7 @@ class LegalStore:
                                 if not item.get(key) and column:item[key]=clean_id(source.get(column,""))
                 registered_rules=REGISTERED_RULES.get(dataset,())
                 if dataset=="assessments" and self._amal_only_assessment_projects(): registered_rules=tuple(name for name in registered_rules if name not in AMAL_HIDDEN_ASSESSMENT_RULES)
-                date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate"}.get(dataset,"")
+                date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate","legalhotlines":"contactDate"}.get(dataset,"")
                 options={key:sorted({r.get(key,"") for r in rows if r.get(key,"")}) for key in ("severity","lawyer","project","location")}
                 options["date"]=sorted({month for r in rows if date_field and (month := row_month(r.get(date_field,"")))})
                 name_records=0;eligible_name_records=0
@@ -1487,15 +1539,22 @@ class LegalStore:
                             recognized_projects={"unhcr 2026 - erbil","unhcr 2026 - mosul & kirkuk","unhcr 2026 - suli","unhcr 2026 - baghdad","unhcr 2026 - gov","unhcr 2026 - amal camp"}
                             projects=self.frames[dataset][project_column].fillna("").astype(str).map(lambda value:re.sub(r"\s+"," ",value).strip().casefold())
                             eligible_name_records=int((normalized_names.str.len().ge(bounded_chars) & projects.isin(recognized_projects)).sum())
+                if dataset=="legalhotlines":
+                    from .hotline_review import prepare
+                    hotline_columns,_,_=prepare(self.frames[dataset])
+                    if hotline_columns["name"]:
+                        normalized_names=self.frames[dataset][hotline_columns["name"]].map(normalize_name)
+                        name_records=int(normalized_names.ne("").sum())
+                        eligible_name_records=int(normalized_names.str.len().ge(bounded_chars).sum())
                 exact_name_rows = self._name_match_flags(exact_only=True, excluded_case_ids=self._excluded_case_ids("Possible duplicate name")) if dataset == "beneficiaries" else []
-                context={"rows":rows,"exactNameRows":exact_name_rows,"registeredRules":registered_rules,"filterOptions":options,"availableMonths":available_months,"activeComparisonMonth":active_month,"nameRecordCount":name_records,"eligibleNameRecordCount":eligible_name_records}
+                context={"unavailableRules":unavailable_rules,"rows":rows,"exactNameRows":exact_name_rows,"registeredRules":registered_rules,"filterOptions":options,"availableMonths":available_months,"activeComparisonMonth":active_month,"nameRecordCount":name_records,"eligibleNameRecordCount":eligible_name_records}
                 self._review_cache[cache_key]=context
         def apply_runtime_filters(items:list[dict[str,Any]])->list[dict[str,Any]]:
             filtered=[item for item in items if not self._is_excluded(item)]
             for key,selection in (("severity",severity),("lawyer",lawyer),("project",project),("location",location)):
                 if selection: filtered=[item for item in filtered if item.get(key)==selection]
             if date:
-                date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate"}.get(dataset,"")
+                date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate","legalhotlines":"contactDate"}.get(dataset,"")
                 filtered=[item for item in filtered if date_field and row_month(item.get(date_field,""))==date]
             if search:
                 needle=search.lower();filtered=[item for item in filtered if needle in " ".join(map(str,item.values())).lower()]
@@ -1516,13 +1575,14 @@ class LegalStore:
             rows.sort(key=lambda item:(normalize_name(item.get("name","")),str(item.get("name","")).casefold(),str(item.get("awarenessId","")).casefold()))
         start=(page-1)*page_size
         rules=sorted({r["rule"] for r in self.flags.get(dataset,[])})
-        return {"dataset":dataset,"total":len(rows),"page":page,"pageSize":page_size,"rules":list(REGISTERED_RULES.get(dataset,rules)),"ruleCounts":rule_counts,"filterOptions":context["filterOptions"],"availableMonths":context["availableMonths"],"activeComparisonMonth":context["activeComparisonMonth"],"nameRecordCount":context["nameRecordCount"],"eligibleNameRecordCount":context["eligibleNameRecordCount"],"nameCompareCharsApplied":bounded_chars,"allowNameVariationsApplied":bool(allow_name_variations),"rows":rows[start:start+page_size]}
+        return {"unavailableRules":context["unavailableRules"],"dataset":dataset,"total":len(rows),"page":page,"pageSize":page_size,"rules":list(REGISTERED_RULES.get(dataset,rules)),"ruleCounts":rule_counts,"filterOptions":context["filterOptions"],"availableMonths":context["availableMonths"],"activeComparisonMonth":context["activeComparisonMonth"],"nameRecordCount":context["nameRecordCount"],"eligibleNameRecordCount":context["eligibleNameRecordCount"],"nameCompareCharsApplied":bounded_chars,"allowNameVariationsApplied":bool(allow_name_variations),"rows":rows[start:start+page_size]}
 
     def review_export(self,dataset:str,comparison_month:str="",name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False,selected_rules:list[str]|None=None,severity:str="",lawyer:str="",project:str="",location:str="",date:str="",search:str="",ignore_court_verdict:bool=False,ignore_court_verdict_rules:set[str]|None=None)->bytes:
         from openpyxl import Workbook
         from openpyxl.styles import Font,PatternFill,Alignment,Border,Side
         from openpyxl.utils import get_column_letter
         flags=list(self.flags.get(dataset,[]))
+        if dataset=="legalhotlines": flags=self._hotline_flags(name_compare_chars,allow_name_variations)[0]
         if dataset=="beneficiaries":
             flags=[r for r in flags if r["rule"] not in {"Possible duplicate name","Possible duplicate contact and name"}]
             flags += self._name_match_flags(name_compare_chars,allow_name_variations,exact_only=exact_matches_only,excluded_case_ids=self._excluded_case_ids("Possible duplicate name"))
@@ -1537,8 +1597,8 @@ class LegalStore:
         for key,selection in (("severity",severity),("lawyer",lawyer),("project",project),("location",location)):
             if selection: flags=[row for row in flags if row.get(key)==selection]
         if date:
-            date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate"}.get(dataset,"")
-            flags=[row for row in flags if date_field and not pd.isna(pd.to_datetime(row.get(date_field,""),errors="coerce",dayfirst=True)) and pd.to_datetime(row.get(date_field,""),errors="coerce",dayfirst=True).strftime("%Y-%m")==date]
+            date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate","legalhotlines":"contactDate"}.get(dataset,"")
+            flags=[row for row in flags if date_field and not pd.isna(pd.to_datetime(row.get(date_field,""),errors="coerce",dayfirst=dataset!="legalhotlines",format="mixed")) and pd.to_datetime(row.get(date_field,""),errors="coerce",dayfirst=dataset!="legalhotlines",format="mixed").strftime("%Y-%m")==date]
         if search:
             needle=search.lower();flags=[row for row in flags if needle in " ".join(map(str,row.values())).lower()]
         ignored_duplicate_rules={"Duplicate service","Duplicate service without Assessment ID"} if ignore_court_verdict else (ignore_court_verdict_rules or set())
@@ -1548,10 +1608,23 @@ class LegalStore:
         frame=self.frames[dataset]
         def columns_for_rule(rule:str)->tuple[list[tuple[str,str,tuple[str,...]]],list[str]]:
             page_columns:list[tuple[str,str,tuple[str,...]]]=[
-                ("Review Finding","rule",()),("Finding detail","detail",()),("Recommended action","action",()),
+                ("Review Finding","rule",()),("نتيجة المراجعة","ruleArabic",()),("Finding detail","detail",()),("Recommended action","action",()),
                 ("Lawyer","lawyer",("Lawyers","Lawyer","Created By","Created by")),
                 ("Project","project",("Projects -","Project")),("Project location","location",("Project Location","Project location")),
             ]
+            if dataset=="legalhotlines":
+                page_columns.extend([
+                    ("Record identifier","hotlineId",()),("Contact date","contactDate",("Contact Date",)),
+                    ("Detained-person name","name",("Name of the detained person",)),("Caller name","callerName",("Name of the caller",)),
+                    ("Contact number","phone",("Contact Number","Phone Number")),("Detained","beneficiaryDetained",("Is the beneficiary detained",)),
+                    ("Helpline referral","helplineReferral",("Has the beneficiary referred to the helpline?",)),("Priority","priority",("Priority",)),
+                    ("Lawyer referral","lawyerReferral",("Refer to Lawyer",)),
+                ])
+            if dataset=="legalhotlines":
+                from .hotline_review import prepare
+                columns,_,_=prepare(frame)
+                represented={column for column in columns.values() if column}
+                return page_columns,[column for column in frame.columns if column not in represented]
             if rule=="Detention Governorate mismatch": page_columns.append(("Detention Governorate mismatch","detentionGovernorate",("Detention Governorate",)))
             if dataset in {"beneficiaries","assessments","legalservices"}: page_columns.append(("Case ID","caseId",("Case ID","Beneficiary ID")))
             if dataset == "beneficiaries" and rule in {"Possible duplicate name", "Possible duplicate contact and name"}:
@@ -1602,10 +1675,11 @@ class LegalStore:
             for index,column in enumerate(columns,1): sheet.cell(header_row,index).value=safe_spreadsheet_value(column)
             for cell in sheet[header_row]:
                 cell.font=Font(bold=True,color="FFFFFF");cell.fill=PatternFill("solid",fgColor="2454C6");cell.alignment=Alignment(vertical="center",wrap_text=True)
+            sheet.cell(header_row,2).alignment=Alignment(horizontal="right",vertical="center",wrap_text=True,readingOrder=2)
             sheet.row_dimensions[header_row].height=34
             for flag in items:
                 source=frame.iloc[flag["row"]-2] if 0 <= flag["row"]-2 < len(frame) else pd.Series(dtype=object)
-                values=[display_value(flag.get(key,"")) for _,key,_ in unique_page_columns]+[display_value(source.get(c,"")) for c in source_columns]
+                values=[REVIEW_FINDING_ARABIC.get(rule,rule) if key=="ruleArabic" else display_value(flag.get(key,"")) for _,key,_ in unique_page_columns]+[display_value(source.get(c,"")) for c in source_columns]
                 sheet.append([safe_spreadsheet_value(value) for value in values]);row_number=sheet.max_row;sheet.row_dimensions[row_number].height=24
                 sheet.cell(row_number,1).fill=PatternFill("solid",fgColor=rule_colors[flag["rule"]])
                 project_column=next((index for index,column in enumerate(columns,1) if column=="Project"),None)
@@ -1614,7 +1688,7 @@ class LegalStore:
                     sheet.cell(row_number,project_column).fill=PatternFill("solid",fgColor=project_colors[project])
                 if flag.get("duplicateGroup"):
                     exact=flag.get("nameMatchMode")=="exact";color="FDE8E8" if exact else duplicate_colors[flag["duplicateGroup"]]
-                    name_column=next((index for index,column in enumerate(columns,1) if column=="Name"),None)
+                    name_column=next((index for index,column in enumerate(columns,1) if column in {"Name","Detained-person name"}),None)
                     if name_column:
                         sheet.cell(row_number,name_column).fill=PatternFill("solid",fgColor=color)
                         if exact:sheet.cell(row_number,name_column).font=Font(bold=True,color="991B1B")
@@ -1625,6 +1699,7 @@ class LegalStore:
                             if exact:source_cell.font=Font(bold=True,color="991B1B")
                 for cell in sheet[row_number]:
                     cell.alignment=Alignment(vertical="center",wrap_text=True);cell.border=Border(bottom=thin)
+                sheet.cell(row_number,2).alignment=Alignment(horizontal="right",vertical="center",wrap_text=True,readingOrder=2)
             table_number+=1
             table=Table(displayName=f"ReviewTable{table_number}",ref=f"A{header_row}:{get_column_letter(len(columns))}{sheet.max_row}")
             table.tableStyleInfo=TableStyleInfo(name="TableStyleMedium2",showFirstColumn=False,showLastColumn=False,showRowStripes=False,showColumnStripes=False)
@@ -2623,10 +2698,19 @@ class LegalStore:
         platform_month=pd.to_datetime(frame[assessment_date],errors="coerce",dayfirst=True).dt.to_period("M").astype(str)
         detained=_find(list(frame.columns),"Is the beneficiary detained")
         platform=frame[platform_month.isin(months)].copy()
-        if detained: platform=platform[platform[detained].fillna("").astype(str).str.contains(r"\byes\b|نعم",case=False,regex=True)]
         if projects:
             if not platform_project: raise ValueError("The platform Assessments data has no Project column.")
             platform=platform[platform[platform_project].fillna("").astype(str).str.strip().isin(projects)]
+        not_detained_case_ids=set()
+        if detained:
+            detention_status=platform[detained].fillna("").astype(str).str.strip()
+            detained_mask=detention_status.str.contains(r"\byes\b|نعم",case=False,regex=True)
+            not_detained_mask=detention_status.str.contains(r"\bno\b|(?<!\w)لا(?!\w)",case=False,regex=True)
+            if platform_columns["Beneficiary ID"]:
+                scoped_case_ids=platform[platform_columns["Beneficiary ID"]].map(clean_id)
+                not_detained_case_ids=set(scoped_case_ids[not_detained_mask])-set(scoped_case_ids[detained_mask])
+                not_detained_case_ids.discard("")
+            platform=platform[detained_mask].copy()
         external_month=pd.to_datetime(external[identification_date],errors="coerce",dayfirst=True).dt.to_period("M").astype(str)
         external=external[external_month.isin(months)].copy()
         if projects and external_project: external=external[external[external_project].fillna("").astype(str).str.strip().isin(projects)]
@@ -2703,7 +2787,8 @@ class LegalStore:
         for case_id,target_group in external_by_id.items():
             if case_id in platform_by_id:continue
             target=target_group.iloc[-1]
-            results.append({"beneficiaryId":case_id,"caseAvailable":case_available(case_id),"name":display_value(target.get(name_external,"")) if name_external else "","lawyer":preferred_lawyer(None,target),"note":"Case ID available in Excel but missing from Platform","differences":[{"field":"Case ID","assessment":"Missing","excel":"Present"}]})
+            note="Case is not detained in the platform" if case_id in not_detained_case_ids else "Case ID available in Excel but missing from Platform"
+            results.append({"beneficiaryId":case_id,"caseAvailable":case_available(case_id),"name":display_value(target.get(name_external,"")) if name_external else "","lawyer":preferred_lawyer(None,target),"note":note,"differences":[{"field":"Case ID","assessment":"Missing","excel":"Present"}]})
         for _,source in platform_missing_id.iterrows():
             results.append({"beneficiaryId":"","caseAvailable":False,"name":display_value(source.get(name_platform,"")) if name_platform else "","lawyer":preferred_lawyer(source),"note":"Case ID missing in Assessments","differences":[{"field":"Case ID","assessment":"Missing","excel":"Not comparable"}]})
         for _,target in external_missing_id.iterrows():

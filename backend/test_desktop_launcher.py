@@ -183,7 +183,8 @@ class DesktopLauncherTests(unittest.TestCase):
                 self.assertIn("Preparing your workspace", html)
                 self.assertIn("Starting the secure local application.", html)
                 self.assertIn('class="startup"', html)
-                self.assertIn("data:image/png;base64,", html)
+                self.assertIn('role="img" aria-label="INTERSOS"', html)
+                self.assertNotIn("data:image/png;base64,", html)
                 self.assertIn("@keyframes orbit", html)
         self.assertIn("Unable to start Iraq Data Analysis", launcher.startup_html("glass-light", failed=True))
 

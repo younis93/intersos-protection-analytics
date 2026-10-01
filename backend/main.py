@@ -435,6 +435,7 @@ def _exclusion_import_column(frame, dataset: str, requested_identifier_type: str
         "assessments": (("assessment id", "assessmentId"),),
         "legalservices": (("service id", "serviceId"),),
         "awareness": (("awareness id", "awarenessId"),),
+        "legalhotlines": (("record identifier", "hotlineId"), ("hotline id", "hotlineId")),
     }
     allowed_types = {identifier_type for _, identifier_type in aliases[dataset]}
     normalized_columns = [(_normalized_import_header(column), column) for column in frame.columns]
@@ -453,7 +454,7 @@ def _exclusion_import_column(frame, dataset: str, requested_identifier_type: str
 
 @app.post("/api/legal/duplicate-exclusions/import")
 async def import_duplicate_exclusions(file: UploadFile = File(...), dataset: str = Form(...), identifier_type: str = Form(...), rules: str = Form(...)):
-    if dataset not in {"assessments", "legalservices", "awareness", "beneficiaries"}:
+    if dataset not in {"assessments", "legalservices", "awareness", "beneficiaries", "legalhotlines"}:
         raise HTTPException(400, "Unsupported review page.")
     selected_rules=[item.strip() for item in rules.split(",") if item.strip()]
     if not selected_rules: raise HTTPException(400, "Choose at least one finding table.")
@@ -474,6 +475,7 @@ async def import_duplicate_exclusions(file: UploadFile = File(...), dataset: str
             if pd.isna(raw_value): invalid+=1; continue
             value = clean_id(raw_value)
             if not value: invalid+=1; continue
+            if dataset=="legalhotlines" and not value.startswith(("id:","hotline:")): value=f"id:{value}"
             if value in seen: continue
             seen.add(value); values.append(value)
         source_name = Path(file.filename or "file").name

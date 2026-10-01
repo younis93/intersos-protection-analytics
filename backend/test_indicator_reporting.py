@@ -5,6 +5,37 @@ from openpyxl import load_workbook
 from backend.indicator_reporting import build_indicator_report, build_indicator_workbook, build_narrative_workbook
 
 
+def test_indicator_filter_options_use_only_uploaded_reporting_sources():
+    def source(project,location,community):
+        return pd.DataFrame({"Projects":[project],"Project Location":[location],"Community Type":[community]})
+    frames={
+        "assessments":source("UNHCR 2026 - Gov","Anbar أنبار","Syrian Refugee"),
+        "legalservices":source("UNHCR 2026 - Mosul & Kirkuk","UNHCR Mosul","Syrian Refugee"),
+        "deportationrecords":source("UNHCR 2026 - SULI","Rania","Non-Syrian Refugee"),
+        "awareness":source("UNHCR 2026 - AMAL CAMP","AMAL Camp","IDP"),
+        "legalfees":source("UNHCR 2026 - Erbil","Urban","Syrian Refugee"),
+        "beneficiaries":source("UNHCR 2026 - Baghdad","Baghdad بغداد","Syrian Refugee"),
+    }
+    report=build_indicator_report(frames)
+    options=report["filterOptions"]
+    assert options["projects"]==["UNHCR 2026 - AMAL CAMP","UNHCR 2026 - SULI","UNHCR 2026 - Mosul & Kirkuk","UNHCR 2026 - Gov"]
+    assert options["locationsByProject"]=={
+        "UNHCR 2026 - AMAL CAMP":["AMAL Camp"],
+        "UNHCR 2026 - SULI":["Pshdar Urban (Refugees) + Rania"],
+        "UNHCR 2026 - Mosul & Kirkuk":["Ninewa نينوى"],
+        "UNHCR 2026 - Gov":["Anbar أنبار"],
+    }
+    assert set(options["locations"])=={"AMAL Camp","Pshdar Urban (Refugees) + Rania","Ninewa نينوى","Anbar أنبار"}
+    assert build_indicator_report(frames,projects=["UNHCR 2026 - Gov"],community_types=["Syrian Refugee"])["filterOptions"]==options
+    frames["awareness"]=pd.DataFrame()
+    without_awareness=build_indicator_report(frames)["filterOptions"]
+    assert "UNHCR 2026 - AMAL CAMP" not in without_awareness["projects"]
+    frames["legalfees"]["Community Type"]="IDP"
+    assert "IDP" not in build_indicator_report(frames)["filterOptions"]["communityTypes"]
+    empty=build_indicator_report({"assessments":pd.DataFrame(),"legalservices":pd.DataFrame(),"legalfees":frames["legalfees"]})["filterOptions"]
+    assert empty["projects"]==empty["locations"]==empty["communityTypes"]==[]
+
+
 def test_indicator_parent_carryover_and_reporting_mappings():
     assessments = pd.DataFrame({
         "Assessment ID": ["A1", "A2", "A3", "A4", "A5"],
@@ -57,7 +88,7 @@ def test_indicator_parent_carryover_and_reporting_mappings():
     combined = next(row for row in all_rows if row["location"] == "Pshdar Urban (Refugees) + Rania")
     assert diyala["project"] == "UNHCR 2026 - Gov" and diyala["values"][-1] == 1
     assert combined["values"][-1] == 2
-    assert any(row["project"] == "UNHCR 2026 - AMAL CAMP" for row in all_rows)
+    assert all(row["project"] != "UNHCR 2026 - AMAL CAMP" for row in all_rows)
     assert all(row["project"] != "UNHCR 2026 - AMAL CAMP" for section in representation["sections"] for row in section["rows"])
 
 
@@ -70,7 +101,7 @@ def test_indicator_filters_hide_rows_and_validate_dates():
     services = pd.DataFrame(columns=["Service ID", "Assessment ID", "Projects - المشروع", "Project Location", "Type of Service Provided / نوع الخدمة"])
     report = build_indicator_report({"assessments": assessments, "legalservices": services}, projects=["UNHCR 2026 - SULI"])
     reached = next(item for group in report["groups"] for item in group["indicators"] if item["id"] == "individuals-reached")
-    assert len(reached["sections"][0]["rows"]) == 3
+    assert reached["sections"][0]["rows"] == []
     january = build_indicator_report({"assessments": assessments, "legalservices": services}, years=["2026"], quarters=["2026-Q1"], months=["2026-01"])
     january_reached = next(item for group in january["groups"] for item in group["indicators"] if item["id"] == "individuals-reached")
     assert january_reached["total"] == 1
@@ -106,12 +137,10 @@ def test_indicator_filters_hide_rows_and_validate_dates():
     age_header_row = next(cell.row for row in sheet.iter_rows() for cell in row if cell.value == "00-04")
     assert sheet.cell(age_header_row, 3).fill.fgColor.rgb == "00D9EAF7"
     assert sheet.cell(age_header_row, 9).fill.fgColor.rgb == "00FCE8C3"
-    pshdar_row = next(cell.row for row in sheet.iter_rows() for cell in row if cell.value == "Pshdar Urban (Refugees) + Rania")
-    mosul_row = next(cell.row for row in sheet.iter_rows() for cell in row if cell.value == "UNHCR 2026 - Mosul & Kirkuk")
-    assert sheet.row_dimensions[pshdar_row].height == 21
-    assert sheet.row_dimensions[mosul_row].height == 21
-    assert sheet.cell(pshdar_row, 2).alignment.shrink_to_fit is True
-    assert sheet.cell(mosul_row, 1).alignment.shrink_to_fit is True
+    assert not any(cell.value in {"Pshdar Urban (Refugees) + Rania", "UNHCR 2026 - Mosul & Kirkuk"} for row in sheet.iter_rows() for cell in row)
+    project_row = next(cell.row for row in sheet.iter_rows() for cell in row if cell.value == "UNHCR 2026 - Gov")
+    assert sheet.row_dimensions[project_row].height == 21
+    assert sheet.cell(project_row, 1).alignment.shrink_to_fit is True
     zero_cells = [cell for row in sheet.iter_rows() for cell in row if cell.value == 0]
     assert zero_cells and all(cell.column == sheet.max_column for cell in zero_cells)
     amal_workbook = load_workbook(BytesIO(build_indicator_workbook(amal)))
@@ -217,3 +246,20 @@ def test_representation_uses_unique_assessment_and_monthly_beneficiary_ids():
     assert "SESSION-TOPIC BREAKDOWN" in awareness_remark
     assert "• Civil documentation - 1 awareness session | Participants: 2 | Women: 2" in awareness_remark
     assert "الوثائق" not in awareness_remark
+
+
+def test_indicator_project_rows_follow_uploaded_project_availability():
+    def displayed_projects(report):
+        def rows(item):
+            return [row for section in item["sections"] for row in section["rows"]] + [row for child in item["children"] for row in rows(child)]
+        return {row["project"] for group in report["groups"] for item in group["indicators"] for row in rows(item)}
+
+    assessments = pd.DataFrame({"Projects": ["UNHCR 2026 - Baghdad"], "Project Location": ["Baghdad بغداد"], "Community Type": ["Syrian Refugee"]})
+    frames = {"assessments": assessments, "legalservices": pd.DataFrame()}
+    assert displayed_projects(build_indicator_report(frames)) == {"UNHCR 2026 - Baghdad"}
+    frames["legalservices"] = pd.DataFrame({"Projects": ["UNHCR 2026 - Erbil"], "Project Location": ["Urban"], "Community Type": ["Syrian Refugee"]})
+    assert displayed_projects(build_indicator_report(frames)) == {"UNHCR 2026 - Baghdad", "UNHCR 2026 - Erbil"}
+    assert displayed_projects(build_indicator_report(frames, months=["2026-02"])) == {"UNHCR 2026 - Baghdad", "UNHCR 2026 - Erbil"}
+    assert displayed_projects(build_indicator_report(frames, projects=["UNHCR 2026 - Erbil"])) == {"UNHCR 2026 - Erbil"}
+    frames["legalservices"] = pd.DataFrame()
+    assert displayed_projects(build_indicator_report(frames)) == {"UNHCR 2026 - Baghdad"}

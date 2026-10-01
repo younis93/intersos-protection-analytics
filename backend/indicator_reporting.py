@@ -136,10 +136,11 @@ def _common_columns(frame: pd.DataFrame) -> dict[str, str | None]:
 
 def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "", to_date: str = "", projects: list[str] | None = None, locations: list[str] | None = None, years: list[str] | None = None, quarters: list[str] | None = None, months: list[str] | None = None, community_types: list[str] | None = None) -> dict[str, Any]:
     projects, locations, years, quarters, months, community_types = projects or [], locations or [], years or [], quarters or [], months or [], community_types or []
+    reporting_frames=[frames[name] for name in ("assessments","legalservices","deportationrecords","awareness") if name in frames]
     # The source values often append Arabic text (for example, "Syrian Refugee
     # لاجئ-سوري"). Expose the reporting populations as clean English labels
     # while retaining a population-aware filter against the original data.
-    community_options=sorted({_community_filter_label(value) for frame in frames.values() for column in [_common_columns(frame).get("community")] if column for value in frame[column].dropna() if _community_filter_label(value)})
+    community_options=sorted({_community_filter_label(value) for frame in reporting_frames for column in [_common_columns(frame).get("community")] if column for value in frame[column].dropna() if _community_filter_label(value)})
     if community_types:
         selected_communities=set(community_types)
         frames={name:frame[frame[_common_columns(frame)["community"]].map(_community_filter_label).isin(selected_communities)].copy() if _common_columns(frame).get("community") else frame.copy() for name,frame in frames.items()}
@@ -156,7 +157,6 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         for legacy_location, current_location in LOCATION_ALIASES.items():
             if location_key == current_location:
                 canonical[(project_key, legacy_location)] = pair
-    visible_rows = [pair for pair in REPORT_ROWS if (not projects or pair[0] in projects) and (not locations or pair[1] in locations)]
     beneficiary_frame = frames.get("beneficiaries", pd.DataFrame())
     beneficiary_id_column = _find(list(beneficiary_frame.columns), "Case ID", "Beneficiary ID")
     beneficiary_name_column = _find(list(beneficiary_frame.columns), "Name (Filter Color Red)", "Beneficiary Name", "Name")
@@ -171,6 +171,16 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         elif "diyala" in location_text or "ديالى" in location_text:
             project, location = "UNHCR 2026 - Gov", "Diyala ديالى"
         return canonical.get((_lookup(project), _lookup(location)))
+
+    available_pairs=set()
+    for reporting_frame in reporting_frames:
+        columns=_common_columns(reporting_frame)
+        for _,row in reporting_frame.iterrows():
+            pair=mapped_pair(row,columns)
+            if pair: available_pairs.add(pair)
+    available_report_rows=[pair for pair in REPORT_ROWS if pair in available_pairs]
+    available_projects={project for project, _ in available_report_rows}
+    visible_rows = [pair for pair in REPORT_ROWS if pair[0] in available_projects and (not projects or pair[0] in projects) and (not locations or pair[1] in locations)]
 
     def in_period(value: Any) -> bool:
         parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
@@ -557,7 +567,7 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         for child in entry.get("children", []): attach_narrative(child)
     for group in groups:
         for item in group["indicators"]: attach_narrative(item)
-    project_order = list(dict.fromkeys(project for project, _ in REPORT_ROWS))
+    project_order = list(dict.fromkeys(project for project, _ in available_report_rows))
     report_dates = []
     for frame, columns in ((assessments, (adate, arelease)), (services, (sprovision, scompleted))):
         for column in columns:
@@ -569,7 +579,7 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
     month_options = sorted({date.strftime("%Y-%m") for date in report_dates}, reverse=True)
     quarter_options = sorted({f"{date.year}-Q{date.quarter}" for date in report_dates}, reverse=True)
     year_options = sorted({str(date.year) for date in report_dates}, reverse=True)
-    return {"fromDate": from_date, "toDate": to_date, "ageGroups": list(AGE_GROUPS), "filterOptions": {"projects": project_order, "locations": list(dict.fromkeys(location for _, location in REPORT_ROWS)), "locationsByProject": {project: [location for row_project, location in REPORT_ROWS if row_project == project] for project in project_order}, "years": year_options, "quarters": quarter_options, "months": month_options, "communityTypes": community_options}, "activeFilters": {"projects": projects, "locations": locations, "years": years, "quarters": quarters, "months": months, "communityTypes": community_types}, "groups": groups}
+    return {"fromDate": from_date, "toDate": to_date, "ageGroups": list(AGE_GROUPS), "filterOptions": {"projects": project_order, "locations": list(dict.fromkeys(location for _, location in available_report_rows)), "locationsByProject": {project: [location for row_project, location in available_report_rows if row_project == project] for project in project_order}, "years": year_options, "quarters": quarter_options, "months": month_options, "communityTypes": community_options}, "activeFilters": {"projects": projects, "locations": locations, "years": years, "quarters": quarters, "months": months, "communityTypes": community_types}, "groups": groups}
 
 
 def _carryover_match(row: pd.Series, provision_column: str | None, completed_column: str | None, status_column: str | None, type_column: str | None, in_period: Callable[[Any], bool]) -> bool:

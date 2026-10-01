@@ -103,6 +103,7 @@ const exportSvgChart: typeof import("./chartExport").exportSvgChart = async (...
 
 type LegalPage =
   | "hotline"
+  | "legalhotlines"
   | "overview"
   | "beneficiaries"
   | "assessments"
@@ -153,6 +154,7 @@ const EXCLUSION_RULE_OPTIONS = [
 const exclusionRuleClass = (rule: string) => rule === "Possible duplicate name" || rule === "Possible duplicate contact and name" ? "duplicates" : rule === "Invalid contact number" ? "contacts" : rule === "Marital status below 18" ? "marital" : "spouse";
 const labels: Record<LegalPage, string> = {
   hotline: "Hotline",
+  legalhotlines: "Hotline Review",
   overview: "Overview",
   beneficiaries: "Beneficiaries Review",
   assessments: "Assessments Review",
@@ -172,6 +174,7 @@ const displayReviewRule = (rule: string) => rule === "Possible duplicate contact
 const announceLegalCopy = (value: string) => window.dispatchEvent(new CustomEvent<string>("legal-copy", { detail: value }));
 const descriptions: Record<LegalPage, string> = {
   hotline: "Hotline contacts, detention, referrals and requests by contact date.",
+  legalhotlines: "Review detained-person names, contact numbers and hotline referral issues.",
   overview:
     "A clear picture of data volume, review priorities and the issues requiring attention.",
   beneficiaries:
@@ -193,6 +196,12 @@ const descriptions: Record<LegalPage, string> = {
   indicators: "Reserved for the indicator reporting framework and definitions.",
 };
 const REVIEW_CHECK_METHODS: Record<string, { columns: string[]; logic: string }> = {
+  "Duplicate detained-person name": { columns: ["Name of the detained person"], logic: "Compares complete normalized nonblank detained-person names across all hotline records." },
+  "Similar detained-person name": { columns: ["Name of the detained person"], logic: "Compares the configured leading normalized characters, allowing 90% similarity when spelling variations are enabled. Identical full names are listed separately." },
+  "Detained-person name matches caller": { columns: ["Name of the detained person", "Name of the caller"], logic: "Checks whether either name contains the other as complete words within this hotline record." },
+  "Detained without lawyer referral": { columns: ["Is the beneficiary detained", "Refer to Lawyer"], logic: "Flags explicit Yes detention answers with a blank lawyer referral." },
+  "Not detained and not referred to helpline": { columns: ["Is the beneficiary detained", "Has the beneficiary referred to the helpline?"], logic: "Flags records with explicit No answers to both questions. Blank answers do not count as No." },
+  "High priority without lawyer referral": { columns: ["Priority", "Refer to Lawyer"], logic: "Flags High priority records with a blank lawyer referral." },
   "Possible duplicate name": { columns: ["Name (Filter Color Red)", "Project"], logic: "Normalizes names, groups them within the permitted project group, then compares the configured leading characters (or exact names when Exact matches is enabled)." },
   "Possible duplicate contact and name": { columns: ["Contact Number", "Name (Filter Color Red)", "# UNHCR", "ID Number", "Individual Number ASSISIT", "Spouse name", "Project"], logic: "Within the permitted project group, flags records with the same nonblank normalized contact number, at least 90% full-name similarity, and one populated identity marker on each record." },
   "Invalid contact number": { columns: ["Contact Number / Phone Number"], logic: "Keeps normalized phone numbers that are not blank, one digit, or 11 digits, after excluding configured system prefixes." },
@@ -262,6 +271,7 @@ const legalPageFromUrl = (): LegalPage => legalRouteFromUrl().page;
 const nav: [LegalPage, any][] = [
   ["overview", LayoutDashboard],
   ["hotline", Megaphone],
+  ["legalhotlines", Megaphone],
   ["indicators", ChartColumnIncreasing],
   ["beneficiaries", Users],
   ["assessments", ShieldCheck],
@@ -519,8 +529,8 @@ function FindingTable({
     announceLegalCopy(name);
   };
   const visibleRows=(result?.rows||[]).filter((row)=>!ignoreCourtVerdict || !/court verdict|\bother\b|اخرى/i.test(row.typeOfDocument||""));
-  const rowKey = (row: LegalFlag, index: number) => `${row.recordId || row.row}|${row.caseId}|${row.assessmentId}|${row.serviceId}|${row.awarenessId}|${index}`;
-  const isExcludable = (row: LegalFlag) => (dataset === "assessments" && Boolean(row.assessmentId)) || (dataset === "legalservices" && Boolean(row.serviceId)) || (dataset === "awareness" && Boolean(row.awarenessId || row.name)) || (dataset === "beneficiaries" && Boolean(row.caseId));
+  const rowKey = (row: LegalFlag, index: number) => dataset === "legalhotlines" ? row.hotlineId || row.recordId : `${row.recordId || row.row}|${row.caseId}|${row.assessmentId}|${row.serviceId}|${row.awarenessId}|${index}`;
+  const isExcludable = (row: LegalFlag) => (dataset === "legalhotlines" && Boolean(row.hotlineId)) || (dataset === "assessments" && Boolean(row.assessmentId)) || (dataset === "legalservices" && Boolean(row.serviceId)) || (dataset === "awareness" && Boolean(row.awarenessId || row.name)) || (dataset === "beneficiaries" && Boolean(row.caseId));
   const excludableRows = visibleRows.filter(isExcludable);
   const selectedRows = visibleRows.filter((row, index) => isExcludable(row) && selectedRowKeys.includes(rowKey(row, index)));
   const allVisibleSelected = excludableRows.length > 0 && selectedRows.length === excludableRows.length;
@@ -538,7 +548,7 @@ function FindingTable({
           <div><h3>{displayReviewRule(rule)}</h3></div>
         </div>
         <div className="finding-table-pagination">
-          {rule === "Possible duplicate name" && (
+          {(rule === "Possible duplicate name" || rule === "Similar detained-person name") && (
             <section className={`name-sensitivity-panel finding-name-matching${exactMatchesOnly ? " disabled" : ""}`} title={exactMatchesOnly ? "Name matching controls are ignored while only 100% matches is selected." : undefined}>
               <div className="name-match-title">
                 <span>NAME MATCHING</span>
@@ -554,7 +564,7 @@ function FindingTable({
                 <span>Spelling variations</span>
               </label>
               {nameRecordCount === 0 ? (
-                <small className="name-empty-message">No beneficiary names are loaded. Choose a folder containing beneficiary names to use duplicate-name matching.</small>
+                <small className="name-empty-message">No names are loaded. Import the review dataset to use duplicate-name matching.</small>
               ) : eligibleNameRecordCount === 0 ? (
                 <small className="name-empty-message">No names are long enough for {nameCompareChars} characters. Move the slider lower to include shorter names.</small>
               ) : null}
@@ -580,16 +590,17 @@ function FindingTable({
           <button className="review-bulk-exclude" onClick={() => onBulkExclude(selectedRows)}><Ban /> Exclude selected</button>
         </div>
       )}
-      {helpOpen && (() => { const method=REVIEW_CHECK_METHODS[rule] || {columns:["Imported source record"],logic:"Flags records matching this review rule."}; return <aside className="finding-check-guidance" role="note"><CircleHelp /><div><strong>Detection methodology</strong><p>{method.logic}</p><div className="finding-method-columns"><span>Columns checked</span>{method.columns.map((column) => <b key={column}>{column}</b>)}</div></div></aside>; })()}
+      {helpOpen && (() => { const method=dataset === "legalhotlines" && rule === "Invalid contact number" ? {columns:["Contact Number / Phone Number"],logic:"Checks populated numbers only. Removes spaces, hyphens and parentheses, then requires exactly 10 digits. Country codes and other characters are invalid."} : REVIEW_CHECK_METHODS[rule] || {columns:["Imported source record"],logic:"Flags records matching this review rule."}; return <aside className="finding-check-guidance" role="note"><CircleHelp /><div><strong>Detection methodology</strong><p>{method.logic}</p><div className="finding-method-columns"><span>Columns checked</span>{method.columns.map((column) => <b key={column}>{column}</b>)}</div></div></aside>; })()}
       {error && <div className="error">{error}</div>}
+      {result?.unavailableRules?.[rule] && <div className="error" role="status">This check is unavailable. {result.unavailableRules[rule]}</div>}
       {!result ? (
         <LegalSkeleton variant="table" compact />
       ) : result.total === 0 ? (
         <div className="review-clear compact">
           <CheckCircle2 />
           <div>
-            <h3>No matching records</h3>
-            <p>No cases match this finding and the active filters.</p>
+            <h3>{result.unavailableRules?.[rule] ? "Required columns are unavailable" : "No matching records"}</h3>
+            <p>{result.unavailableRules?.[rule] ? "Import the required hotline columns to run this check." : "No records match this finding and the active filters."}</p>
           </div>
         </div>
       ) : (
@@ -601,19 +612,21 @@ function FindingTable({
                   <th className="review-selection-column"><input ref={selectVisibleRef} aria-label={`Select visible records for ${displayReviewRule(rule)}`} type="checkbox" disabled={!excludableRows.length} checked={allVisibleSelected} onChange={(event) => setSelectedRowKeys(event.target.checked ? visibleRows.map((row, index) => isExcludable(row) ? rowKey(row, index) : "").filter(Boolean) : [])} /></th>
                   <th>Finding detail</th>
                   <th>Recommended action</th>
-                  <th>Lawyer</th>
-                  <th>Priority</th>
+                  <th>{dataset === "legalhotlines" ? "Lawyer referral" : "Lawyer"}</th>
+                  <th>{dataset === "legalhotlines" ? "Finding severity" : "Priority"}</th>
                   <th>Project</th>
                   <th>Project location</th>{rule === "Detention Governorate mismatch" && <th>Detention Governorate mismatch</th>}
-                  <th>Name</th>
+                  <th>{dataset === "legalhotlines" ? "Detained-person name" : "Name"}</th>
                   {(rule === "Marital status below 18" || rule === "Spouse below 18") && <th>Marital status</th>}
                   {rule === "Spouse below 18" && <><th>Spouse name</th><th>Spouse date of birth</th><th>Spouse current age</th></>}
                   <th>Phone number</th>
                   {dataset === "beneficiaries" && <th>Date of birth</th>}
-                  {dataset === "awareness" ? (
+                  {dataset === "legalhotlines" ? (
+                    <><th>Contact date</th><th>Caller name</th><th>Detained</th><th>Helpline referral</th><th>Priority</th></>
+                  ) : dataset === "awareness" ? (
                     <><th>Awareness ID</th><th>Session topic</th></>
                   ) : (
-                    <><th>Case ID</th>{(rule === "Possible duplicate name" || rule === "Possible duplicate contact and name") && <><th>Date of Identification</th><th>Created On</th><th>Fee ID</th><th>Amount Spent (IQD)</th><th>Type of Legal Service Needed</th></>}<th>Assessment</th>{dataset === "assessments" && <th>Date of assessment</th>}{rule === "Open counselling-only assessment" && <><th>Assessment status</th><th>Type of Legal Service Needed</th></>}{rule === "Detention/immigration inconsistency" && <><th>Is the beneficiary detained</th><th>Is it an immigration related charge?</th></>}{rule === "Detained beneficiary below 10 years" && <><th>Is the beneficiary detained</th><th>Date of birth</th><th>Current age</th></>}{rule === "Selected month with previous assessment" && <th>Created On</th>}{rule === "Representation while not detained" && <th>Type of documents to be issued</th>}{rule === "Type of document in Assessments vs Services" && <><th>Finding</th><th>Assessment documents</th><th>Service documents</th></>}{rule === "Type of Legal Service in Assessment vs Services" && <><th>Assessment service needed</th><th>Service type provided</th></>}{(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <><th>Beneficiary ID</th><th>Type of Service Provided</th><th>Type of Document</th><th>Please specify the Court Verdict</th><th>Type of Document if Other</th><th>Legal Concern Specified</th><th>Legal Concern</th></>}<th>Service</th></>
+                    <>{dataset !== "legalservices" ? <th>Case ID</th> : rule !== "Duplicate service" && rule !== "Duplicate service without Assessment ID" && <th>Beneficiary ID</th>}{(rule === "Possible duplicate name" || rule === "Possible duplicate contact and name") && <><th>Date of Identification</th><th>Created On</th><th>Fee ID</th><th>Amount Spent (IQD)</th><th>Type of Legal Service Needed</th></>}<th>Assessment</th>{dataset === "assessments" && <th>Date of assessment</th>}{rule === "Open counselling-only assessment" && <><th>Assessment status</th><th>Type of Legal Service Needed</th></>}{rule === "Detention/immigration inconsistency" && <><th>Is the beneficiary detained</th><th>Is it an immigration related charge?</th></>}{rule === "Detained beneficiary below 10 years" && <><th>Is the beneficiary detained</th><th>Date of birth</th><th>Current age</th></>}{rule === "Selected month with previous assessment" && <th>Created On</th>}{rule === "Representation while not detained" && <th>Type of documents to be issued</th>}{rule === "Type of document in Assessments vs Services" && <><th>Finding</th><th>Assessment documents</th><th>Service documents</th></>}{rule === "Type of Legal Service in Assessment vs Services" && <><th>Assessment service needed</th><th>Service type provided</th></>}{(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <><th>Beneficiary ID</th><th>Type of Service Provided</th><th>Type of Document</th><th>Please specify the Court Verdict</th><th>Type of Document if Other</th><th>Legal Concern Specified</th><th>Legal Concern</th></>}<th>Service</th></>
                   )}
                   {rule === "Open assessment with all services closed" && <><th>Assessment status</th><th>Linked services</th><th>Service statuses</th></>}
                   <th></th>
@@ -621,14 +634,14 @@ function FindingTable({
               </thead>
               <tbody>
                 {visibleRows.map((r, i) => (
-                  <tr key={`${r.row}-${i}`} className={(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID" || rule === "Beneficiary has multiple assessments" || rule === "Duplicate participant in session") && r.duplicateGroup ? "duplicate-service-row" : ""} style={(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID" || rule === "Beneficiary has multiple assessments" || rule === "Duplicate participant in session") && r.duplicateGroup ? { background: duplicateColor(r.duplicateGroup) } : undefined} onContextMenu={(event) => {
-                    if ((dataset === "assessments" && r.assessmentId) || (dataset === "legalservices" && r.serviceId) || (dataset === "awareness" && (r.awarenessId || r.name)) || (dataset === "beneficiaries" && r.caseId)) onFindingContextMenu(event, r);
+                  <tr key={`${r.row}-${i}`} className={(rule === "Duplicate detained-person name" || rule === "Similar detained-person name" || rule === "Duplicate service" || rule === "Duplicate service without Assessment ID" || rule === "Beneficiary has multiple assessments" || rule === "Duplicate participant in session") && r.duplicateGroup ? "duplicate-service-row" : ""} style={(rule === "Duplicate detained-person name" || rule === "Similar detained-person name" || rule === "Duplicate service" || rule === "Duplicate service without Assessment ID" || rule === "Beneficiary has multiple assessments" || rule === "Duplicate participant in session") && r.duplicateGroup ? { background: duplicateColor(r.duplicateGroup) } : undefined} onContextMenu={(event) => {
+                    if ((dataset === "legalhotlines" && r.hotlineId) || (dataset === "assessments" && r.assessmentId) || (dataset === "legalservices" && r.serviceId) || (dataset === "awareness" && (r.awarenessId || r.name)) || (dataset === "beneficiaries" && r.caseId)) onFindingContextMenu(event, r);
                   }}>
                     <td className="review-selection-column"><input aria-label={`Select ${r.name || r.caseId || r.assessmentId || r.serviceId || r.awarenessId || "record"}`} type="checkbox" disabled={!isExcludable(r)} checked={selectedRowKeys.includes(rowKey(r, i))} onChange={() => setSelectedRowKeys((current) => current.includes(rowKey(r, i)) ? current.filter((key) => key !== rowKey(r, i)) : [...current, rowKey(r, i)])} /></td>
                     <td>{r.duplicateRecheck && <span className="duplicate-recheck-badge">Recheck</span>}{r.detail}</td>
                     <td className="action-cell">{r.action}</td>
                     <td>
-                      <strong>{r.lawyer || "Unassigned"}</strong>
+                      <strong>{r.lawyer || (dataset === "legalhotlines" ? "Not recorded" : "Unassigned")}</strong>
                     </td>
                     <td>
                       <span
@@ -648,7 +661,7 @@ function FindingTable({
                         if (r.name) announceLegalCopy(r.name);
                       }}
                     >
-                      {r.name?<button type="button" className="duplicate-name-copy" onClick={()=>void copyDuplicateName(r.name)} title="Copy beneficiary name" aria-label={`Copy ${r.name}`}>{r.name}</button>:<strong>Not provided</strong>}
+                      {r.name?<button type="button" className="duplicate-name-copy" onClick={()=>void copyDuplicateName(r.name)} title={dataset === "legalhotlines" ? "Copy detained-person name" : "Copy beneficiary name"} aria-label={`Copy ${r.name}`}>{r.name}</button>:<strong>Not provided</strong>}
                       {r.duplicateSimilarity !== undefined && <span className="duplicate-match-badge" aria-hidden="true">{r.duplicateSimilarity}% match</span>}
                       {r.nameMatchMode === "exact" && <span className="exact-duplicate-badge" aria-hidden="true">Exact duplicate</span>}
                     </td>
@@ -656,10 +669,12 @@ function FindingTable({
                     {rule === "Spouse below 18" && <><td><strong>{r.spouseName || "Not provided"}</strong></td><td>{r.spouseDateOfBirth || "—"}</td><td>{r.spouseAge ?? "—"}</td></>}
                     <td>{r.phone || "—"}</td>
                     {dataset === "beneficiaries" && <td>{r.dateOfBirth || "—"}{rule === "Marital status below 18" && r.beneficiaryAge !== null && r.beneficiaryAge !== undefined ? ` (${r.beneficiaryAge})` : ""}</td>}
-                    {dataset === "awareness" ? (
+                    {dataset === "legalhotlines" ? (
+                      <><td>{r.contactDate}</td><td>{r.callerName}</td><td>{r.beneficiaryDetained}</td><td>{r.helplineReferral}</td><td>{r.priority}</td></>
+                    ) : dataset === "awareness" ? (
                       <><td>{r.awarenessId || r.recordId || "—"}</td><td>{r.sessionTopic || "—"}</td></>
                     ) : (
-                      <><td>{r.caseId || "-"}</td>{(rule === "Possible duplicate name" || rule === "Possible duplicate contact and name") && <><td>{r.identificationDate || "-"}</td><td>{r.createdOn || "-"}</td><td>{r.feeId || "-"}</td><td>{r.amountSpentIqd || "-"}</td><td>{r.legalServiceNeeded || "-"}</td></>}<td>{r.assessmentId || "—"}</td>{dataset === "assessments" && <td>{r.assessmentDate || "—"}</td>}{rule === "Open counselling-only assessment" && <><td>{r.assessmentStatus || "—"}</td><td>{r.legalServiceNeeded || "—"}</td></>}{rule === "Detention/immigration inconsistency" && <><td>{r.beneficiaryDetained || "—"}</td><td>{r.immigrationRelatedCharge || "—"}</td></>}{rule === "Detained beneficiary below 10 years" && <><td>{r.beneficiaryDetained || "—"}</td><td>{r.dateOfBirth || "—"}</td><td>{r.beneficiaryAge ?? "—"}</td></>}{rule === "Selected month with previous assessment" && <td>{r.createdOn || "—"}</td>}{rule === "Representation while not detained" && <td>{r.typeOfDocument || "—"}</td>}{rule === "Type of document in Assessments vs Services" && <><td>{r.comparisonFinding || "—"}</td><td>{r.assessmentDocuments || "—"}</td><td>{r.serviceDocuments || "—"}</td></>}{rule === "Type of Legal Service in Assessment vs Services" && <><td>{r.requestedServiceTypes || "—"}</td><td>{r.providedServiceTypes || "—"}</td></>}{(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <><td>{r.caseId || "—"}</td><td>{r.serviceTypeProvided || "—"}</td><td>{r.typeOfDocument || "—"}</td><td>{r.courtVerdictDetail || "—"}</td><td>{r.otherDocumentDetail || "—"}</td><td>{r.legalConcernSpecified || "—"}</td><td>{r.legalConcern || "—"}</td></>}<td>{r.serviceId || "—"}</td></>
+                      <>{(dataset !== "legalservices" || (rule !== "Duplicate service" && rule !== "Duplicate service without Assessment ID")) && <td>{r.caseId || "-"}</td>}{(rule === "Possible duplicate name" || rule === "Possible duplicate contact and name") && <><td>{r.identificationDate || "-"}</td><td>{r.createdOn || "-"}</td><td>{r.feeId || "-"}</td><td>{r.amountSpentIqd || "-"}</td><td>{r.legalServiceNeeded || "-"}</td></>}<td>{r.assessmentId || "—"}</td>{dataset === "assessments" && <td>{r.assessmentDate || "—"}</td>}{rule === "Open counselling-only assessment" && <><td>{r.assessmentStatus || "—"}</td><td>{r.legalServiceNeeded || "—"}</td></>}{rule === "Detention/immigration inconsistency" && <><td>{r.beneficiaryDetained || "—"}</td><td>{r.immigrationRelatedCharge || "—"}</td></>}{rule === "Detained beneficiary below 10 years" && <><td>{r.beneficiaryDetained || "—"}</td><td>{r.dateOfBirth || "—"}</td><td>{r.beneficiaryAge ?? "—"}</td></>}{rule === "Selected month with previous assessment" && <td>{r.createdOn || "—"}</td>}{rule === "Representation while not detained" && <td>{r.typeOfDocument || "—"}</td>}{rule === "Type of document in Assessments vs Services" && <><td>{r.comparisonFinding || "—"}</td><td>{r.assessmentDocuments || "—"}</td><td>{r.serviceDocuments || "—"}</td></>}{rule === "Type of Legal Service in Assessment vs Services" && <><td>{r.requestedServiceTypes || "—"}</td><td>{r.providedServiceTypes || "—"}</td></>}{(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <><td>{r.caseId || "—"}</td><td>{r.serviceTypeProvided || "—"}</td><td>{r.typeOfDocument || "—"}</td><td>{r.courtVerdictDetail || "—"}</td><td>{r.otherDocumentDetail || "—"}</td><td>{r.legalConcernSpecified || "—"}</td><td>{r.legalConcern || "—"}</td></>}<td>{r.serviceId || "—"}</td></>
                     )}
                     {rule === "Open assessment with all services closed" && <><td>{r.assessmentStatus || "-"}</td><td>{r.linkedServiceCount ?? 0}</td><td>{r.linkedServiceStatuses || "-"}</td></>}
                     <td>
@@ -698,8 +713,8 @@ function ReviewPageBody({
     [debouncedSearch, setDebouncedSearch] = useState(""),
     [nameCompareChars, setNameCompareChars] = useState(15),
     [appliedNameCompareChars, setAppliedNameCompareChars] = useState(15),
-    [allowNameVariations, setAllowNameVariations] = useState(false),
-    [exactMatchesOnly, setExactMatchesOnly] = useState(true),
+    [allowNameVariations, setAllowNameVariations] = useState(dataset === "legalhotlines"),
+    [exactMatchesOnly, setExactMatchesOnly] = useState(dataset !== "legalhotlines"),
     [ignoreCourtVerdictByRule, setIgnoreCourtVerdictByRule] = useState<Record<string, boolean>>({}),
     [selectedRules, setSelectedRules] = useState<string[]>([]),
     [filters, setFilters] = useState<Record<string, string>>({}),
@@ -732,6 +747,8 @@ function ReviewPageBody({
     setInitialized(false);
     setFilters({});
     setIgnoreCourtVerdictByRule({});
+    setAllowNameVariations(dataset === "legalhotlines");
+    setExactMatchesOnly(dataset !== "legalhotlines");
   }, [dataset]);
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(search), 300);
@@ -826,7 +843,7 @@ function ReviewPageBody({
       ...current,
       [key]: current[key] === item ? "" : item,
     }));
-  const exclusionIdentity = (row: LegalFlag) => dataset === "assessments" ? ["assessmentId",row.assessmentId] : dataset === "legalservices" ? ["serviceId",row.serviceId] : dataset === "awareness" ? (row.awarenessId ? ["awarenessId",row.awarenessId] : ["awarenessName",row.name]) : ["caseId",row.caseId];
+  const exclusionIdentity = (row: LegalFlag) => dataset === "legalhotlines" ? ["hotlineId",row.hotlineId || row.recordId] : dataset === "assessments" ? ["assessmentId",row.assessmentId] : dataset === "legalservices" ? ["serviceId",row.serviceId] : dataset === "awareness" ? (row.awarenessId ? ["awarenessId",row.awarenessId] : ["awarenessName",row.name]) : ["caseId",row.caseId];
   const excludeFindings = async () => {
     if (!exclusionCandidates?.length) return;
     setExclusionBusy(true);
@@ -908,7 +925,7 @@ function ReviewPageBody({
                 onChange={() => toggleRule(rule)}
               />
               <span>{displayReviewRule(rule)}</span>
-              <b>{count.toLocaleString()}</b>
+              <b title={summary?.unavailableRules?.[rule]}>{summary?.unavailableRules?.[rule] ? "Unavailable" : count.toLocaleString()}</b>
             </label>
           ))}
         </div>
@@ -1023,13 +1040,13 @@ function ReviewPageBody({
           <button className="case-modal-backdrop" aria-label="Close exclusion import" onClick={() => setExclusionImportOpen(false)} />
           <section className="duplicate-exclusion-panel exclusion-import-panel">
             <header className="exclusion-import-header"><div><span className="eyebrow">BULK EXCLUSIONS</span><h2>Import IDs for selected findings</h2></div><button className="exclusion-modal-close" aria-label="Close import exclusions" title="Close" onClick={() => setExclusionImportOpen(false)}><X /></button></header>
-            <p>Choose the finding tables to exclude from, then upload CSV or Excel. The app automatically uses {dataset === "beneficiaries" ? "Case ID or Beneficiary ID" : dataset === "assessments" ? "Assessment ID" : dataset === "legalservices" ? "Service ID" : "Awareness ID"} from the file.</p>
+            <p>Choose the finding tables to exclude from, then upload CSV or Excel. The app automatically uses {dataset === "beneficiaries" ? "Case ID or Beneficiary ID" : dataset === "assessments" ? "Assessment ID" : dataset === "legalservices" ? "Service ID" : dataset === "legalhotlines" ? "Record identifier from a Hotline Review export" : "Awareness ID"} from the file.</p>
             <div className="exclusion-import-rules"><span>Exclude from these tables</span>{orderedRules.map(([rule]) => <label key={rule}><input type="checkbox" checked={exclusionImportRules.includes(rule)} onChange={() => setExclusionImportRules((current) => current.includes(rule) ? current.filter((item) => item !== rule) : [...current, rule])} /><span>{rule}</span></label>)}</div>
             <label className="exclusion-file-picker" htmlFor="exclusion-import-file"><span>Choose file</span><small>{exclusionFile?.name || "CSV, XLSX, or XLS"}</small></label>
             <input id="exclusion-import-file" className="exclusion-file-input" type="file" accept=".csv,.xlsx,.xls" onChange={(event) => { setExclusionFile(event.target.files?.[0] || null); setExclusionImportResult(""); setExclusionImportError(""); }} />
             {exclusionImportResult && <p className="exclusion-import-success" role="status"><CheckCircle2 />{exclusionImportResult}</p>}
             {exclusionImportError && <p className="error" role="alert">{exclusionImportError}</p>}
-            <footer><button className="soft" onClick={() => setExclusionImportOpen(false)}>Cancel</button><button className="primary" disabled={!exclusionFile || !exclusionImportRules.length || exclusionBusy} onClick={async () => { if (!exclusionFile) return; setExclusionBusy(true); setExclusionImportError(""); setExclusionImportResult(""); try { const type=dataset === "assessments" ? "assessmentId" : dataset === "legalservices" ? "serviceId" : dataset === "awareness" ? "awarenessId" : "caseId"; const result=await importDuplicateExclusions(exclusionFile,dataset,type,exclusionImportRules); setExcludedDuplicates(result.rows); setExclusionImportResult(`Successfully imported ${result.imported} exclusion${result.imported === 1 ? "" : "s"} from ${result.column}. ${result.duplicates} already existed; ${result.invalid} invalid.`); setFindingRevisions((current)=>({...current,...Object.fromEntries(exclusionImportRules.map((rule)=>[rule,(current[rule]||0)+1]))})); } catch (reason) { setExclusionImportError(reason instanceof Error ? reason.message : "The exclusion file could not be imported."); } finally { setExclusionBusy(false); } }}>{exclusionBusy ? "Importing…" : "Import exclusions"}</button></footer>
+            <footer><button className="soft" onClick={() => setExclusionImportOpen(false)}>Cancel</button><button className="primary" disabled={!exclusionFile || !exclusionImportRules.length || exclusionBusy} onClick={async () => { if (!exclusionFile) return; setExclusionBusy(true); setExclusionImportError(""); setExclusionImportResult(""); try { const type=dataset === "legalhotlines" ? "hotlineId" : dataset === "assessments" ? "assessmentId" : dataset === "legalservices" ? "serviceId" : dataset === "awareness" ? "awarenessId" : "caseId"; const result=await importDuplicateExclusions(exclusionFile,dataset,type,exclusionImportRules); setExcludedDuplicates(result.rows); setExclusionImportResult(`Successfully imported ${result.imported} exclusion${result.imported === 1 ? "" : "s"} from ${result.column}. ${result.duplicates} already existed; ${result.invalid} invalid.`); setFindingRevisions((current)=>({...current,...Object.fromEntries(exclusionImportRules.map((rule)=>[rule,(current[rule]||0)+1]))})); } catch (reason) { setExclusionImportError(reason instanceof Error ? reason.message : "The exclusion file could not be imported."); } finally { setExclusionBusy(false); } }}>{exclusionBusy ? "Importing…" : "Import exclusions"}</button></footer>
           </section>
         </div>, document.body,
       )}
@@ -1056,7 +1073,7 @@ function ReviewPageBody({
                   <details key={key} open>
                     <summary>
                       <span>
-                        {key === "location" ? "Project location" : key === "date" ? ({beneficiaries:"Date of identification",assessments:"Date of assessment",legalservices:"Date of Service Provision",awareness:"Date of awareness"}[dataset] || "Date") : "Project"}
+                        {key === "location" ? "Project location" : key === "date" ? ({beneficiaries:"Date of identification",assessments:"Date of assessment",legalservices:"Date of Service Provision",awareness:"Date of awareness",legalhotlines:"Contact date"}[dataset] || "Date") : "Project"}
                       </span>
                       {filters[key] && <b>1</b>}
                       <ChevronDown />
@@ -1327,7 +1344,10 @@ function HotlineRecordsTable({filters}:{filters:Record<string,string[]>}){
   const debouncedSearch=useDebouncedValue(search);
   useEffect(()=>{setPage(1);setSelected(new Map())},[filters,debouncedSearch]);
   useEffect(()=>{let active=true;setBusy(true);setError("");getLegalExplorer("legalhotlines",debouncedSearch,page,filters,sortColumn,sortDirection).then(data=>{if(active)setResult(data)}).catch((reason)=>{if(active){setResult(null);setError(reason.message||"Unable to load hotline records.")}}).finally(()=>{if(active)setBusy(false)});return()=>{active=false}},[filters,debouncedSearch,page,sortColumn,sortDirection,retry]);
-  return <section className="glass legal-table-card deportation-records-table hotline-records-table"><div className="legal-card-heading"><label className="detention-table-search"><Search/><input className="table-search-input" value={search} onChange={(event)=>{setSearch(event.target.value);setPage(1)}} placeholder="Search hotline records"/></label><div className="indicator-total-block detention-table-total"><strong>{result?.total.toLocaleString()||0}</strong><span>Total</span></div><TableSelectionActions selected={selected} filename="selected-hotline-records.xlsx" onClear={()=>setSelected(new Map())} onDownloadAll={()=>exportLegalExplorer("xlsx","legalhotlines",debouncedSearch,filters)} iconOnly/>{result&&<Pager compact page={page} total={result.total} onChange={setPage}/>}</div>{error&&<div className="error" role="alert">{error}<button className="soft" onClick={()=>setRetry(n=>n+1)}>Retry</button></div>}{busy&&<p role="status">Loading records...</p>}{!busy&&!error&&result?.total===0&&<p>No hotline records match these filters.</p>}<div className="legal-table-wrap" aria-busy={busy}><table><thead><tr><th><input aria-label="Select visible hotline records" type="checkbox" checked={Boolean(result?.rows.length)&&result!.rows.every((row:any)=>selected.has(String(row.__rowKey)))} onChange={(event)=>setSelected((current)=>{const next=new Map(current);result?.rows.forEach((row:any)=>{const key=String(row.__rowKey);if(event.target.checked)next.set(key,row);else next.delete(key)});return next})}/></th>{result?.columns.map((column)=><th key={column}><button className={sortColumn===column?"active":""} onClick={()=>{setSortColumn(column);setSortDirection(sortColumn===column&&sortDirection==="asc"?"desc":"asc");setPage(1)}}><span>{column}</span><b>{sortColumn===column?(sortDirection==="asc"?"▲":"▼"):"↕"}</b></button></th>)}</tr></thead><tbody>{result?.rows.map((row:any,index)=><tr key={String(row.__rowKey??index)}><td><input aria-label="Select hotline record" type="checkbox" checked={selected.has(String(row.__rowKey))} onChange={()=>setSelected((current)=>{const next=new Map(current),key=String(row.__rowKey);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td>{result.columns.map((column)=>{const cell=value(row[column]),priority=/^priority\b/i.test(column)?String(cell).match(/high|عالية/i)?"high":String(cell).match(/medium|متوسطة/i)?"medium":String(cell).match(/low|منخفضة/i)?"low":"unknown":"";return <td key={column}>{priority?<span className={`hotline-priority hotline-priority-${priority}`}>{cell}</span>:cell}</td>})}</tr>)}</tbody></table></div></section>;
+  const contactColumn=(column:string)=>/contact.*(number|phone)|phone.*number|رقم.*(هاتف|اتصال|متصل)/i.test(column);
+  const nameColumn=(column:string)=>/name of (the )?(detained person|caller)|اسم.*(معتقل|متصل)/i.test(column);
+  const columns=[...(result?.columns||[])].filter((column)=>!/^record[\s_-]*(?:id|identifier)\b/i.test(column.trim())).sort((left,right)=>Number(!(nameColumn(left)||contactColumn(left)))-Number(!(nameColumn(right)||contactColumn(right))));
+  return <section className="glass legal-table-card deportation-records-table hotline-records-table"><div className="legal-card-heading"><label className="detention-table-search"><Search/><input className="table-search-input" value={search} onChange={(event)=>{setSearch(event.target.value);setPage(1)}} placeholder="Search hotline records"/></label><div className="indicator-total-block detention-table-total"><strong>{result?.total.toLocaleString()||0}</strong><span>Total</span></div><TableSelectionActions selected={selected} filename="selected-hotline-records.xlsx" onClear={()=>setSelected(new Map())} onDownloadAll={()=>exportLegalExplorer("xlsx","legalhotlines",debouncedSearch,filters)} iconOnly/>{result&&<Pager compact page={page} total={result.total} onChange={setPage}/>}</div>{error&&<div className="error" role="alert">{error}<button className="soft" onClick={()=>setRetry(n=>n+1)}>Retry</button></div>}{busy&&<p role="status">Loading records...</p>}{!busy&&!error&&result?.total===0&&<p>No hotline records match these filters.</p>}<div className="legal-table-wrap" aria-busy={busy}><table><thead><tr><th><input aria-label="Select visible hotline records" type="checkbox" checked={Boolean(result?.rows.length)&&result!.rows.every((row:any)=>selected.has(String(row.__rowKey)))} onChange={(event)=>setSelected((current)=>{const next=new Map(current);result?.rows.forEach((row:any)=>{const key=String(row.__rowKey);if(event.target.checked)next.set(key,row);else next.delete(key)});return next})}/></th>{columns.map((column)=><th key={column}><button className={sortColumn===column?"active":""} onClick={()=>{setSortColumn(column);setSortDirection(sortColumn===column&&sortDirection==="asc"?"desc":"asc");setPage(1)}}><span>{column}</span><b>{sortColumn===column?(sortDirection==="asc"?"▲":"▼"):"↕"}</b></button></th>)}</tr></thead><tbody>{result?.rows.map((row:any,index)=><tr key={String(row.__rowKey??index)}><td><input aria-label="Select hotline record" type="checkbox" checked={selected.has(String(row.__rowKey))} onChange={()=>setSelected((current)=>{const next=new Map(current),key=String(row.__rowKey);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td>{columns.map((column)=>{const cell=value(row[column]),priority=/^priority\b/i.test(column)?String(cell).match(/high|عالية/i)?"high":String(cell).match(/medium|متوسطة/i)?"medium":String(cell).match(/low|منخفضة/i)?"low":"unknown":"";return <td key={column} className={nameColumn(column)?"hotline-person-name":contactColumn(column)?"hotline-contact-number":undefined}>{priority?<span className={`hotline-priority hotline-priority-${priority}`}>{cell}</span>:cell}</td>})}</tr>)}</tbody></table></div></section>;
 }
 
 function DeportationRecordsTable({filters}:{filters:Record<string,string[]>}){
@@ -1996,7 +2016,7 @@ function DetentionCases({
     setPage(1);
   };
   const activeCount=Object.values(filters).reduce((sum,items)=>sum+items.length,0);
-  const quickFilterLabels=["Project","Project location","Detention governorate","Date of Assessment","Date of the released","Current status","Type of Released","Nationality"];
+  const quickFilterLabels=["Project","Project location","Detention governorate","Date of Assessment","Date of Detention","Date of the released","Current status","Type of Released","Nationality"];
   const quickFilters=()=>quickFilterLabels.map((label)=><CheckboxMultiSelect key={label} label={label} values={data?.filterOptions?.[label]||[]} selected={filters[label]||[]} onChange={(items)=>updateFilter(label,items)} hideLabel/>);
   const availableMonths=(data?.trend||[]).map((row)=>row.month).reverse();
   useEffect(()=>{
@@ -3292,13 +3312,11 @@ function BeneficiaryIdModal({ids,count,title,onClose,onCopy}:{ids:string[];count
   return <div className="indicator-modal" role="dialog" aria-modal="true" aria-label="Beneficiary and Assessment IDs"><button className="case-modal-backdrop" aria-label="Close IDs" onClick={onClose}/><section className="beneficiary-id-modal"><header><div><span>BENEFICIARY &amp; ASSESSMENT ID DRILL-DOWN</span><h2>Matching case records</h2><p>{title}</p></div><button className="icon" onClick={onClose} aria-label="Close IDs"><X/></button></header><div className="beneficiary-id-summary"><strong>{count.toLocaleString()}</strong><span>reported count</span><b>{rows.length.toLocaleString()}</b><span>unique records</span><button className="soft" disabled={!rows.length} onClick={()=>onCopy(sortedRows.map((row)=>`${row.beneficiaryId}\t${row.assessmentId}\t${row.name}\t${row.source}`).join("\n"),"Beneficiary and Assessment IDs copied")}><Copy/>Copy IDs</button><ExcelDownloadButton className="primary" disabled={!rows.length} onClick={exportRows}/></div><div className="drill-source-summary">{Object.entries(sourceCounts).map(([source,total])=><span key={source}><b>{total.toLocaleString()}</b> from {source}</span>)}</div><div className="beneficiary-id-list">{rows.length?<table className="drilldown-table"><thead><tr><th><button onClick={()=>sortBy("beneficiaryId")}>Beneficiary ID{sortMark("beneficiaryId")}</button></th><th><button onClick={()=>sortBy("assessmentId")}>Assessment ID{sortMark("assessmentId")}</button></th><th><button onClick={()=>sortBy("name")}>Name{sortMark("name")}</button></th><th><button onClick={()=>sortBy("source")}>Source{sortMark("source")}</button></th></tr></thead><tbody>{sortedRows.map((row,index)=><tr key={`${row.beneficiaryId}-${row.assessmentId}-${row.source}-${index}`}><td><code>{row.beneficiaryId}</code></td><td><code>{row.assessmentId||"—"}</code></td><td><code>{row.name||"—"}</code></td><td><span className={`drill-source drill-source-${row.source.toLowerCase().replace(/\s+/g,"-")}`}>{row.source}</span></td></tr>)}</tbody></table>:<p>No Beneficiary ID is available for these matching records.</p>}</div></section></div>;
 }
 
-function IndicatorTrendChart({title,months,series}:{title:string;months:string[];series:{label:string;values:number[];color:string}[]}){
+function IndicatorTrendChart({months,series}:{title:string;months:string[];series:{label:string;values:number[];color:string}[]}){
   const width=800,height=360,padding={left:62,right:28,top:64,bottom:64},maximum=Math.max(1,...series.flatMap((item)=>item.values)),plotHeight=height-padding.top-padding.bottom;
   const x=(index:number)=>padding.left+(months.length<=1?0:index*(width-padding.left-padding.right)/(months.length-1));
   const y=(number:number)=>height-padding.bottom-(number/maximum)*plotHeight;
-  const chartRef=useRef<SVGSVGElement>(null);
-  const downloadPng=()=>{const svg=chartRef.current;if(svg)void exportSvgChart(svg,`${title}-monthly-trend`,"png")};
-  return <div className="indicator-analysis-chart"><button className="soft indicator-chart-download" onClick={downloadPng} title="Download high-quality PNG"><Download/>PNG</button><svg ref={chartRef} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Monthly indicator trend" style={{fontFamily:"Arial, sans-serif"}}><rect width={width} height={height} rx="18" fill="var(--panel-strong)"/>{[0,.25,.5,.75,1].map((ratio)=>{const lineY=height-padding.bottom-ratio*plotHeight,value=Math.round(maximum*ratio);return <g key={ratio}><line x1={padding.left} x2={width-padding.right} y1={lineY} y2={lineY} stroke="var(--line)" strokeDasharray={ratio===0?"":"4 6"}/><text x={padding.left-12} y={lineY+4} textAnchor="end" fill="var(--muted)" fontSize="12">{value.toLocaleString()}</text></g>})}{months.map((month,index)=><text key={month} x={x(index)} y={height-25} textAnchor="middle" fill="var(--muted)" fontSize="12" fontWeight="600">{month}</text>)}{series.map((item,seriesIndex)=>{return <g key={item.label}><polyline points={item.values.map((number,index)=>`${x(index)},${y(number)}`).join(" ")} fill="none" stroke={item.color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>{item.values.map((number,index)=>{const label=number.toLocaleString(),labelWidth=Math.max(30,label.length*8+12),labelY=Math.max(26,Math.min(height-padding.bottom-16,y(number)-22-seriesIndex*10));return <g key={index}><circle cx={x(index)} cy={y(number)} r="6" fill="var(--panel-strong)" stroke={item.color} strokeWidth="4"/><rect x={x(index)-labelWidth/2} y={labelY-15} width={labelWidth} height="20" rx="10" fill="var(--panel-strong)" stroke={item.color} strokeOpacity=".7"/><text x={x(index)} y={labelY-1} textAnchor="middle" fill={item.color} fontSize="12" fontWeight="700">{label}</text></g>})}</g>})}</svg><footer>{series.map((item)=><span key={item.label}><i style={{background:item.color}}/>{item.label}</span>)}</footer></div>;
+  return <div className="indicator-analysis-chart"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Monthly indicator trend" style={{fontFamily:"Arial, sans-serif"}}><rect width={width} height={height} rx="18" fill="var(--panel-strong)"/>{[0,.25,.5,.75,1].map((ratio)=>{const lineY=height-padding.bottom-ratio*plotHeight,value=Math.round(maximum*ratio);return <g key={ratio}><line x1={padding.left} x2={width-padding.right} y1={lineY} y2={lineY} stroke="var(--line)" strokeDasharray={ratio===0?"":"4 6"}/><text x={padding.left-12} y={lineY+4} textAnchor="end" fill="var(--muted)" fontSize="12">{value.toLocaleString()}</text></g>})}{months.map((month,index)=><text key={month} x={x(index)} y={height-25} textAnchor="middle" fill="var(--muted)" fontSize="12" fontWeight="600">{month}</text>)}{series.map((item,seriesIndex)=>{return <g key={item.label}><polyline points={item.values.map((number,index)=>`${x(index)},${y(number)}`).join(" ")} fill="none" stroke={item.color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>{item.values.map((number,index)=>{const label=number.toLocaleString(),labelWidth=Math.max(30,label.length*8+12),labelY=Math.max(26,Math.min(height-padding.bottom-16,y(number)-22-seriesIndex*10));return <g key={index}><circle cx={x(index)} cy={y(number)} r="6" fill="var(--panel-strong)" stroke={item.color} strokeWidth="4"/><rect x={x(index)-labelWidth/2} y={labelY-15} width={labelWidth} height="20" rx="10" fill="var(--panel-strong)" stroke={item.color} strokeOpacity=".7"/><text x={x(index)} y={labelY-1} textAnchor="middle" fill={item.color} fontSize="12" fontWeight="700">{label}</text></g>})}</g>})}</svg><footer>{series.map((item)=><span key={item.label}><i style={{background:item.color}}/>{item.label}</span>)}</footer></div>;
 }
 
 function LazyIndicatorTrendChart(props:{title:string;months:string[];series:{label:string;values:number[];color:string}[]}){
@@ -3369,7 +3387,7 @@ function IndicatorAnalysis({report,monthlyReports,loading}:{report:IndicatorRepo
     {!monthlyReports.length?<div className="legal-empty"><ChartColumnIncreasing/><h3>{loading?"Preparing the first month of analysis…":"No months are available for this selection."}</h3></div>:<div className="indicator-groups indicator-analysis-groups">{groups.map(({group,cards})=><details className={`indicator-group indicator-group-${group.id}`} open key={group.id}>
       <summary><div><span>{group.label}</span><strong>Monthly indicator analysis</strong></div><b>{cards.length} indicator{cards.length===1?"":"s"}</b><ChevronDown/></summary>
       <div className="indicator-analysis-list">{cards.map(({item,series,total})=><article className="glass indicator-analysis-card" key={item.id}>
-        <header><div><span>{item.source}</span><h3>{item.title}</h3></div><div className="indicator-analysis-actions"><strong>{total.toLocaleString()}<small>selected total</small></strong><button className="soft indicator-analysis-pdf" onClick={()=>downloadIndicatorAnalysisPdf(item.title,months,series)} title="Download pivot table and chart as PDF"><FileText/>PDF</button></div></header>
+        <header><div><span>{item.source}</span><h3>{item.title}</h3></div><div className="indicator-analysis-actions"><button className="soft indicator-analysis-pdf" onClick={()=>downloadIndicatorAnalysisPdf(item.title,months,series)} title="Download pivot table and chart as PDF"><FileText/>PDF</button><button className="soft indicator-analysis-pdf" onClick={(event)=>{const svg=event.currentTarget.closest("article")?.querySelector<SVGSVGElement>(".indicator-analysis-chart svg");if(svg)void exportSvgChart(svg,`${item.title}-monthly-trend`,"png")}} title="Download high-quality PNG"><Download/>PNG</button><strong>{total.toLocaleString()}<small>selected total</small></strong></div></header>
         <div className="indicator-analysis-content"><div className="indicator-analysis-table-wrap"><table><thead><tr><th>Month</th>{series.map((item)=><th key={item.label}>{item.label}</th>)}</tr></thead><tbody>{months.map((month,index)=><tr key={month}><td>{month}</td>{series.map((item)=><td key={item.label}>{item.values[index]?item.values[index].toLocaleString():""}</td>)}</tr>)}<tr className="indicator-analysis-total"><td>Total</td>{series.map((item)=><td key={item.label}>{item.values.reduce((sum,value)=>sum+value,0).toLocaleString()}</td>)}</tr></tbody></table></div><LazyIndicatorTrendChart title={item.title} months={months} series={series}/></div>
       </article>)}</div>
     </details>)}</div>}
@@ -3784,9 +3802,9 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
   const coreAvailable=Boolean(metadata&&["beneficiaries","assessments","legalservices"].every(dataset=>metadata.availability[dataset]));
   const hotlineOnly=Boolean(metadata?.availability.legalhotlines&&!coreAvailable);
   const availableNav = nav.filter(([id]) => {
-    if(hotlineOnly)return id==="hotline";
+    if(hotlineOnly)return id==="hotline"||id==="legalhotlines";
     if(!coreAvailable)return false;
-    return (id !== "hotline" || Boolean(metadata?.availability.legalhotlines)) &&
+    return (!["hotline","legalhotlines"].includes(id) || Boolean(metadata?.availability.legalhotlines)) &&
       (id !== "awareness" || Boolean(metadata?.availability.awareness)) &&
       (id !== "deportation" || Boolean(metadata?.features?.deportation)) &&
       (id !== "detention" || Boolean(metadata?.features?.detention));
@@ -3795,8 +3813,8 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
   useEffect(()=>{if(metadata?.ready)legalLoadScheduler.promotePage(page)},[metadata?.ready,page]);
   useEffect(()=>{
     if(!metadata?.ready)return;
-    if(hotlineOnly&&page!=="hotline"){setPage("hotline");return}
-    if(!hotlineOnly&&page==="hotline"&&!metadata.availability.legalhotlines){setPage("overview");return}
+    if(hotlineOnly&&page!=="hotline"&&page!=="legalhotlines"){setPage("hotline");return}
+    if(!hotlineOnly&&["hotline","legalhotlines"].includes(page)&&!metadata.availability.legalhotlines){setPage("overview");return}
     if(page==="deportation"&&!metadata.features?.deportation)setPage("overview");
     if(page==="detention"&&!metadata.features?.detention)setPage("overview");
   },[metadata?.ready,metadata?.availability.legalhotlines,metadata?.features?.deportation,metadata?.features?.detention,hotlineOnly,page]);
@@ -3902,6 +3920,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
               "assessments",
               "legalservices",
               "awareness",
+              "legalhotlines",
             ].includes(page) ? (
             <ReviewPage key={`${page}-${dataRevision}`} dataset={page} onOpenCase={openReviewCase} />
           ) : page === "explorer" ? (

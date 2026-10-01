@@ -357,7 +357,7 @@ path.detention-map-region{stroke:color-mix(in srgb,var(--muted) 32%,var(--line))
 .home-rive-avatar{will-change:transform,opacity;animation:avatar-reveal .52s cubic-bezier(.16,.84,.32,1) both;transition-timing-function:cubic-bezier(.22,.72,.22,1)}.home-rive-avatar[data-activity=idle] .avatar-character{animation:avatar-idle-breathe 3.8s ease-in-out infinite}.home-rive-avatar:hover .avatar-character{transform:translateY(-2px) scale(1.015)}@keyframes avatar-reveal{from{opacity:0;filter:drop-shadow(0 3px 5px rgba(24,61,91,.08))}to{opacity:1;filter:drop-shadow(0 12px 16px rgba(24,61,91,.24))}}@keyframes avatar-idle-breathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-2px) scale(1.008)}}@media(prefers-reduced-motion:reduce){.home-rive-avatar{animation:none}.home-rive-avatar[data-activity=idle] .avatar-character{animation:none}}
 
 /* Consistent click-to-sort affordance for every Legal Platform table. */
-.legal-shell table th:not([colspan]):not(.no-sort){cursor:pointer;padding-right:28px!important;user-select:none}.legal-shell table th:not([colspan]):not(.no-sort):not(:has(button))::after{content:"↕";position:absolute;right:9px;color:color-mix(in srgb,var(--muted) 65%,transparent);font-size:10px}.legal-shell table th[aria-sort="ascending"]:not(:has(button))::after{content:"▲";color:var(--blue)}.legal-shell table th[aria-sort="descending"]:not(:has(button))::after{content:"▼";color:var(--blue)}.legal-shell table th.table-sort-active{color:var(--blue);background:color-mix(in srgb,var(--blue) 8%,var(--panel-strong))}
+.legal-shell table th:not([colspan]):not(.no-sort):not(:has(input[type="checkbox"])){cursor:pointer;padding-right:28px!important;user-select:none}.legal-shell table th:not([colspan]):not(.no-sort):not(:has(input[type="checkbox"])):not(:has(button))::after{content:"↕";position:absolute;right:9px;color:color-mix(in srgb,var(--muted) 65%,transparent);font-size:10px}.legal-shell table th[aria-sort="ascending"]:not(:has(button))::after{content:"▲";color:var(--blue)}.legal-shell table th[aria-sort="descending"]:not(:has(button))::after{content:"▼";color:var(--blue)}.legal-shell table th.table-sort-active{color:var(--blue);background:color-mix(in srgb,var(--blue) 8%,var(--panel-strong))}
 
 /* Keep the current reconciliation note visible until its grouped rows end. */
 .reconciliation-note-group-content{position:sticky;top:46px;padding-bottom:8px}
@@ -1135,3 +1135,21 @@ html,body,#root{height:100%;overflow-x:hidden}
 
 /* Lawyer Overview uses the application main pane as its vertical scroll owner. */
 .legal-shell main:has(.lawyer-overview-page){height:100dvh;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior-y:contain}
+
+.indicator-analysis-card>header{flex-wrap:wrap;align-items:center}.indicator-analysis-actions{flex-wrap:nowrap;flex-shrink:0;margin-left:auto}.indicator-analysis-actions>button{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+
+/* Selection columns use identical spacing in the header and records. */
+.legal-shell table :is(th,td):has(>input[type="checkbox"]){padding-inline:9px;text-align:center;vertical-align:middle}
+.legal-shell table :is(th,td)>input[type="checkbox"]{display:inline-block;width:15px;height:15px;margin:0;vertical-align:middle}
+
+/* Reserve the startup logo bounds before the image decodes. */
+.app-startup-loading-card{grid-template-columns:minmax(0,1fr)}
+.app-startup-loading-mark{box-sizing:border-box;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-width:76px;min-height:76px;margin-bottom:32px}
+.app-startup-loading-logo{position:relative;z-index:2;display:grid;place-items:center;width:54px;height:54px;overflow:hidden;border-radius:8px;contain:layout paint}
+
+/* Keep the startup mark on a stable WebView paint layer. */
+.app-startup-loading-logo{contain:none}.app-startup-loading-mark{animation:none}.app-startup-loading-card.glass{backdrop-filter:none;-webkit-backdrop-filter:none}
+
+/* Hotline identity and contact cells display their complete source values. */
+.hotline-records-table td.hotline-person-name{min-width:200px;max-width:none;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+.hotline-records-table td.hotline-contact-number{min-width:140px;max-width:none;white-space:nowrap;overflow:visible;text-overflow:clip}

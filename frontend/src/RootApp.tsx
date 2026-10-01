@@ -1,3 +1,4 @@
+import startupLogo from '../public/intersos-startup-logo.svg?raw';
 import {type CSSProperties,useCallback,useEffect,useRef,useState} from 'react';
 import {ShieldCheck} from 'lucide-react';
 import Welcome from './Welcome';
@@ -18,7 +19,7 @@ function StartupScreen({phase}:{phase:Exclude<StartupPhase,'hidden'>}){
  return <section className={`app-startup-loading ${startupEpoch?'is-handoff ':''}${phase==='exiting'?'is-exiting':''}`} style={style} role="status" aria-live="polite" aria-label="Starting Iraq Data Analysis" aria-busy="true">
   <div className="app-startup-loading-ambient ambient-one"/><div className="app-startup-loading-ambient ambient-two"/>
   <div className="app-startup-loading-card glass">
-   <div className="app-startup-loading-mark"><span className="app-startup-loading-orbit"/><img src="/intersos-symbol-transparent.png" alt="INTERSOS"/></div>
+   <div className="app-startup-loading-mark"><span className="app-startup-loading-orbit"/><span className="app-startup-loading-logo" dangerouslySetInnerHTML={{__html:startupLogo}}/></div>
    <span className="eyebrow">IRAQ DATA ANALYSIS</span><h1>Preparing your workspace</h1><p>Starting the secure local application.</p>
    <div className="app-startup-loading-progress" aria-hidden="true"><i/></div>
    <footer><ShieldCheck/><span>Local and private data workspace</span></footer>

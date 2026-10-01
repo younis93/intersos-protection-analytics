@@ -62,6 +62,7 @@ function taskManifest(metadata:LegalMetadata):PageLoadTask[] {
       request(()=>getLegalExplorer("legalhotlines","",1,{},"","asc",100,signal)),
     ])),
     main("indicators:main","indicators",()=>core,(signal,request)=>request(()=>getLegalIndicators([],[],[],[],[],[],signal))),
+    main("legalhotlines:main","legalhotlines",()=>has("legalhotlines"),(signal,request)=>request(()=>reviewRequest("legalhotlines","",signal))),
     ...["beneficiaries","assessments","legalservices","awareness"].map((dataset)=>main(`${dataset}:main`,dataset,()=>core&&has(dataset),(signal,request)=>request(()=>reviewRequest(dataset,"",signal)))),
     main("detention:main","detention",()=>core&&Boolean(metadata.features?.detention),(signal,request)=>request(()=>getLegalDetention("",1,{},"","asc",signal))),
     main("deportation:main","deportation",()=>core&&Boolean(metadata.features?.deportation),async(signal,request)=>Promise.all([

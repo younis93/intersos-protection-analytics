@@ -38,9 +38,9 @@ export const indicatorLines = (item: IndicatorReportItem, scope: Pick<IndicatorC
       if (scope.locations.length && !scope.locations.includes(row.location)) continue;
       const key = `${row.project}\u0000${row.location}`;
       if (!rowKeys.includes(key)) rowKeys.push(key);
-      rows.set(key, row.values.slice(0, 13));
+      rows.set(key, [...row.values.slice(0, 12), 0]);
     }
     return rows;
   });
-  return rowKeys.map((key) => item.sections.flatMap((_, index) => rowsBySection[index].get(key) || Array(13).fill(0)).join("\t"));
+  return rowKeys.map((key) => item.sections.flatMap((_, index) => rowsBySection[index].get(key) || Array(13).fill(0)).map((value) => value === 0 ? "" : value).join("\t"));
 };
