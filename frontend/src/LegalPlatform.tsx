@@ -1,5 +1,11 @@
+import ProcessingRecords from './ProcessingRecords';
+import NotificationToast from './NotificationToast';
+import {useImportProgress} from './importProgress';
+import {VirtualRows} from "./VirtualRows";
+import {UpdateFallbackNotice} from "./UpdateFallbackNotice";
 import {getLegalHotlineDashboard} from "./api";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Children, Fragment, isValidElement, memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { reviewColumnIndices } from "./reviewColumnOrder";
 import { createPortal } from "react-dom";
 import type { jsPDF } from "jspdf";
 import {setLegalRevision} from "./legalQueryCache";
@@ -71,6 +77,8 @@ import {
   getLegalStudio,
   getLegalAnalyticsDashboard,
   getLegalIndicators,
+  getLegalIndicatorsMonthly,
+  exportLegalDetention,
   getIndicatorReconciliationMetadata,
   getLegalIntelligence,
   getLegalReview,
@@ -429,6 +437,15 @@ function LegalSkeleton({
   );
 }
 
+// Flatten conditional column fragments so headers and cells share one ordering.
+function reviewTableCells(children: ReactNode): ReactNode[] {
+  return Children.toArray(children).flatMap((child) =>
+    isValidElement<{ children?: ReactNode }>(child) && child.type === Fragment
+      ? reviewTableCells(child.props.children)
+      : [child],
+  );
+}
+
 function ReviewPage({
   dataset,
   onOpenCase,
@@ -448,6 +465,7 @@ function ReviewPage({
 function FindingTable({
   dataset,
   rule,
+  closureRequestGroup,
   search,
   nameCompareChars,
   nameCompareCharsInput,
@@ -469,6 +487,7 @@ function FindingTable({
 }: {
   dataset: string;
   rule: string;
+  closureRequestGroup?: boolean;
   search: string;
   nameCompareChars: number;
   nameCompareCharsInput: number;
@@ -528,7 +547,9 @@ function FindingTable({
     try{await navigator.clipboard.writeText(name)}catch{const field=document.createElement("textarea");field.value=name;field.style.position="fixed";field.style.opacity="0";document.body.appendChild(field);field.select();document.execCommand("copy");field.remove()}
     announceLegalCopy(name);
   };
-  const visibleRows=(result?.rows||[]).filter((row)=>!ignoreCourtVerdict || !/court verdict|\bother\b|اخرى/i.test(row.typeOfDocument||""));
+  const visibleRows=(result?.rows||[]).filter((row)=>(!ignoreCourtVerdict || !/court verdict|\bother\b|اخرى/i.test(row.typeOfDocument||"")) && (closureRequestGroup === undefined || ((row.requestForClosedStatus || "").trim().toLowerCase() === "yes") === closureRequestGroup));
+  const tableTitle = closureRequestGroup === undefined ? displayReviewRule(rule) : closureRequestGroup ? "Open assessment with all services closed (Closure requested by lawyer)" : "Open assessment with all services closed (Closure not requested by lawyer)";
+  const tableGroups = [{title: "", rows: visibleRows.map((row, index) => ({row, index}))}];
   const rowKey = (row: LegalFlag, index: number) => dataset === "legalhotlines" ? row.hotlineId || row.recordId : `${row.recordId || row.row}|${row.caseId}|${row.assessmentId}|${row.serviceId}|${row.awarenessId}|${index}`;
   const isExcludable = (row: LegalFlag) => (dataset === "legalhotlines" && Boolean(row.hotlineId)) || (dataset === "assessments" && Boolean(row.assessmentId)) || (dataset === "legalservices" && Boolean(row.serviceId)) || (dataset === "awareness" && Boolean(row.awarenessId || row.name)) || (dataset === "beneficiaries" && Boolean(row.caseId));
   const excludableRows = visibleRows.filter(isExcludable);
@@ -540,12 +561,82 @@ function FindingTable({
   useEffect(() => {
     if (selectVisibleRef.current) selectVisibleRef.current.indeterminate = selectedRows.length > 0 && !allVisibleSelected;
   }, [selectedRows.length, allVisibleSelected]);
+  const tableHeaders = reviewTableCells(<>
+    <th className="review-selection-column"><input ref={selectVisibleRef} aria-label={`Select visible records for ${displayReviewRule(rule)}`} type="checkbox" disabled={!excludableRows.length} checked={allVisibleSelected} onChange={(event) => setSelectedRowKeys(event.target.checked ? visibleRows.map((row, index) => isExcludable(row) ? rowKey(row, index) : "").filter(Boolean) : [])} /></th>
+    <th>Finding detail</th>
+    <th>Recommended action</th>
+    <th>{dataset === "legalhotlines" ? "Lawyer referral" : "Lawyer"}</th>
+    <th>Project</th>
+    <th>Project location</th>{rule === "Detention Governorate mismatch" && <th>Detention Governorate mismatch</th>}
+    <th>{dataset === "legalhotlines" ? "Detained-person name" : "Name"}</th>
+    {(rule === "Marital status below 18" || rule === "Spouse below 18") && <th>Marital status</th>}
+    {rule === "Spouse below 18" && <><th>Spouse name</th><th>Spouse date of birth</th><th>Spouse current age</th></>}
+    <th>Phone number</th>
+    {dataset === "beneficiaries" && <th>Date of birth</th>}
+    {dataset === "legalhotlines" ? (
+      <><th>Contact date</th><th>Caller name</th><th>Detained</th><th>Helpline referral</th></>
+    ) : dataset === "awareness" ? (
+      <><th>Awareness ID</th><th>Session topic</th></>
+    ) : (
+      <>{dataset !== "legalservices" ? <th>Case ID</th> : rule !== "Duplicate service" && rule !== "Duplicate service without Assessment ID" && <th>Beneficiary ID</th>}{(rule === "Possible duplicate name" || rule === "Possible duplicate contact and name") && <><th>Date of Identification</th><th>Created On</th><th>Fee ID</th><th>Amount Spent (IQD)</th><th>Type of Legal Service Needed</th></>}<th>Assessment ID</th>{dataset === "assessments" && <th>Date of assessment</th>}{rule === "Open counselling-only assessment" && <><th>Assessment status</th><th>Type of Legal Service Needed</th></>}{rule === "Detention/immigration inconsistency" && <><th>Is the beneficiary detained</th><th>Is it an immigration related charge?</th></>}{rule === "Detained beneficiary below 10 years" && <><th>Is the beneficiary detained</th><th>Date of birth</th><th>Current age</th></>}{rule === "Selected month with previous assessment" && <th>Created On</th>}{rule === "Representation while not detained" && <th>Type of documents to be issued</th>}{rule === "Type of document in Assessments vs Services" && <><th>Finding</th><th>Assessment documents</th><th>Service documents</th></>}{rule === "Type of Legal Service in Assessment vs Services" && <><th>Assessment service needed</th><th>Service type provided</th></>}{(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <><th>Beneficiary ID</th><th>Type of Service Provided</th><th>Type of Document</th><th>Please specify the Court Verdict</th><th>Type of Document if Other</th><th>Legal Concern Specified</th><th>Legal Concern</th></>}<th>Service ID</th></>
+    )}
+    {rule === "Open assessment with all services closed" && <><th>Assessment status</th><th>Request for Closed Status</th><th>Linked services</th><th>Service statuses</th></>}
+    <th></th>
+  </>);
+  const columnLabels = tableHeaders.map((header) => isValidElement<{children?: ReactNode}>(header) && typeof header.props.children === "string" ? header.props.children : "");
+  const columnOrder = reviewColumnIndices(dataset, rule, columnLabels, REVIEW_CHECK_METHODS[rule]?.columns || []);
+  const cellsForRow = (r: LegalFlag, i: number) => reviewTableCells(<>
+      <td className="review-selection-column"><input aria-label={`Select ${r.name || r.caseId || r.assessmentId || r.serviceId || r.awarenessId || "record"}`} type="checkbox" disabled={!isExcludable(r)} checked={selectedRowKeys.includes(rowKey(r, i))} onChange={() => setSelectedRowKeys((current) => current.includes(rowKey(r, i)) ? current.filter((key) => key !== rowKey(r, i)) : [...current, rowKey(r, i)])} /></td>
+      <td>{r.duplicateRecheck && <span className="duplicate-recheck-badge">Recheck</span>}{r.detail}</td>
+      <td className="action-cell">{r.action}</td>
+      <td>
+        <strong>{r.lawyer || (dataset === "legalhotlines" ? "Not recorded" : "Unassigned")}</strong>
+      </td>
+      <td>{r.project ? formatProjectLabel(r.project) : "-"}</td>
+      <td>{r.location || "-"}</td>{rule === "Detention Governorate mismatch" && <td>{r.detentionGovernorate || "Missing"}</td>}
+      <td
+        className={r.duplicateGroup ? `duplicate-name-cell ${r.nameMatchMode === "exact" ? "exact-duplicate-name" : "variation-duplicate-name"}` : ""}
+        style={r.duplicateGroup && r.nameMatchMode !== "exact" ? { background: `linear-gradient(90deg, ${duplicateColor(r.duplicateGroup)} 0%, ${duplicateColor(r.duplicateGroup)} ${r.duplicateSimilarity ?? 90}%, color-mix(in srgb,var(--panel-strong) 42%,transparent) ${r.duplicateSimilarity ?? 90}%, transparent 100%)` } : undefined}
+        onCopy={(event) => {
+          event.preventDefault();
+          event.clipboardData.setData("text/plain", r.name || "");
+          if (r.name) announceLegalCopy(r.name);
+        }}
+      >
+        {r.name?<button type="button" className="duplicate-name-copy" onClick={()=>void copyDuplicateName(r.name)} title={dataset === "legalhotlines" ? "Copy detained-person name" : "Copy beneficiary name"} aria-label={`Copy ${r.name}`}>{r.name}</button>:<strong>Not provided</strong>}
+        {r.duplicateSimilarity !== undefined && <span className="duplicate-match-badge" aria-hidden="true">{r.duplicateSimilarity}% match</span>}
+        {r.nameMatchMode === "exact" && <span className="exact-duplicate-badge" aria-hidden="true">Exact duplicate</span>}
+      </td>
+      {(rule === "Marital status below 18" || rule === "Spouse below 18") && <td>{r.maritalStatus || "-"}</td>}
+      {rule === "Spouse below 18" && <><td><strong>{r.spouseName || "Not provided"}</strong></td><td>{r.spouseDateOfBirth || "-"}</td><td>{r.spouseAge ?? "-"}</td></>}
+      <td>{r.phone || "-"}</td>
+      {dataset === "beneficiaries" && <td>{r.dateOfBirth || "-"}{rule === "Marital status below 18" && r.beneficiaryAge !== null && r.beneficiaryAge !== undefined ? ` (${r.beneficiaryAge})` : ""}</td>}
+      {dataset === "legalhotlines" ? (
+        <><td>{r.contactDate}</td><td>{r.callerName}</td><td>{r.beneficiaryDetained}</td><td>{r.helplineReferral}</td></>
+      ) : dataset === "awareness" ? (
+        <><td>{r.awarenessId || r.recordId || "-"}</td><td>{r.sessionTopic || "-"}</td></>
+      ) : (
+        <>{(dataset !== "legalservices" || (rule !== "Duplicate service" && rule !== "Duplicate service without Assessment ID")) && <td>{r.caseId || "-"}</td>}{(rule === "Possible duplicate name" || rule === "Possible duplicate contact and name") && <><td>{r.identificationDate || "-"}</td><td>{r.createdOn || "-"}</td><td>{r.feeId || "-"}</td><td>{r.amountSpentIqd || "-"}</td><td>{r.legalServiceNeeded || "-"}</td></>}<td>{r.assessmentId || "-"}</td>{dataset === "assessments" && <td>{r.assessmentDate || "-"}</td>}{rule === "Open counselling-only assessment" && <><td>{r.assessmentStatus || "-"}</td><td>{r.legalServiceNeeded || "-"}</td></>}{rule === "Detention/immigration inconsistency" && <><td>{r.beneficiaryDetained || "-"}</td><td>{r.immigrationRelatedCharge || "-"}</td></>}{rule === "Detained beneficiary below 10 years" && <><td>{r.beneficiaryDetained || "-"}</td><td>{r.dateOfBirth || "-"}</td><td>{r.beneficiaryAge ?? "-"}</td></>}{rule === "Selected month with previous assessment" && <td>{r.createdOn || "-"}</td>}{rule === "Representation while not detained" && <td>{r.typeOfDocument || "-"}</td>}{rule === "Type of document in Assessments vs Services" && <><td>{r.comparisonFinding || "-"}</td><td>{r.assessmentDocuments || "-"}</td><td>{r.serviceDocuments || "-"}</td></>}{rule === "Type of Legal Service in Assessment vs Services" && <><td>{r.requestedServiceTypes || "-"}</td><td>{r.providedServiceTypes || "-"}</td></>}{(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <><td>{r.caseId || "-"}</td><td>{r.serviceTypeProvided || "-"}</td><td>{r.typeOfDocument || "-"}</td><td>{r.courtVerdictDetail || "-"}</td><td>{r.otherDocumentDetail || "-"}</td><td>{r.legalConcernSpecified || "-"}</td><td>{r.legalConcern || "-"}</td></>}<td>{r.serviceId || "-"}</td></>
+      )}
+      {rule === "Open assessment with all services closed" && <><td>{r.assessmentStatus || "-"}</td><td>{r.requestForClosedStatus || "-"}</td><td>{r.linkedServiceCount ?? 0}</td><td>{r.linkedServiceStatuses || "-"}</td></>}
+      <td>
+        {r.caseId && (
+          <button
+            className="table-action"
+            onClick={() => onOpenCase(r.caseId)}
+          >
+            Open case
+            <ArrowRight />
+          </button>
+        )}
+      </td>
+  </>);
   return (
     <section className="glass finding-table-section">
       <header>
         <div className="finding-title-wrap">
           <button className="finding-help-button" type="button" aria-label={`How to check ${rule}`} title="How to check" aria-expanded={helpOpen} onClick={() => setHelpOpen((current) => !current)}><CircleHelp /></button>
-          <div><h3>{displayReviewRule(rule)}</h3></div>
+          <div><h3>{tableTitle}</h3></div>
         </div>
         <div className="finding-table-pagination">
           {(rule === "Possible duplicate name" || rule === "Similar detained-person name") && (
@@ -595,7 +686,7 @@ function FindingTable({
       {result?.unavailableRules?.[rule] && <div className="error" role="status">This check is unavailable. {result.unavailableRules[rule]}</div>}
       {!result ? (
         <LegalSkeleton variant="table" compact />
-      ) : result.total === 0 ? (
+      ) : visibleRows.length === 0 ? (
         <div className="review-clear compact">
           <CheckCircle2 />
           <div>
@@ -605,94 +696,29 @@ function FindingTable({
         </div>
       ) : (
         <>
+          {tableGroups.map((group) => <div key={group.title || rule}>
+            {group.title && <header><h4>{group.title}</h4><p>{group.rows.length.toLocaleString()} records</p></header>}
+            {group.rows.length === 0 ? <div className="review-clear compact">No matching records</div> : <>
           <div className="legal-table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th className="review-selection-column"><input ref={selectVisibleRef} aria-label={`Select visible records for ${displayReviewRule(rule)}`} type="checkbox" disabled={!excludableRows.length} checked={allVisibleSelected} onChange={(event) => setSelectedRowKeys(event.target.checked ? visibleRows.map((row, index) => isExcludable(row) ? rowKey(row, index) : "").filter(Boolean) : [])} /></th>
-                  <th>Finding detail</th>
-                  <th>Recommended action</th>
-                  <th>{dataset === "legalhotlines" ? "Lawyer referral" : "Lawyer"}</th>
-                  <th>{dataset === "legalhotlines" ? "Finding severity" : "Priority"}</th>
-                  <th>Project</th>
-                  <th>Project location</th>{rule === "Detention Governorate mismatch" && <th>Detention Governorate mismatch</th>}
-                  <th>{dataset === "legalhotlines" ? "Detained-person name" : "Name"}</th>
-                  {(rule === "Marital status below 18" || rule === "Spouse below 18") && <th>Marital status</th>}
-                  {rule === "Spouse below 18" && <><th>Spouse name</th><th>Spouse date of birth</th><th>Spouse current age</th></>}
-                  <th>Phone number</th>
-                  {dataset === "beneficiaries" && <th>Date of birth</th>}
-                  {dataset === "legalhotlines" ? (
-                    <><th>Contact date</th><th>Caller name</th><th>Detained</th><th>Helpline referral</th><th>Priority</th></>
-                  ) : dataset === "awareness" ? (
-                    <><th>Awareness ID</th><th>Session topic</th></>
-                  ) : (
-                    <>{dataset !== "legalservices" ? <th>Case ID</th> : rule !== "Duplicate service" && rule !== "Duplicate service without Assessment ID" && <th>Beneficiary ID</th>}{(rule === "Possible duplicate name" || rule === "Possible duplicate contact and name") && <><th>Date of Identification</th><th>Created On</th><th>Fee ID</th><th>Amount Spent (IQD)</th><th>Type of Legal Service Needed</th></>}<th>Assessment</th>{dataset === "assessments" && <th>Date of assessment</th>}{rule === "Open counselling-only assessment" && <><th>Assessment status</th><th>Type of Legal Service Needed</th></>}{rule === "Detention/immigration inconsistency" && <><th>Is the beneficiary detained</th><th>Is it an immigration related charge?</th></>}{rule === "Detained beneficiary below 10 years" && <><th>Is the beneficiary detained</th><th>Date of birth</th><th>Current age</th></>}{rule === "Selected month with previous assessment" && <th>Created On</th>}{rule === "Representation while not detained" && <th>Type of documents to be issued</th>}{rule === "Type of document in Assessments vs Services" && <><th>Finding</th><th>Assessment documents</th><th>Service documents</th></>}{rule === "Type of Legal Service in Assessment vs Services" && <><th>Assessment service needed</th><th>Service type provided</th></>}{(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <><th>Beneficiary ID</th><th>Type of Service Provided</th><th>Type of Document</th><th>Please specify the Court Verdict</th><th>Type of Document if Other</th><th>Legal Concern Specified</th><th>Legal Concern</th></>}<th>Service</th></>
-                  )}
-                  {rule === "Open assessment with all services closed" && <><th>Assessment status</th><th>Linked services</th><th>Service statuses</th></>}
-                  <th></th>
+                  {columnOrder.map((index) => <Fragment key={index}>{tableHeaders[index]}</Fragment>)}
                 </tr>
               </thead>
               <tbody>
-                {visibleRows.map((r, i) => (
+                {group.rows.map(({row: r, index: i}) => { const cells = cellsForRow(r, i); return (
                   <tr key={`${r.row}-${i}`} className={(rule === "Duplicate detained-person name" || rule === "Similar detained-person name" || rule === "Duplicate service" || rule === "Duplicate service without Assessment ID" || rule === "Beneficiary has multiple assessments" || rule === "Duplicate participant in session") && r.duplicateGroup ? "duplicate-service-row" : ""} style={(rule === "Duplicate detained-person name" || rule === "Similar detained-person name" || rule === "Duplicate service" || rule === "Duplicate service without Assessment ID" || rule === "Beneficiary has multiple assessments" || rule === "Duplicate participant in session") && r.duplicateGroup ? { background: duplicateColor(r.duplicateGroup) } : undefined} onContextMenu={(event) => {
                     if ((dataset === "legalhotlines" && r.hotlineId) || (dataset === "assessments" && r.assessmentId) || (dataset === "legalservices" && r.serviceId) || (dataset === "awareness" && (r.awarenessId || r.name)) || (dataset === "beneficiaries" && r.caseId)) onFindingContextMenu(event, r);
                   }}>
-                    <td className="review-selection-column"><input aria-label={`Select ${r.name || r.caseId || r.assessmentId || r.serviceId || r.awarenessId || "record"}`} type="checkbox" disabled={!isExcludable(r)} checked={selectedRowKeys.includes(rowKey(r, i))} onChange={() => setSelectedRowKeys((current) => current.includes(rowKey(r, i)) ? current.filter((key) => key !== rowKey(r, i)) : [...current, rowKey(r, i)])} /></td>
-                    <td>{r.duplicateRecheck && <span className="duplicate-recheck-badge">Recheck</span>}{r.detail}</td>
-                    <td className="action-cell">{r.action}</td>
-                    <td>
-                      <strong>{r.lawyer || (dataset === "legalhotlines" ? "Not recorded" : "Unassigned")}</strong>
-                    </td>
-                    <td>
-                      <span
-                        className={`severity severity-${r.severity.toLowerCase()}`}
-                      >
-                        {r.severity}
-                      </span>
-                    </td>
-                    <td>{r.project ? formatProjectLabel(r.project) : "—"}</td>
-                    <td>{r.location || "—"}</td>{rule === "Detention Governorate mismatch" && <td>{r.detentionGovernorate || "Missing"}</td>}
-                    <td
-                      className={r.duplicateGroup ? `duplicate-name-cell ${r.nameMatchMode === "exact" ? "exact-duplicate-name" : "variation-duplicate-name"}` : ""}
-                      style={r.duplicateGroup && r.nameMatchMode !== "exact" ? { background: `linear-gradient(90deg, ${duplicateColor(r.duplicateGroup)} 0%, ${duplicateColor(r.duplicateGroup)} ${r.duplicateSimilarity ?? 90}%, color-mix(in srgb,var(--panel-strong) 42%,transparent) ${r.duplicateSimilarity ?? 90}%, transparent 100%)` } : undefined}
-                      onCopy={(event) => {
-                        event.preventDefault();
-                        event.clipboardData.setData("text/plain", r.name || "");
-                        if (r.name) announceLegalCopy(r.name);
-                      }}
-                    >
-                      {r.name?<button type="button" className="duplicate-name-copy" onClick={()=>void copyDuplicateName(r.name)} title={dataset === "legalhotlines" ? "Copy detained-person name" : "Copy beneficiary name"} aria-label={`Copy ${r.name}`}>{r.name}</button>:<strong>Not provided</strong>}
-                      {r.duplicateSimilarity !== undefined && <span className="duplicate-match-badge" aria-hidden="true">{r.duplicateSimilarity}% match</span>}
-                      {r.nameMatchMode === "exact" && <span className="exact-duplicate-badge" aria-hidden="true">Exact duplicate</span>}
-                    </td>
-                    {(rule === "Marital status below 18" || rule === "Spouse below 18") && <td>{r.maritalStatus || "—"}</td>}
-                    {rule === "Spouse below 18" && <><td><strong>{r.spouseName || "Not provided"}</strong></td><td>{r.spouseDateOfBirth || "—"}</td><td>{r.spouseAge ?? "—"}</td></>}
-                    <td>{r.phone || "—"}</td>
-                    {dataset === "beneficiaries" && <td>{r.dateOfBirth || "—"}{rule === "Marital status below 18" && r.beneficiaryAge !== null && r.beneficiaryAge !== undefined ? ` (${r.beneficiaryAge})` : ""}</td>}
-                    {dataset === "legalhotlines" ? (
-                      <><td>{r.contactDate}</td><td>{r.callerName}</td><td>{r.beneficiaryDetained}</td><td>{r.helplineReferral}</td><td>{r.priority}</td></>
-                    ) : dataset === "awareness" ? (
-                      <><td>{r.awarenessId || r.recordId || "—"}</td><td>{r.sessionTopic || "—"}</td></>
-                    ) : (
-                      <>{(dataset !== "legalservices" || (rule !== "Duplicate service" && rule !== "Duplicate service without Assessment ID")) && <td>{r.caseId || "-"}</td>}{(rule === "Possible duplicate name" || rule === "Possible duplicate contact and name") && <><td>{r.identificationDate || "-"}</td><td>{r.createdOn || "-"}</td><td>{r.feeId || "-"}</td><td>{r.amountSpentIqd || "-"}</td><td>{r.legalServiceNeeded || "-"}</td></>}<td>{r.assessmentId || "—"}</td>{dataset === "assessments" && <td>{r.assessmentDate || "—"}</td>}{rule === "Open counselling-only assessment" && <><td>{r.assessmentStatus || "—"}</td><td>{r.legalServiceNeeded || "—"}</td></>}{rule === "Detention/immigration inconsistency" && <><td>{r.beneficiaryDetained || "—"}</td><td>{r.immigrationRelatedCharge || "—"}</td></>}{rule === "Detained beneficiary below 10 years" && <><td>{r.beneficiaryDetained || "—"}</td><td>{r.dateOfBirth || "—"}</td><td>{r.beneficiaryAge ?? "—"}</td></>}{rule === "Selected month with previous assessment" && <td>{r.createdOn || "—"}</td>}{rule === "Representation while not detained" && <td>{r.typeOfDocument || "—"}</td>}{rule === "Type of document in Assessments vs Services" && <><td>{r.comparisonFinding || "—"}</td><td>{r.assessmentDocuments || "—"}</td><td>{r.serviceDocuments || "—"}</td></>}{rule === "Type of Legal Service in Assessment vs Services" && <><td>{r.requestedServiceTypes || "—"}</td><td>{r.providedServiceTypes || "—"}</td></>}{(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <><td>{r.caseId || "—"}</td><td>{r.serviceTypeProvided || "—"}</td><td>{r.typeOfDocument || "—"}</td><td>{r.courtVerdictDetail || "—"}</td><td>{r.otherDocumentDetail || "—"}</td><td>{r.legalConcernSpecified || "—"}</td><td>{r.legalConcern || "—"}</td></>}<td>{r.serviceId || "—"}</td></>
-                    )}
-                    {rule === "Open assessment with all services closed" && <><td>{r.assessmentStatus || "-"}</td><td>{r.linkedServiceCount ?? 0}</td><td>{r.linkedServiceStatuses || "-"}</td></>}
-                    <td>
-                      {r.caseId && (
-                        <button
-                          className="table-action"
-                          onClick={() => onOpenCase(r.caseId)}
-                        >
-                          Open case
-                          <ArrowRight />
-                        </button>
-                      )}
-                    </td>
+                    {columnOrder.map((index) => <Fragment key={index}>{cells[index]}</Fragment>)}
                   </tr>
-                ))}
+                ); })}
               </tbody>
             </table>
           </div>
+            </>}
+          </div>)}
         </>
       )}
     </section>
@@ -946,7 +972,7 @@ function ReviewPageBody({
           onClick={() => setDrawer(true)}
         >
           <SlidersHorizontal />
-          All filters{activeFilters > 0 && <b>{activeFilters}</b>}
+          Filters{activeFilters > 0 && <b>{activeFilters}</b>}
         </button>
         <ExcelDownloadButton disabled={selectedRules.length === 0} onClick={()=>downloadExcelUrl(legalReviewExportUrl(dataset, comparisonMonth, appliedNameCompareChars, allowNameVariations, exactMatchesOnly, selectedRules, filters, debouncedSearch, Object.entries(ignoreCourtVerdictByRule).filter(([,ignored])=>ignored).map(([rule])=>rule)),`${dataset}-review-findings.xlsx`)}/>
       </div>
@@ -959,9 +985,10 @@ function ReviewPageBody({
         </div>
       ) : (
         <div className="finding-tables">
-          {selectedRules.map((rule) => (
+          {selectedRules.flatMap((rule) => (dataset === "assessments" && rule === "Open assessment with all services closed" ? [true, false] : [undefined]).map((closureRequestGroup) => (
             <FindingTable
-              key={rule}
+              key={`${rule}-${closureRequestGroup}`}
+              closureRequestGroup={closureRequestGroup}
               dataset={dataset}
               rule={rule}
               search={debouncedSearch}
@@ -983,7 +1010,7 @@ function ReviewPageBody({
               onFindingContextMenu={(event, row) => { event.preventDefault(); setDuplicateMenu({ x: event.clientX, y: event.clientY, row }); }}
               onBulkExclude={(rows) => setExclusionCandidates(rows)}
             />
-          ))}
+          )))}
         </div>
       )}
       {duplicateMenu && (
@@ -1232,7 +1259,7 @@ function LegacyReviewPageBody({
                 <thead>
                   <tr>
                     <th>Lawyer</th>
-                    <th>Priority</th>
+
                     <th>Project</th>
                     <th>Project location</th>
                     <th>Name</th>
@@ -1250,13 +1277,6 @@ function LegacyReviewPageBody({
                     <tr key={`${r.row}-${r.rule}-${i}`}>
                       <td>
                         <strong>{r.lawyer || "Unassigned"}</strong>
-                      </td>
-                      <td>
-                        <span
-                          className={`severity severity-${r.severity.toLowerCase()}`}
-                        >
-                          {r.severity}
-                        </span>
                       </td>
                       <td>{r.project ? formatProjectLabel(r.project) : "—"}</td>
                       <td>{r.location || "—"}</td>
@@ -1395,10 +1415,10 @@ function LegalAnalyticsSection({dataset,theme,state,update,onOpenCase}:{dataset:
   const statusColors=["#d4852f","#2f9e68","#8b5cf6","#e05252","#1683d8","#64748b"];
   const statusHoverMetrics=(data?.statusTrends||[]).map((status,index)=>({label:status.label,icon:"●",color:statusColors[index%statusColors.length],rows:status.rows}));
   return <section className={`studio-fixed-section ${busy?"refreshing":""}`}>
-    <LegalScrollControls filterLabel="All filters" onFilters={()=>setDrawer(true)} activeCount={active} onClear={clear}>
+    <LegalScrollControls filterLabel="Filters" onFilters={()=>setDrawer(true)} activeCount={active} onClear={clear}>
       <div className="glass studio-quick-toolbar">
       <div className="studio-quick-fields">{quick.map((column)=><CheckboxMultiSelect key={column} hideLabel label={toolbarFilterLabel(column)} values={data?.filterOptions[column]||[]} selected={state.filters[column]||[]} onChange={(values)=>setFilter(column,values)}/>)}</div>
-      <div className="studio-quick-actions"><button className="soft detention-filter-clear" disabled={!active} onClick={clear}><RotateCcw/>Clear</button><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>All filters {active>0&&<b>{active}</b>}</button><button className="primary studio-excel" onClick={()=>void exportLegalExplorer("xlsx",dataset,state.search,state.filters)}><Download/>Excel</button></div>
+      <div className="studio-quick-actions"><button className="soft detention-filter-clear" disabled={!active} onClick={clear}><RotateCcw/>Clear</button><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {active>0&&<b>{active}</b>}</button><button className="primary studio-excel" onClick={()=>void exportLegalExplorer("xlsx",dataset,state.search,state.filters)}><Download/>Excel</button></div>
     </div>
     </LegalScrollControls>
     {error&&<div className="error glass">{error}</div>}
@@ -1500,7 +1520,7 @@ function Explorer({
           onClick={() => setDrawer(true)}
         >
           <SlidersHorizontal />
-          All filters{activeCount > 0 && <b>{activeCount}</b>}
+          Filters{activeCount > 0 && <b>{activeCount}</b>}
         </button>
         <button className="soft explorer-sticky-clear" disabled={!activeCount} onClick={()=>{setFilters({});setPage(1)}}>
           <RotateCcw />
@@ -1714,7 +1734,7 @@ function LegacyExplorer({
           onClick={() => setDrawer(true)}
         >
           <SlidersHorizontal />
-          All filters{activeCount > 0 && <b>{activeCount}</b>}
+          Filters{activeCount > 0 && <b>{activeCount}</b>}
         </button>
         <ExcelDownloadButton className="soft" onClick={()=>downloadExcelUrl(legalExportUrl(dataset),`${dataset}.xlsx`)}/>
       </div>
@@ -2051,11 +2071,7 @@ function DetentionCases({
     if(!data||tableExporting)return;
     setTableExporting(true);
     try{
-      const pageSize=500,pages=Math.ceil(data.total/pageSize);
-      const results=await Promise.all(Array.from({length:pages},(_,index)=>getLegalDetention(recordSearch,index+1,filters,recordSortColumn,recordSortDirection)));
-      const columns=[...data.columns,"Case ID"];
-      const rows=results.flatMap((result)=>result.rows.map((row)=>Object.fromEntries(columns.map((column)=>[column,column==="Case ID"?row.caseId:row[column]]))));
-      await exportTableWorkbook("detention-cases.xlsx",columns,rows);
+      await exportLegalDetention(recordSearch,filters,recordSortColumn,recordSortDirection);
     }catch(reason:any){setError(reason.message||"Could not export detention table data.")}
     finally{setTableExporting(false)}
   };
@@ -2241,6 +2257,15 @@ function DetentionTrendChart({rows}:{rows:{month:string;detainedAssessments:numb
   return <section className="glass detention-trend"><header><div><span className="eyebrow">MONTHLY TREND</span><h3>Detained assessments and releases</h3></div><div className="trend-legend"><span><i className="assessment"/>Assessment date</span><span><i className="release"/>Release/deportation date</span></div></header><div className="detention-chart-scroll"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Monthly detained assessments and releases comparison"><line x1={pad.left} y1={height-pad.bottom} x2={width-pad.right} y2={height-pad.bottom} className="chart-axis"/>{[0,.25,.5,.75,1].map((step)=><g key={step}><line x1={pad.left} y1={pad.top+(height-pad.top-pad.bottom)*(1-step)} x2={width-pad.right} y2={pad.top+(height-pad.top-pad.bottom)*(1-step)} className="chart-grid"/><text x={pad.left-9} y={pad.top+(height-pad.top-pad.bottom)*(1-step)+4} textAnchor="end">{Math.round(max*step)}</text></g>)}<polyline points={points("detainedAssessments")} className="trend-line assessment"/><polyline points={points("released")} className="trend-line release"/>{rows.map((row,index)=>{const x=pad.left+(index*Math.max(1,width-pad.left-pad.right))/Math.max(1,rows.length-1);return <g key={row.month}><circle cx={x} cy={pad.top+(height-pad.top-pad.bottom)*(1-row.detainedAssessments/max)} r="3.5" className="trend-dot assessment"><title>{`${row.month}: ${row.detainedAssessments} detained assessments`}</title></circle><circle cx={x} cy={pad.top+(height-pad.top-pad.bottom)*(1-row.released/max)} r="3.5" className="trend-dot release"><title>{`${row.month}: ${row.released} releases`}</title></circle>{(index===0||index===rows.length-1||index%Math.max(1,Math.ceil(rows.length/8))===0)&&<text x={x} y={height-15} textAnchor="middle">{row.month}</text>}</g>})}</svg></div></section>;
 }
 
+const ASSESSMENT_STATUS_FIELDS = [
+  "Date of the Request",
+  "Request for Pending Status",
+  "Pending Status Approval",
+  "Request for Closed Status",
+  "Closed Status Approval",
+  "Status Comment by Supervisor",
+  "Approved By",
+];
 const ASSESSMENT_OMIT = [
   "Beneficiary ID",
   "Gender النوع الاجتماعي",
@@ -2436,7 +2461,7 @@ function Cases({
             onClick={() => setDrawer(true)}
           >
             <SlidersHorizontal />
-            All filters{activeCount > 0 && <b>{activeCount}</b>}
+            Filters{activeCount > 0 && <b>{activeCount}</b>}
           </button>
           <button className="soft case-clear" disabled={!activeCount} onClick={clear}><RotateCcw/>Clear</button>
         </div>
@@ -2758,7 +2783,9 @@ function AssessmentNode({
           <ChevronDown />
         </div>
       </summary>
-      <RecordGrid row={node.assessment} omit={ASSESSMENT_OMIT} />
+      <RecordGrid row={node.assessment} omit={[...ASSESSMENT_OMIT, ...Object.keys(node.assessment).filter((key) => ASSESSMENT_STATUS_FIELDS.some((field) => key.trim().toLowerCase().includes(field.toLowerCase())))]} />
+      <div className="case-level-heading"><span>Status requests and approvals</span></div>
+      <RecordGrid row={Object.fromEntries(ASSESSMENT_STATUS_FIELDS.map((field) => [field, getField(node.assessment, field) || "-"]))} />
       <div className="service-list">
         <div className="case-level-heading">
           <span>Legal services</span>
@@ -3319,7 +3346,7 @@ function IndicatorTrendChart({months,series}:{title:string;months:string[];serie
   return <div className="indicator-analysis-chart"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Monthly indicator trend" style={{fontFamily:"Arial, sans-serif"}}><rect width={width} height={height} rx="18" fill="var(--panel-strong)"/>{[0,.25,.5,.75,1].map((ratio)=>{const lineY=height-padding.bottom-ratio*plotHeight,value=Math.round(maximum*ratio);return <g key={ratio}><line x1={padding.left} x2={width-padding.right} y1={lineY} y2={lineY} stroke="var(--line)" strokeDasharray={ratio===0?"":"4 6"}/><text x={padding.left-12} y={lineY+4} textAnchor="end" fill="var(--muted)" fontSize="12">{value.toLocaleString()}</text></g>})}{months.map((month,index)=><text key={month} x={x(index)} y={height-25} textAnchor="middle" fill="var(--muted)" fontSize="12" fontWeight="600">{month}</text>)}{series.map((item,seriesIndex)=>{return <g key={item.label}><polyline points={item.values.map((number,index)=>`${x(index)},${y(number)}`).join(" ")} fill="none" stroke={item.color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>{item.values.map((number,index)=>{const label=number.toLocaleString(),labelWidth=Math.max(30,label.length*8+12),labelY=Math.max(26,Math.min(height-padding.bottom-16,y(number)-22-seriesIndex*10));return <g key={index}><circle cx={x(index)} cy={y(number)} r="6" fill="var(--panel-strong)" stroke={item.color} strokeWidth="4"/><rect x={x(index)-labelWidth/2} y={labelY-15} width={labelWidth} height="20" rx="10" fill="var(--panel-strong)" stroke={item.color} strokeOpacity=".7"/><text x={x(index)} y={labelY-1} textAnchor="middle" fill={item.color} fontSize="12" fontWeight="700">{label}</text></g>})}</g>})}</svg><footer>{series.map((item)=><span key={item.label}><i style={{background:item.color}}/>{item.label}</span>)}</footer></div>;
 }
 
-function LazyIndicatorTrendChart(props:{title:string;months:string[];series:{label:string;values:number[];color:string}[]}){
+const LazyIndicatorTrendChart=memo(function LazyIndicatorTrendChart(props:{title:string;months:string[];series:{label:string;values:number[];color:string}[]}){
   const host=useRef<HTMLDivElement>(null),[visible,setVisible]=useState(false);
   useEffect(()=>{
     if(visible)return;
@@ -3330,7 +3357,7 @@ function LazyIndicatorTrendChart(props:{title:string;months:string[];series:{lab
     return()=>observer.disconnect();
   },[visible]);
   return <div ref={host} style={{minHeight:360}}>{visible?<IndicatorTrendChart {...props}/>:null}</div>;
-}
+});
 
 function addIndicatorAnalysisPdfPage(pdf:jsPDF,title:string,months:string[],series:{label:string;values:number[];color:string}[]){
   const pageWidth=pdf.internal.pageSize.getWidth(),pageHeight=pdf.internal.pageSize.getHeight();
@@ -3394,16 +3421,20 @@ function IndicatorAnalysis({report,monthlyReports,loading}:{report:IndicatorRepo
   </section>;
 }
 
-function IndicatorReportingCheck({projects,months,projectOptions,monthOptions}:{projects:string[];months:string[];projectOptions:string[];monthOptions:string[]}){
+function IndicatorReportingCheck({projects,months,projectOptions,monthOptions,revision}:{projects:string[];months:string[];projectOptions:string[];monthOptions:string[];revision:number}){
   const [metadata,setMetadata]=useState<IndicatorReconciliationMetadata|null>(null),[result,setResult]=useState<IndicatorReconciliation|null>(null),[busy,setBusy]=useState(false),[importBusy,setImportBusy]=useState(false),[exportBusy,setExportBusy]=useState(false),[error,setError]=useState(""),[query,setQuery]=useState(""),[mode,setMode]=useState<"issues"|"all">("issues"),[page,setPage]=useState(1);
   const [checkProjects,setCheckProjects]=useState<string[]>(projects),[checkMonths,setCheckMonths]=useState<string[]>(months);
   const fileInput=useRef<HTMLInputElement|null>(null),pageSize=100;
+  const checkController=useRef<AbortController|null>(null),checkScope=useRef("");
+  checkScope.current=JSON.stringify([checkProjects,checkMonths,metadata?.loadedAt,metadata?.sheet,revision]);
+  useEffect(()=>()=>checkController.current?.abort(),[]);
+  useEffect(()=>{checkController.current?.abort();setBusy(false);setResult(null)},[checkProjects,checkMonths,metadata,revision]);
   useEffect(()=>{getIndicatorReconciliationMetadata().then(setMetadata).catch((reason)=>setError(reason.message))},[]);
   const availableMonths=useMemo(()=>metadata?.months?.length?monthOptions.filter((month)=>metadata.months.includes(month)):monthOptions,[metadata,monthOptions]);
   useEffect(()=>setCheckMonths((current)=>current.filter((month)=>availableMonths.includes(month))),[availableMonths]);
   const changeProjects=(next:string[])=>{setCheckProjects(next);setResult(null)};
   const changeMonths=(next:string[])=>{setCheckMonths(next);setResult(null)};
-  const run=async()=>{setBusy(true);setError("");try{setResult(await reconcileLegalIndicators(checkProjects,[],[],checkMonths,[]));setPage(1)}catch(reason:any){setError(reason?.message||"Unable to compare the reporting tools.")}finally{setBusy(false)}};
+  const run=async()=>{checkController.current?.abort();const controller=new AbortController();checkController.current=controller;const scope=checkScope.current;const current=()=>!controller.signal.aborted&&checkScope.current===scope;setBusy(true);setError("");try{const next=await reconcileLegalIndicators(checkProjects,[],[],checkMonths,[],controller.signal);if(current()){setResult(next);setPage(1)}}catch(reason:any){if(current())setError(reason?.message||"Unable to compare the reporting tools.")}finally{if(current())setBusy(false)}};
   const acceptMetadata=(next:IndicatorReconciliationMetadata)=>{setMetadata(next);setResult(null);setError("")};
   const importBrowserFile=async(file:File|null)=>{if(!file)return;setImportBusy(true);setError("");try{acceptMetadata(await uploadIndicatorMasterWorkbook(file))}catch(reason:any){setError(reason?.message||"Unable to read the master workbook.")}finally{setImportBusy(false)}};
   const chooseWorkbook=async()=>{const desktopApi=(window as any).pywebview?.api;if(!desktopApi?.choose_indicator_master_workbook||!desktopApi?.process_indicator_master_workbook){fileInput.current?.click();return}setImportBusy(true);setError("");try{const path=await desktopApi.choose_indicator_master_workbook();if(path)acceptMetadata(await desktopApi.process_indicator_master_workbook(path))}catch(reason:any){setError(reason?.message||"Unable to read the master workbook.")}finally{setImportBusy(false)}};
@@ -3411,7 +3442,7 @@ function IndicatorReportingCheck({projects,months,projectOptions,monthOptions}:{
   const changeSheet=async(sheet:string)=>{setImportBusy(true);setError("");try{acceptMetadata(await selectIndicatorMasterSheet(sheet))}catch(reason:any){setError(reason?.message||"Unable to read the selected worksheet.")}finally{setImportBusy(false)}};
   const exportResults=async()=>{setExportBusy(true);setError("");try{await exportIndicatorReconciliation(checkProjects,[],[],checkMonths,[])}catch(reason:any){setError(reason?.message||"Unable to export the reporting check.")}finally{setExportBusy(false)}};
   const filtered=useMemo(()=>{const needle=query.trim().toLowerCase();return (result?.rows||[]).filter((row)=>(mode==="all"||row.status!=="matched")&&(!needle||[row.indicator,row.month,row.project,row.location,row.population,row.sex,row.ageGroup,row.status].some(value=>value.toLowerCase().includes(needle))))},[result,mode,query]);
-  const pageCount=Math.max(1,Math.ceil(filtered.length/pageSize)),visible=filtered.slice((page-1)*pageSize,page*pageSize);
+  const pageCount=Math.max(1,Math.ceil(filtered.length/pageSize)),visible=useMemo(()=>filtered.slice((page-1)*pageSize,page*pageSize),[filtered,page]);
   useEffect(()=>setPage(1),[query,mode]);
   const statusLabel=(status:string)=>({matched:"Matched",different:"Different","workbook-only":"Workbook only","platform-only":"Platform only","missing-workbook":"Missing workbook value"}[status]||status);
   return <section className="indicator-reconciliation-page">
@@ -3430,20 +3461,21 @@ function IndicatorReportingCheck({projects,months,projectOptions,monthOptions}:{
       <div className="glass indicator-reconciliation-results">
         <header><div><span className="eyebrow">COMPARISON RESULTS</span><h3>{filtered.length.toLocaleString()} displayed values</h3><p>{result.months.map(formatFilterMonth).join(", ")}</p></div><div className="indicator-reconciliation-result-actions"><div className="indicator-reconciliation-mode"><button className={mode==="issues"?"active":""} onClick={()=>setMode("issues")}>Differences only</button><button className={mode==="all"?"active":""} onClick={()=>setMode("all")}>All values</button></div><label><Search/><input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Search results"/></label><ExcelDownloadButton busy={exportBusy} onClick={exportResults}/></div></header>
         {result.warnings.length>0&&<details className="reconciliation-warnings"><summary>{result.warnings.length} mapping or workbook warning{result.warnings.length===1?"":"s"}</summary>{result.warnings.map((warning)=><p key={warning}>{warning}</p>)}</details>}
-        <div className="legal-table-wrap indicator-reconciliation-table"><table><thead><tr><th>Indicator</th><th>Month</th><th>Project / location</th><th>Population</th><th>Sex / age</th><th>Platform</th><th>Excel</th><th>Variance</th><th>Status</th></tr></thead><tbody>{visible.length?visible.map((row,index)=><tr key={`${row.indicatorId}-${row.month}-${row.project}-${row.location}-${row.population}-${row.sex}-${row.ageGroup}-${index}`}><td><strong>{row.indicator}</strong></td><td>{formatFilterMonth(row.month)}</td><td><strong>{formatProjectLabel(row.project)}</strong><small>{row.location}</small></td><td>{row.population.replaceAll("-"," ")}</td><td>{row.sex} · {row.ageGroup}</td><td>{row.platformValue===null?"Missing":row.platformValue.toLocaleString()}</td><td>{row.workbookValue===null?"Missing":row.workbookValue.toLocaleString()}</td><td>{row.variance===null?"-":row.variance.toLocaleString()}</td><td><span className={`indicator-reconciliation-status ${row.status}`}>{statusLabel(row.status)}</span></td></tr>):<tr><td colSpan={9}><div className="reconciliation-empty"><CheckCircle2/><strong>No differences match the current search.</strong></div></td></tr>}</tbody></table></div>
+        <div className="legal-table-wrap indicator-reconciliation-table"><table><thead><tr><th>Indicator</th><th>Month</th><th>Project / location</th><th>Population</th><th>Sex / age</th><th>Platform</th><th>Excel</th><th>Variance</th><th>Status</th></tr></thead>{visible.length?<VirtualRows items={visible} table columns={11} enabled={filtered.length>200} estimate={64} render={(row,index)=><tr key={`${row.indicatorId}-${row.month}-${row.project}-${row.location}-${row.population}-${row.sex}-${row.ageGroup}-${index}`}><td><strong>{row.indicator}</strong></td><td>{formatFilterMonth(row.month)}</td><td><strong>{formatProjectLabel(row.project)}</strong><small>{row.location}</small></td><td>{row.population.replaceAll("-"," ")}</td><td>{row.sex} · {row.ageGroup}</td><td>{row.platformValue===null?"Missing":row.platformValue.toLocaleString()}</td><td>{row.workbookValue===null?"Missing":row.workbookValue.toLocaleString()}</td><td>{row.variance===null?"-":row.variance.toLocaleString()}</td><td><span className={`indicator-reconciliation-status ${row.status}`}>{statusLabel(row.status)}</span></td></tr>}/>:<tbody><tr><td colSpan={11}><div className="reconciliation-empty"><CheckCircle2/><strong>No differences match the current search.</strong></div></td></tr></tbody>}</table></div>
         <footer className="legal-pager"><button className="soft" disabled={page<=1} onClick={()=>setPage((value)=>value-1)}><ChevronLeft/>Previous</button><span>Page {page} of {pageCount}</span><button className="soft" disabled={page>=pageCount} onClick={()=>setPage((value)=>value+1)}>Next<ChevronRight/></button></footer>
       </div>
     </>}
   </section>;
 }
 
-function IndicatorReporting(){
+function IndicatorReporting({revision}:{revision:number}){
   const [report,setReport]=useState<IndicatorReport|null>(null),[projects,setProjects]=useState<string[]>([]),[locations,setLocations]=useState<string[]>([]),[quarters,setQuarters]=useState<string[]>([]),[months,setMonths]=useState<string[]>([]),[communityTypes,setCommunityTypes]=useState<string[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState(""),[toast,setToast]=useState(""),[filterDrawer,setFilterDrawer]=useState(false),[fullView,setFullView]=useState<IndicatorReportItem|null>(null),[idDrill,setIdDrill]=useState<{ids:string[];count:number;title:string}|null>(null),[view,setView]=useState<"report"|"analysis"|"check">("report"),[monthlyReports,setMonthlyReports]=useState<{month:string;report:IndicatorReport}[]>([]),[analysisLoading,setAnalysisLoading]=useState(false),[exporting,setExporting]=useState(false),[narrativeExporting,setNarrativeExporting]=useState(false);
-  const toastTimer=useRef<number|undefined>(undefined),analysisCache=useRef(new Map<string,IndicatorReport>());
-  const indicatorQuery=useMemo(()=>({projects,locations,quarters,months,communityTypes}),[projects,locations,quarters,months,communityTypes]);
+  const toastTimer=useRef<number|undefined>(undefined);
+  const indicatorQuery=useMemo(()=>({projects,locations,quarters,months,communityTypes,revision}),[projects,locations,quarters,months,communityTypes,revision]);
+  const latestIndicatorQuery=useRef(indicatorQuery);latestIndicatorQuery.current=indicatorQuery;
   const debouncedQuery=useDebouncedValue(indicatorQuery,180);
   const reportMatchesFilters=useMemo(()=>reportMatchesIndicatorScope(report,indicatorQuery),[report,indicatorQuery]);
-  useEffect(()=>{const controller=new AbortController();setLoading(true);setError("");getLegalIndicators(debouncedQuery.projects,debouncedQuery.locations,[],debouncedQuery.quarters,debouncedQuery.months,debouncedQuery.communityTypes,controller.signal).then(setReport).catch((reason)=>{if(reason.name!=="AbortError")setError(reason.message)}).finally(()=>{if(!controller.signal.aborted)setLoading(false)});return()=>controller.abort()},[debouncedQuery]);
+  useEffect(()=>{const controller=new AbortController();const current=()=>!controller.signal.aborted&&latestIndicatorQuery.current===debouncedQuery;setLoading(true);setError("");getLegalIndicators(debouncedQuery.projects,debouncedQuery.locations,[],debouncedQuery.quarters,debouncedQuery.months,debouncedQuery.communityTypes,controller.signal).then((next)=>{if(current())setReport(next)}).catch((reason)=>{if(current()&&reason.name!=="AbortError")setError(reason.message)}).finally(()=>{if(current())setLoading(false)});return()=>controller.abort()},[debouncedQuery]);
   const locationOptions=useMemo(()=>!report?[]:projects.length?Array.from(new Set(projects.flatMap((project)=>report.filterOptions.locationsByProject[project]||[]))):report.filterOptions.locations,[report,projects]);
   const communityTypeOptions=useMemo(()=>!report?[]:report.filterOptions.communityTypes.filter((type)=>type!=="IDP"||!projects.length||projects.includes("UNHCR 2026 - AMAL CAMP")),[report,projects]);
   useEffect(()=>setLocations((current)=>{
@@ -3456,24 +3488,15 @@ function IndicatorReporting(){
   useEffect(()=>{
     // Wait until the Indicators request is complete, then preload Analysis in
     // the background so opening the tab can reuse already completed months.
-    if(view!=="analysis"||loading||!report||!analysisMonths.length){setMonthlyReports([]);setAnalysisLoading(false);return;}
+    if(view!=="analysis"||loading||!report||!reportMatchesFilters||!analysisMonths.length){setMonthlyReports([]);setAnalysisLoading(false);return;}
     const controller=new AbortController();
     setMonthlyReports([]);setAnalysisLoading(true);
-    const loadMonth=async(month:string)=>{
-      const key=JSON.stringify([projects,locations,communityTypes,month]),cached=analysisCache.current.get(key);
-      if(cached)return {month,report:cached};
-      const monthly=months.length===1&&months[0]===month?report:await getLegalIndicators(projects,locations,[],[],[month],communityTypes,controller.signal);
-      analysisCache.current.set(key,monthly);
-      return {month,report:monthly};
-    };
-    // Limit concurrent CPU-heavy report builds and reveal each completed month
-    // immediately instead of leaving the Analysis page blank until all finish.
-    let cursor=0;
-    const worker=async()=>{while(!controller.signal.aborted){const index=cursor++;if(index>=analysisMonths.length)return;const next=await loadMonth(analysisMonths[index]);if(!controller.signal.aborted)setMonthlyReports((current)=>[...current.filter(({month})=>month!==next.month),next])}};
-    const concurrency=view==="analysis"?2:1;
-    Promise.all(Array.from({length:Math.min(concurrency,analysisMonths.length)},worker)).catch((reason)=>{if(reason.name!=="AbortError")setError(reason instanceof Error?reason.message:"Unable to load monthly analysis")}).finally(()=>{if(!controller.signal.aborted)setAnalysisLoading(false)});
+    getLegalIndicatorsMonthly(projects,locations,[],[],analysisMonths,communityTypes,controller.signal)
+      .then((result)=>{if(!controller.signal.aborted&&latestIndicatorQuery.current===indicatorQuery)setMonthlyReports(result.reports)})
+      .catch((reason)=>{if(!controller.signal.aborted&&reason.name!=="AbortError")setError(reason.message||"Unable to load monthly analysis")})
+      .finally(()=>{if(!controller.signal.aborted)setAnalysisLoading(false)});
     return()=>controller.abort();
-  },[view,loading,report,analysisMonths,projects,locations,months,communityTypes]);
+  },[view,loading,report,analysisMonths,projects,locations,months,communityTypes,revision,reportMatchesFilters,indicatorQuery]);
   useEffect(()=>setQuarters((current)=>{const next=current.filter((value)=>quarterOptions.includes(value));return next.length===current.length?current:next}),[quarterOptions]);
   useEffect(()=>setMonths((current)=>{const next=current.filter((value)=>monthOptions.includes(value));return next.length===current.length?current:next}),[monthOptions]);
   useEffect(()=>setCommunityTypes((current)=>{const next=current.filter((value)=>communityTypeOptions.includes(value));return next.length===current.length?current:next}),[communityTypeOptions]);
@@ -3508,7 +3531,7 @@ function IndicatorReporting(){
   const filterControls=<><CheckboxMultiSelect label="Projects" values={report?.filterOptions.projects||[]} selected={projects} onChange={setProjects}/><CheckboxMultiSelect label="Project locations" values={locationOptions} selected={locations} onChange={setLocations}/><CheckboxMultiSelect label="Community type" values={communityTypeOptions} selected={communityTypes} onChange={setCommunityTypes}/><CheckboxMultiSelect label="Quarters" values={quarterOptions} selected={quarters} onChange={setQuarters}/><CheckboxMultiSelect label="Months" values={monthOptions} selected={months} onChange={setMonths}/></>;
   const filterBar=<>{filterControls}<button className="soft indicator-filter-clear" disabled={!activeFilters} onClick={clearFilters}><RotateCcw/>Clear</button><ExcelDownloadButton className="soft narrative-export-button" disabled={!report||loading} busy={narrativeExporting} onClick={exportNarrative}>Narrative</ExcelDownloadButton><ExcelDownloadButton disabled={!report||loading} busy={exporting} onClick={exportAll}/></>;
   const openIds=(ids:string[],count:number,title:string)=>setIdDrill({ids,count,title});
-  return <div className="indicator-reporting"><nav className="indicator-subnav" aria-label="Indicator reporting views"><button className={view==="report"?"active":""} onClick={()=>setView("report")}><TableProperties/>Indicators</button><button className={view==="analysis"?"active":""} onClick={()=>setView("analysis")}><ChartColumnIncreasing/>Analysis</button><button className={view==="check"?"active":""} onClick={()=>setView("check")}><CheckCheck/>Reporting Check</button></nav><LegalScrollControls onFilters={()=>setFilterDrawer(true)} activeCount={activeFilters} onClear={clearFilters} compactFilters={<><div className="indicator-header-project"><CheckboxMultiSelect label="Projects" values={report?.filterOptions.projects||[]} selected={projects} onChange={setProjects}/></div><div className="indicator-header-month"><CheckboxMultiSelect label="Months" values={monthOptions} selected={months} onChange={setMonths}/></div></>}><div className="indicator-filter-bar">{filterBar}</div></LegalScrollControls>{filterDrawer&&<><button className="indicator-filter-drawer-backdrop" aria-label="Close indicator filters" onClick={()=>setFilterDrawer(false)}/><aside className="indicator-filter-drawer glass"><header><div><span>INDICATOR FILTERS</span><h2>Filter indicator reporting</h2></div><button className="icon" onClick={()=>setFilterDrawer(false)} aria-label="Close filters"><X/></button></header><div className="indicator-filter-drawer-controls">{filterControls}</div><footer><button className="soft" disabled={!activeFilters} onClick={clearFilters}>Clear all</button></footer></aside></>}{error&&<div className="error glass">{error}</div>}{view==="check"?<IndicatorReportingCheck projects={projects} months={months} projectOptions={report?.filterOptions.projects||[]} monthOptions={report?.filterOptions.months||[]}/>:loading&&!report?<LegalSkeleton variant="indicator"/>:report&&(view==="report"?<div className={loading?"indicator-groups refreshing":"indicator-groups"}>{report.groups.map((group)=><ExpandedIndicatorGroup key={group.id} group={group} ageGroups={report.ageGroups} achievementLabel={achievementLabel} onCopy={copyItem} onCopyTitle={copyTitle} onView={setFullView} onOpenIds={openIds}/>)}</div>:<IndicatorAnalysis report={report} monthlyReports={monthlyReports} loading={analysisLoading}/>)}{report&&view==="report"&&<IdpDurableSolutions report={report}/>} {fullView&&<IndicatorFullView item={fullView} ageGroups={report?.ageGroups||[]} onClose={()=>setFullView(null)} onOpenIds={openIds} onCopy={()=>void copyItem(fullView)}/>} {idDrill&&<BeneficiaryIdModal {...idDrill} onClose={()=>setIdDrill(null)} onCopy={copyText}/>} {toast&&<div className="legal-copy-toast"><CheckCircle2/><span>Copied</span><strong>{toast}</strong></div>}</div>;
+  return <div className="indicator-reporting"><nav className="indicator-subnav" aria-label="Indicator reporting views"><button className={view==="report"?"active":""} onClick={()=>setView("report")}><TableProperties/>Indicators</button><button className={view==="analysis"?"active":""} onClick={()=>setView("analysis")}><ChartColumnIncreasing/>Analysis</button><button className={view==="check"?"active":""} onClick={()=>setView("check")}><CheckCheck/>Reporting Check</button></nav><LegalScrollControls onFilters={()=>setFilterDrawer(true)} activeCount={activeFilters} onClear={clearFilters} compactFilters={<><div className="indicator-header-project"><CheckboxMultiSelect label="Projects" values={report?.filterOptions.projects||[]} selected={projects} onChange={setProjects}/></div><div className="indicator-header-month"><CheckboxMultiSelect label="Months" values={monthOptions} selected={months} onChange={setMonths}/></div></>}><div className="indicator-filter-bar">{filterBar}</div></LegalScrollControls>{filterDrawer&&<><button className="indicator-filter-drawer-backdrop" aria-label="Close indicator filters" onClick={()=>setFilterDrawer(false)}/><aside className="indicator-filter-drawer glass"><header><div><span>INDICATOR FILTERS</span><h2>Filter indicator reporting</h2></div><button className="icon" onClick={()=>setFilterDrawer(false)} aria-label="Close filters"><X/></button></header><div className="indicator-filter-drawer-controls">{filterControls}</div><footer><button className="soft" disabled={!activeFilters} onClick={clearFilters}>Clear all</button></footer></aside></>}{error&&<div className="error glass">{error}</div>}{view==="check"?<IndicatorReportingCheck revision={revision} projects={projects} months={months} projectOptions={report?.filterOptions.projects||[]} monthOptions={report?.filterOptions.months||[]}/>:loading&&!report?<LegalSkeleton variant="indicator"/>:report&&(view==="report"?<div className={loading?"indicator-groups refreshing":"indicator-groups"}>{report.groups.map((group)=><ExpandedIndicatorGroup key={group.id} group={group} ageGroups={report.ageGroups} achievementLabel={achievementLabel} onCopy={copyItem} onCopyTitle={copyTitle} onView={setFullView} onOpenIds={openIds}/>)}</div>:<IndicatorAnalysis report={report} monthlyReports={monthlyReports} loading={analysisLoading}/>)}{report&&view==="report"&&<IdpDurableSolutions report={report}/>} {fullView&&<IndicatorFullView item={fullView} ageGroups={report?.ageGroups||[]} onClose={()=>setFullView(null)} onOpenIds={openIds} onCopy={()=>void copyItem(fullView)}/>} {idDrill&&<BeneficiaryIdModal {...idDrill} onClose={()=>setIdDrill(null)} onCopy={copyText}/>} <NotificationToast message={toast} label="Copied"/></div>;
 }
 
 function CaseReviewModal({ caseId, metadata, onClose }: { caseId: string; metadata: LegalMetadata; onClose: () => void }) {
@@ -3576,6 +3599,10 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
     setLegalRevision(next?.revision || null);
     setMetadataState(next);
   }, []);
+  const [importOperationId,setImportOperationId]=useState<string|null>(null);
+  const restoringData=Boolean(!metadata?.ready&&(metadataLoading||metadata?.loading));
+  const importProgress=useImportProgress(uploading||restoringData,uploading?importOperationId:null);
+  const beginImportProgress=()=>{const id=crypto.randomUUID();setImportOperationId(id);return id;};
   const [updateInfo, setUpdateInfo] = useState<UpdateCheck | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateOpen, setUpdateOpen] = useState(false);
@@ -3719,6 +3746,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
       setError("No supported CSV files were found in the selected folder.");
       return;
     }
+    const operationId=beginImportProgress();
     setUploading(true);
     setUploadProgress(0);
     setUploadPhase("uploading");
@@ -3726,11 +3754,8 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
     try {
       const next = await uploadLegalFolder(selectedFiles, (status) => {
         setUploadPhase(status.phase);
-        // The browser can measure bytes sent, but the server processes the
-        // CSVs as one request and cannot truthfully report record progress.
-        // Keep the processing stage indeterminate instead of showing 100%.
         if (status.percent !== null) setUploadProgress(status.percent);
-      });
+      }, operationId);
       setMetadata(next); setDataRevision((value) => value + 1);
     } catch (e: any) {
       setError(e.message);
@@ -3743,7 +3768,6 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
   };
   const selectFolder = async () => {
     const desktopApi = (window as any).pywebview?.api;
-    let progressTimer:number|undefined;
     if (!desktopApi?.choose_legal_folder || !desktopApi?.process_legal_folder) {
       folderInput.current?.click();
       return;
@@ -3752,18 +3776,18 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
     try {
       const selectedPath = await desktopApi.choose_legal_folder();
       if (!selectedPath) return;
+      const operationId=beginImportProgress();
       setUploading(true);
       setUploadProgress(0);
       setUploadPhase("processing");
-      progressTimer=window.setInterval(()=>{void desktopApi.get_legal_import_progress?.().then((progress:number)=>setUploadProgress(progress)).catch(()=>{})},180);
-      const next = await desktopApi.process_legal_folder(selectedPath);
+      const next = await desktopApi.process_legal_folder(selectedPath,operationId);
       if (next?.ready) {
         setMetadata(next); setDataRevision((value) => value + 1);
       }
     } catch (reason: any) {
       setError(reason?.message || String(reason) || "Unable to open the selected folder.");
     } finally {
-      if(progressTimer!==undefined)window.clearInterval(progressTimer);
+      await new Promise(resolve=>window.setTimeout(resolve,300));
       setUploading(false);
       setUploadProgress(0);
     }
@@ -3771,33 +3795,34 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
   const refreshSelectedFolder = async () => {
     const desktopApi = (window as any).pywebview?.api;
     if (!desktopApi?.refresh_legal_folder) return;
+    const operationId=beginImportProgress();
     setError("");setUploading(true);setUploadProgress(0);setUploadPhase("processing");
-    try { const next = await desktopApi.refresh_legal_folder(); setMetadata(next); setDataRevision((value) => value + 1); }
+    try { const next = await desktopApi.refresh_legal_folder(operationId); setMetadata(next); setDataRevision((value) => value + 1); }
     catch (reason: any) { setError(reason?.message || "Unable to refresh the selected folder."); }
-    finally { setUploading(false);setUploadProgress(0); }
+    finally { await new Promise(resolve=>window.setTimeout(resolve,300));setUploading(false);setUploadProgress(0); }
   };
   const selectFiles = async () => {
     const desktopApi = (window as any).pywebview?.api;
-    let progressTimer:number|undefined;
     if (!desktopApi?.choose_legal_files || !desktopApi?.process_legal_files) { filesInput.current?.click(); return; }
     setError("");
     try {
       const paths = await desktopApi.choose_legal_files();
       if (!paths?.length) return;
+      const operationId=beginImportProgress();
       setUploading(true);setUploadProgress(0);setUploadPhase("processing");
-      progressTimer=window.setInterval(()=>{void desktopApi.get_legal_import_progress?.().then((progress:number)=>setUploadProgress(progress)).catch(()=>{})},180);
-      const next = await desktopApi.process_legal_files(paths);
+      const next = await desktopApi.process_legal_files(paths,operationId);
       setMetadata(next); setDataRevision((value) => value + 1);
     } catch (reason: any) { setError(reason?.message || "Unable to open the selected CSV files."); }
-    finally { if(progressTimer!==undefined)window.clearInterval(progressTimer);setUploading(false);setUploadProgress(0); }
+    finally { await new Promise(resolve=>window.setTimeout(resolve,300));setUploading(false);setUploadProgress(0); }
   };
   const refreshSelectedFiles = async () => {
     const desktopApi = (window as any).pywebview?.api;
     if (!desktopApi?.refresh_legal_files) return;
+    const operationId=beginImportProgress();
     setError("");setUploading(true);setUploadProgress(0);setUploadPhase("processing");
-    try { const next = await desktopApi.refresh_legal_files();setMetadata(next); setDataRevision((value) => value + 1); }
+    try { const next = await desktopApi.refresh_legal_files(operationId);setMetadata(next); setDataRevision((value) => value + 1); }
     catch (reason: any) { setError(reason?.message || "Unable to refresh the selected CSV files."); }
-    finally { setUploading(false);setUploadProgress(0); }
+    finally { await new Promise(resolve=>window.setTimeout(resolve,300));setUploading(false);setUploadProgress(0); }
   };
   const coreAvailable=Boolean(metadata&&["beneficiaries","assessments","legalservices"].every(dataset=>metadata.availability[dataset]));
   const hotlineOnly=Boolean(metadata?.availability.legalhotlines&&!coreAvailable);
@@ -3942,33 +3967,13 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
             />
           ) : page === "lawyer-intelligence" ? (
             <LawyerOverview metadata={metadata} />
-          ) : <IndicatorReporting/>}
+          ) : <IndicatorReporting revision={dataRevision}/>}
         </section>
       </main>
-      {uploading && (
-        <div className="legal-upload-overlay" role="status" aria-live="polite">
-          <section className="glass legal-upload-progress">
-            <div className="legal-upload-icon">
-              <FolderOpen />
-            </div>
-            <span className="eyebrow">REPLACING LEGAL DATA</span>
-            <h2>
-              {uploadPhase === "uploading"
-                ? "Uploading folder"
-                : "Processing records"}
-            </h2>
-            {uploadPhase === "uploading"?<><strong>{uploadProgress}%</strong><div role="progressbar" aria-label="Legal Platform folder upload" aria-valuemin={0} aria-valuemax={100} aria-valuenow={uploadProgress}><i style={{ width: `${uploadProgress}%` }} /></div></>:<><strong className="legal-upload-indeterminate-label">Working…</strong><div className="legal-upload-indeterminate" role="progressbar" aria-label="Processing Legal Platform records"><i/></div></>}
-            <p>
-              {uploadPhase === "uploading"
-                ? "Sending selected CSV files to the local service…"
-                : "Validating relationships and preparing review findings. This can take about a minute for large folders."}
-            </p>
-          </section>
-        </div>
-      )}
+      {(uploading||restoringData)&&<ProcessingRecords progress={importProgress} uploadPercent={uploading&&uploadPhase==="uploading"?uploadProgress:undefined} restoring={!uploading}/>}
       {reviewCaseId && metadata?.ready && <CaseReviewModal caseId={reviewCaseId} metadata={metadata} onClose={() => setReviewCaseId("")} />}
-      {copiedValue&&<div className="legal-copy-toast" role="status" aria-live="polite"><CheckCircle2/><span>Copied</span><strong>{copiedValue}</strong></div>}
-      {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?"Updates need configuration":updateInfo?.message?.startsWith("Unable")?"Unable to check for updates":"You’re up to date"}</h2><p>{updateInfo?.available?(updateInfo.notes||"A new signed version of Iraq Data Analysis is ready to install."):(updateInfo?.message||`You are using version ${updateInfo?.currentVersion||"1.0.18"}.`)}</p>{updateInfo?.available&&typeof updateInfo.sizeBytes==="number"&&<small className="update-size">Update size: {formatUpdateSize(updateInfo.sizeBytes)}</small>}{updateStatus&&updateStatus.phase!=="idle"&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.phase==="downloading"&&<small>Downloaded {formatUpdateSize(updateStatus.downloadedBytes)} of {formatUpdateSize(updateStatus.totalBytes||updateInfo?.sizeBytes)}</small>}{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}<div className="update-actions">{updateInfo?.available&&(!updateStatus||["idle","error"].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>Update now</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&["installing","restarting"].includes(updateStatus.phase))}>{updateInfo?.available?"Later":"Close"}</button></div></section></div>}
+      <NotificationToast message={copiedValue} label="Copied"/>
+      {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?"Updates need configuration":updateInfo?.message?.startsWith("Unable")?"Unable to check for updates":"You’re up to date"}</h2><p>{updateInfo?.available?(updateInfo.notes||"A new signed version of Iraq Data Analysis is ready to install."):(updateInfo?.message||`You are using version ${updateInfo?.currentVersion||"1.0.18"}.`)}</p>{updateInfo?.available&&typeof updateInfo.sizeBytes==="number"&&<small className="update-size">Update size: {formatUpdateSize(updateInfo.sizeBytes)}</small>}{updateStatus&&updateStatus.phase!=="idle"&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.phase==="downloading"&&<small>Downloaded {formatUpdateSize(updateStatus.downloadedBytes)} of {formatUpdateSize(updateStatus.totalBytes||updateInfo?.sizeBytes)}</small>}{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}{updateInfo?.available&&<UpdateFallbackNotice failed={updateStatus?.phase === "error"}/>}<div className="update-actions">{updateInfo?.available&&(!updateStatus||["idle","error"].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>{updateStatus?.phase === "error" ? "Try again" : "Update now"}</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&["installing","restarting"].includes(updateStatus.phase))}>{updateInfo?.available?"Later":"Close"}</button></div></section></div>}
     </div>
   );
 }

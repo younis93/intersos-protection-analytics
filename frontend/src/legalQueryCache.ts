@@ -4,7 +4,7 @@ type Entry = {payload: Payload; bytes: number};
 type Pending = {controller: AbortController; promise: Promise<Payload>; users: number};
 export type LegalFetchPriority = "foreground" | "background";
 type ActivityListener = (active: boolean) => void;
-const readable = /^\/api\/legal\/(review|explorer|explorer-filters\/[^/]+|case|case-filters|studio|analytics-dashboard|deportation-dashboard|hotline-dashboard|indicators(?:\/reconciliation\/metadata)?|lawyers|intelligence\/[^/]+|representation-case-load\/(open|closed)|detention)$/;
+const readable = /^\/api\/legal\/(review|explorer|explorer-filters\/[^/]+|case|case-filters|studio|analytics-dashboard|deportation-dashboard|hotline-dashboard|indicators(?:\/monthly|\/reconciliation\/metadata)?|lawyers|intelligence\/[^/]+|representation-case-load\/(open|closed)|detention)$/;
 const entries = new Map<string, Entry>();
 const pending = new Map<string, Pending>();
 const activityListeners = new Set<ActivityListener>();

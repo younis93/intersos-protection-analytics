@@ -49,7 +49,7 @@ def test_hotline_normalization_dates_and_source_preservation(payload):
     assert exported.iloc[1]['Priority الاولوية'] == 'Low منخفضة'
     workbook = load_workbook(io.BytesIO(exported_bytes))
     date_column = next(cell.column for cell in workbook['Filtered data'][1] if str(cell.value).startswith('Contact Date'))
-    assert workbook['Filtered data'].cell(2, date_column).number_format == 'YYYY-MM-DD'
+    assert workbook['Filtered data'].cell(2, date_column).number_format == '[$-en-US]yyyy-mmmm-dd'
 
 
 @pytest.mark.parametrize('filters,expected', [

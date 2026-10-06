@@ -7,7 +7,9 @@ import json
 import multiprocessing
 import os
 import secrets
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -587,7 +589,8 @@ class DesktopApi:
         self._legal_import_progress = 0
 
     def get_legal_import_progress(self) -> int:
-        return self._legal_import_progress
+        from backend.import_progress import legal_import_tracker
+        return legal_import_tracker.status()["percent"] or 0
 
     def toggle_fullscreen(self) -> bool:
         return bool(self._fullscreen.toggle())
@@ -628,27 +631,33 @@ class DesktopApi:
             return None
         return str(Path(selection[0]).resolve())
 
-    def process_legal_folder(self, selected_path: str) -> dict[str, Any]:
+    def _load_legal_candidate(self, factory, remember, operation_id, source):
+        from backend import main as backend_main
+        from backend.import_progress import legal_import_tracker
+        operation = legal_import_tracker.begin(operation_id, source)
+        try:
+            candidate = factory(operation)
+            # Persist the selection only after validation and review preparation succeed.
+            return backend_main.publish_legal_candidate(candidate, operation, before_publish=remember)
+        except Exception as exc:
+            operation.fail(exc)
+            raise
+
+    def process_legal_folder(self, selected_path: str, operationId: str | None = None) -> dict[str, Any]:
         folder = Path(selected_path).resolve()
         if not folder.is_dir():
             raise ValueError("The selected Legal Platform folder is no longer available.")
         from backend import main as backend_main
         from backend.legal_platform import LegalStore
-        self._legal_import_progress = 0
-        candidate = LegalStore.from_folder(folder, lambda percent: setattr(self, "_legal_import_progress", percent), exclusions=backend_main.duplicate_exclusions.exclusion_rows())
-        backend_main.synchronize_duplicate_exclusions(candidate)
-        metadata = candidate.metadata()
-        backend_main.legal_store = candidate
-        save_legal_folder(folder)
-        self._legal_import_progress = 97
-        self._legal_import_progress = 100
-        return metadata
+        return self._load_legal_candidate(
+            lambda operation: LegalStore.from_folder(folder, exclusions=backend_main.duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=backend_main.synchronize_duplicate_exclusions),
+            lambda: save_legal_folder(folder), operationId, "folder")
 
-    def refresh_legal_folder(self) -> dict[str, Any]:
+    def refresh_legal_folder(self, operationId: str | None = None) -> dict[str, Any]:
         folder = saved_legal_folder()
         if not folder:
             raise ValueError("No previously selected Legal Platform folder is available.")
-        return self.process_legal_folder(str(folder))
+        return self.process_legal_folder(str(folder), operationId)
 
     def choose_legal_files(self) -> list[str] | None:
         import webview
@@ -657,12 +666,13 @@ class DesktopApi:
         selection = webview.windows[0].create_file_dialog(webview.FileDialog.OPEN, str(initial_folder or ""), True, "", ("CSV files (*.csv)",))
         return [str(Path(path).resolve()) for path in selection] if selection else None
 
-    def process_legal_files(self, selected_paths: list[str]) -> dict[str, Any]:
+    def process_legal_files(self, selected_paths: list[str], operationId: str | None = None) -> dict[str, Any]:
         paths = [Path(path).resolve() for path in selected_paths]
         if not paths or any(not path.is_file() or path.suffix.lower() != ".csv" for path in paths):
             raise ValueError("The selected CSV files are no longer available.")
         from backend import main as backend_main
         from backend.legal_platform import LegalStore, versioned_dataset_name
+        from backend.import_progress import import_plan
         selected: dict[str, tuple[int, Path]] = {}
         for path in paths:
             parsed = versioned_dataset_name(path.name)
@@ -670,23 +680,22 @@ class DesktopApi:
             name, version = parsed
             current = selected.get(name)
             if current is None or version > current[0] or (version == current[0] and path.stat().st_mtime > current[1].stat().st_mtime): selected[name] = (version, path)
-        self._legal_import_progress = 0
-        payload = {name: path.read_bytes() for name, (_, path) in selected.items()}
-        self._legal_import_progress = 15
-        candidate = LegalStore.from_files(payload, "Selected Legal Platform CSV files", lambda percent: setattr(self, "_legal_import_progress", percent), exclusions=backend_main.duplicate_exclusions.exclusion_rows())
-        backend_main.synchronize_duplicate_exclusions(candidate)
-        metadata = candidate.metadata()
-        backend_main.legal_store = candidate
-        save_legal_files(paths)
-        self._legal_import_progress = 97
-        self._legal_import_progress = 100
-        return metadata
+        def prepare(operation):
+            operation.plan(import_plan(selected))
+            payload = {}
+            for name, (_, path) in selected.items():
+                operation.start(f"Reading:{name}")
+                payload[name] = path.read_bytes()
+                operation.finish(f"Reading:{name}")
+            return LegalStore.from_files(payload, "Selected Legal Platform CSV files", exclusions=backend_main.duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=backend_main.synchronize_duplicate_exclusions)
+        return self._load_legal_candidate(prepare, lambda: save_legal_files(paths), operationId, "files")
 
-    def refresh_legal_files(self) -> dict[str, Any]:
+    def refresh_legal_files(self, operationId: str | None = None) -> dict[str, Any]:
         paths = saved_legal_files()
         if not paths:
             raise ValueError("No previously selected Legal Platform CSV files are available.")
-        return self.process_legal_files([str(path) for path in paths])
+        return self.process_legal_files([str(path) for path in paths], operationId)
+
 
 def main() -> None:
     metrics = StartupMetrics()

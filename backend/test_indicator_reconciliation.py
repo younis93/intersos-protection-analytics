@@ -50,7 +50,7 @@ def test_reconciliation_statuses_and_export():
     values = [3, 2, 4] + [0] * 10
     report = {"filterOptions": {"months": ["2026-01"]}, "groups": [{"indicators": [{"id": "civil-counselling", "title": "Civil counselling", "children": [], "sections": [{"id": "idp", "rows": [{"project": "UNHCR 2026 - AMAL CAMP", "location": "AMAL Camp", "values": values}]}]}]}]}
     request = SimpleNamespace(fromDate="", toDate="", projects=[], projectLocations=[], years=[], quarters=[], months=["2026-01"], communityTypes=[])
-    with patch("backend.indicator_reconciliation.build_indicator_report", return_value=report):
+    with patch("backend.indicator_reconciliation.build_indicator_report", return_value=report), patch("backend.indicator_reconciliation.build_monthly_reports", return_value={"reports": [{"month": "2026-01", "report": report}]}):
         result = reconcile(master, {}, request)
     assert result["summary"] == {"matched": 1, "different": 0, "workbookOnly": 1, "platformOnly": 1, "missingWorkbook": 1, "warnings": 0}
     assert len(result["rows"]) == 4

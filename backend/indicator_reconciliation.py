@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from .excel_export import Alignment, Font, PatternFill
 
 from .file_security import safe_spreadsheet_value, validate_xlsx_archive
-from .indicator_reporting import AGE_GROUPS, build_indicator_report
+from .legal_platform import format_excel_dates
+from .indicator_reporting import AGE_GROUPS, PreparedIndicatorData, build_indicator_report, build_monthly_reports, available_reporting_months, reporting_period_bounds
 
 
 MONTH_START_COLUMNS = tuple(4 + (40 * index) for index in range(12))
@@ -230,9 +231,10 @@ def _platform_values(report: dict[str, Any], month: str) -> tuple[dict[tuple[str
     return values, titles
 
 
-def reconcile(master: IndicatorMasterWorkbook, frames: dict[str, Any], request: Any) -> dict[str, Any]:
-    base = build_indicator_report(frames, request.fromDate, request.toDate, request.projects, request.projectLocations, request.years, request.quarters, request.months, request.communityTypes)
-    months = list(request.months) or list(base.get("filterOptions", {}).get("months", []))
+def reconcile(master: IndicatorMasterWorkbook, frames: dict[str, Any], request: Any, *, prepared: PreparedIndicatorData | None = None, cached_reports=None) -> dict[str, Any]:
+    prepared = prepared or PreparedIndicatorData(frames)
+    reporting_period_bounds(request.fromDate, request.toDate)
+    months = list(request.months) or list(available_reporting_months(prepared, request.communityTypes))
     if request.years:
         months = [month for month in months if month[:4] in request.years]
     if request.quarters:
@@ -245,8 +247,10 @@ def reconcile(master: IndicatorMasterWorkbook, frames: dict[str, Any], request: 
 
     platform: dict[tuple[str, str, str, str, str, str, str], int] = {}
     titles: dict[str, str] = {}
-    for month in months:
-        report = build_indicator_report(frames, request.fromDate, request.toDate, request.projects, request.projectLocations, request.years, [], [month], request.communityTypes)
+    monthly = build_monthly_reports(frames, request.fromDate, request.toDate, request.projects,
+                                   request.projectLocations, request.years, [], months, request.communityTypes, prepared=prepared, cached_reports=cached_reports)
+    for entry in monthly["reports"]:
+        month, report = entry["month"], entry["report"]
         month_values, month_titles = _platform_values(report, month)
         platform.update(month_values)
         titles.update(month_titles)
@@ -341,5 +345,6 @@ def build_reconciliation_workbook(result: dict[str, Any]) -> bytes:
             letter = column[0].column_letter
             sheet.column_dimensions[letter].width = min(48, max(12, max(len(str(cell.value or "")) for cell in column) + 2))
     output = BytesIO()
+    format_excel_dates(workbook)
     workbook.save(output)
     return output.getvalue()

@@ -21,15 +21,16 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from .excel_export import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from .legal_platform import LegalStore, FILES, REGISTERED_RULES, clean_id, versioned_dataset_name
+from .legal_platform import LegalStore, FILES, REGISTERED_RULES, clean_id, versioned_dataset_name, format_excel_dates
 from .file_security import safe_spreadsheet_value, validate_xlsx_archive
 from .duplicate_exclusions import DuplicateExclusionRegistry
 from .indicator_reporting import build_indicator_report, build_indicator_workbook, build_narrative_workbook
 from .indicator_reconciliation import IndicatorMasterWorkbook, build_reconciliation_workbook, reconcile as reconcile_indicators
 from . import updater
+from .import_progress import legal_import_tracker, ImportBusyError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -129,32 +130,53 @@ def synchronize_duplicate_exclusions(store: LegalStore) -> None:
     if changed:
         store.set_review_exclusions(reconciled)
 
+def publish_legal_candidate(candidate, operation, before_publish=None):
+    global legal_store
+    if not operation.tasks.get("Reconciling exclusions"):
+        operation.start("Reconciling exclusions")
+        synchronize_duplicate_exclusions(candidate)
+        operation.finish("Reconciling exclusions")
+    operation.start("Finalizing metadata")
+    metadata = candidate.metadata()
+    operation.finish("Finalizing metadata")
+    if before_publish is not None: before_publish()
+    operation.start("Publishing")
+    legal_store = candidate
+    operation.finish("Publishing")
+    operation.complete()
+    return metadata
+
+
 def load_initial_legal_store() -> None:
     """Restore the remembered Legal data outside the desktop window startup path."""
     global legal_store, legal_store_loading, legal_store_restore_error
     legal_store_loading = True
+    operation = None
     try:
+        operation = legal_import_tracker.begin(source="startup")
         use_files=REMEMBERED_LEGAL_SOURCE=="files"
         if REMEMBERED_LEGAL_SOURCE_CONFIGURED:
             if use_files:
-                candidate = LegalStore.from_files(remembered_legal_file_payload(REMEMBERED_LEGAL_FILES), "Selected Legal Platform CSV files", exclusions=duplicate_exclusions.exclusion_rows()) if REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else None
+                candidate = LegalStore.from_files(remembered_legal_file_payload(REMEMBERED_LEGAL_FILES), "Selected Legal Platform CSV files", exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=synchronize_duplicate_exclusions) if REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else None
                 unavailable = "The last selected Legal Platform CSV files are unavailable. Choose a new source."
             else:
-                candidate = LegalStore.from_folder(REMEMBERED_LEGAL_FOLDER, exclusions=duplicate_exclusions.exclusion_rows()) if REMEMBERED_LEGAL_FOLDER and REMEMBERED_LEGAL_FOLDER.is_dir() else None
+                candidate = LegalStore.from_folder(REMEMBERED_LEGAL_FOLDER, exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=synchronize_duplicate_exclusions) if REMEMBERED_LEGAL_FOLDER and REMEMBERED_LEGAL_FOLDER.is_dir() else None
                 unavailable = "The last selected Legal Platform folder is unavailable. Choose a new source."
         else:
-            candidate = LegalStore.from_folder(LEGAL_SAMPLE, exclusions=duplicate_exclusions.exclusion_rows()) if LEGAL_SAMPLE.exists() else None
+            candidate = LegalStore.from_folder(LEGAL_SAMPLE, exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=synchronize_duplicate_exclusions) if LEGAL_SAMPLE.exists() else None
             unavailable = ""
         if candidate is None and unavailable:
             legal_store = None
             legal_store_restore_error = unavailable
+            operation.fail(unavailable)
             return
         if candidate:
-            synchronize_duplicate_exclusions(candidate)
-        legal_store = candidate
+            publish_legal_candidate(candidate, operation)
+        elif operation:
+            operation.fail("No remembered Legal Platform source is available.")
         legal_store_restore_error = ""
     except Exception as exc:
-        legal_store = None
+        if operation: operation.fail(exc)
         legal_store_restore_error = f"Unable to restore the last Legal Platform source: {exc}"
     finally:
         legal_store_loading = False
@@ -308,6 +330,12 @@ def update_install():
     except ValueError as exc: raise HTTPException(409, str(exc)) from exc
 
 
+@app.get("/api/legal/import/status")
+def legal_import_status(operationId: str | None = None):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(legal_import_tracker.status(operationId), headers={"Cache-Control":"no-store"})
+
+
 @app.get("/api/legal/metadata")
 def legal_metadata():
     return legal_store.metadata() if legal_store else {"ready": False, "loading":legal_store_loading, "source": None, "warnings": [legal_store_restore_error] if legal_store_restore_error else [], "availability": {name: False for name in FILES}, "features":{"detention":False,"deportation":False}, "sheets": [], "months": [], "reviewCounts": {}}
@@ -331,12 +359,14 @@ def legal_hotline_dashboard(request: LegalQuery):
 
 
 @app.post("/api/legal/upload")
-async def legal_upload(files: list[UploadFile] = File(...)):
+async def legal_upload(files: list[UploadFile] = File(...), operationId: str | None = None):
     global legal_store
     payload: dict[str, bytes] = {}
     versions: dict[str, int] = {}
     total = 0
+    operation = None
     try:
+        operation = legal_import_tracker.begin(operationId, "upload")
         for file in files:
             filename = Path(file.filename or "").name
             parsed = versioned_dataset_name(filename)
@@ -346,13 +376,15 @@ async def legal_upload(files: list[UploadFile] = File(...)):
             total += len(raw)
             if total > MAX_UPLOAD_BYTES: raise HTTPException(413, "Legal Platform files must total 100 MB or smaller.")
             if version >= versions.get(key, -1):payload[key]=raw;versions[key]=version
-        candidate = await run_in_threadpool(LegalStore.from_files, payload, "Selected Legal Platform folder", exclusions=duplicate_exclusions.exclusion_rows())
-        synchronize_duplicate_exclusions(candidate)
-        legal_store = candidate
-        return candidate.metadata()
-    except HTTPException:
+        candidate = await run_in_threadpool(LegalStore.from_files, payload, "Selected Legal Platform folder", exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=synchronize_duplicate_exclusions)
+        return publish_legal_candidate(candidate, operation)
+    except ImportBusyError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except HTTPException as exc:
+        if operation: operation.fail(exc.detail)
         raise
     except Exception as exc:
+        if operation: operation.fail(exc)
         raise HTTPException(400, str(exc)) from exc
     finally:
         for file in files: await file.close()
@@ -494,7 +526,7 @@ async def import_duplicate_exclusions(file: UploadFile = File(...), dataset: str
 def export_duplicate_exclusions():
     from io import BytesIO
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill
+    from .excel_export import Font, PatternFill
 
     workbook = Workbook()
     sheet = workbook.active
@@ -508,6 +540,7 @@ def export_duplicate_exclusions():
     for column, width in zip("ABCDEF", (32, 20, 32, 34, 28, 28)):
         sheet.column_dimensions[column].width = width
     buffer = BytesIO()
+    format_excel_dates(workbook)
     workbook.save(buffer)
     return Response(buffer.getvalue(), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": 'attachment; filename="beneficiary-finding-exclusions.xlsx"'})
 
@@ -599,7 +632,7 @@ def table_workbook(request: TableWorkbookRequest):
         if request.style == "interactive-detail" or request.filename == "detention-governorate-pivot.xlsx":
             for row_index in range(2, sheet.max_row + 1):
                 is_total = str(sheet.cell(row_index, 1).value or "").strip().casefold() == "total"
-                for column_index in range(1, sheet.max_column + 1):
+                for column_index in range(1, len(item.columns) + 1):
                     cell = sheet.cell(row_index, column_index)
                     cell.font = Font(name="Aptos", size=11, bold=is_total, color="0F2742" if column_index == 1 else "126FBA")
                     cell.alignment = Alignment(vertical="center", horizontal="left" if column_index == 1 else "right")
@@ -609,6 +642,7 @@ def table_workbook(request: TableWorkbookRequest):
         for index,column in enumerate(item.columns,1):
             values=[str(row.get(column,"") or "") for row in item.rows[:500]]
             sheet.column_dimensions[get_column_letter(index)].width=min(42,max(12,len(column)+2,*(len(value)+2 for value in values)))
+    format_excel_dates(book)
     book.save(output)
     name=re.sub(r"[^A-Za-z0-9._ -]","_",request.filename or "table-export.xlsx")
     if not name.lower().endswith(".xlsx"): name+= ".xlsx"
@@ -634,14 +668,45 @@ def legal_intelligence(page:str,request:LegalQuery):
 @app.post("/api/legal/indicators")
 def legal_indicators(request:IndicatorReportRequest):
     store=require_legal_store()
-    key=(request.fromDate,request.toDate,tuple(sorted(request.projects)),tuple(sorted(request.projectLocations)),tuple(sorted(request.years)),tuple(sorted(request.quarters)),tuple(sorted(request.months)),tuple(sorted(request.communityTypes)))
+    key=(request.fromDate,request.toDate,tuple(sorted(set(request.projects))),tuple(sorted(set(request.projectLocations))),tuple(sorted(set(request.years))),tuple(sorted(set(request.quarters))),tuple(sorted(set(request.months))),tuple(sorted(set(request.communityTypes))))
     with store._cache_lock:
         cached=store._indicator_cache.get(key)
     if cached is not None:return cached
-    try:result=build_indicator_report(store.frames,request.fromDate,request.toDate,request.projects,request.projectLocations,request.years,request.quarters,request.months,request.communityTypes)
+    revision, prepared = store.indicator_preparation()
+    try:result=build_indicator_report(store.frames,request.fromDate,request.toDate,request.projects,request.projectLocations,request.years,request.quarters,request.months,request.communityTypes,prepared=prepared)
     except ValueError as exc:raise HTTPException(400,str(exc)) from exc
     with store._cache_lock:
-        store._indicator_cache[key]=result
+        if store.revision == revision:
+            store._indicator_cache[key]=result
+    return result
+
+
+def monthly_cache_key(request, month):
+    return (request.fromDate, request.toDate, tuple(sorted(set(request.projects))),
+            tuple(sorted(set(request.projectLocations))), tuple(sorted(set(request.years))),
+            (), (month,), tuple(sorted(set(request.communityTypes))))
+
+
+def monthly_cached_reports(store, request):
+    with store._cache_lock:
+        return {key[6][0]: value for key, value in store._indicator_cache.items()
+                if len(key[6]) == 1 and key == monthly_cache_key(request, key[6][0])}
+
+
+@app.post("/api/legal/indicators/monthly")
+def legal_indicators_monthly(request: IndicatorReportRequest):
+    from .indicator_reporting import build_monthly_reports
+    store = require_legal_store()
+    revision, prepared = store.indicator_preparation()
+    cached = monthly_cached_reports(store, request)
+    try:
+        result = build_monthly_reports(store.frames, request.fromDate, request.toDate,
+            request.projects, request.projectLocations, request.years, request.quarters,
+            request.months, request.communityTypes, prepared=prepared, cached_reports=cached)
+    except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+    with store._cache_lock:
+        if store.revision == revision:
+            for entry in result["reports"]: store._indicator_cache[monthly_cache_key(request, entry["month"])] = entry["report"]
     return result
 
 
@@ -717,7 +782,9 @@ def require_indicator_master() -> IndicatorMasterWorkbook:
 @app.post("/api/legal/indicators/reconciliation")
 def indicator_reconciliation(request: IndicatorReportRequest):
     try:
-        return reconcile_indicators(require_indicator_master(), require_legal_store().frames, request)
+        store = require_legal_store()
+        _, prepared = store.indicator_preparation()
+        return reconcile_indicators(require_indicator_master(), store.frames, request, prepared=prepared, cached_reports=monthly_cached_reports(store, request))
     except HTTPException:
         raise
     except ValueError as exc:
@@ -736,6 +803,18 @@ def legal_detention(request:LegalQuery):
     if request.page < 1 or request.pageSize < 1 or request.pageSize > 500: raise HTTPException(400,"Invalid pagination")
     if request.sortDirection not in {"asc","desc"}: raise HTTPException(400,"Invalid sort direction")
     return require_legal_store().detention_cases(request.search,request.page,request.pageSize,request.filters,request.sortColumn,request.sortDirection)
+
+
+@app.post("/api/legal/detention/export")
+def legal_detention_export(request: LegalQuery):
+    if request.sortDirection not in {"asc", "desc"}: raise HTTPException(400, "Invalid sort direction")
+    result = require_legal_store().detention_cases(request.search, 1, 10001, request.filters,
+                                                 request.sortColumn, request.sortDirection)
+    if result["total"] > 10000: raise HTTPException(400, "Excel export is limited to 10,000 selected rows.")
+    columns = [*result["columns"], "Case ID"]
+    rows = [{column: row.get("caseId", "") if column == "Case ID" else row.get(column, "")
+             for column in columns} for row in result["rows"]]
+    return table_workbook(TableWorkbookRequest(filename="detention-cases.xlsx", columns=columns, rows=rows))
 
 
 @app.post("/api/legal/detention/reconcile")
@@ -780,6 +859,7 @@ def legal_export(dataset: str):
     try: payload=require_legal_store().export(dataset)
     except ValueError as exc: raise HTTPException(400, str(exc)) from exc
     return Response(payload, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{dataset}-filtered.xlsx"'})
+
 
 
 if STATIC_DIR.exists():
