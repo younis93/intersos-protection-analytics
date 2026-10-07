@@ -45,8 +45,9 @@ try {
             $ApplicationPids = @(Get-Process -Name 'Iraq Data Analysis' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
             foreach ($Connection in @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object {$_.OwningProcess -in $ApplicationPids})) {
                 try {
-                    $Health = Invoke-RestMethod "http://127.0.0.1:$($Connection.LocalPort)/api/health" -TimeoutSec 3
-                    $Status = Invoke-RestMethod "http://127.0.0.1:$($Connection.LocalPort)/api/update/status" -TimeoutSec 3
+                    Invoke-WebRequest "http://127.0.0.1:$($Connection.LocalPort)/" -SessionVariable ApplicationSession -TimeoutSec 3 | Out-Null
+                    $Health = Invoke-RestMethod "http://127.0.0.1:$($Connection.LocalPort)/api/health" -WebSession $ApplicationSession -TimeoutSec 3
+                    $Status = Invoke-RestMethod "http://127.0.0.1:$($Connection.LocalPort)/api/update/status" -WebSession $ApplicationSession -TimeoutSec 3
                     if ($Health.status -and $Status.currentVersion -eq $Version) {$ApiReady=$true;break}
                 } catch {}
             }
@@ -63,7 +64,7 @@ try {
     Check-Application $PreviousVersion
     New-Item -ItemType Directory -Path $DataRoot -Force | Out-Null
     New-Item -ItemType Directory -Path "$SmokeRoot/source" -Force | Out-Null
-    $Settings = @{appTheme='executive';legalSourceType='files';legalFiles=@();legalFolder="$SmokeRoot/source";upgradeSmokeMarker='retain-settings'} | ConvertTo-Json -Compress
+    $Settings = @{appTheme='executive';legalSource='folder';legalFiles=@();legalFolder="$SmokeRoot/source";upgradeSmokeMarker='retain-settings'} | ConvertTo-Json -Compress
     $Contacts = '{"Alice":"alice@example.org"}'
     $Numbers = '{"Alice":"9647701234567"}'
     [IO.File]::WriteAllText((Join-Path $DataRoot 'settings.json'),$Settings)
@@ -85,3 +86,4 @@ try {
 $Results | ConvertTo-Json | Set-Content -LiteralPath "$SmokeRoot\result.json" -Encoding UTF8
 if (-not $Results.passed) {throw $Results.error}
 Write-Output ($Results | ConvertTo-Json)
+
