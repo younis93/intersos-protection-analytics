@@ -106,7 +106,7 @@ def findings(store, compare_chars=15, allow_variations=True):
         key = f"hotline-exact:{name}"
         context = store._duplicate_context(key, [identities[i] for i in members])
         for index in members:
-            add(index, RULES[0], f"Normalized name matches {len(members)-1} other record(s)", duplicateGroup=key, duplicateContext=context, nameMatchMode="exact", duplicateSimilarity=100)
+            add(index, RULES[0], f"Normalized name matches {len(members)-1} other record(s)", duplicateGroup=key, duplicateContext=context, nameMatchMode="exact", duplicateSimilarity=100, duplicateMatchRows=[int(peer)+2 for peer in sorted(members) if peer != index])
     matches = defaultdict(set)
     buckets = defaultdict(list)
     for index, name in names.items():
@@ -131,7 +131,7 @@ def findings(store, compare_chars=15, allow_variations=True):
         context = store._duplicate_context(key, [identities[i] for i in members], settings)
         for member in members:
             similarity = round(max(SequenceMatcher(None, names[member], names[peer]).ratio() for peer in matches[member])*100)
-            add(member, RULES[1], f"First {settings['nameCompareChars']} normalized characters match {len(matches[member])} other record(s)", duplicateGroup=key, duplicateContext=context, nameMatchMode="variation", duplicateSimilarity=similarity)
+            add(member, RULES[1], f"First {settings['nameCompareChars']} normalized characters match {len(matches[member])} other record(s)", duplicateGroup=key, duplicateContext=context, nameMatchMode="variation", duplicateSimilarity=similarity, duplicateMatchRows=[int(peer)+2 for peer in sorted(matches[member])])
     for index, row in frame.iterrows():
         detained = answer(value(row, "beneficiaryDetained")); referral = answer(value(row, "helplineReferral"))
         name = normalized_words(value(row, "name")); caller = normalized_words(value(row, "callerName"))

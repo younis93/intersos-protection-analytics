@@ -1,4 +1,6 @@
 """Hotline aggregation and filtering, without modifying imported source values."""
+from .filter_selection import selection_mask
+from .linked_filters import available_values, search_mask
 import re
 
 import pandas as pd
@@ -47,22 +49,25 @@ def filter_frame(frame, filters):
     for field, selections in (filters or {}).items():
         key = "Contact Date" if field == "Month" else field
         if selections and key in FIELDS:
-            frame = frame[values(frame, key).isin(selections)]
+            frame = frame[selection_mask(values(frame, key), selections)]
         elif selections and field in frame.columns:
-            frame = frame[source_values(frame, field).isin(selections)]
+            frame = frame[selection_mask(source_values(frame, field), selections)]
     return frame
 
 
-def dashboard(source, filters=None):
+def dashboard(source, filters=None,search=""):
     if source is None:
         raise ValueError("legalhotlines.csv is not loaded.")
     frame = filter_frame(source, filters)
     total = len(frame)
-    options = {field: sorted(values(source, field).unique().tolist()) for field in FIELDS}
-    known_columns = {next((column for column in source.columns if str(column).strip().casefold().startswith(field.casefold())), None) for field in FIELDS}
+    facet_series={field:values(source,field) for field in FIELDS}
+    known_columns={next((column for column in source.columns if str(column).strip().casefold().startswith(field.casefold())),None) for field in FIELDS}
     for column in source.columns:
-        if column not in known_columns:
-            options[str(column)] = sorted(source_values(source, column).unique().tolist())
+        if column not in known_columns:facet_series[str(column)]=source_values(source,column)
+    selections=dict(filters or {})
+    if "Month" in selections:facet_series["Month"]=facet_series["Contact Date"]
+    options=available_values(facet_series,selections,search_mask(source,search,join=True))
+    options.pop("Month",None)
     options["Contact Date"] = [m for m in options["Contact Date"] if m != "Not recorded"]
     charts = []
     for field in FIELDS[1:]:

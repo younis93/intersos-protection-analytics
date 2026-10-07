@@ -1,5 +1,5 @@
 import {describe,expect,it} from "vitest";
-import {formatDisplayDate,formatStudioDateMonth,formatTableValue,formatYearMonthFilterValue} from "./dateFormat";
+import {sortFilterValues,formatDisplayDate,formatStudioDateMonth,formatTableValue,formatYearMonthFilterValue} from "./dateFormat";
 
 describe("table date formatting",()=>{
   it("uses the requested year-month-day format",()=>{
@@ -21,5 +21,19 @@ describe("table date formatting",()=>{
     expect(formatYearMonthFilterValue("Date of Identification", "2026-02-15 00:00:00")).toBe("2026-02");
     expect(formatYearMonthFilterValue("Created On", "15/02/2026")).toBe("2026-02");
     expect(formatYearMonthFilterValue("Case ID", "2026-02")).toBe("2026-02");
+  });
+});
+
+describe("calendar filter order",()=>{
+  it("sorts dates by calendar value and leaves unavailable values last",()=>{
+    expect(sortFilterValues("Assessment date",["02/01/2026","15/12/2025","10/02/2026","Unknown"])).toEqual(["10/02/2026","02/01/2026","15/12/2025","Unknown"]);
+    expect(sortFilterValues("Months",["January","December","February"])).toEqual(["December","February","January"]);
+  });
+  it("orders quarters across years and does not mutate the source",()=>{
+    const values=["2025-Q4","2026-Q1","2026-Q3"];
+    expect(sortFilterValues("Quarters",values)).toEqual(["2026-Q3","2026-Q1","2025-Q4"]);
+    expect(values).toEqual(["2025-Q4","2026-Q1","2026-Q3"]);
+    expect(sortFilterValues("Quarter",["Q1 2026","Q4 2025","Q2 2026"])).toEqual(["Q2 2026","Q1 2026","Q4 2025"]);
+    expect(sortFilterValues("Projects",["B","A"])).toEqual(["B","A"]);
   });
 });

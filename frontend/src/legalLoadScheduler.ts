@@ -9,10 +9,13 @@ import {
   getLegalExplorerFilters,
   getLegalHotlineDashboard,
   getLegalIndicators,
+  getLegalIndicatorsMonthly,
   getLegalIntelligence,
   getLegalReview,
   getRepresentationCaseLoad,
 } from "./api";
+import {loadIssues} from "./sendIssuesApi";
+import {hasLegalCore, isLegalPageAvailable} from './legalAvailability';
 import type {LegalMetadata, LegalReview} from "./types";
 import {
   subscribeLegalFetchActivity,
@@ -37,7 +40,7 @@ type TaskState = PageLoadTask & {status: LoadStatus; error?: unknown};
 type StatusListener = (statuses: Record<string, LoadStatus>) => void;
 
 const reviewRequest = (dataset:string, rule:string, signal:AbortSignal) =>
-  getLegalReview(dataset,"",rule,1,{},"",15,false,false,signal);
+  getLegalReview(dataset,"",rule,1,{},"",15,dataset==="legalhotlines",Boolean(rule)&&dataset!=="legalhotlines",signal);
 
 function defaultReviewRules(dataset:string, result:LegalReview) {
   const beneficiaryDefaults=["Possible duplicate name","Possible duplicate contact and name","Invalid contact number","Case without assessment","Invalid age"];
@@ -49,8 +52,8 @@ function defaultReviewRules(dataset:string, result:LegalReview) {
     .map(([rule])=>rule);
 }
 
-function taskManifest(metadata:LegalMetadata):PageLoadTask[] {
-  const core=["beneficiaries","assessments","legalservices"].every((name)=>metadata.availability[name]);
+export function taskManifest(metadata:LegalMetadata):PageLoadTask[] {
+  const core=hasLegalCore(metadata);
   const has=(name:string)=>Boolean(metadata.availability[name]);
   const main=(id:string,page:string,available:PageLoadTask["available"],run:PageLoadTask["run"]):PageLoadTask=>({id,page,phase:"main",priority:"main-background",available,run});
   const secondary=(id:string,page:string,tab:string,available:PageLoadTask["available"],run:PageLoadTask["run"]):PageLoadTask=>({id,page,tab,phase:"secondary",priority:"secondary-background",available,run});
@@ -63,29 +66,30 @@ function taskManifest(metadata:LegalMetadata):PageLoadTask[] {
     ])),
     main("indicators:main","indicators",()=>core,(signal,request)=>request(()=>getLegalIndicators([],[],[],[],[],[],signal))),
     main("legalhotlines:main","legalhotlines",()=>has("legalhotlines"),(signal,request)=>request(()=>reviewRequest("legalhotlines","",signal))),
-    ...["beneficiaries","assessments","legalservices","awareness"].map((dataset)=>main(`${dataset}:main`,dataset,()=>core&&has(dataset),(signal,request)=>request(()=>reviewRequest(dataset,"",signal)))),
+    ...["beneficiaries","assessments","legalservices","awareness"].map((dataset)=>main(`${dataset}:main`,dataset,()=>isLegalPageAvailable(metadata,dataset),(signal,request)=>request(()=>reviewRequest(dataset,"",signal)))),
+    main("send-issues:main","send-issues",()=>isLegalPageAvailable(metadata,'send-issues'),(signal,request)=>loadIssues(signal,false,request)),
     main("detention:main","detention",()=>core&&Boolean(metadata.features?.detention),(signal,request)=>request(()=>getLegalDetention("",1,{},"","asc",signal))),
-    main("deportation:main","deportation",()=>core&&Boolean(metadata.features?.deportation),async(signal,request)=>Promise.all([
+    main("deportation:main","deportation",()=>has('deportationrecords'),async(signal,request)=>Promise.all([
       request(()=>getLegalDeportationDashboard({},signal)),
       request(()=>getLegalExplorer("deportationrecords","",1,{},"","asc",100,signal)),
     ])),
     main("lawyer-intelligence:main","lawyer-intelligence",()=>core,(signal,request)=>request(()=>getLegalIntelligence("lawyer-intelligence",{},signal))),
     main("studio:main","studio",()=>core,(signal,request)=>analytics("assessments",signal,request)),
-    main("explorer:main","explorer",()=>core,async(signal,request)=>{
+    main("explorer:main","explorer",()=>isLegalPageAvailable(metadata,'explorer'),async(signal,request)=>{
       const dataset=metadata.sheets[0]?.id||"beneficiaries";
       return Promise.all([request(()=>getLegalExplorer(dataset,"",1,{},"","asc",100,signal)),request(()=>getLegalExplorerFilters(dataset,signal))]);
     }),
     main("cases:main","cases",()=>core,async(signal,request)=>Promise.all([
-      request(()=>getLegalCase("",{},{viewMode:"cards",page:1,pageSize:100},signal)),
+      request(()=>getLegalCase("",{},{viewMode:"cards",page:1,pageSize:100,sortColumn:"",sortDirection:"asc",columns:[]},signal)),
       request(()=>getLegalCaseFilters(signal)),
     ])),
     secondary("indicators:analysis","indicators","analysis",()=>core,async(signal,request)=>{
       const report=await request(()=>getLegalIndicators([],[],[],[],[],[],signal));
       const months=report.filterOptions.months.filter((month)=>month.startsWith("2026-")).sort((a,b)=>b.localeCompare(a));
-      for(const month of months)await request(()=>getLegalIndicators([],[],[],[],[month],[],signal));
+      if(months.length)await request(()=>getLegalIndicatorsMonthly([],[],[],[],months,[],signal));
     }),
     secondary("indicators:check","indicators","check",()=>core,(signal,request)=>request(()=>getIndicatorReconciliationMetadata(signal))),
-    ...["beneficiaries","assessments","legalservices","awareness"].map((dataset)=>secondary(`${dataset}:findings`,dataset,"findings",()=>core&&has(dataset),async(signal,request)=>{
+    ...["beneficiaries","assessments","legalservices","awareness"].map((dataset)=>secondary(`${dataset}:findings`,dataset,"findings",()=>isLegalPageAvailable(metadata,dataset),async(signal,request)=>{
       const result=await request(()=>reviewRequest(dataset,"",signal));
       for(const rule of defaultReviewRules(dataset,result))await request(()=>reviewRequest(dataset,rule,signal));
     })),
@@ -95,7 +99,7 @@ function taskManifest(metadata:LegalMetadata):PageLoadTask[] {
     secondary("studio:legalservices","studio","legalservices",()=>core,(signal,request)=>analytics("legalservices",signal,request)),
     secondary("studio:beneficiaries","studio","beneficiaries",()=>core,(signal,request)=>analytics("beneficiaries",signal,request)),
     secondary("studio:awareness","studio","awareness",()=>core&&has("awareness"),(signal,request)=>analytics("awareness",signal,request)),
-    secondary("cases:table","cases","table",()=>core,(signal,request)=>request(()=>getLegalCase("",{},{viewMode:"table",page:1,pageSize:100},signal))),
+    secondary("cases:table","cases","table",()=>core,(signal,request)=>request(()=>getLegalCase("",{},{viewMode:"table",page:1,pageSize:100,sortColumn:"",sortDirection:"asc",columns:[]},signal))),
   ];
   return tasks.filter((task)=>task.available(metadata));
 }
@@ -105,20 +109,30 @@ export class LegalLoadScheduler {
   private listeners=new Set<StatusListener>();
   private controllers=new Map<string,AbortController>();
   private running=new Map<string,Promise<unknown>>();
+  private priorities=new Map<string,LoadPriority>();
+  private interrupted=new Set<string>();
   private revision="";
   private metadata:LegalMetadata|null=null;
   private activePage="overview";
+  private activeTab:string|undefined;
   private foregroundRequests=0;
   private timer:ReturnType<typeof setTimeout>|undefined;
   private generation=0;
   private sourceTasks:PageLoadTask[]|null=null;
   private cleanups:Array<()=>void>=[];
+  private resumeAt=0;
+  private stopping=false;
+  private disposed=false;
 
   constructor(){
-    this.cleanups.push(subscribeLegalFetchActivity((active)=>{this.foregroundRequests=Math.max(0,this.foregroundRequests+(active?1:-1));if(!this.foregroundRequests)this.schedule()}));
+    this.cleanups.push(subscribeLegalFetchActivity((active)=>{
+      this.foregroundRequests=Math.max(0,this.foregroundRequests+(active?1:-1));
+      if(active){this.clearTimer();this.pauseUnrelated();}
+      else if(!this.foregroundRequests){this.resumeAt=Date.now()+250;this.schedule();}
+    }));
     this.cleanups.push(subscribeLegalQueryInvalidation((reason)=>{if(reason==="revision")this.invalidate();else if(this.metadata||this.sourceTasks)this.restart()}));
     if(typeof document!=="undefined"){
-      const visible=()=>{if(!document.hidden)this.schedule()};document.addEventListener("visibilitychange",visible);this.cleanups.push(()=>document.removeEventListener("visibilitychange",visible));
+      const visible=()=>{if(document.hidden)this.clearTimer();else this.schedule()};document.addEventListener("visibilitychange",visible);this.cleanups.push(()=>document.removeEventListener("visibilitychange",visible));
     }
   }
 
@@ -137,12 +151,14 @@ export class LegalLoadScheduler {
     this.revision=revision;this.restart();
   }
 
-  dispose(){this.stop();this.cleanups.forEach((cleanup)=>cleanup());this.cleanups=[];this.tasks.clear();this.listeners.clear()}
+  dispose(){this.disposed=true;this.stop();this.cleanups.forEach((cleanup)=>cleanup());this.cleanups=[];this.tasks.clear();this.listeners.clear()}
 
   promotePage(page:string,tab?:string){
-    this.activePage=page;
+    this.activePage=page;this.activeTab=tab;this.clearTimer();
     const candidates=[...this.tasks.values()].filter((task)=>task.page===page&&(tab?task.tab===tab:task.phase==="main"));
+    this.pauseUnrelated();
     for(const task of candidates){
+      if(this.running.has(task.id))this.priorities.set(task.id,"foreground");
       if(task.status==="error")task.status="queued";
       if(task.status==="queued"||task.status==="idle")void this.execute(task,"foreground");
     }
@@ -159,41 +175,63 @@ export class LegalLoadScheduler {
   }
 
   private stop(){
+    this.stopping=true;
     this.generation++;
-    if(this.timer!==undefined)clearTimeout(this.timer);
-    this.timer=undefined;
+    this.clearTimer();
     for(const controller of this.controllers.values())controller.abort();
-    this.controllers.clear();this.running.clear();
+    this.controllers.clear();this.running.clear();this.priorities.clear();this.interrupted.clear();
+    this.resumeAt=0;this.stopping=false;
+  }
+
+  private clearTimer(){if(this.timer!==undefined)clearTimeout(this.timer);this.timer=undefined;}
+
+  private pauseUnrelated(){
+    if(this.stopping||this.disposed)return;
+    for(const [id,controller] of this.controllers){
+      const task=this.tasks.get(id)!;
+      if(task.page===this.activePage&&(task.phase==="main"||task.tab===this.activeTab))continue;
+      // Remove ownership before aborting: a late completion must not clear a resumed run.
+      this.controllers.delete(id);this.running.delete(id);this.priorities.delete(id);
+      task.status="queued";task.error=undefined;this.interrupted.add(id);controller.abort();
+    }
+    this.emit();
   }
 
   private schedule(){
-    if(this.timer!==undefined||this.foregroundRequests>0||typeof document!=="undefined"&&document.hidden)return;
-    this.timer=setTimeout(()=>{this.timer=undefined;void this.runNext()},250);
+    if(this.stopping||this.disposed||this.timer!==undefined||this.foregroundRequests>0||this.running.size||!this.tasks.size||typeof document!=="undefined"&&document.hidden)return;
+    if(![...this.tasks.values()].some(task=>task.status==="queued"))return;
+    this.timer=setTimeout(()=>{this.timer=undefined;this.runNext()},Math.max(16,this.resumeAt-Date.now()));
   }
 
-  private async runNext(){
-    if(this.foregroundRequests>0||this.running.size||typeof document!=="undefined"&&document.hidden){this.schedule();return}
+  private runNext(){
+    if(this.foregroundRequests>0||this.running.size||typeof document!=="undefined"&&document.hidden)return;
     const all=[...this.tasks.values()];
     const mainsSettled=all.filter((task)=>task.phase==="main").every((task)=>task.status==="ready"||task.status==="error");
-    const next=all.find((task)=>task.status==="queued"&&task.phase===(mainsSettled?"secondary":"main"));
+    const phase=mainsSettled?"secondary":"main";
+    const eligible=(task:TaskState)=>task.status==="queued"&&task.phase===phase;
+    const next=all.find(task=>eligible(task)&&this.interrupted.has(task.id))||all.find(eligible);
     if(!next)return;
-    await this.execute(next,next.priority);
-    this.schedule();
+    void this.execute(next,next.priority);
   }
 
   private execute(task:TaskState,priority:LoadPriority){
     const existing=this.running.get(task.id);if(existing)return existing;
     const generation=this.generation,controller=new AbortController();
-    task.status="loading";task.error=undefined;this.controllers.set(task.id,controller);this.emit();
-    const request:PageLoadRequest=(factory)=>priority==="foreground"?factory():withLegalFetchPriority("background",factory);
-    const promise=Promise.resolve().then(()=>task.run(controller.signal,request)).then((result)=>{
-      if(generation===this.generation&&!controller.signal.aborted)task.status="ready";
+    task.status="loading";task.error=undefined;this.controllers.set(task.id,controller);this.priorities.set(task.id,priority);this.interrupted.delete(task.id);this.emit();
+    const ownsRun=()=>generation===this.generation&&this.controllers.get(task.id)===controller;
+    const request:PageLoadRequest=(factory)=>{
+      if(controller.signal.aborted)return Promise.reject(new DOMException("Cancelled","AbortError"));
+      return this.priorities.get(task.id)==="foreground"?factory():withLegalFetchPriority("background",factory);
+    };
+    const promise=Promise.resolve().then(()=>controller.signal.aborted?undefined:task.run(controller.signal,request)).then((result)=>{
+      if(ownsRun()&&!controller.signal.aborted)task.status="ready";
       return result;
     }).catch((error)=>{
-      if(generation===this.generation&&!controller.signal.aborted){task.status="error";task.error=error}
+      if(ownsRun()&&!controller.signal.aborted){task.status="error";task.error=error}
     }).finally(()=>{
-      if(generation!==this.generation)return;
-      this.controllers.delete(task.id);this.running.delete(task.id);this.emit();this.schedule();
+      if(!ownsRun())return;
+      if(this.priorities.get(task.id)==="foreground")this.resumeAt=Date.now()+250;
+      this.controllers.delete(task.id);this.running.delete(task.id);this.priorities.delete(task.id);this.emit();this.schedule();
     });
     this.running.set(task.id,promise);return promise;
   }

@@ -6,14 +6,18 @@ import ctypes
 import json
 import multiprocessing
 import os
+import re
 import secrets
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
 import traceback
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 
 APP_TITLE = "Iraq Data Analysis"
@@ -33,6 +37,22 @@ WAIT_TIMEOUT = 258
 SW_RESTORE = 9
 MUTEX_NAME = r"Local\INTERSOS.IraqDataAnalysis.SingleInstance"
 ACTIVATION_EVENT_NAME = r"Local\INTERSOS.IraqDataAnalysis.Activate"
+
+
+def _whatsapp_protocol_available() -> bool:
+    if sys.platform != "win32":
+        return False
+    # Ask Windows for the protocol association, including Microsoft Store apps.
+    query = ctypes.windll.shlwapi.AssocQueryStringW
+    query.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_wchar_p,
+                      ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_ulong)]
+    query.restype = ctypes.c_long
+    size = ctypes.c_ulong(0)
+    query(0x1000, 20, "whatsapp", None, None, ctypes.byref(size))
+    if not size.value:
+        return False
+    result = ctypes.create_unicode_buffer(size.value)
+    return query(0x1000, 20, "whatsapp", None, result, ctypes.byref(size)) == 0 and bool(result.value)
 
 
 def app_data_dir() -> Path:
@@ -587,7 +607,8 @@ class DesktopApi:
         self._legal_import_progress = 0
 
     def get_legal_import_progress(self) -> int:
-        return self._legal_import_progress
+        from backend.import_progress import legal_import_tracker
+        return legal_import_tracker.status()["percent"] or 0
 
     def toggle_fullscreen(self) -> bool:
         return bool(self._fullscreen.toggle())
@@ -597,6 +618,42 @@ class DesktopApi:
 
     def get_saved_app_theme(self) -> str:
         return saved_app_theme()
+
+    def open_issue_whatsapp(self, recipient: str) -> bool:
+        if not isinstance(recipient, str) or not re.fullmatch(r"[1-9][0-9]{7,14}", recipient):
+            raise ValueError("Add a valid number including its country code.")
+        if sys.platform == "win32":
+            try:
+                if _whatsapp_protocol_available():
+                    os.startfile("whatsapp://send?" + urlencode({"phone": recipient}))
+                    return True
+            except OSError:
+                # A stale registration or failed app launch should still open Web.
+                pass
+            os.startfile("https://web.whatsapp.com/send?" + urlencode({"phone": recipient}))
+            return True
+        import webbrowser
+        return bool(webbrowser.open("https://web.whatsapp.com/send?" + urlencode({"phone": recipient})))
+
+    def open_issue_email_in_chrome(self, provider: str, recipient: str, subject: str) -> bool:
+        from backend.send_issues import valid_email
+        if provider not in {"gmail", "outlook"}:
+            raise ValueError("Choose Gmail or Outlook.")
+        if not isinstance(recipient, str) or not valid_email(recipient):
+            raise ValueError("Invalid email recipient.")
+        if not isinstance(subject, str) or len(subject) > 998 or any(char in subject for char in "\r\n\x00"):
+            raise ValueError("Invalid email subject.")
+        if provider == "gmail":
+            url = "https://mail.google.com/mail/u/0/?" + urlencode({"view": "cm", "fs": "1", "to": recipient, "su": subject})
+        else:
+            url = "https://outlook.office.com/mail/deeplink/compose?" + urlencode({"to": recipient, "subject": subject})
+        candidates = [Path(os.environ[root]) / "Google/Chrome/Application/chrome.exe"
+                      for root in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA") if os.environ.get(root)]
+        chrome = next((str(path) for path in candidates if path.is_file()), None) or shutil.which("chrome.exe")
+        if not chrome:
+            raise RuntimeError("Google Chrome is unavailable. Install Chrome or use Copy email and Download email draft.")
+        subprocess.Popen([chrome, "--new-window", url], shell=False)
+        return True
 
     def choose_indicator_master_workbook(self) -> str | None:
         import webview
@@ -628,27 +685,33 @@ class DesktopApi:
             return None
         return str(Path(selection[0]).resolve())
 
-    def process_legal_folder(self, selected_path: str) -> dict[str, Any]:
+    def _load_legal_candidate(self, factory, remember, operation_id, source):
+        from backend import main as backend_main
+        from backend.import_progress import legal_import_tracker
+        operation = legal_import_tracker.begin(operation_id, source)
+        try:
+            candidate = factory(operation)
+            # Persist the selection only after validation and review preparation succeed.
+            return backend_main.publish_legal_candidate(candidate, operation, before_publish=remember)
+        except Exception as exc:
+            operation.fail(exc)
+            raise
+
+    def process_legal_folder(self, selected_path: str, operationId: str | None = None) -> dict[str, Any]:
         folder = Path(selected_path).resolve()
         if not folder.is_dir():
             raise ValueError("The selected Legal Platform folder is no longer available.")
         from backend import main as backend_main
         from backend.legal_platform import LegalStore
-        self._legal_import_progress = 0
-        candidate = LegalStore.from_folder(folder, lambda percent: setattr(self, "_legal_import_progress", percent), exclusions=backend_main.duplicate_exclusions.exclusion_rows())
-        backend_main.synchronize_duplicate_exclusions(candidate)
-        metadata = candidate.metadata()
-        backend_main.legal_store = candidate
-        save_legal_folder(folder)
-        self._legal_import_progress = 97
-        self._legal_import_progress = 100
-        return metadata
+        return self._load_legal_candidate(
+            lambda operation: LegalStore.from_folder(folder, exclusions=backend_main.duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=backend_main.synchronize_duplicate_exclusions),
+            lambda: save_legal_folder(folder), operationId, "folder")
 
-    def refresh_legal_folder(self) -> dict[str, Any]:
+    def refresh_legal_folder(self, operationId: str | None = None) -> dict[str, Any]:
         folder = saved_legal_folder()
         if not folder:
             raise ValueError("No previously selected Legal Platform folder is available.")
-        return self.process_legal_folder(str(folder))
+        return self.process_legal_folder(str(folder), operationId)
 
     def choose_legal_files(self) -> list[str] | None:
         import webview
@@ -657,12 +720,13 @@ class DesktopApi:
         selection = webview.windows[0].create_file_dialog(webview.FileDialog.OPEN, str(initial_folder or ""), True, "", ("CSV files (*.csv)",))
         return [str(Path(path).resolve()) for path in selection] if selection else None
 
-    def process_legal_files(self, selected_paths: list[str]) -> dict[str, Any]:
+    def process_legal_files(self, selected_paths: list[str], operationId: str | None = None) -> dict[str, Any]:
         paths = [Path(path).resolve() for path in selected_paths]
         if not paths or any(not path.is_file() or path.suffix.lower() != ".csv" for path in paths):
             raise ValueError("The selected CSV files are no longer available.")
         from backend import main as backend_main
         from backend.legal_platform import LegalStore, versioned_dataset_name
+        from backend.import_progress import import_plan
         selected: dict[str, tuple[int, Path]] = {}
         for path in paths:
             parsed = versioned_dataset_name(path.name)
@@ -670,23 +734,22 @@ class DesktopApi:
             name, version = parsed
             current = selected.get(name)
             if current is None or version > current[0] or (version == current[0] and path.stat().st_mtime > current[1].stat().st_mtime): selected[name] = (version, path)
-        self._legal_import_progress = 0
-        payload = {name: path.read_bytes() for name, (_, path) in selected.items()}
-        self._legal_import_progress = 15
-        candidate = LegalStore.from_files(payload, "Selected Legal Platform CSV files", lambda percent: setattr(self, "_legal_import_progress", percent), exclusions=backend_main.duplicate_exclusions.exclusion_rows())
-        backend_main.synchronize_duplicate_exclusions(candidate)
-        metadata = candidate.metadata()
-        backend_main.legal_store = candidate
-        save_legal_files(paths)
-        self._legal_import_progress = 97
-        self._legal_import_progress = 100
-        return metadata
+        def prepare(operation):
+            operation.plan(import_plan(selected))
+            payload = {}
+            for name, (_, path) in selected.items():
+                operation.start(f"Reading:{name}")
+                payload[name] = path.read_bytes()
+                operation.finish(f"Reading:{name}")
+            return LegalStore.from_files(payload, "Selected Legal Platform CSV files", exclusions=backend_main.duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=backend_main.synchronize_duplicate_exclusions)
+        return self._load_legal_candidate(prepare, lambda: save_legal_files(paths), operationId, "files")
 
-    def refresh_legal_files(self) -> dict[str, Any]:
+    def refresh_legal_files(self, operationId: str | None = None) -> dict[str, Any]:
         paths = saved_legal_files()
         if not paths:
             raise ValueError("No previously selected Legal Platform CSV files are available.")
-        return self.process_legal_files([str(path) for path in paths])
+        return self.process_legal_files([str(path) for path in paths], operationId)
+
 
 def main() -> None:
     metrics = StartupMetrics()

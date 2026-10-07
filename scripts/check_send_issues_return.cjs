@@ -1,0 +1,32 @@
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE_PATH||'playwright');
+const root=path.resolve(__dirname,'..'),fixture=path.join(root,'frontend/src/sendIssuesReturnCheck.tsx'),component=path.join(root,'frontend/src/sendIssuesReturnComponent.tsx'),html=path.join(root,'frontend/send-issues-return-check.html');
+(async()=>{let browser;try{
+ fs.writeFileSync(component,fs.readFileSync(path.join(root,'frontend/src/LegalPlatform.tsx'),'utf8')+'\nexport {NavLoadStatus};\n');
+ fs.writeFileSync(fixture,`import React,{useCallback,useState} from 'react';import {createRoot} from 'react-dom/client';import SendIssues from './SendIssues';import {NavLoadStatus} from './sendIssuesReturnComponent';import {setLegalRevision,invalidateLegalQueries} from './legalQueryCache';import './styles.css';
+ setLegalRevision('return-test');(window as any).loadEvents=[];
+ function Fixture(){const [visible,setVisible]=useState(true),[status,setStatus]=useState<any>('loading');const report=useCallback((next:any)=>{(window as any).loadEvents.push(next);setStatus(next)},[]);return <main><nav><NavLoadStatus label="Send Issues" status={status==='idle'?'ready':status}/></nav><button onClick={()=>setVisible(value=>!value)}>Toggle page</button><button onClick={()=>invalidateLegalQueries()}>Invalidate data</button>{visible&&<SendIssues revision="0" onLoadStatus={report}/>}</main>};createRoot(document.getElementById('root')!).render(<Fixture/>);`);
+ fs.writeFileSync(html,'<div id="root"></div><script type="module" src="/src/sendIssuesReturnCheck.tsx"></script>');
+ browser=await chromium.launch({executablePath:process.env.EDGE_PATH||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+ const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];let findings=0,contacts=0;
+ page.on('pageerror',error=>errors.push(String(error)));
+ await page.route('**/api/legal/send-issues/**',async route=>{
+  const isContacts=route.request().url().endsWith('/contacts');if(isContacts)contacts++;else findings++;
+  await new Promise(resolve=>setTimeout(resolve,isContacts?700:200));
+  const response=isContacts?{contacts:{Alice:'alice@example.org'},whatsappNumbers:{}}:{revision:'r1',lawyers:['Alice'],rows:[{id:'one',lawyer:'Alice',rule:'Invalid age',ruleArabic:'',severity:'Low',row:1,recordId:'B1',caseId:'B1',dataset:'beneficiaries',reviewPage:'Beneficiaries Review',project:'P1',location:'L1',detail:'Synthetic test finding',action:'Check age'}],total:1,contacts:{Alice:'alice@example.org'}};
+  await route.fulfill({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:JSON.stringify(response)});
+ });
+ await page.goto((process.env.APP_TEST_URL||'http://127.0.0.1:5174')+'/send-issues-return-check.html');
+ await page.locator('.si-loading-skeleton').waitFor();await page.getByText('Synthetic test finding',{exact:true}).waitFor();
+ assert.deepEqual(await page.evaluate(()=>window.loadEvents),['loading','ready']);assert.equal(findings,1);
+ await page.waitForTimeout(5500);assert.equal(await page.locator('.nav-load-status').count(),0);
+ await page.getByRole('button',{name:'Toggle page',exact:true}).click();
+ await page.evaluate(()=>window.loadEvents.length=0);
+ await page.getByRole('button',{name:'Toggle page',exact:true}).click();
+ assert.equal(await page.locator('.si-loading-skeleton').count(),0);assert.equal(await page.locator('.nav-load-status').count(),0);
+ await page.getByText('Synthetic test finding',{exact:true}).waitFor();await page.waitForTimeout(1000);
+ const returnEvents=await page.evaluate(()=>window.loadEvents);assert(returnEvents.length>0&&returnEvents.every(status=>status==='ready'));assert.equal(findings,1);assert.equal(contacts,2);
+ await page.getByRole('button',{name:'Invalidate data',exact:true}).click();await page.locator('.si-loading-skeleton').waitFor();
+ await page.getByText('Synthetic test finding',{exact:true}).waitFor();assert.equal(findings,2);assert.equal(contacts,3);
+ assert.deepEqual(errors,[]);console.log(JSON.stringify({returnVisitShowsLoader:false,returnVisitRestartsSidebarIndicator:false,returnVisitFindingsRequests:0,backgroundContactRefresh:true,invalidationReloads:true,pageErrors:errors}));
+}finally{await browser?.close();for(const file of [fixture,component,html])fs.rmSync(file,{force:true});}})().catch(error=>{console.error(error);process.exit(1)});

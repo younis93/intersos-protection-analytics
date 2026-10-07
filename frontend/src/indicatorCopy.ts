@@ -1,3 +1,4 @@
+import {matchesSelection} from "./filterSelection";
 import type { IndicatorReport, IndicatorReportItem } from "./types";
 
 export interface IndicatorCopyScope {
@@ -34,8 +35,8 @@ export const indicatorLines = (item: IndicatorReportItem, scope: Pick<IndicatorC
   const rowsBySection = item.sections.map((section) => {
     const rows = new Map<string, number[]>();
     for (const row of section.rows) {
-      if (scope.projects.length && !scope.projects.includes(row.project)) continue;
-      if (scope.locations.length && !scope.locations.includes(row.location)) continue;
+      if (!matchesSelection(row.project,scope.projects)) continue;
+      if (!matchesSelection(row.location,scope.locations)) continue;
       const key = `${row.project}\u0000${row.location}`;
       if (!rowKeys.includes(key)) rowKeys.push(key);
       rows.set(key, [...row.values.slice(0, 12), 0]);

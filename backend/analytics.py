@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+from .filter_selection import split_selection
+
 import io
 import re
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from .excel_export import Alignment, Font, PatternFill, append_frame
 from openpyxl.utils import get_column_letter
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
 
-from .legal_platform import format_excel_dates
+from .legal_platform import EXPLORER_DATE_FORMAT, format_excel_dates
 from .file_security import validate_xlsx_archive
 
 OPEN_STATUS_PATTERN = "open|pend"
@@ -344,9 +346,10 @@ class DataStore:
                 frame[column] = frame[column].map(lambda value: "'" + value if isinstance(value, str) and re.match(r"^[=+\-@]", value) else value)
         output = io.BytesIO()
         if export_format == "xlsx":
-            with pd.ExcelWriter(output, engine="openpyxl", date_format="YYYY-MMMM-DD", datetime_format="YYYY-MMMM-DD") as writer:
-                frame.to_excel(writer, index=False, sheet_name="Filtered data")
-                format_excel_dates(writer.book)
+            workbook=Workbook();sheet=workbook.active;sheet.title="Filtered data"
+            append_frame(sheet,frame)
+            format_excel_dates(workbook, EXPLORER_DATE_FORMAT)
+            workbook.save(output)
         else:
             return frame.to_csv(index=False).encode("utf-8-sig")
         return output.getvalue()
@@ -357,11 +360,18 @@ class DataStore:
             frame = frame.filter((pl.col("year") == "2026") & (~pl.col("invalid_date")))
         for field, selections in filters.items():
             if not selections: continue
+            included, excluded = split_selection(selections)
+            predicate = (pl.col(field).is_in(included) if included else pl.lit(True)) & ~pl.col(field).is_in(excluded).fill_null(False)
             if field in self.options[page]:
-                ids = self.options[page][field].filter(pl.col(field).is_in(selections)).get_column("id").unique().to_list()
-                frame = frame.filter(pl.col("id").is_in(ids))
+                options = self.options[page][field]
+                if included:
+                    ids = options.filter(pl.col(field).is_in(included)).get_column("id").unique().to_list()
+                    frame = frame.filter(pl.col("id").is_in(ids))
+                if excluded:
+                    ids = options.filter(pl.col(field).is_in(excluded)).get_column("id").unique().to_list()
+                    frame = frame.filter(~pl.col("id").is_in(ids))
             elif field in frame.columns:
-                frame = frame.filter(pl.col(field).is_in(selections))
+                frame = frame.filter(predicate)
         return frame
 
     @staticmethod
@@ -491,4 +501,5 @@ class DataStore:
         sheet.freeze_panes="A2";sheet.auto_filter.ref=sheet.dimensions;sheet.row_dimensions[1].height=32
         for cell in sheet[1]:cell.font=Font(bold=True,color="FFFFFF");cell.fill=PatternFill("solid",fgColor="2563EB");cell.alignment=Alignment(wrap_text=True,vertical="center")
         for index,column in enumerate(columns,1):sheet.column_dimensions[get_column_letter(index)].width=min(38,max(12,len(column)+2))
+        format_excel_dates(workbook)
         output=io.BytesIO();workbook.save(output);return output.getvalue()

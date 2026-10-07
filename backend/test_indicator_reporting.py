@@ -26,7 +26,10 @@ def test_indicator_filter_options_use_only_uploaded_reporting_sources():
         "UNHCR 2026 - Gov":["Anbar أنبار"],
     }
     assert set(options["locations"])=={"AMAL Camp","Pshdar Urban (Refugees) + Rania","Ninewa نينوى","Anbar أنبار"}
-    assert build_indicator_report(frames,projects=["UNHCR 2026 - Gov"],community_types=["Syrian Refugee"])["filterOptions"]==options
+    linked=build_indicator_report(frames,projects=["UNHCR 2026 - Gov"],community_types=["Syrian Refugee"])["filterOptions"]
+    assert linked["locations"]==["Anbar أنبار"]
+    assert linked["communityTypes"]==["Syrian Refugee"]
+    assert set(linked["projects"])=={"UNHCR 2026 - Gov","UNHCR 2026 - Mosul & Kirkuk"}
     frames["awareness"]=pd.DataFrame()
     without_awareness=build_indicator_report(frames)["filterOptions"]
     assert "UNHCR 2026 - AMAL CAMP" not in without_awareness["projects"]

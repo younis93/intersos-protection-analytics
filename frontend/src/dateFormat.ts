@@ -45,3 +45,26 @@ export function formatTableValue(value: unknown, isDateColumn = false): string {
   const formatted = isDateColumn || typeof value === "string" ? formatDisplayDate(value) : null;
   return formatted ?? (typeof value === "object" ? JSON.stringify(value) : String(value));
 }
+
+/** Orders calendar filter options newest first without changing stored values. */
+export function sortFilterValues(field: string, values: string[]): string[] {
+  const normalized=field.replace(/[_-]+/g," ").replace(/([a-z])([A-Z])/g,"$1 $2");
+  const temporal=isDateFilterField(field)||/\b(years?|quarters?|months?|dates?)\b/i.test(normalized);
+  const rank=(value:string):number|null=>{
+    const text=value.trim();
+    const yearQuarter=text.match(/^(\d{4})[\s-]*Q([1-4])$/i),quarterYear=text.match(/^Q([1-4])[\s-]*(\d{4})$/i);
+    if(yearQuarter||quarterYear) return Date.UTC(Number(yearQuarter?.[1]||quarterYear?.[2]),(Number(yearQuarter?.[2]||quarterYear?.[1])-1)*3,1);
+    if(/^Q[1-4]$/i.test(text))return Number(text[1]);
+    if(/^\d{4}$/.test(text))return Date.UTC(Number(text),0,1);
+    const iso=text.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?(?:[T\s].*)?$/);
+    if(iso)return Date.UTC(Number(iso[1]),Number(iso[2])-1,Number(iso[3]||1));
+    const dayFirst=text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:\s.*)?$/);
+    if(dayFirst)return Date.UTC(Number(dayFirst[3]),Number(dayFirst[2])-1,Number(dayFirst[1]));
+    const month=MONTHS.findIndex(name=>name.toLowerCase()===text.toLowerCase()||name.slice(0,3).toLowerCase()===text.toLowerCase());
+    if(month>=0)return month;
+    if(temporal&&/[a-z]/i.test(text)){const parsed=Date.parse(text);if(Number.isFinite(parsed))return parsed;}
+    return null;
+  };
+  if(!temporal&&!(values.length>0&&values.every(value=>/^(?:\d{4}-\d{1,2}(?:-\d{1,2})?(?:[T\s].*)?|\d{4}[\s-]*Q[1-4]|Q[1-4][\s-]*\d{4})$/i.test(value))))return values;
+  return [...values].sort((left,right)=>{const a=rank(left),b=rank(right);return a===null?(b===null?0:1):b===null?-1:b-a});
+}

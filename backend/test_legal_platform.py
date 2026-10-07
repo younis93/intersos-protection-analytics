@@ -199,7 +199,7 @@ def test_detention_workbook_rejects_extreme_xlsx_compression_ratio():
         LegalStore.detention_workbook_sheets(output.getvalue())
 
 
-def test_amal_only_hides_detention_and_deportation_but_awareness_depends_on_file():
+def test_amal_only_hides_detention_but_imported_independent_pages_remain_available():
     payload=required_payload()
     for name in ("beneficiaries","assessments","legalservices"):
         frame=pd.read_csv(io.BytesIO(payload[name]),dtype=object)
@@ -209,7 +209,7 @@ def test_amal_only_hides_detention_and_deportation_but_awareness_depends_on_file
     payload["deportationrecords"]=csv(**{"PN ID":["D1"],"Project":["UNHCR 2026 - AMAL CAMP"]})
     metadata=LegalStore.from_files(payload,"test").metadata()
     assert metadata["availability"]["awareness"] is True
-    assert metadata["features"]=={"awareness":True,"detention":False,"deportation":False}
+    assert metadata["features"]=={"awareness":True,"detention":False,"deportation":True}
 
 
 def test_deportation_dashboard_uses_deportationrecords_csv():
@@ -673,6 +673,31 @@ def test_name_counts_distinguish_loaded_names_from_threshold_eligible_names():
     assert result["eligibleNameRecordCount"]==0
 
 
+@pytest.mark.parametrize("dataset,rule",[
+    ("beneficiaries","Invalid age"),
+    ("assessments","Assessment without services"),
+    ("legalservices","Missing Type of Document"),
+])
+@pytest.mark.parametrize("projects,expected",[
+    (["UNHCR 2026 - Erbil"],["North Iraq"]),
+    (["UNHCR 2026 - Gov"],["South Iraq"]),
+    (["UNHCR 2026 - AMAL CAMP"],["AMAL Camp"]),
+    (["UNHCR 2026 - Gov","UNHCR 2026 - Erbil"],["North Iraq","South Iraq"]),
+    (["Unknown"],["Unclassified"]),
+    ([],["Review findings"]),
+])
+def test_review_export_omits_regions_without_matching_findings(dataset,rule,projects,expected):
+    store=LegalStore.from_files(required_payload(),"test")
+    store.flags[dataset]=[{"rule":rule,"row":2,"project":project} for project in projects]
+    book=load_workbook(io.BytesIO(store.review_export(dataset,selected_rules=[rule])))
+    assert book.sheetnames==expected
+    if not projects:
+        assert book.active["A1"].value=="No matching review findings"
+    elif len(projects)>1:
+        filtered=load_workbook(io.BytesIO(store.review_export(dataset,selected_rules=[rule],project=projects[0])))
+        assert filtered.sheetnames==["South Iraq"]
+
+
 def test_review_export_uses_the_same_south_duplicate_group():
     payload=required_payload()
     payload["beneficiaries"]=csv(**{
@@ -682,7 +707,7 @@ def test_review_export_uses_the_same_south_duplicate_group():
     })
     exported=LegalStore.from_files(payload,"test").review_export("beneficiaries")
     workbook=load_workbook(io.BytesIO(exported),read_only=True,data_only=True)
-    assert workbook.sheetnames==["North Iraq","AMAL Camp","South Iraq"]
+    assert workbook.sheetnames==["North Iraq","South Iraq"]
     rows=list(workbook["South Iraq"].iter_rows(values_only=True))
     header=list(rows[0]);case_id_index=header.index("Case ID");detail_index=header.index("Review Detail")
     duplicate_rows=[row for row in rows[1:] if row[header.index("Review Finding")]=="Possible duplicate name"]
@@ -691,6 +716,7 @@ def test_review_export_uses_the_same_south_duplicate_group():
 
 
 def test_review_export_uses_consistent_rows_and_duplicate_name_colors():
+    from openpyxl.utils.cell import range_boundaries
     payload=required_payload()
     payload["beneficiaries"]=csv(**{
         "Case ID":["B1","G1"],"Name (Filter Color Red)":["Shared Beneficiary Name"]*2,
@@ -698,13 +724,24 @@ def test_review_export_uses_consistent_rows_and_duplicate_name_colors():
     })
     workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("beneficiaries")))
     sheet=workbook["South Iraq"]
-    header=[cell.value for cell in sheet[1]];name_column=header.index("Name")+1
-    finding_column=header.index("Review Finding")+1
-    duplicate_rows=[row for row in range(2,sheet.max_row+1) if sheet.cell(row,finding_column).value=="Possible duplicate name"]
+    duplicate_rows=[];name_cells=[];case_ids=set()
+    for table in sheet.tables.values():
+        left,first,right,last=range_boundaries(table.ref)
+        headers=[sheet.cell(first,column).value for column in range(left,right+1)]
+        finding_column=left+headers.index("Review Finding")
+        name_column=left+headers.index("Name")
+        case_column=left+headers.index("Case ID")
+        for row in range(first+1,last+1):
+            if sheet.cell(row,finding_column).value=="Possible duplicate name":
+                duplicate_rows.append(row);name_cells.append(sheet.cell(row,name_column))
+                case_ids.add(sheet.cell(row,case_column).value)
+    assert len(name_cells)==2
+    assert case_ids=={"B1","G1"}
+    assert {cell.value for cell in name_cells}=={"Shared Beneficiary Name"}
     assert {sheet.row_dimensions[row].height for row in duplicate_rows}=={24.0}
-    assert len({sheet.cell(row,name_column).fill.fgColor.rgb for row in duplicate_rows})==1
-    assert {sheet.cell(row,name_column).fill.fgColor.rgb for row in duplicate_rows}=={"00FDE8E8"}
-    assert {sheet.cell(row,name_column).font.color.rgb for row in duplicate_rows}=={"00991B1B"}
+    assert {cell.fill.fgColor.rgb for cell in name_cells}=={"00FDE8E8"}
+    assert {cell.font.color.rgb for cell in name_cells}=={"00991B1B"}
+    assert all(cell.font.bold for cell in name_cells)
 
 
 def test_beneficiary_review_export_groups_findings_by_region():
@@ -1097,20 +1134,28 @@ def test_detention_governorate_project_mapping_overrides_conflicting_location():
 
 
 def test_assessment_review_export_groups_findings_by_region():
+    from openpyxl.utils.cell import range_boundaries
     payload=required_payload();payload["assessments"]=csv(**{
         "Assessment ID":["ERB","AMAL","GOV"],
         "Beneficiary ID":["B1","B2","B3"],
         "Projects - المشروع":["UNHCR 2026 - Erbil","UNHCR 2026 - AMAL CAMP","UNHCR 2026 - Gov"],
         "Assessment Status":["Pending","Pending","Pending"],
     })
-    workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("assessments")),read_only=True,data_only=True)
+    workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("assessments")),data_only=True)
     assert workbook.sheetnames==["North Iraq","AMAL Camp","South Iraq"]
     for sheet_name,assessment_id in (("North Iraq","ERB"),("AMAL Camp","AMAL"),("South Iraq","GOV")):
-        rows=list(workbook[sheet_name].iter_rows(values_only=True));assessment_index=list(rows[0]).index("Assessment ID")
-        assert assessment_id in {row[assessment_index] for row in rows[1:]}
+        sheet=workbook[sheet_name];assessment_ids=set()
+        assert sheet.tables
+        for table in sheet.tables.values():
+            left,first,right,last=range_boundaries(table.ref)
+            headers=[sheet.cell(first,column).value for column in range(left,right+1)]
+            assessment_column=left+headers.index("Assessment")
+            assessment_ids.update(sheet.cell(row,assessment_column).value for row in range(first+1,last+1))
+        assert assessment_ids=={assessment_id}
 
 
 def test_legal_services_review_export_groups_findings_by_region():
+    from openpyxl.utils.cell import range_boundaries
     payload=required_payload();payload["legalservices"]=csv(**{
         "Service ID":["ERB","AMAL","GOV"],
         "Assessment ID":["A1","A2","A3"],
@@ -1118,28 +1163,50 @@ def test_legal_services_review_export_groups_findings_by_region():
         "Project":["UNHCR 2026 - Erbil","UNHCR 2026 - AMAL CAMP","UNHCR 2026 - Gov"],
         "Type of Document نوع الوثيقة":["","",""]
     })
-    workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("legalservices")),read_only=True,data_only=True)
+    workbook=load_workbook(io.BytesIO(LegalStore.from_files(payload,"test").review_export("legalservices")),data_only=True)
     assert workbook.sheetnames==["North Iraq","AMAL Camp","South Iraq"]
     for sheet_name,service_id in (("North Iraq","ERB"),("AMAL Camp","AMAL"),("South Iraq","GOV")):
-        rows=list(workbook[sheet_name].iter_rows(values_only=True));service_index=list(rows[0]).index("Service ID")
-        assert service_id in {row[service_index] for row in rows[1:]}
+        sheet=workbook[sheet_name];service_ids=set()
+        assert sheet.tables
+        for table in sheet.tables.values():
+            left,first,right,last=range_boundaries(table.ref)
+            headers=[sheet.cell(first,column).value for column in range(left,right+1)]
+            service_column=left+headers.index("Service")
+            service_ids.update(sheet.cell(row,service_column).value for row in range(first+1,last+1))
+        assert service_ids=={service_id}
 
 
 def test_legal_services_review_export_applies_filters_and_ignores_court_verdict_other():
+    from openpyxl.utils.cell import range_boundaries
     payload=required_payload();payload["legalservices"]=csv(**{
-        "Service ID":["Court1","Court2","Card1","Card2"],
-        "Assessment ID":["A1","A1","A2","A2"],
-        "Beneficiary ID":["B1","B1","B2","B2"],
-        "Project":["UNHCR 2026 - Erbil","UNHCR 2026 - Erbil","UNHCR 2026 - SULI","UNHCR 2026 - SULI"],
-        "Type of Service Provided":["Legal Representation"]*4,
-        "Type of Document":["Court Verdict","Court Verdict","ID Card","ID Card"],
+        "Service ID":["Court1","Court2","Card1","Card2","Other1","Other2"],
+        "Assessment ID":["A1","A1","A2","A2","A1","A1"],
+        "Beneficiary ID":["B1","B1","B2","B2","B1","B1"],
+        "Project":["UNHCR 2026 - Erbil","UNHCR 2026 - Erbil","UNHCR 2026 - SULI","UNHCR 2026 - SULI","UNHCR 2026 - Erbil","UNHCR 2026 - Erbil"],
+        "Type of Service Provided":["Legal Representation"]*6,
+        "Type of Document":["Court Verdict","Court Verdict","ID Card","ID Card","Other","Other"],
     })
     store=LegalStore.from_files(payload,"test")
-    exported=load_workbook(io.BytesIO(store.review_export("legalservices",selected_rules=["Duplicate service"],project="UNHCR 2026 - Erbil")),read_only=True,data_only=True)
-    rows=list(exported["North Iraq"].iter_rows(values_only=True));service_index=list(rows[0]).index("Service ID")
-    assert {row[service_index] for row in rows[1:]}=={"Court1","Court2"}
+    def exported_records(**filters):
+        workbook=load_workbook(io.BytesIO(store.review_export("legalservices",selected_rules=["Duplicate service"],**filters)),data_only=True)
+        records=[]
+        for sheet in workbook:
+            for table in sheet.tables.values():
+                left,first,right,last=range_boundaries(table.ref)
+                headers=[sheet.cell(first,column).value for column in range(left,right+1)]
+                assert "Service" in headers
+                for row in sheet.iter_rows(min_row=first+1,max_row=last,min_col=left,max_col=right,values_only=True):
+                    records.append(dict(zip(headers,row)))
+        return records
+    exported=exported_records(project="UNHCR 2026 - Erbil")
+    assert {row["Service"] for row in exported}=={"Court1","Court2","Other1","Other2"}
+    assert all(row["Project"]=="UNHCR 2026 - Erbil" and row["Review Finding"]=="Duplicate service" for row in exported)
+    remaining=exported_records(ignore_court_verdict=True)
+    assert {row["Service"] for row in remaining}=={"Card1","Card2"}
+    assert all(row["Project"]=="UNHCR 2026 - SULI" and row["Type of Document"]=="ID Card" for row in remaining)
     ignored=load_workbook(io.BytesIO(store.review_export("legalservices",selected_rules=["Duplicate service"],project="UNHCR 2026 - Erbil",ignore_court_verdict=True)),read_only=True,data_only=True)
-    assert ignored["North Iraq"].max_row==1
+    assert ignored.sheetnames==["Review findings"]
+    assert ignored.active["A1"].value=="No matching review findings"
 
 
 def test_duplicate_service_without_assessment_id_compares_across_assessments():
@@ -1604,3 +1671,101 @@ def test_analytics_export_applies_derived_month_filter():
     exported=store.explorer_export("beneficiaries",filters={"Month":["2026-02"]})
     rows=pd.read_excel(io.BytesIO(exported))
     assert rows["Case ID"].tolist()==["B2"]
+
+
+@pytest.mark.parametrize("include_column",[True,False])
+def test_closed_service_assessment_closure_request_groups_and_export(include_column,tmp_path):
+    rule="Open assessment with all services closed"
+    values=["Yes"," yEs ","No","",None,"Unknown"]
+    ids=[f"C{i}" for i in range(len(values))]
+    columns={"Assessment ID":ids,"Beneficiary ID":ids,"Assessment Status":["Open"]*6,"Project":["UNHCR 2026 - Erbil"]*6}
+    if include_column: columns["Request for Closed Status"]=values
+    payload=required_payload()
+    payload["assessments"]=csv(**columns)
+    payload["legalservices"]=csv(**{"Service ID":ids,"Assessment ID":ids,"Beneficiary ID":ids,"Service Status":["Closed"]*6})
+    store=LegalStore.from_files(payload,"test")
+    result=store.review("assessments",rule=rule,page_size=100)
+    assert result["total"]==6
+    requested={row["assessmentId"] for row in result["rows"] if row["requestForClosedStatus"].strip().casefold()=="yes"}
+    assert requested==({"C0","C1"} if include_column else set())
+    book=load_workbook(io.BytesIO(store.review_export("assessments",selected_rules=[rule])))
+    assert book.sheetnames==["North Iraq"]
+    sheet=book.active
+    titles=[cell.value for row in sheet for cell in row if cell.column==1 and cell.value in {"Open assessment with all services closed (Closure requested by lawyer)","Open assessment with all services closed (Closure not requested by lawyer)"}]
+    assert titles==(["Open assessment with all services closed (Closure requested by lawyer)","Open assessment with all services closed (Closure not requested by lawyer)"] if include_column else ["Open assessment with all services closed (Closure not requested by lawyer)"])
+    exported=set()
+    from openpyxl.utils.cell import range_boundaries
+    for table in sheet.tables.values():
+        _,first,_,last=range_boundaries(table.ref)
+        headers=[cell.value for cell in sheet[first]]
+        request_column=headers.index("Request for Closed Status")+1
+        assessment_column=headers.index("Assessment")+1
+        title=sheet.cell(first-1,1).value
+        for row in range(first+1,last+1):
+            assessment=sheet.cell(row,assessment_column).value
+            assert assessment not in exported
+            exported.add(assessment)
+            assert (str(sheet.cell(row,request_column).value or "").strip().casefold()=="yes")== (title=="Open assessment with all services closed (Closure requested by lawyer)")
+    assert exported==set(ids)
+    filtered=store.review("assessments",rule=rule,search="C0")
+    assert {row["assessmentId"] for row in filtered["rows"]}=={"C0"}
+    filtered_book=load_workbook(io.BytesIO(store.review_export("assessments",selected_rules=[rule],search="C0")))
+    assert len(filtered_book.active.tables)==1
+    registry=DuplicateExclusionRegistry(tmp_path/"closure-exclusions.json")
+    for assessment in ("C0","C2"):
+        registry.exclude_record("assessments",rule,"assessmentId",assessment)
+    store.set_review_exclusions(registry.exclusion_rows())
+    remaining=store.review("assessments",rule=rule,page_size=100)
+    assert remaining["total"]==4
+    assert {row["assessmentId"] for row in remaining["rows"]}==set(ids)-{"C0","C2"}
+    excluded_book=load_workbook(io.BytesIO(store.review_export("assessments",selected_rules=[rule])))
+    assert sum(range_boundaries(table.ref)[3]-range_boundaries(table.ref)[1] for table in excluded_book.active.tables.values())==4
+
+
+def test_detention_map_click_matches_trimmed_governorate_values():
+    payload=required_payload()
+    payload["assessments"]=csv(**{
+        "Assessment ID":["D1","D2","D3","D4"],
+        "Beneficiary ID":["B1","B2","B3","B4"],
+        "Is the beneficiary detained":["Yes"]*4,
+        "Detention Governorate":[" Baghdad ","Baghdad","  Ninewa  ","Mosul"],
+        "Date of Assessment":["10/01/2026"]*4,
+    })
+    store=LegalStore.from_files(payload,"test")
+    overview=store.detention_cases()
+    assert {item["label"] for item in overview["map"]["items"]}=={"Baghdad","Ninawa"}
+    for item in overview["map"]["items"]:
+        filtered=store.detention_cases(filters={"Detention governorate":item["values"]})
+        assert filtered["total"]==item["detained"]==2
+        assert len(filtered["rows"])==2
+    assert store.detention_cases(filters={"Detention governorate":[" Baghdad "]})["total"]==2
+    assert store.detention_cases(filters={"Detention governorate":["Baghdad","Ninewa","Mosul"]})["total"]==4
+
+
+def test_analytics_reuses_summaries_for_table_changes_and_invalidates():
+    store=LegalStore.from_files(required_payload(),"test")
+    first=store.analytics_dashboard("assessments",page_size=1)
+    cached=next(iter(store._analytics_results.values()))
+    page=store.analytics_dashboard("assessments",page=2,page_size=1,sort_column="Assessment ID",sort_direction="desc")
+    assert next(iter(store._analytics_results.values())) is cached
+    assert len(store._analytics_results)==1
+    for key in ("kpis","charts","trend","statusTrends","filterOptions","matchedRows"):
+        assert page[key]==first[key]
+    assert page["rows"][0]["Assessment ID"]=="A1"
+    store.analytics_dashboard("assessments",filters={"Month":["2026-01"]})
+    assert len(store._analytics_results)==2
+    store.set_review_exclusions([{"dataset":"beneficiaries","rule":"Invalid age","identifierType":"caseId","identifierValue":"B1"}])
+    assert not store._analytics_results
+    assert not store._analytics_prepared
+    refreshed=store.analytics_dashboard("assessments",page_size=1)
+    assert refreshed==first
+
+
+def test_analytics_cache_is_bounded_and_does_not_modify_source():
+    store=LegalStore.from_files(required_payload(),"test")
+    source=store.frames["assessments"].copy(deep=True)
+    for index in range(30):
+        result=store.analytics_dashboard("assessments",search=f"not-present-{index}")
+        assert result["matchedRows"]==0
+    assert len(store._analytics_results)==24
+    pd.testing.assert_frame_equal(store.frames["assessments"],source)

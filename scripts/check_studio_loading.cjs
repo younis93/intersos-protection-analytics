@@ -1,0 +1,35 @@
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE_PATH||'playwright');
+const root=path.resolve(__dirname,'..'),fixture=path.join(root,'frontend/src/studioLoadingCheck.tsx'),component=path.join(root,'frontend/src/studioLoadingComponent.tsx'),html=path.join(root,'frontend/studio-loading-check.html');
+(async()=>{let browser;try{
+  fs.writeFileSync(component,fs.readFileSync(path.join(root,'frontend/src/LegalPlatform.tsx'),'utf8')+'\nexport {LegalAnalyticsStudio};\n');
+  fs.writeFileSync(fixture,`import React from 'react';import {createRoot} from 'react-dom/client';import {LegalAnalyticsStudio} from './studioLoadingComponent';import './styles.css';
+  const metadata:any={source:'Synthetic loading check',features:{detention:true},availability:{assessments:true,legalservices:true,beneficiaries:true,awareness:false},sheets:['assessments','legalservices','beneficiaries'].map(id=>({id,name:id,rows:2,columns:['Assessment Status','Project','Month']}))};
+  createRoot(document.getElementById('root')!).render(<LegalAnalyticsStudio metadata={metadata} theme="glass-light" onOpenCase={()=>{}}/>);`);
+  fs.writeFileSync(html,'<div id="root"></div><script type="module" src="/src/studioLoadingCheck.tsx"></script>');
+  browser=await chromium.launch({executablePath:process.env.EDGE_PATH||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+  const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[],requests=[];
+  page.on('pageerror',error=>errors.push(String(error)));
+  await page.route('**/api/legal/analytics-dashboard',async route=>{
+    const query=route.request().postDataJSON();requests.push(query);
+    await new Promise(resolve=>setTimeout(resolve,120));
+    const filtered=Boolean(query.filters.Project?.length);
+    await route.fulfill({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:JSON.stringify({dataset:query.dataset,total:filtered?1:2,matchedRows:filtered?1:2,page:query.page,pageSize:100,kpis:[{label:'Records',value:filtered?1:2,format:'number'}],trend:[],statusTrends:[],charts:[],filterOptions:{Project:['P1','P2'],Month:['2026-01','2026-02']},columns:['Project'],rows:filtered?[{__rowKey:'1',Project:'P1'}]:[{__rowKey:'1',Project:'P1'},{__rowKey:'2',Project:'P2'}],warnings:[]})});
+  });
+  await page.goto((process.env.APP_TEST_URL||'http://127.0.0.1:5174')+'/studio-loading-check.html');
+  await page.locator('.legal-kpi strong').waitFor();await page.waitForTimeout(600);
+  assert.equal(requests.length,1,'Default state caused repeated loading');
+  assert.equal(await page.locator('.studio-section-loading,.studio-section-refreshing').count(),0);
+  const tabs=page.getByRole('navigation',{name:'Analytics Studio sections'});
+  await tabs.getByRole('button',{name:'Legal Services',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.legal-kpi strong')?.textContent==='2');await page.waitForTimeout(600);
+  assert.equal(requests.length,2,'Section switch caused repeated loading');assert.equal(requests[1].dataset,'legalservices');
+  await page.getByRole('button',{name:'All project',exact:true}).click();
+  await page.getByRole('checkbox',{name:'P1',exact:true}).check();
+  await page.waitForFunction(()=>document.querySelector('.legal-kpi strong')?.textContent==='1');
+  await page.waitForTimeout(400);assert.equal(requests.length,3);assert.deepEqual(requests[2].filters,{Project:['P1']});
+  await page.getByRole('button',{name:'Done',exact:true}).click();
+  await tabs.getByRole('button',{name:'Assessments',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('.legal-kpi strong')?.textContent==='2');await page.waitForTimeout(400);assert.equal(requests.length,4);
+  assert.deepEqual(errors,[]);console.log(JSON.stringify({initialRequests:1,sectionRequests:1,filterRequests:1,stableLoading:true,sectionDataIsolation:true,pageErrors:errors}));
+}finally{await browser?.close();for(const file of [fixture,component,html])fs.rmSync(file,{force:true});}})().catch(error=>{console.error(error);process.exit(1)});

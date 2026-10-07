@@ -168,10 +168,8 @@ export default function App() {
         setRefreshing(false);
       });
   }, [page, filters, measure, metadata]);
-  useEffect(() => {
-    setFilters({});
-    setDash(null);
-  }, [page]);
+  const previousPage=useRef(page);
+  if(previousPage.current!==page){previousPage.current=page;setFilters({});setDash(null);}
   const available = metadata?.pages[page]?.filters || {};
   const activeCount = Object.values(filters).reduce((n, v) => n + v.length, 0);
   const headerFiltersVisible = false;
@@ -284,7 +282,7 @@ export default function App() {
         <header className="topbar">
           <div className="mobile-brand">Protection Analytics</div>
           <div className={`header-actions ${headerFiltersVisible ? "header-actions-pinned" : ""}`}>
-            {headerFiltersVisible && <div className="header-filter-actions"><button className="primary" onClick={() => setDrawer(true)}><Filter/>Filters {activeCount > 0 && <b>{activeCount}</b>}</button><button className="soft" onClick={clearFilters} disabled={!activeCount}><RotateCcw/>Clear</button></div>}
+            {headerFiltersVisible && <div className="header-filter-actions"><button className="primary" onClick={() => setDrawer(true)}><Filter/>Filters {activeCount > 0 && <b>{activeCount}</b>}</button><button className="soft" onClick={clearFilters} disabled={!activeCount}><RotateCcw/>Reset</button></div>}
             <input
               ref={input}
               hidden
@@ -318,7 +316,7 @@ export default function App() {
                   disabled={!activeCount}
                 >
                   <RotateCcw />
-                  Clear all filters
+                  Reset all filters
                 </button>
                 {page !== "executive" && <ExcelDownloadButton className="soft" onClick={()=>downloadExcelUrl(exportUrl(page, filters),`${page}.xlsx`)}/>}
                 <div className="toolbar-metrics">

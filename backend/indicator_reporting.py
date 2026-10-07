@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+from .filter_selection import selection_mask, split_selection, matches_selection
+from .linked_filters import available_values
+
 import re
 import unicodedata
 from io import BytesIO
+from threading import RLock
 from typing import Any, Callable
 
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.chart import LineChart, Reference
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from .excel_export import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from .legal_platform import _find, clean_id
+from .legal_platform import _find, clean_id, format_excel_dates
 
 
 AGE_GROUPS = ("00-04", "05-11", "12-17", "18-39", "40-59", "60+")
@@ -134,16 +138,182 @@ def _common_columns(frame: pd.DataFrame) -> dict[str, str | None]:
     }
 
 
-def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "", to_date: str = "", projects: list[str] | None = None, locations: list[str] | None = None, years: list[str] | None = None, quarters: list[str] | None = None, months: list[str] | None = None, community_types: list[str] | None = None) -> dict[str, Any]:
-    projects, locations, years, quarters, months, community_types = projects or [], locations or [], years or [], quarters or [], months or [], community_types or []
-    reporting_frames=[frames[name] for name in ("assessments","legalservices","deportationrecords","awareness") if name in frames]
-    # The source values often append Arabic text (for example, "Syrian Refugee
-    # لاجئ-سوري"). Expose the reporting populations as clean English labels
-    # while retaining a population-aware filter against the original data.
-    community_options=sorted({_community_filter_label(value) for frame in reporting_frames for column in [_common_columns(frame).get("community")] if column for value in frame[column].dropna() if _community_filter_label(value)})
-    if community_types:
-        selected_communities=set(community_types)
-        frames={name:frame[frame[_common_columns(frame)["community"]].map(_community_filter_label).isin(selected_communities)].copy() if _common_columns(frame).get("community") else frame.copy() for name,frame in frames.items()}
+_CANONICAL_PAIRS = {(_lookup(project), _lookup(location)): (project, location) for project, location in REPORT_ROWS}
+
+
+def _report_pair(row: dict[str, Any], cols: dict[str, str | None]) -> tuple[str, str] | None:
+    project, location = row.get(cols["project"], ""), row.get(cols["location"], "")
+    location_text = _norm(location)
+    if "pshdar urban" in location_text or location_text == "rania":
+        project, location = "UNHCR 2026 - SULI", "Pshdar Urban (Refugees) + Rania"
+    elif "diyala" in location_text or "ديالى" in location_text:
+        project, location = "UNHCR 2026 - Gov", "Diyala ديالى"
+    location_key = LOCATION_ALIASES.get(_lookup(location), _lookup(location))
+    return _CANONICAL_PAIRS.get((_lookup(project), location_key))
+
+
+class PreparedIndicatorData:
+    """Immutable source records with reusable classifications and date/eligibility indexes.
+
+    Owned by one LegalStore revision, never a global cache. Source order is retained
+    because indicator deduplication must happen before project/location filtering.
+    """
+    def __init__(self, frames: dict[str, pd.DataFrame]):
+        self.frames = frames
+        self.lock = RLock()
+        self.empty_frame = pd.DataFrame()
+        self.columns = {}
+        self.records = {id(frame): frame.to_dict("records") for name, frame in frames.items()
+                        if name in {"beneficiaries", "assessments", "legalservices", "deportationrecords", "awareness"}}
+        self.common = {id(frame): _common_columns(frame) for frame in frames.values()}
+        self.demographics = {}
+        self.details = {}
+        self.detained = {}
+        self.amal = set()
+        self.identifiers = {}
+        self.date_records = {}
+        self.communities = {}
+        self.dates = {}
+        self.eligibility = {}
+        self.names = {}
+        self.row_positions = {}
+        self.option_dates = {}
+        for name, frame in frames.items():
+            rows = self.records.get(id(frame), [])
+            self.row_positions[id(frame)] = {id(row): index for index, row in enumerate(rows)}
+            cols = self.common[id(frame)]
+            self.communities[id(frame)] = pd.Series([_community_filter_label(row.get(cols["community"], "")) for row in rows], dtype=object)
+            if name == "beneficiaries":
+                identifier = _find(list(frame.columns), "Case ID", "Beneficiary ID")
+                label = _find(list(frame.columns), "Name (Filter Color Red)", "Beneficiary Name", "Name")
+                if identifier and label:
+                    self.names = {clean_id(row.get(identifier, "")): clean_id(row.get(label, "")) for row in rows}
+            else:
+                beneficiary_column = _find(list(frame.columns), "Beneficiary ID", "Case ID", "PN ID")
+                assessment_column = _find(list(frame.columns), "Assessment ID")
+                name_column = _find(list(frame.columns), "Name (Filter Color Red)", "Beneficiary Name", "Name")
+                detained_column = _find(list(frame.columns), "Is the beneficiary detained")
+                for row in rows:
+                    self.demographics[id(row)] = (_population(row.get(cols["community"], "")), _report_pair(row, cols),
+                                                  _gender(row.get(cols["gender"], "")), _age_group(row.get(cols["age"], "")))
+                    sex, age = self.demographics[id(row)][2:]
+                    self.details[id(row)] = (clean_id(row.get(beneficiary_column, "")), clean_id(row.get(assessment_column, "")),
+                                             clean_id(row.get(name_column, "")), AGE_GROUPS.index(age)+(0 if sex=="male" else 6) if sex and age else None)
+                    self.detained[id(row)] = (_yes(row.get(detained_column, "")), _no(row.get(detained_column, "")))
+                    if _norm(row.get(cols["project"], "")) == "unhcr 2026 - amal camp" and _norm(row.get(cols["location"], "")) == "amal camp":
+                        self.amal.add(id(row))
+        self.available_pairs = {value[1] for value in self.demographics.values() if value[1]}
+        self.community_options = sorted({label for name, frame in frames.items()
+                                         if name in {"assessments", "legalservices", "deportationrecords", "awareness"}
+                                         for label in self.communities[id(frame)] if label})
+        for name, hints in {
+            "assessments": ("Date of Assessment", "Date of the released or deported"),
+            "legalservices": ("Date of Service Provision", "Date Service Completed"),
+            "deportationrecords": ("Date of Deportation Knowledge", "Date of deporting"),
+            "awareness": ("Date of Session",),
+        }.items():
+            if name in frames:
+                for hint in hints:
+                    column = _find(list(frames[name].columns), hint)
+                    if column:
+                        self.date_index(frames[name], column)
+
+    def date_index(self, frame: pd.DataFrame, column: str | None):
+        key = (id(frame), column)
+        with self.lock:
+            if key not in self.dates:
+                values = [row.get(column, "") for row in self.records.get(id(frame), [])]
+                # Parse distinct scalars to preserve the legacy mixed-format/dayfirst
+                # behavior; pandas whole-column inference can reject valid dates.
+                parsed_values = {}
+                parsed = []
+                for value in values:
+                    value_key = (type(value), value)
+                    if value_key not in parsed_values:
+                        parsed_values[value_key] = pd.to_datetime(value, errors="coerce", dayfirst=True)
+                    parsed.append(parsed_values[value_key])
+                dates = pd.Series(parsed, dtype="datetime64[ns]")
+                self.dates[key] = (dates, dates.dt.strftime("%Y-%m"),
+                                   dates.dt.year.astype("Int64").astype(str),
+                                   dates.dt.year.astype("Int64").astype(str) + "-Q" + dates.dt.quarter.astype("Int64").astype(str),
+                                   pd.Series([not _norm(value) for value in values], dtype=bool))
+                self.date_records[key] = dates.tolist()
+            return self.dates[key]
+
+    def identifier_values(self, frame, column):
+        key = (id(frame), column)
+        with self.lock:
+            if key not in self.identifiers:
+                self.identifiers[key] = [clean_id(row.get(column, "")) for row in self.records.get(id(frame), [])]
+            return self.identifiers[key]
+
+    def find(self, names: list[str], *hints: str) -> str | None:
+        key = (tuple(names), hints)
+        with self.lock:
+            if key not in self.columns:
+                self.columns[key] = _find(names, *hints)
+            return self.columns[key]
+
+    def eligible(self, frame: pd.DataFrame, rule: str, predicate: Callable) -> pd.Series:
+        key = (id(frame), rule)
+        with self.lock:
+            if key not in self.eligibility:
+                self.eligibility[key] = pd.Series([bool(predicate(row)) for row in self.records.get(id(frame), [])], dtype=bool)
+            return self.eligibility[key]
+
+    def linked_filter_options(self,selections,from_date="",to_date=""):
+        key=(from_date,to_date,tuple(sorted((field,tuple(values)) for field,values in selections.items() if values)))
+        with self.lock:
+            cache=getattr(self,"linked_option_cache",{})
+            if key in cache:return cache[key]
+            events=getattr(self,"filter_events",None)
+            if events is None:
+                parts=[]
+                date_hints={"assessments":(("Date of Assessment",),("Date of the released or deported","Date of Release")),"legalservices":(("Date of Service Provision",),("Date Service Completed",)),"deportationrecords":(("Date of Deportation Knowledge","Date of deporting"),),"awareness":(("Date of Session",),)}
+                for name,hints in date_hints.items():
+                    frame=self.frames.get(name)
+                    if frame is None:continue
+                    cols=self.common[id(frame)];rows=self.records[id(frame)]
+                    pairs=[_report_pair(row,cols) for row in rows]
+                    if not any(self.find(list(frame.columns),*wanted) for wanted in hints):
+                        parts.append(pd.DataFrame({"projects":[pair[0] if pair else "" for pair in pairs],"locations":[pair[1] if pair else "" for pair in pairs],"communityTypes":self.communities[id(frame)],"months":"","quarters":"","years":"","date":pd.NaT}))
+                    for wanted in hints:
+                        column=self.find(list(frame.columns),*wanted)
+                        if not column:continue
+                        dates,months,years,quarters,_=self.date_index(frame,column)
+                        part=pd.DataFrame({"projects":[pair[0] if pair else "" for pair in pairs],"locations":[pair[1] if pair else "" for pair in pairs],"communityTypes":self.communities[id(frame)],"months":months,"quarters":quarters,"years":years,"date":dates})
+                        parts.append(part[part.projects.ne("")])
+                events=pd.concat(parts,ignore_index=True) if parts else pd.DataFrame(columns=["projects","locations","communityTypes","months","quarters","years","date"])
+                self.filter_events=events
+            base=pd.Series(True,index=events.index)
+            start,end=reporting_period_bounds(from_date,to_date)
+            if start is not None:base&=events.date.ge(start)
+            if end is not None:base&=events.date.le(end)
+            options=available_values({field:events[field] for field in selections},selections,base)
+            for field in ("months","quarters","years"):options[field]=[value for value in reversed(options[field]) if value not in ("<NA>","<NA>-Q<NA>")]
+            pairs=REPORT_ROWS
+            options["projects"]=list(dict.fromkeys(project for project,_ in pairs if project in options["projects"]))
+            options["locationsByProject"]={project:[location for row_project,location in pairs if row_project==project and location in options["locations"]] for project in options["projects"]}
+            if len(cache)>=128:cache.clear()
+            cache[key]=options;self.linked_option_cache=cache
+            return options
+
+    def reporting_dates(self, frame: pd.DataFrame, column: str, communities: list[str]):
+        key = (id(frame), column, tuple(sorted(set(communities))))
+        with self.lock:
+            if key not in self.option_dates:
+                values = frame[column]
+                if communities and self.common[id(frame)]["community"]:
+                    values = values.iloc[selection_mask(self.communities[id(frame)], set(communities)).to_numpy()]
+                # Preserve the filter-option dates' original whole-column inference.
+                dates = pd.to_datetime(values, errors="coerce", dayfirst=True).dropna()
+                self.option_dates[key] = ({date.strftime("%Y-%m") for date in dates},
+                                         {f"{date.year}-Q{date.quarter}" for date in dates},
+                                         {str(date.year) for date in dates})
+            return self.option_dates[key]
+
+
+def reporting_period_bounds(from_date, to_date):
     start = pd.to_datetime(from_date, errors="coerce") if from_date else None
     end = pd.to_datetime(to_date, errors="coerce") if to_date else None
     if from_date and pd.isna(start): raise ValueError("From date is invalid.")
@@ -152,87 +322,115 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
     if end is not None: end = end.normalize() + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
     if start is not None and end is not None and start > end: raise ValueError("From date must be before To date.")
 
-    canonical = {(_lookup(project), _lookup(location)): (project, location) for project, location in REPORT_ROWS}
-    for (project_key, location_key), pair in list(canonical.items()):
-        for legacy_location, current_location in LOCATION_ALIASES.items():
-            if location_key == current_location:
-                canonical[(project_key, legacy_location)] = pair
-    beneficiary_frame = frames.get("beneficiaries", pd.DataFrame())
-    beneficiary_id_column = _find(list(beneficiary_frame.columns), "Case ID", "Beneficiary ID")
-    beneficiary_name_column = _find(list(beneficiary_frame.columns), "Name (Filter Color Red)", "Beneficiary Name", "Name")
-    beneficiary_names = {clean_id(row.get(beneficiary_id_column, "")): clean_id(row.get(beneficiary_name_column, "")) for _, row in beneficiary_frame.iterrows()} if beneficiary_id_column and beneficiary_name_column else {}
+    return start, end
 
-    def mapped_pair(row: pd.Series, cols: dict[str, str | None]) -> tuple[str, str] | None:
-        project = row.get(cols["project"], "") if cols["project"] else ""
-        location = row.get(cols["location"], "") if cols["location"] else ""
-        location_text = _norm(location)
-        if "pshdar urban" in location_text or location_text == "rania":
-            project, location = "UNHCR 2026 - SULI", "Pshdar Urban (Refugees) + Rania"
-        elif "diyala" in location_text or "ديالى" in location_text:
-            project, location = "UNHCR 2026 - Gov", "Diyala ديالى"
-        return canonical.get((_lookup(project), _lookup(location)))
 
-    available_pairs=set()
-    for reporting_frame in reporting_frames:
-        columns=_common_columns(reporting_frame)
-        for _,row in reporting_frame.iterrows():
-            pair=mapped_pair(row,columns)
-            if pair: available_pairs.add(pair)
+def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "", to_date: str = "", projects: list[str] | None = None, locations: list[str] | None = None, years: list[str] | None = None, quarters: list[str] | None = None, months: list[str] | None = None, community_types: list[str] | None = None, *, prepared: PreparedIndicatorData | None = None, _batch: dict | None = None) -> dict[str, Any]:
+    prepared = prepared or PreparedIndicatorData(frames)
+    projects, locations, years, quarters, months, community_types = projects or [], locations or [], years or [], quarters or [], months or [], community_types or []
+    # The source values often append Arabic text (for example, "Syrian Refugee
+    # لاجئ-سوري"). Expose the reporting populations as clean English labels
+    # while retaining a population-aware filter against the original data.
+    community_options=prepared.community_options
+    community_masks = _batch.get("communities") if _batch is not None else None
+    if community_masks is None:
+        community_masks = {id(frame): selection_mask(prepared.communities[id(frame)], set(community_types))
+                       if community_types and prepared.common[id(frame)]["community"] else
+                       pd.Series(True, index=range(len(prepared.records.get(id(frame), []))), dtype=bool)
+                           for frame in frames.values()}
+        if _batch is not None: _batch["communities"] = community_masks
+    start, end = reporting_period_bounds(from_date, to_date)
+
+    beneficiary_frame = frames.get("beneficiaries", prepared.empty_frame)
+    beneficiary_id_column = prepared.find(list(beneficiary_frame.columns), "Case ID", "Beneficiary ID")
+    beneficiary_name_column = prepared.find(list(beneficiary_frame.columns), "Name (Filter Color Red)", "Beneficiary Name", "Name")
+    beneficiary_names = prepared.names
+    if community_types and prepared.common.get(id(beneficiary_frame), {}).get("community") and beneficiary_id_column and beneficiary_name_column:
+        if _batch is not None and "names" in _batch:
+            beneficiary_names = _batch["names"]
+        else:
+            beneficiary_names = {clean_id(row.get(beneficiary_id_column, "")): clean_id(row.get(beneficiary_name_column, ""))
+                                 for row, keep in zip(prepared.records[id(beneficiary_frame)], community_masks[id(beneficiary_frame)]) if keep}
+            if _batch is not None: _batch["names"] = beneficiary_names
+
+    available_pairs=prepared.available_pairs
     available_report_rows=[pair for pair in REPORT_ROWS if pair in available_pairs]
     available_projects={project for project, _ in available_report_rows}
-    visible_rows = [pair for pair in REPORT_ROWS if pair[0] in available_projects and (not projects or pair[0] in projects) and (not locations or pair[1] in locations)]
+    visible_rows = [pair for pair in REPORT_ROWS if pair[0] in available_projects and matches_selection(pair[0], projects) and matches_selection(pair[1], locations)]
 
-    def in_period(value: Any) -> bool:
-        parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
-        if pd.isna(parsed) or (start is not None and parsed < start) or (end is not None and parsed > end): return False
-        month_key, quarter_key, year_key = parsed.strftime("%Y-%m"), f"{parsed.year}-Q{parsed.quarter}", str(parsed.year)
-        return (not years or year_key in years) and (not quarters or quarter_key in quarters) and (not months or month_key in months)
+    period_masks = {}
+    def parsed_date(frame: pd.DataFrame, row: dict, column: str | None):
+        key = (id(frame), column)
+        if key not in prepared.date_records: prepared.date_index(frame, column)
+        return prepared.date_records[key][prepared.row_positions[id(frame)][id(row)]]
+    def period_mask(frame: pd.DataFrame, column: str | None, countifs: bool = False) -> pd.Series:
+        key = (id(frame), column, countifs)
+        if key not in period_masks:
+            dates, month_keys, year_keys, quarter_keys, blanks = prepared.date_index(frame, column)
+            if countifs:
+                mask = period_mask(frame, column)
+                if start is None and not years and not quarters and not months:
+                    mask = mask | (blanks & community_masks.get(id(frame), pd.Series(True, index=mask.index, dtype=bool)))
+                period_masks[key] = mask
+                return mask
+            mask = dates.notna()
+            if start is not None: mask &= dates >= start
+            if end is not None: mask &= dates <= end
+            if years: mask &= selection_mask(year_keys, set(years))
+            if quarters: mask &= selection_mask(quarter_keys, set(quarters))
+            if months: mask &= selection_mask(month_keys, set(months))
+            period_masks[key] = mask & community_masks.get(id(frame), pd.Series(True, index=mask.index, dtype=bool))
+        return period_masks[key]
 
-    def in_countifs_period(value: Any) -> bool:
-        """Match Excel COUNTIFS date criteria, including a blank date when no lower bound is set."""
-        parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
-        if pd.isna(parsed):
-            return not _norm(value) and start is None and not years and not quarters and not months
-        if (start is not None and parsed < start) or (end is not None and parsed > end): return False
-        month_key, quarter_key, year_key = parsed.strftime("%Y-%m"), f"{parsed.year}-Q{parsed.quarter}", str(parsed.year)
-        return (not years or year_key in years) and (not quarters or quarter_key in quarters) and (not months or month_key in months)
+    def matching(frame: pd.DataFrame, column: str | None, rule: str, predicate: Callable, countifs: bool = False):
+        if _batch is not None:
+            key = (id(frame), column, rule)
+            if key not in _batch["records"]:
+                date_key = (id(frame), column)
+                dates, month_keys, year_keys, _, _ = prepared.date_index(frame, column)
+                if date_key not in _batch["masks"]:
+                    mask = dates.notna() & month_keys.isin(_batch["months"]) & community_masks[id(frame)]
+                    if start is not None: mask &= dates >= start
+                    if end is not None: mask &= dates <= end
+                    if years: mask &= selection_mask(year_keys, set(years))
+                    _batch["masks"][date_key] = mask
+                mask = _batch["masks"][date_key] & prepared.eligible(frame, rule, predicate)
+                grouped = {}
+                source = prepared.records.get(id(frame), [])
+                month_values = month_keys.to_numpy()
+                for index in mask[mask].index:
+                    grouped.setdefault(month_values[index], []).append(source[index])
+                _batch["records"][key] = grouped
+            return _batch["records"][key].get(months[0], [])
+        mask = period_mask(frame, column, countifs) & prepared.eligible(frame, rule, predicate)
+        records = prepared.records.get(id(frame), [])
+        return [records[index] for index in mask[mask].index]
 
-    def select(frame: pd.DataFrame, key_column: str | None, predicate: Callable[[pd.Series], bool], monthly: bool = False) -> list[pd.Series]:
+    def select(frame: pd.DataFrame, key_column: str | None, records: list, monthly: bool = False) -> list[dict[str, Any]]:
         chosen, seen = [], set()
-        completed_column = _find(list(frame.columns), "Date Service Completed") if monthly else None
-        for _, row in frame.iterrows():
-            if not predicate(row): continue
-            key = clean_id(row.get(key_column, "")) if key_column else ""
+        keys = prepared.identifier_values(frame, key_column)
+        completed_column = prepared.find(list(frame.columns), "Date Service Completed") if monthly else None
+        for row in records:
+            key = keys[prepared.row_positions[id(frame)][id(row)]] if key_column else ""
             if not key: continue
             if monthly:
-                parsed = pd.to_datetime(row.get(completed_column, ""), errors="coerce", dayfirst=True)
+                parsed = parsed_date(frame, row, completed_column)
                 if pd.isna(parsed): continue
                 key = f"{parsed.strftime('%Y-%m')}|{key}"
             if key in seen: continue
             seen.add(key); chosen.append(row)
         return chosen
 
-    def countifs_rows(frame: pd.DataFrame, predicate: Callable[[pd.Series], bool]) -> list[pd.Series]:
-        """COUNTIFS counts matching rows; it does not de-duplicate record identifiers."""
-        return [row for _, row in frame.iterrows() if predicate(row)]
-
-    def unique_rows(frame: pd.DataFrame, key_column: str | None, predicate: Callable[[pd.Series], bool]) -> list[pd.Series]:
-        chosen, seen = [], set()
-        for _, row in frame.iterrows():
-            if not predicate(row): continue
-            key = clean_id(row.get(key_column, "")) if key_column else ""
-            if key in seen: continue
-            seen.add(key); chosen.append(row)
-        return chosen
-
     amal_project = "UNHCR 2026 - AMAL CAMP"
-    # AMAL is an IDP-only project.  A project filter that includes AMAL therefore
-    # presents only IDP reporting; without AMAL, IDP reporting is not relevant.
+    # AMAL is an IDP-only project. Mixed project selections must retain the
+    # refugee sections alongside IDP reporting instead of letting AMAL hide them.
     refugee_community_types = {"Syrian Refugee", "Non-Syrian Refugee"}
-    show_refugee_columns = not (projects and amal_project in projects) and "IDP" not in community_types
+    population_scope = [(project, location) for project, location in REPORT_ROWS
+                        if matches_selection(project, projects) and matches_selection(location, locations)]
+    show_refugee_columns = any(project != amal_project for project, _ in population_scope) and any(matches_selection(value, community_types) for value in refugee_community_types)
     # With no project filter, the report covers every available project,
     # including AMAL; retain the IDP section and workbook sheet in that case.
-    show_idp_columns = (not projects or amal_project in projects) and not (refugee_community_types & set(community_types))
+    show_idp_columns = any(project == amal_project for project, _ in population_scope) and matches_selection("IDP", community_types)
     all_populations = tuple(
         ([(("syrian-refugee", "Syrian Refugees")), (("non-syrian-refugee", "Non-Syrian Refugees"))] if show_refugee_columns else [])
         + ([("idp", "IDP")] if show_idp_columns else [])
@@ -243,27 +441,23 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         "idp": (("idp", "IDP"),),
     }
 
-    def matrix(records: list[pd.Series], frame: pd.DataFrame, population_id: str, population_group: str, source_label: str = "") -> dict[str, Any]:
+    def matrix(records: list[dict[str, Any]], frame: pd.DataFrame, population_id: str, population_group: str, source_label: str = "") -> dict[str, Any]:
         if population_group == "idp":
             matrix_rows = [pair for pair in visible_rows if pair[0] == "UNHCR 2026 - AMAL CAMP"]
         elif population_group == "refugee":
             matrix_rows = [pair for pair in visible_rows if pair[0] != "UNHCR 2026 - AMAL CAMP"]
         else:
             matrix_rows = visible_rows
-        cols = _common_columns(frame); beneficiary_column = _find(list(frame.columns), "Beneficiary ID", "Case ID", "PN ID"); assessment_column = _find(list(frame.columns), "Assessment ID"); name_column = _find(list(frame.columns), "Name (Filter Color Red)", "Beneficiary Name", "Name")
+        beneficiary_column = prepared.find(list(frame.columns), "Beneficiary ID", "Case ID", "PN ID"); assessment_column = prepared.find(list(frame.columns), "Assessment ID"); name_column = prepared.find(list(frame.columns), "Name (Filter Color Red)", "Beneficiary Name", "Name")
         counts = {pair: [0] * 12 for pair in matrix_rows}; ids = {pair: [[] for _ in range(12)] for pair in matrix_rows}; assessment_ids = {pair: [[] for _ in range(12)] for pair in matrix_rows}; unclassified = unknown = 0
         for row in records:
-            if _population(row.get(cols["community"], "")) != population_id: continue
-            pair = mapped_pair(row, cols)
+            population, pair, sex, age = prepared.demographics[id(row)]
+            if population != population_id: continue
             if pair is None: unknown += 1; continue
             if pair not in counts: continue
-            sex, age = _gender(row.get(cols["gender"], "")), _age_group(row.get(cols["age"], ""))
             if not sex or not age: unclassified += 1; continue
-            index = AGE_GROUPS.index(age) + (0 if sex == "male" else 6)
+            beneficiary_id, assessment_id, name, index = prepared.details[id(row)]
             counts[pair][index] += 1
-            beneficiary_id = clean_id(row.get(beneficiary_column, "")) if beneficiary_column else ""
-            assessment_id = clean_id(row.get(assessment_column, "")) if assessment_column else ""
-            name = clean_id(row.get(name_column, "")) if name_column else ""
             if not name: name = beneficiary_names.get(beneficiary_id, "")
             source = source_label or ("assessments.csv" if assessment_column else "source record")
             if beneficiary_id:
@@ -281,7 +475,7 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
             rows.append({"project": project, "location": location, "values": values, "beneficiaryIds": row_ids, "assessmentIds": row_assessment_ids})
         return {"rows": rows, "totals": totals, "total": totals[-1], "totalBeneficiaryIds": total_ids, "warnings": {"unclassified": unclassified, "unknownLocation": unknown}}
 
-    def indicator(identifier: str, title: str, source: str, date_field: str, rule: str, population_group: str, records: list[pd.Series], frame: pd.DataFrame) -> dict[str, Any]:
+    def indicator(identifier: str, title: str, source: str, date_field: str, rule: str, population_group: str, records: list[dict[str, Any]], frame: pd.DataFrame) -> dict[str, Any]:
         source_file = {"Assessments": "assessments.csv", "Legal Services": "legalservices.csv", "Deportation Records": "deportationrecords.csv", "Awareness": "awareness.csv", "Assessments (this year)": "assessments.csv - this year", "Legal Services (carry-over)": "legalservices.csv - carry-over"}.get(source, source)
         sections = [{"id": pid, "label": label, **matrix(records, frame, pid, population_group, source_file)} for pid, label in populations[population_group]]
         return {"id": identifier, "title": title, "source": source, "dateField": date_field, "rule": rule, "population": population_group, "total": sum(section["total"] for section in sections), "sections": sections, "children": [], "contributions": {}}
@@ -301,55 +495,57 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
 
     assessments, services = frames["assessments"], frames["legalservices"]
     acols, scols = list(assessments.columns), list(services.columns)
-    aid = _find(acols, "Assessment ID"); adate = _find(acols, "Date of Assessment"); aneed = _find(acols, "Type of Legal Service Needed")
-    aprovided = _find(acols, "Legal Service (Type of Service Provided", "Type of Service Provided"); adetained = _find(acols, "Is the beneficiary detained")
-    aimmigration = _find(acols, "Is it an immigration related charge"); astatus = _find(acols, "Detainee current status")
-    arelease = _find(acols, "Date of the released or deported"); adoc = _find(acols, "Type of Documents to be issued")
-    sid = _find(scols, "Service ID"); sbid = _find(scols, "Beneficiary ID"); stype = _find(scols, "Type of Service Provided")
-    sstatus = _find(scols, "Service Status"); sprovision = _find(scols, "Date of Service Provision"); scompleted = _find(scols, "Date Service Completed")
-    sdetained = _find(scols, "Is the beneficiary detained"); sdoc = _find(scols, "Type of Document")
+    aid = prepared.find(acols, "Assessment ID"); adate = prepared.find(acols, "Date of Assessment"); aneed = prepared.find(acols, "Type of Legal Service Needed")
+    aprovided = prepared.find(acols, "Legal Service (Type of Service Provided", "Type of Service Provided"); adetained = prepared.find(acols, "Is the beneficiary detained")
+    aimmigration = prepared.find(acols, "Is it an immigration related charge"); astatus = prepared.find(acols, "Detainee current status")
+    arelease = prepared.find(acols, "Date of the released or deported"); adoc = prepared.find(acols, "Type of Documents to be issued")
+    sid = prepared.find(scols, "Service ID"); sbid = prepared.find(scols, "Beneficiary ID"); stype = prepared.find(scols, "Type of Service Provided")
+    sstatus = prepared.find(scols, "Service Status"); sprovision = prepared.find(scols, "Date of Service Provision"); scompleted = prepared.find(scols, "Date Service Completed")
+    sdetained = prepared.find(scols, "Is the beneficiary detained"); sdoc = prepared.find(scols, "Type of Document")
 
-    reached = select(assessments, aid, lambda row: in_period(row.get(adate, "")) and bool(_norm(row.get(aneed, ""))))
-    representation_base = select(assessments, aid, lambda row: in_period(row.get(adate, "")) and _assistance_or_representation(row.get(aprovided, "")) and _contains(row.get(aneed, ""), "legal representation"))
-    carryover = select(services, sbid, lambda row: _carryover_match(row, sprovision, scompleted, sstatus, stype, in_countifs_period), monthly=True)
+    reached = select(assessments, aid, matching(assessments, adate, "reached", lambda row: bool(_norm(row.get(aneed, "")))))
+    representation_base = select(assessments, aid, matching(assessments, adate, "representation", lambda row: _assistance_or_representation(row.get(aprovided, "")) and _contains(row.get(aneed, ""), "legal representation")))
+    def eligible_carryover(row):
+        provision = parsed_date(services, row, sprovision)
+        return not pd.isna(provision) and provision <= pd.Timestamp("2025-12-31") and _norm(row.get(sstatus, "")) in {"completed اكتملت", "completed اکتملت"} and not _contains(row.get(stype, ""), "legal counselling")
+    carryover = select(services, sbid, matching(services, scompleted, "carryover", eligible_carryover, True), monthly=True)
     monthly_carryover: dict[str, int] = {}
     for row in carryover:
-        parsed = pd.to_datetime(row.get(scompleted, ""), errors="coerce", dayfirst=True)
+        parsed = parsed_date(services, row, scompleted)
         if pd.isna(parsed): continue
         month = parsed.strftime("%Y-%m"); monthly_carryover[month] = monthly_carryover.get(month, 0) + 1
 
     representation_children = []
     for suffix, label, detained_test in (("detainee", "Detainee", _yes), ("other", "Other", _no)):
-        base = [row for row in representation_base if detained_test(row.get(adetained, ""))]
-        carried = [row for row in carryover if detained_test(row.get(sdetained, ""))]
+        base = [row for row in representation_base if prepared.detained[id(row)][0 if suffix=="detainee" else 1]]
+        carried = [row for row in carryover if prepared.detained[id(row)][0 if suffix=="detainee" else 1]]
         base_result = indicator("tmp", "", "Assessments (this year)", "Date of Assessment", "", "refugee", base, assessments)
         carry_result = indicator("tmp", "", "Legal Services (carry-over)", "Date Service Completed", "", "refugee", carried, services)
         sections = add_sections(base_result["sections"], carry_result["sections"])
         representation_children.append({"id": f"legal-representation-{suffix}", "title": f"# of persons provided with legal representation ({label})", "source": "Assessments + Legal Services", "dateField": "Date of Assessment / Date Service Completed", "rule": "Unique Assessment IDs in the reporting period plus eligible pre-2026 services, counted once per Beneficiary ID per completion month.", "population": "refugee", "total": sum(section["total"] for section in sections), "sections": sections, "children": [], "contributions": {"assessmentPeriod": base_result["total"], "carryOver": carry_result["total"]}})
     representation = parent("legal-representation", "# of persons provided with legal representation (attributes- detainee and other)", "Detainee plus Other: unique Assessment IDs and monthly unique Beneficiary IDs from eligible carry-over services.", representation_children, True, {"assessmentPeriod": sum(child["contributions"]["assessmentPeriod"] for child in representation_children), "carryOver": sum(child["contributions"]["carryOver"] for child in representation_children), "monthlyCarryOver": monthly_carryover})
 
-    counselling_base = countifs_rows(assessments, lambda row: in_countifs_period(row.get(adate, "")) and _only_counselling(row.get(aprovided, "")) and _single_counselling(row.get(aneed, "")))
-    counselling_children = [indicator(f"legal-counselling-{suffix}", f"# of persons provided with legal counselling ({label})", "Assessments", "Date of Assessment", "Only Counselling provided and Legal Counselling needed.", "refugee", [row for row in counselling_base if detained_test(row.get(adetained, ""))], assessments) for suffix, label, detained_test in (("detainee", "Detainee", _yes), ("other", "Other", _no))]
+    counselling_base = matching(assessments, adate, "counselling", lambda row: _only_counselling(row.get(aprovided, "")) and _single_counselling(row.get(aneed, "")), True)
+    counselling_children = [indicator(f"legal-counselling-{suffix}", f"# of persons provided with legal counselling ({label})", "Assessments", "Date of Assessment", "Only Counselling provided and Legal Counselling needed.", "refugee", [row for row in counselling_base if prepared.detained[id(row)][0 if suffix=="detainee" else 1]], assessments) for suffix, label, detained_test in (("detainee", "Detainee", _yes), ("other", "Other", _no))]
     counselling = parent("legal-counselling", "# of persons provided with legal counselling (attributes- detainee and other)", "Detainee plus Other; no carry-over.", counselling_children)
 
-    identified = countifs_rows(assessments, lambda row: in_countifs_period(row.get(adate, "")) and _yes(row.get(adetained, "")) and _yes(row.get(aimmigration, "")))
-    released = countifs_rows(assessments, lambda row: in_countifs_period(row.get(arelease, "")) and _yes(row.get(adetained, "")) and _yes(row.get(aimmigration, "")) and _released(row.get(astatus, "")) and _assistance_or_representation(row.get(aprovided, "")))
-    scivil = _find(scols, "Is Civil Documents")
-    secured = countifs_rows(services, lambda row: in_countifs_period(row.get(scompleted, "")) and _yes(row.get(scivil, "")) and _completed(row.get(sstatus, "")) and not _contains(row.get(stype, ""), "legal counselling"))
-    uid = countifs_rows(services, lambda row: in_countifs_period(row.get(scompleted, "")) and _contains(row.get(sdoc, ""), "unified national card") and not _contains(row.get(stype, ""), "legal counselling"))
+    identified = matching(assessments, adate, "identified", lambda row: _yes(row.get(adetained, "")) and _yes(row.get(aimmigration, "")), True)
+    released = matching(assessments, arelease, "released", lambda row: _yes(row.get(adetained, "")) and _yes(row.get(aimmigration, "")) and _released(row.get(astatus, "")) and _assistance_or_representation(row.get(aprovided, "")), True)
+    scivil = prepared.find(scols, "Is Civil Documents")
+    secured = matching(services, scompleted, "secured", lambda row: _yes(row.get(scivil, "")) and _completed(row.get(sstatus, "")) and not _contains(row.get(stype, ""), "legal counselling"), True)
+    uid = matching(services, scompleted, "uid", lambda row: _contains(row.get(sdoc, ""), "unified national card") and not _contains(row.get(stype, ""), "legal counselling"), True)
 
-    def is_amal_camp(row: pd.Series, frame: pd.DataFrame) -> bool:
-        columns = _common_columns(frame)
-        return _norm(row.get(columns["project"], "")) == _norm(amal_project) and _norm(row.get(columns["location"], "")) == _norm("AMAL Camp")
+    def is_amal_camp(row: dict[str, Any], frame: pd.DataFrame) -> bool:
+        return id(row) in prepared.amal
 
-    civil_counselling = indicator("civil-counselling", "# of persons receiving legal counselling for civil documentation", "Assessments", "Date of Assessment", "Same criteria as legal counselling (Other), restricted to AMAL Camp.", "idp", [row for row in counselling_base if _no(row.get(adetained, "")) and is_amal_camp(row, assessments)], assessments)
-    civil_representation_base = [row for row in representation_base if _no(row.get(adetained, "")) and is_amal_camp(row, assessments)]
-    civil_representation_carryover = [row for row in carryover if _no(row.get(sdetained, "")) and is_amal_camp(row, services)]
+    civil_counselling = indicator("civil-counselling", "# of persons receiving legal counselling for civil documentation", "Assessments", "Date of Assessment", "Same criteria as legal counselling (Other), restricted to AMAL Camp.", "idp", [row for row in counselling_base if prepared.detained[id(row)][1] and is_amal_camp(row, assessments)], assessments)
+    civil_representation_base = [row for row in representation_base if prepared.detained[id(row)][1] and is_amal_camp(row, assessments)]
+    civil_representation_carryover = [row for row in carryover if prepared.detained[id(row)][1] and is_amal_camp(row, services)]
     civil_representation_assessments = indicator("tmp", "", "Assessments (this year)", "Date of Assessment", "", "idp", civil_representation_base, assessments)
     civil_representation_services = indicator("tmp", "", "Legal Services (carry-over)", "Date Service Completed", "", "idp", civil_representation_carryover, services)
     civil_representation_sections = add_sections(civil_representation_assessments["sections"], civil_representation_services["sections"])
     civil_representation = {"id": "civil-representation", "title": "# of persons receiving legal representation for civil documentation", "source": "Assessments + Legal Services", "dateField": "Date of Assessment / Date Service Completed", "rule": "Same criteria as legal representation (Other), restricted to AMAL Camp.", "population": "idp", "total": sum(section["total"] for section in civil_representation_sections), "sections": civil_representation_sections, "children": [], "contributions": {"assessmentPeriod": civil_representation_assessments["total"], "carryOver": civil_representation_services["total"]}}
-    civil_representation_document_rows = countifs_rows(services, lambda row: in_countifs_period(row.get(scompleted, "")) and _completed(row.get(sstatus, "")) and _contains(row.get(stype, ""), "legal representation") and is_amal_camp(row, services))
+    civil_representation_document_rows = matching(services, scompleted, "civil-documents", lambda row: _completed(row.get(sstatus, "")) and _contains(row.get(stype, ""), "legal representation") and is_amal_camp(row, services), True)
 
     legal_assistance_total = {
         "id": "06-1-1-legal-assistance",
@@ -363,12 +559,12 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         "children": [],
         "contributions": {"assessmentPeriod": counselling["total"] + representation["contributions"]["assessmentPeriod"], "carryOver": representation["contributions"]["carryOver"]},
     }
-    deport = frames.get("deportationrecords", pd.DataFrame())
-    ddate = _find(list(deport.columns), "Date of Deportation Knowledge", "Date of deporting")
-    deported = indicator("deported", "# of persons deported from detention (with immigration related charges)", "Deportation Records", "Date of Deportation Knowledge - تاريخ العلم بالترحيل", "All rows matching the reporting dimensions and Date of Deportation Knowledge.", "refugee", countifs_rows(deport, lambda row: in_countifs_period(row.get(ddate, ""))), deport)
-    awareness = frames.get("awareness", pd.DataFrame())
-    wdate = _find(list(awareness.columns), "Date of Session")
-    awareness_rows = countifs_rows(awareness, lambda row: in_countifs_period(row.get(wdate, "")))
+    deport = frames.get("deportationrecords", prepared.empty_frame)
+    ddate = prepared.find(list(deport.columns), "Date of Deportation Knowledge", "Date of deporting")
+    deported = indicator("deported", "# of persons deported from detention (with immigration related charges)", "Deportation Records", "Date of Deportation Knowledge - تاريخ العلم بالترحيل", "All rows matching the reporting dimensions and Date of Deportation Knowledge.", "refugee", matching(deport, ddate, "all", lambda row: True, True), deport)
+    awareness = frames.get("awareness", prepared.empty_frame)
+    wdate = prepared.find(list(awareness.columns), "Date of Session")
+    awareness_rows = matching(awareness, wdate, "all", lambda row: True, True)
 
     refugee_indicators = [
         indicator("detention-immigration", "# of persons identified in detention (with immigration related charges)", "Assessments", "Date of Assessment", "Detained and immigration-related charge are Yes.", "refugee", identified, assessments),
@@ -425,7 +621,7 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         if len(values) == 2: return f"{values[0]} and {values[1]}"
         return ", ".join(values[:-1]) + f", and {values[-1]}"
 
-    if len(months) == 1:
+    if len(months) == 1 and not split_selection(months)[1]:
         try: narrative_period = pd.Timestamp(f"{months[0]}-01").strftime("%B %Y")
         except (TypeError, ValueError): narrative_period = str(months[0])
     else: narrative_period = "the selected reporting period" if months else "the reporting period"
@@ -489,8 +685,8 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
             ("Men", sum(values[3:6])),
         )
         gender_summary = ", ".join(f"{label}: {value:,} ({value / entry['total'] * 100:.1f}%)" for label, value in gender_groups if value)
-        awareness_id_column = _find(list(awareness.columns), "Awareness ID")
-        topic_column = _find(list(awareness.columns), "Session Topic")
+        awareness_id_column = prepared.find(list(awareness.columns), "Awareness ID")
+        topic_column = prepared.find(list(awareness.columns), "Session Topic")
         session_ids = {clean_id(row.get(awareness_id_column, "")) for row in awareness_rows if awareness_id_column and clean_id(row.get(awareness_id_column, ""))}
         topics: dict[str, dict[str, Any]] = {}
         awareness_columns = _common_columns(awareness)
@@ -567,25 +763,8 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
         for child in entry.get("children", []): attach_narrative(child)
     for group in groups:
         for item in group["indicators"]: attach_narrative(item)
-    project_order = list(dict.fromkeys(project for project, _ in available_report_rows))
-    report_dates = []
-    for frame, columns in ((assessments, (adate, arelease)), (services, (sprovision, scompleted))):
-        for column in columns:
-            if column: report_dates.extend(pd.to_datetime(frame[column], errors="coerce", dayfirst=True).dropna().tolist())
-    for dataset, hints in (("deportationrecords", ("Date of Deportation Knowledge", "Date of deporting")), ("awareness", ("Date of Session",))):
-        if dataset in frames:
-            column = _find(list(frames[dataset].columns), *hints)
-            if column: report_dates.extend(pd.to_datetime(frames[dataset][column], errors="coerce", dayfirst=True).dropna().tolist())
-    month_options = sorted({date.strftime("%Y-%m") for date in report_dates}, reverse=True)
-    quarter_options = sorted({f"{date.year}-Q{date.quarter}" for date in report_dates}, reverse=True)
-    year_options = sorted({str(date.year) for date in report_dates}, reverse=True)
-    return {"fromDate": from_date, "toDate": to_date, "ageGroups": list(AGE_GROUPS), "filterOptions": {"projects": project_order, "locations": list(dict.fromkeys(location for _, location in available_report_rows)), "locationsByProject": {project: [location for row_project, location in available_report_rows if row_project == project] for project in project_order}, "years": year_options, "quarters": quarter_options, "months": month_options, "communityTypes": community_options}, "activeFilters": {"projects": projects, "locations": locations, "years": years, "quarters": quarters, "months": months, "communityTypes": community_types}, "groups": groups}
-
-
-def _carryover_match(row: pd.Series, provision_column: str | None, completed_column: str | None, status_column: str | None, type_column: str | None, in_period: Callable[[Any], bool]) -> bool:
-    provision = pd.to_datetime(row.get(provision_column, ""), errors="coerce", dayfirst=True)
-    completed_status = _norm(row.get(status_column, "")) in {"completed اكتملت", "completed اکتملت"}
-    return not pd.isna(provision) and provision <= pd.Timestamp("2025-12-31") and in_period(row.get(completed_column, "")) and completed_status and not _contains(row.get(type_column, ""), "legal counselling")
+    linked_options=prepared.linked_filter_options({"projects":projects,"locations":locations,"years":years,"quarters":quarters,"months":months,"communityTypes":community_types},from_date,to_date)
+    return {"fromDate": from_date, "toDate": to_date, "ageGroups": list(AGE_GROUPS), "filterOptions": linked_options, "activeFilters": {"projects": projects, "locations": locations, "years": years, "quarters": quarters, "months": months, "communityTypes": community_types}, "groups": groups}
 
 
 def build_indicator_workbook(report: dict[str, Any], monthly_reports: list[tuple[str, dict[str, Any]]] | None = None) -> bytes:
@@ -771,6 +950,7 @@ def build_indicator_workbook(report: dict[str, Any], monthly_reports: list[tuple
                     row_number += 3
         analysis.column_dimensions["A"].width = 56
         for column in range(2, len(month_labels) + 3): analysis.column_dimensions[get_column_letter(column)].width = 14
+    format_excel_dates(workbook)
     buffer = BytesIO(); workbook.save(buffer)
     return buffer.getvalue()
 
@@ -778,7 +958,7 @@ def build_indicator_workbook(report: dict[str, Any], monthly_reports: list[tuple
 def build_narrative_workbook(report: dict[str, Any]) -> bytes:
     workbook = Workbook(); sheet = workbook.active; sheet.title = "Narrative Report"; sheet.sheet_view.showGridLines = False; sheet.freeze_panes = "A2"
     selected_months = report.get("activeFilters", {}).get("months", [])
-    if len(selected_months) == 1:
+    if len(selected_months) == 1 and not split_selection(selected_months)[1]:
         try: achievement_period = pd.Timestamp(f"{selected_months[0]}-01").strftime("%B %Y")
         except (TypeError, ValueError): achievement_period = str(selected_months[0])
     else: achievement_period = "Selected Period" if selected_months else "Reporting Period"
@@ -795,4 +975,42 @@ def build_narrative_workbook(report: dict[str, Any]) -> bytes:
         for cell in row: cell.border = Border(bottom=thin); cell.alignment = Alignment(vertical="top", wrap_text=True)
         row[2].number_format = "#,##0"
     for column, width in {"A":55,"B":24,"C":27,"D":115}.items(): sheet.column_dimensions[column].width = width
+    format_excel_dates(workbook)
     buffer=BytesIO(); workbook.save(buffer); return buffer.getvalue()
+
+
+def available_reporting_months(prepared, community_types=None):
+    available = set()
+    for dataset, columns in (("assessments", (("Date of Assessment",), ("Date of the released or deported",))),
+                             ("legalservices", (("Date of Service Provision",), ("Date Service Completed",))),
+                             ("deportationrecords", (("Date of Deportation Knowledge", "Date of deporting"),)),
+                             ("awareness", (("Date of Session",),))):
+        if dataset not in prepared.frames: continue
+        frame = prepared.frames[dataset]
+        for hints in columns:
+            column = prepared.find(list(frame.columns), *hints)
+            if column: available.update(prepared.reporting_dates(frame, column, community_types or [])[0])
+    return available
+
+
+def build_monthly_reports(frames, from_date="", to_date="", projects=None, locations=None,
+                          years=None, quarters=None, months=None, community_types=None,
+                          *, prepared=None, cached_reports=None):
+    """Partition eligible source rows once, retaining independent monthly deduplication."""
+    prepared = prepared or PreparedIndicatorData(frames)
+    reporting_period_bounds(from_date, to_date)
+    available = available_reporting_months(prepared, community_types)
+    included_months, excluded_months = split_selection(months or [])
+    selected = sorted(set(included_months or available) - set(excluded_months))
+    if years: selected = [month for month in selected if matches_selection(month[:4], years)]
+    if quarters:
+        selected = [month for month in selected if matches_selection(f"{month[:4]}-Q{(int(month[5:7])-1)//3+1}", quarters)]
+    batch = {"months": set(selected), "masks": {}, "records": {}}
+    reports = []
+    for month in selected:
+        report = (cached_reports or {}).get(month)
+        if report is None:
+            report = build_indicator_report(frames, from_date, to_date, projects, locations,
+                                            years, [], [month], community_types, prepared=prepared, _batch=batch)
+        reports.append({"month": month, "report": report})
+    return {"months": selected, "reports": reports}

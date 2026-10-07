@@ -7,10 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from .excel_export import Alignment, Font, PatternFill
 
 from .file_security import safe_spreadsheet_value, validate_xlsx_archive
-from .indicator_reporting import AGE_GROUPS, build_indicator_report
+from .legal_platform import format_excel_dates
+from .filter_selection import matches_selection, resolve_selection, split_selection
+from .indicator_reporting import AGE_GROUPS, PreparedIndicatorData, build_indicator_report, build_monthly_reports, available_reporting_months, reporting_period_bounds
 
 
 MONTH_START_COLUMNS = tuple(4 + (40 * index) for index in range(12))
@@ -230,23 +232,26 @@ def _platform_values(report: dict[str, Any], month: str) -> tuple[dict[tuple[str
     return values, titles
 
 
-def reconcile(master: IndicatorMasterWorkbook, frames: dict[str, Any], request: Any) -> dict[str, Any]:
-    base = build_indicator_report(frames, request.fromDate, request.toDate, request.projects, request.projectLocations, request.years, request.quarters, request.months, request.communityTypes)
-    months = list(request.months) or list(base.get("filterOptions", {}).get("months", []))
+def reconcile(master: IndicatorMasterWorkbook, frames: dict[str, Any], request: Any, *, prepared: PreparedIndicatorData | None = None, cached_reports=None) -> dict[str, Any]:
+    prepared = prepared or PreparedIndicatorData(frames)
+    reporting_period_bounds(request.fromDate, request.toDate)
+    included_months, excluded_months = split_selection(request.months)
+    available_months = included_months or list(available_reporting_months(prepared, request.communityTypes))
+    months = [month for month in available_months if month not in excluded_months]
     if request.years:
-        months = [month for month in months if month[:4] in request.years]
+        months = [month for month in months if matches_selection(month[:4], request.years)]
     if request.quarters:
-        allowed = {match.group(1) for value in request.quarters if (match := re.search(r"q\s*([1-4])", value, re.I))}
-        if allowed:
-            months = [month for month in months if str((int(month[5:7]) - 1) // 3 + 1) in allowed]
+        months = [month for month in months if matches_selection(f"{month[:4]}-Q{(int(month[5:7])-1)//3+1}", request.quarters)]
     months = sorted(set(months) & set(master.months))
     if not months:
         raise ValueError("No common reporting month is available between the current filters and the master workbook.")
 
     platform: dict[tuple[str, str, str, str, str, str, str], int] = {}
     titles: dict[str, str] = {}
-    for month in months:
-        report = build_indicator_report(frames, request.fromDate, request.toDate, request.projects, request.projectLocations, request.years, [], [month], request.communityTypes)
+    monthly = build_monthly_reports(frames, request.fromDate, request.toDate, request.projects,
+                                   request.projectLocations, request.years, [], months, request.communityTypes, prepared=prepared, cached_reports=cached_reports)
+    for entry in monthly["reports"]:
+        month, report = entry["month"], entry["report"]
         month_values, month_titles = _platform_values(report, month)
         platform.update(month_values)
         titles.update(month_titles)
@@ -257,14 +262,12 @@ def reconcile(master: IndicatorMasterWorkbook, frames: dict[str, Any], request: 
     platform = {key: value for key, value in platform.items() if value != 0}
     master_values = {key: value for key, value in master.values.items() if key[1] in months and value != 0}
     if request.projects:
-        allowed_projects = set(request.projects)
-        master_values = {key: value for key, value in master_values.items() if key[2] in allowed_projects}
+        master_values = {key: value for key, value in master_values.items() if matches_selection(key[2], request.projects)}
     if request.projectLocations:
-        allowed_locations = set(request.projectLocations) | {"All project locations"}
-        master_values = {key: value for key, value in master_values.items() if key[3] in allowed_locations}
+        master_values = {key: value for key, value in master_values.items() if key[3] == "All project locations" or matches_selection(key[3], request.projectLocations)}
     if request.communityTypes:
         allowed_populations = set()
-        for label in request.communityTypes:
+        for label in resolve_selection(request.communityTypes, prepared.community_options):
             normalized = _key(label)
             if normalized == "idp": allowed_populations.add("idp")
             elif "non syrian" in normalized: allowed_populations.add("non-syrian-refugee")
@@ -341,5 +344,6 @@ def build_reconciliation_workbook(result: dict[str, Any]) -> bytes:
             letter = column[0].column_letter
             sheet.column_dimensions[letter].width = min(48, max(12, max(len(str(cell.value or "")) for cell in column) + 2))
     output = BytesIO()
+    format_excel_dates(workbook)
     workbook.save(output)
     return output.getvalue()

@@ -1,4 +1,8 @@
 import {legalFetch as fetch, setLegalRevision} from "./legalQueryCache";
+import type {OverviewFilters, LegalOverviewResult} from "./types";
+
+export const getLegalOverview = (filters:OverviewFilters, signal?:AbortSignal) =>
+  fetch(`${API}/legal/overview`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(filters),signal}).then(parse<LegalOverviewResult>);
 import type {
   Dashboard,
   ExplorerFilter,
@@ -153,9 +157,17 @@ export const getLegalMetadata = (signal?: AbortSignal) =>
   fetch(`${API}/legal/metadata`, { cache: "no-store", signal }).then(
     parse<LegalMetadata>,
   );
-export const getLegalDeportationDashboard = (filters:Filters={},signal?:AbortSignal) => fetch(`${API}/legal/deportation-dashboard`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dataset:"deportationrecords",filters}),signal}).then(parse<Dashboard>);
+export const getLegalDeportationDashboard = (filters:Filters={},signal?:AbortSignal,search="") => fetch(`${API}/legal/deportation-dashboard`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dataset:"deportationrecords",filters,search}),signal}).then(parse<Dashboard>);
 export const getLegalIndicators = (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[],communityTypes:string[]=[],signal?:AbortSignal) =>
-  fetch(`${API}/legal/indicators`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({projects,projectLocations,years,quarters,months,communityTypes}),signal}).then(parse<IndicatorReport>);
+  fetch(`${API}/legal/indicators`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.fromEntries(Object.entries({projects,projectLocations,years,quarters,months,communityTypes}).map(([key, values])=>[key,[...new Set(values)].sort()]))),signal}).then(parse<IndicatorReport>);
+export const getLegalIndicatorsMonthly = (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[],communityTypes:string[]=[],signal?:AbortSignal) =>
+  fetch(`${API}/legal/indicators/monthly`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.fromEntries(Object.entries({projects,projectLocations,years,quarters,months,communityTypes}).map(([key,values])=>[key,[...new Set(values)].sort()]))),signal}).then(parse<{months:string[];reports:{month:string;report:IndicatorReport}[]}>);
+export const exportLegalDetention = async (search:string,filters:Record<string,string[]>,sortColumn:string,sortDirection:"asc"|"desc") => {
+  const response=await fetch(`${API}/legal/detention/export`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({search,filters,sortColumn,sortDirection})});
+  if(!response.ok)throw new Error(await response.text()||"Could not export detention table data.");
+  const url=URL.createObjectURL(await response.blob()),link=document.createElement("a");
+  link.href=url;link.download="detention-cases.xlsx";document.body.appendChild(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),2000);
+};
 export const exportLegalIndicators = async (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[],communityTypes:string[]=[]) => {
   const response=await fetch(`${API}/legal/indicators/export`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({projects,projectLocations,years,quarters,months,communityTypes})});
   if(!response.ok)throw new Error(await response.text()||"Unable to export indicator report");
@@ -171,7 +183,7 @@ const indicatorReconciliationBody=(projects:string[],projectLocations:string[],q
 export const getIndicatorReconciliationMetadata=(signal?:AbortSignal)=>fetch(`${API}/legal/indicators/reconciliation/metadata`,{cache:"no-store",signal}).then(parse<IndicatorReconciliationMetadata>);
 export const uploadIndicatorMasterWorkbook=(file:File)=>{const body=new FormData();body.append("file",file);return fetch(`${API}/legal/indicators/reconciliation/import`,{method:"POST",body}).then(parse<IndicatorReconciliationMetadata>)};
 export const selectIndicatorMasterSheet=(sheet:string)=>fetch(`${API}/legal/indicators/reconciliation/sheet?sheet=${encodeURIComponent(sheet)}`,{method:"POST"}).then(parse<IndicatorReconciliationMetadata>);
-export const reconcileLegalIndicators=(projects:string[],projectLocations:string[],quarters:string[],months:string[],communityTypes:string[]=[])=>fetch(`${API}/legal/indicators/reconciliation`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(indicatorReconciliationBody(projects,projectLocations,quarters,months,communityTypes))}).then(parse<IndicatorReconciliation>);
+export const reconcileLegalIndicators=(projects:string[],projectLocations:string[],quarters:string[],months:string[],communityTypes:string[]=[],signal?:AbortSignal)=>fetch(`${API}/legal/indicators/reconciliation`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(indicatorReconciliationBody(projects,projectLocations,quarters,months,communityTypes)),signal}).then(parse<IndicatorReconciliation>);
 export const exportIndicatorReconciliation=async(projects:string[],projectLocations:string[],quarters:string[],months:string[],communityTypes:string[]=[])=>{const response=await fetch(`${API}/legal/indicators/reconciliation/export`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(indicatorReconciliationBody(projects,projectLocations,quarters,months,communityTypes))});if(!response.ok){const issue=await response.json().catch(()=>({detail:response.statusText}));throw new Error(issue.detail||"Unable to export the reporting check")};const url=URL.createObjectURL(await response.blob()),link=document.createElement("a");link.href=url;link.download="indicator-reporting-check.xlsx";link.click();window.setTimeout(()=>URL.revokeObjectURL(url),1500)};
 export const uploadLegalFolder = async (
   files: File[],
@@ -179,12 +191,13 @@ export const uploadLegalFolder = async (
     phase: "uploading" | "processing";
     percent: number | null;
   }) => void,
+  operationId?:string,
 ) => {
   const body = new FormData();
   files.forEach((file) => body.append("files", file));
   return new Promise<LegalMetadata>((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("POST", `${API}/legal/upload`);
+    request.open("POST", `${API}/legal/upload${operationId?"?operationId="+encodeURIComponent(operationId):""}`);
     onProgress?.({ phase: "uploading", percent: 0 });
     request.upload.onprogress = (event) => {
       if (!event.lengthComputable) return;
@@ -286,8 +299,8 @@ export const getLegalExplorer = (
     body: JSON.stringify({ dataset, search, page, pageSize, filters, sortColumn, sortDirection }),
     signal,
   }).then(parse<LegalExplorerResult>);
-export const getLegalExplorerFilters = (dataset: string, signal?: AbortSignal) =>
-  fetch(`${API}/legal/explorer-filters/${dataset}`, { cache: "no-store", signal }).then(
+export const getLegalExplorerFilters = (dataset: string, signal?: AbortSignal, filters:Record<string,string[]>={}, search="") =>
+  fetch(`${API}/legal/explorer-filters/${dataset}`, { method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dataset,filters,search}), cache: "no-store", signal }).then(
     parse<{ columns: { name: string; values: string[]; valueCount?: number; truncated?: boolean }[] }>,
   );
 export const exportLegalExplorer = async (
@@ -339,8 +352,8 @@ export const getLegalCase = (
     body: JSON.stringify({ query, filters, ...options }),
     signal,
   }).then(parse<{ query: string; cases: any[];rows:any[];columns:{key:string;label:string;dataset:string}[];availableColumns:{key:string;label:string;dataset:string}[];totalRows:number;totalCases:number;page:number;pageSize:number }>);
-export const getLegalCaseFilters = (signal?: AbortSignal) =>
-  fetch(`${API}/legal/case-filters`, { cache: "no-store", signal }).then(
+export const getLegalCaseFilters = (signal?: AbortSignal,filters:Record<string,string[]>={},query="") =>
+  fetch(`${API}/legal/case-filters`, { method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filters,query}), cache: "no-store", signal }).then(
     parse<{ groups: {dataset:string;label:string;columns:{key:string;name:string;values:string[]}[]}[] }>,
   );
 export const exportLegalCases = async (
@@ -501,4 +514,4 @@ export const legalExportUrl = (dataset: string) =>
 export const legalAttachmentDownloadUrl = (url: string) =>
   `${API}/legal/attachment-download?${new URLSearchParams({url}).toString()}`;
 
-export const getLegalHotlineDashboard = (filters:Filters={},signal?:AbortSignal) => fetch(`${API}/legal/hotline-dashboard`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dataset:"legalhotlines",filters}),signal}).then(parse<Omit<Dashboard,"trend"> & {trend:{label:string;count:number;percent:number;detained:number;notDetained:number}[];missingContactDates:number;map:{items:{label:string;count:number;detained:number;notDetained:number;values:string[]}[]}}>);
+export const getLegalHotlineDashboard = (filters:Filters={},signal?:AbortSignal,search="") => fetch(`${API}/legal/hotline-dashboard`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dataset:"legalhotlines",filters,search}),signal}).then(parse<Omit<Dashboard,"trend"> & {trend:{label:string;count:number;percent:number;detained:number;notDetained:number}[];missingContactDates:number;map:{items:{label:string;count:number;detained:number;notDetained:number;values:string[]}[]}}>);

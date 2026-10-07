@@ -134,7 +134,10 @@ class DesktopLauncherTests(unittest.TestCase):
             folder = Path(temporary)
             candidate = SimpleNamespace(metadata=lambda: {"ready": True})
             api = launcher.DesktopApi(SimpleNamespace(toggle=lambda: False))
-            with patch("backend.legal_platform.LegalStore.from_folder", return_value=candidate), patch.object(launcher, "save_legal_folder") as save:
+            def prepared(*args, operation=None, **kwargs):
+                operation.plan(["Reconciling exclusions", "Finalizing metadata", "Publishing"])
+                return candidate
+            with patch("backend.legal_platform.LegalStore.from_folder", side_effect=prepared), patch.object(launcher, "save_legal_folder") as save:
                 result = api.process_legal_folder(str(folder))
             self.assertTrue(result["ready"]); save.assert_called_once_with(folder.resolve())
 

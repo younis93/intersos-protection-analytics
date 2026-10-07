@@ -213,7 +213,7 @@ html{scroll-behavior:smooth;scrollbar-width:thin;scrollbar-color:color-mix(in sr
 /* Home-only appearance controls and interactive filter refinements. */
 .welcome-home-actions{position:absolute;z-index:20;top:18px;right:22px;display:flex;align-items:center;gap:8px}.timeline-chips button{display:inline-flex;align-items:center;gap:6px}.timeline-chip-remove{width:14px;height:14px;padding:2px;border-radius:50%;background:rgba(255,255,255,.22)}
 .severity-warning{background:#fef3c7;color:#92400e}
-.detention-toolbar{position:relative;z-index:100;overflow:visible}.checkbox-multi-menu{z-index:500!important}.checkbox-multi-menu>div>label{display:flex!important;align-items:center;justify-content:flex-start;gap:9px;width:100%;padding:9px 10px!important;border:0!important;border-radius:9px!important;background:transparent!important;color:var(--ink);font-size:12px;cursor:pointer}.checkbox-multi-menu>div>label:hover,.checkbox-multi-menu>div>label.selected{background:color-mix(in srgb,var(--blue) 14%,transparent)!important;color:var(--blue)}.checkbox-multi-menu>div>label input{width:15px!important;min-width:15px!important;height:15px;margin:0;accent-color:var(--blue)}
+.detention-toolbar{position:relative;z-index:100;overflow:visible}.checkbox-multi-menu{z-index:500!important}.checkbox-multi-menu>div>label{display:flex!important;align-items:center;justify-content:flex-start;gap:9px;width:100%;padding:9px 10px!important;border:0!important;border-radius:0!important;background:transparent!important;color:var(--ink);font-size:12px;cursor:pointer}.checkbox-multi-menu>div>label:hover,.checkbox-multi-menu>div>label.selected{background:color-mix(in srgb,var(--blue) 14%,transparent)!important;color:var(--blue)}.checkbox-multi-menu>div>label input{width:15px!important;min-width:15px!important;height:15px;margin:0;accent-color:var(--blue)}
 .detention-toolbar .checkbox-multi-menu{left:0;right:auto;overflow-x:hidden}.detention-toolbar .checkbox-multi-menu>div{display:grid;gap:0;min-width:0}.detention-toolbar .checkbox-multi-menu>div>label{min-width:0!important;min-height:34px!important;flex:none!important;padding:6px 10px!important}.detention-toolbar .checkbox-multi-menu>div>label input{min-height:15px!important;padding:0!important}
 .detention-breakdown-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.detention-breakdown{padding:18px;min-width:0;border-radius:var(--radius)}.detention-breakdown:last-child:nth-child(odd){grid-column:1/-1}.detention-breakdown>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.detention-breakdown h3{margin:4px 0 0}.detention-breakdown>header>strong{font-size:22px}.detention-breakdown-bars{display:grid;gap:7px;margin-top:14px;max-height:330px;overflow:auto}.detention-breakdown-bars button{display:grid;grid-template-columns:minmax(110px,1.1fr) minmax(100px,2fr) 52px;align-items:center;gap:10px;padding:8px;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--ink);text-align:left;cursor:pointer}.detention-breakdown-bars button:hover,.detention-breakdown-bars button.selected{border-color:color-mix(in srgb,var(--blue) 45%,var(--line));background:color-mix(in srgb,var(--blue) 9%,transparent)}.detention-breakdown-bars button>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.detention-breakdown-bars button>i{height:8px;border-radius:999px;background:color-mix(in srgb,var(--line) 65%,transparent);overflow:hidden}.detention-breakdown-bars button>i>b{display:block;height:100%;border-radius:inherit}.detention-breakdown-bars button>strong{text-align:right;font-size:11px}
 .hierarchical-case-table{overflow:hidden}.hierarchical-case-table>table{table-layout:fixed!important;width:100%!important;min-width:0!important}.hierarchical-case-table>table>thead tr{display:table-row!important;min-width:0!important}.hierarchical-case-table>table>thead th,.hierarchical-case-table>table>tbody>tr>td{display:table-cell!important}.hierarchical-case-table th:first-child{width:4%}.hierarchical-case-table th:nth-child(2){width:15%}.hierarchical-case-table th:nth-child(3){width:11%}.hierarchical-case-table th:nth-child(4){width:15%}.hierarchical-case-table th:nth-child(5){width:14%}.hierarchical-case-table th:nth-child(6){width:13%}.hierarchical-case-table th:nth-child(7){width:11%}.hierarchical-case-table th:nth-child(8){width:17%}.hierarchical-case-table>table>tbody>tr>td:not(:last-child){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hierarchical-case-table .case-connected-summary{min-width:0}
@@ -363,7 +363,7 @@ path.detention-map-region{stroke:color-mix(in srgb,var(--muted) 32%,var(--line))
 .reconciliation-note-group-content{position:sticky;top:46px;padding-bottom:8px}
 
 /* Copyable Legal Platform table cells and opened-case values. */
-.legal-shell td:not(:has(button,a,input,select,textarea)),.legal-shell .case-record>div,.legal-shell .record-fields>div>span,.legal-shell [data-copy-value]{cursor:copy}.legal-shell td:not(:has(button,a,input,select,textarea)):active,.legal-shell .case-record>div:active,.legal-shell .record-fields>div>span:active,.legal-shell [data-copy-value]:active{outline:2px solid color-mix(in srgb,var(--blue) 45%,transparent);outline-offset:-2px}.legal-copy-toast{position:fixed;right:24px;bottom:24px;z-index:2000;display:grid;grid-template-columns:20px minmax(0,1fr);align-items:center;gap:2px 9px;width:min(360px,calc(100vw - 32px));padding:11px 14px;border:1px solid color-mix(in srgb,#269866 38%,var(--line));border-radius:14px;background:color-mix(in srgb,var(--panel-strong) 94%,transparent);color:var(--ink);box-shadow:0 16px 42px color-mix(in srgb,var(--ink) 18%,transparent);backdrop-filter:blur(20px);animation:legal-copy-in .18s ease-out}.legal-copy-toast svg{grid-row:1/3;width:18px;color:#269866}.legal-copy-toast span{font-size:10px;font-weight:850;color:#269866}.legal-copy-toast strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}@keyframes legal-copy-in{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}@media(max-width:760px){.legal-copy-toast{right:16px;bottom:92px}}
+.legal-shell td:not(:has(button,a,input,select,textarea)),.legal-shell .case-record>div,.legal-shell .record-fields>div>span,.legal-shell [data-copy-value]{cursor:copy}.legal-shell td:not(:has(button,a,input,select,textarea)):active,.legal-shell .case-record>div:active,.legal-shell .record-fields>div>span:active,.legal-shell [data-copy-value]:active{outline:2px solid color-mix(in srgb,var(--blue) 45%,transparent);outline-offset:-2px}.legal-copy-toast{flex-shrink:0;pointer-events:none;position:fixed;right:24px;bottom:24px;z-index:2000;display:grid;grid-template-columns:20px minmax(0,1fr);align-items:center;gap:2px 9px;width:min(360px,calc(100vw - 32px));padding:11px 14px;border:1px solid color-mix(in srgb,#269866 38%,var(--line));border-radius:14px;background:color-mix(in srgb,var(--panel-strong) 94%,transparent);color:var(--ink);box-shadow:0 16px 42px color-mix(in srgb,var(--ink) 18%,transparent);backdrop-filter:blur(20px);animation:legal-copy-in .18s ease-out}.legal-copy-toast svg{grid-row:1/3;width:18px;color:#269866}.legal-copy-toast span{font-size:10px;font-weight:850;color:#269866}.legal-copy-toast strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:normal;overflow-wrap:anywhere;line-height:1.45;font-size:11px}@keyframes legal-copy-in{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}@media(max-width:760px){.legal-copy-toast{right:16px;bottom:92px}}
 
 /* Keep the Legal services section boundary visible below assessment details. */
 .service-list{margin-top:12px;padding-top:13px;border-top:1px solid color-mix(in srgb,var(--blue) 24%,var(--line));background:color-mix(in srgb,var(--blue) 2%,transparent)}
@@ -754,7 +754,8 @@ path.detention-map-region{stroke:color-mix(in srgb,var(--muted) 32%,var(--line))
 @media(min-width:901px){.legal-shell .legal-content{padding-bottom:16px}}
 
 /* Overview is a single page grid; prevent nested section margins from adding a second gap. */
-.legal-shell .professional-overview{gap:var(--lp-gap);margin:0}
+.legal-shell .professional-overview{position:relative;gap:var(--lp-gap);margin:0}
+.professional-overview>.legal-scroll-sentinel{position:absolute;top:0;left:0;margin:0}
 .legal-shell .professional-overview> :is(section,article){margin:0!important}
 .legal-shell .professional-overview :is(.overview-primary-kpis,.overview-supporting,.overview-analysis-grid,.overview-detention-grid){gap:var(--lp-gap);margin:0}
 .legal-shell .professional-overview .overview-location-performance{margin:0;overflow:hidden}
@@ -869,7 +870,7 @@ path.detention-map-region{stroke:color-mix(in srgb,var(--muted) 32%,var(--line))
 .legal-shell:has(.legal-analytics-studio .app-select.open) .sidebar{z-index:0}
 @media(min-width:1280px){body:has(.legal-analytics-studio) .legal-shell .topbar .header-actions:has(.legal-header-scroll-controls){top:96px}}
 
-/* Match Assessment Review's outlined All filters action across analysis workspaces. */
+/* Match Assessment Review's outlined Filters action across analysis workspaces. */
 .legal-shell :is(.legal-deportation-dashboard>.toolbar,.detention-toolbar,.legal-analytics-studio .studio-quick-actions)>button.primary:has(>svg.lucide-sliders-horizontal){border-color:var(--line);background:var(--panel-strong);color:var(--ink);box-shadow:none}.legal-shell :is(.legal-deportation-dashboard>.toolbar,.detention-toolbar,.legal-analytics-studio .studio-quick-actions)>button.primary:has(>svg.lucide-sliders-horizontal):not(:disabled):hover{border-color:color-mix(in srgb,var(--blue) 48%,var(--line));background:var(--panel-strong);color:var(--blue);box-shadow:0 7px 16px color-mix(in srgb,var(--ink) 12%,transparent)}
 /* Shared table header pagination: concise controls directly above the records. */
 .legal-pager-compact{display:inline-flex;justify-content:flex-end;gap:7px;min-height:34px;padding:0!important;font-size:10px;font-weight:800;white-space:nowrap}.legal-pager-compact .soft{display:grid;place-items:center;width:34px;min-width:34px;min-height:34px;padding:0;border-radius:10px}.legal-pager-compact svg{width:16px;height:16px}.legal-card-heading>.legal-pager-compact,.legal-card-heading>.explorer-card-pager{margin-left:auto}.legal-card-heading:has(.table-selection-actions):has(.legal-pager-compact){align-items:center}.table-page-controls{margin:0!important}.table-page-controls>label{min-width:260px;flex:1 1 360px}.deportation-records-table .legal-card-heading{align-items:center}
@@ -1153,3 +1154,101 @@ html,body,#root{height:100%;overflow-x:hidden}
 /* Hotline identity and contact cells display their complete source values. */
 .hotline-records-table td.hotline-person-name{min-width:200px;max-width:none;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
 .hotline-records-table td.hotline-contact-number{min-width:140px;max-width:none;white-space:nowrap;overflow:visible;text-overflow:clip}
+
+
+.update-fallback-notice{display:flex;align-items:flex-start;gap:12px;margin:20px 0;padding:16px;text-align:left;border:1px solid color-mix(in srgb,var(--muted) 22%,transparent);border-radius:14px;background:color-mix(in srgb,var(--blue) 4%,var(--panel-strong));color:var(--ink)}
+.update-fallback-icon{display:grid;place-items:center;flex:0 0 32px;width:32px;height:32px;border-radius:10px;color:var(--muted);background:color-mix(in srgb,var(--muted) 10%,transparent)}
+.update-fallback-icon svg{width:17px;height:17px}
+.update-fallback-notice>div{min-width:0;flex:1}
+.update-fallback-notice strong{display:block;font-size:13px;font-weight:650;line-height:1.4}
+.update-fallback-notice p{margin:5px 0 10px;color:var(--muted);font-size:12px;line-height:1.6}
+.update-fallback-notice a{display:inline-flex;align-items:center;gap:6px;max-width:100%;color:var(--blue);font-size:12px;font-weight:600;line-height:1.5;text-decoration:underline;text-underline-offset:3px;border-radius:3px}
+.update-fallback-notice a span{min-width:0;overflow-wrap:anywhere}
+.update-fallback-notice a svg{flex:0 0 13px;width:13px;height:13px}
+.update-fallback-notice a:hover{text-decoration-thickness:2px}
+.update-fallback-notice a:focus-visible{outline:2px solid var(--blue);outline-offset:4px}
+@media(max-width:400px){.update-modal{padding:22px}.update-fallback-notice{gap:9px;padding:12px}}
+
+
+/* Keep the detention filter count readable inside its action button. */
+.detention-toolbar .detention-toolbar-actions>button.primary{width:auto;min-width:108px;flex:0 0 auto;gap:8px;padding-inline:16px;white-space:nowrap}
+.detention-toolbar .detention-toolbar-actions>button.primary>svg{flex:0 0 auto}
+.detention-toolbar .detention-toolbar-actions>button.primary>b{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;min-width:22px;width:auto;height:22px;padding:0 6px;border-radius:999px;font-size:11px;line-height:1;white-space:nowrap}
+
+
+.legal-shell .legal-analytics-studio .studio-quick-actions>button>b{display:grid;place-items:center;flex:0 0 auto;min-width:19px;height:19px;padding:0 5px;border-radius:999px;background:var(--blue);color:#fff;font-size:9px;line-height:1}
+
+/* Shared dropdowns use the browser top layer and viewport-bounded positioning. */
+.app-select-menu.viewport-dropdown{box-sizing:border-box;overflow-y:auto;overscroll-behavior:contain;animation:none;color:var(--ink)}
+.checkbox-multi-menu.viewport-dropdown{display:flex;flex-direction:column}
+.checkbox-multi-menu.viewport-dropdown>div{min-height:0;flex:1 1 auto}
+.checkbox-multi-menu.viewport-dropdown>.multi-select-search,.checkbox-multi-menu.viewport-dropdown>footer{flex-shrink:0}
+.app-select-menu.viewport-dropdown button>span,.checkbox-multi-menu.viewport-dropdown label>span{min-width:0;overflow-wrap:anywhere}
+
+/* Option actions stay beside the label on desktop and expand inline on touch screens. */
+.filter-option-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:5px 6px;border-radius:9px;min-width:0}
+.filter-option-row:hover,.filter-option-row:focus-within{background:color-mix(in srgb,var(--blue) 8%,transparent)}
+.filter-option-row>label{display:flex!important;align-items:center;gap:9px;flex:1;min-width:0;padding:4px!important;margin:0;cursor:pointer;color:var(--ink);font-size:12px}
+.filter-option-row>label input{flex:none;width:15px;height:15px;accent-color:var(--blue)}
+.filter-option-row>label>span{min-width:0;overflow-wrap:anywhere}
+.filter-option-row small{display:block;color:var(--muted);font-size:10px}
+.filter-option-row .filter-option-more{display:none;width:28px;padding:5px;justify-content:center}
+.filter-option-row .filter-option-actions{display:flex;gap:4px;visibility:hidden}
+.filter-option-row:hover .filter-option-actions,.filter-option-row:focus-within .filter-option-actions,.filter-option-actions.expanded{visibility:visible}
+.filter-option-row .filter-option-actions button{width:auto;padding:5px 7px;font-size:10px;white-space:nowrap;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);color:var(--blue);cursor:pointer}
+.filter-group-actions{display:flex;gap:8px;margin:6px 0}.filter-group-actions button{width:auto;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);color:var(--blue);padding:6px 9px;font-size:11px;cursor:pointer}.filter-group-actions button:disabled{opacity:.4;cursor:default}
+.filter-bulk-actions{display:flex!important;flex-wrap:wrap;gap:6px;flex:none!important;max-height:none!important;overflow:visible!important;padding:4px 2px 7px}
+.filter-bulk-actions button{flex:1 1 auto;width:auto;min-height:32px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);color:var(--blue);font-size:11px;cursor:pointer}
+.filter-bulk-actions button:disabled{opacity:.4;cursor:default}
+.checkbox-multi-menu>.filter-link-guidance{flex:none;margin:3px 4px 7px;color:var(--muted);font-size:11px;line-height:1.45;text-align:left;overflow-wrap:anywhere}
+@media(max-width:760px),(hover:none){.filter-option-row .filter-option-more{display:flex}.filter-option-row .filter-option-actions{display:none;visibility:visible;flex-basis:100%;padding-left:24px}.filter-option-row .filter-option-actions.expanded{display:flex}.filter-option-row .filter-option-actions button{min-height:34px}.filter-option-row>label{min-height:32px}}
+
+
+/* Visible keyboard focus across shared filter controls. */
+.app-select-trigger:focus-visible,.app-select-menu button:focus-visible,.filter-option-row input:focus-visible,.filter-option-row button:focus-visible,.filter-bulk-actions button:focus-visible{outline:2px solid var(--blue)!important;outline-offset:2px}
+.filter-option-row:focus-within{background:color-mix(in srgb,var(--blue) 8%,var(--panel-strong))}
+
+.checkbox-multi-menu footer{flex:none;align-items:center;flex-wrap:wrap}
+.checkbox-multi-menu footer button{width:auto;min-height:34px;padding:6px 9px;white-space:nowrap;font-size:11px}
+.checkbox-multi-menu footer .filter-select-all{margin-right:auto;color:var(--blue);background:transparent}
+
+/* Dropdown contents must not inherit the surrounding toolbar control sizes. */
+.legal-shell .checkbox-multi-menu .multi-select-search{flex:0 0 auto;min-height:36px;height:auto;margin:0 0 5px}
+.legal-shell .checkbox-multi-menu .multi-select-search input{min-height:0;height:20px;padding:0!important}
+.legal-shell .checkbox-multi-menu .filter-option-row{flex:0 0 auto;min-height:38px;height:auto}
+.legal-shell .checkbox-multi-menu .filter-option-row>label{min-height:28px;height:auto;flex:1 1 0;min-width:0;border:0;border-radius:0;background:transparent}
+.legal-shell .checkbox-multi-menu .filter-option-row input[type=checkbox]{min-height:15px;height:15px;min-width:15px;max-width:15px;width:15px;flex:none;padding:0!important;margin:0}
+.legal-shell .checkbox-multi-menu .filter-option-more,.legal-shell .checkbox-multi-menu .filter-option-actions button{min-height:28px;height:auto}
+.legal-shell .checkbox-multi-menu>div{display:block;min-width:0}
+
+.filter-unavailable{display:flex;flex:none;gap:5px;flex-wrap:wrap;padding:5px 3px;max-height:110px;overflow:auto}.filter-unavailable button{display:flex;align-items:center;gap:6px;width:auto;padding:5px 8px;border:1px dashed var(--line);border-radius:8px;background:var(--panel);color:var(--muted);font-size:11px;cursor:pointer}.filter-unavailable small{display:block;font-size:10px}.filter-unavailable svg{width:13px;height:13px}.filter-empty{color:var(--muted);font-size:11px}
+
+.legal-shell:has(.case-filter-drawer) .sidebar{z-index:0}
+/* Lift the source menu's sidebar above page stacking contexts while it is open. */
+.legal-shell .sidebar:has(.data-source-control.open){z-index:100}
+
+/* Shared table alignment, including record lists, reviews and reporting tables. */
+.legal-shell table :is(th,td){text-align:center!important;vertical-align:middle!important}
+.legal-shell table th:not([colspan]):not(.no-sort):not(:has(input[type="checkbox"])){padding-left:28px!important}
+.legal-shell table th>button{position:relative;justify-content:center!important;text-align:center!important}
+.legal-shell table th>button>b{position:absolute;right:-18px;top:50%;transform:translateY(-50%)}
+.legal-shell table :is(.case-connected-summary,.row-actions){justify-content:center}
+.legal-shell .case-table summary{text-align:center}
+/* Overview shares the content-pane toolbar alignment and controls. */
+.overview-filter-bar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto auto;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--lp-radius);overflow:visible}
+.overview-filter-bar>.checkbox-multi-select{min-width:0;min-height:56px;padding:0 13px;border:1px solid var(--line);border-radius:13px;background:var(--panel-strong)}
+.overview-filter-bar .app-select-label{display:none}.overview-filter-bar .app-select-trigger{min-height:54px}
+.overview-filter-bar>.soft{min-height:56px}.overview-filter-bar .checkbox-multi-select.has-selection{border-color:var(--blue)}
+.overview-filter-bar>.checkbox-multi-select:first-child .checkbox-multi-menu{left:0;right:auto}
+.overview-filter-bar:has(.checkbox-multi-select.open){position:relative;z-index:60}
+.overview-filter-status{font-size:12px;color:var(--muted)}.overview-unavailable{padding:20px}
+@media(max-width:1100px){.overview-filter-bar{grid-template-columns:repeat(3,minmax(0,1fr))}.overview-filter-bar>.soft{min-height:44px}}
+@media(max-width:700px){.overview-filter-bar{grid-template-columns:minmax(0,1fr)}.overview-filter-bar .checkbox-multi-menu{left:0;right:auto;width:min(290px,calc(100vw - 40px))}}
+/* Every table follows its displayed cell value, rather than column position. */
+table :is(th,td)[data-value-align="left"]{text-align:left!important;--table-value-justify:flex-start}
+table :is(th,td)[data-value-align="center"]{text-align:center!important;--table-value-justify:center}
+table :is(th,td)[data-value-align="right"]{text-align:right!important;--table-value-justify:flex-start}
+table :is(th,td)[data-value-align]>:is(button,a,div){text-align:inherit!important;justify-content:var(--table-value-justify)!important}
+table th[data-value-align]>button>span{text-align:inherit!important}
+
+.legal-copy-toast-error{border-color:color-mix(in srgb,#c0392b 38%,var(--line))}.legal-copy-toast-error>svg,.legal-copy-toast-error>span{color:#c0392b}.legal-copy-toast-dismissible{pointer-events:auto;grid-template-columns:20px minmax(0,1fr) 28px}.legal-copy-toast-dismissible>strong{grid-column:2}.legal-copy-toast-dismissible>button{grid-column:3;grid-row:1/3;display:grid;place-items:center;width:28px;height:28px;padding:4px;border:0;border-radius:7px;background:transparent;color:var(--ink);cursor:pointer}.legal-copy-toast-dismissible>button:hover{background:color-mix(in srgb,var(--ink) 8%,transparent)}.legal-copy-toast-dismissible>button svg{width:16px;height:16px;color:inherit}

@@ -1,9 +1,13 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {ValueTable} from "./ValueTable";
+import { type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {checkedFilterValues, selectAllExcept, toggleFilterValue, filterValue, isExcludedValue} from "./filterSelection";
+import {VirtualRows} from "./VirtualRows";
 import { createPortal } from "react-dom";
 import Plot from "./LazyPlot";
-import { formatFilterMonth, formatYearMonthFilterValue } from "./dateFormat";
+import { sortFilterValues, formatFilterMonth, formatYearMonthFilterValue } from "./dateFormat";
 import {
   Check,
+  MoreHorizontal,
   ChevronDown,
   Download,
   Expand,
@@ -37,6 +41,86 @@ export function ExcelDownloadButton({onClick,children="Excel",className="primary
   return <button className={`${className} excel-download-button${busy?" is-preparing":""}`} disabled={disabled||busy} aria-busy={busy} aria-label={busy?"Preparing Excel download":label} title={busy?"Preparing Excel download":label} onClick={()=>void download()}><span className="excel-download-button-content"><Download/>{children}</span>{busy&&<span className="button-spinner excel-download-spinner" aria-hidden="true"/>}</button>;
 }
 
+// The top layer escapes clipping without losing each page's inherited menu styles.
+function useDropdownPosition(open: boolean, close: () => void) {
+  const root = useRef<HTMLDivElement>(null), menu = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const node = menu.current, trigger = root.current?.querySelector<HTMLElement>(".app-select-trigger");
+    if (!open || !node || !trigger) return;
+    node.showPopover();
+    const position = () => {
+      const viewport = window.visualViewport;
+      const x = viewport?.offsetLeft || 0, y = viewport?.offsetTop || 0;
+      const width = viewport?.width || window.innerWidth, height = viewport?.height || window.innerHeight;
+      const rect = trigger.getBoundingClientRect(), gap = 8, edge = 12;
+      const menuWidth = Math.min(Math.max(rect.width, node.classList.contains("checkbox-multi-menu") ? 290 : 220), width - edge * 2);
+      const below = Math.max(0, y + height - edge - rect.bottom - gap);
+      const above = Math.max(0, rect.top - y - edge - gap);
+      const upwards = below < Math.min(node.scrollHeight, 320) && above > below;
+      const available = Math.min(upwards ? above : below, height - edge * 2);
+      Object.assign(node.style, {position: "fixed", margin: "0", right: "auto", bottom: "auto", minWidth: "0", width: `${menuWidth}px`, maxHeight: `${available}px`, left: `${Math.max(x + edge, Math.min(rect.left, x + width - edge - menuWidth))}px`});
+      const menuHeight = Math.min(node.getBoundingClientRect().height, available);
+      const top = upwards ? rect.top - gap - menuHeight : rect.bottom + gap;
+      node.style.top = `${Math.max(y + edge, Math.min(top, y + height - edge - menuHeight))}px`;
+    };
+    position();
+    (node.querySelector<HTMLElement>("input") || node.querySelector<HTMLElement>("[aria-selected=\"true\"]") || node.querySelector<HTMLElement>("button") || node).focus({preventScroll:true});
+    const scroll = (event: Event) => { if (!node.contains(event.target as Node)) position(); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && node.contains(event.target as Node) && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); close(); trigger.focus({preventScroll:true}); } };
+    window.addEventListener("scroll", scroll, true);
+    window.addEventListener("resize", position);
+    viewportListeners(true);
+    document.addEventListener("keydown", escape);
+    function viewportListeners(add: boolean) {
+      const method = add ? "addEventListener" : "removeEventListener";
+      window.visualViewport?.[method]("resize", position);
+      window.visualViewport?.[method]("scroll", position);
+    }
+    const observer = new ResizeObserver(position);
+    observer.observe(trigger);
+    observer.observe(node);
+    return () => {
+      window.removeEventListener("scroll", scroll, true);
+      window.removeEventListener("resize", position);
+      viewportListeners(false);
+      document.removeEventListener("keydown", escape);
+      observer.disconnect();
+      if (node.matches(":popover-open")) node.hidePopover();
+    };
+  }, [open]);
+  return {root, menu};
+}
+
+// Keep Tab native so every action is reachable; leaving the control closes its popup.
+function dropdownBlur(event: React.FocusEvent<HTMLDivElement>, close: () => void) {
+  if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget as Node)) close();
+}
+function dropdownTriggerKey(event: React.KeyboardEvent<HTMLButtonElement>, open: () => void) {
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); open(); }
+}
+function dropdownMenuKey(event: React.KeyboardEvent<HTMLDivElement>) {
+  if (event.defaultPrevented) return;
+  const target = event.target as HTMLElement;
+  const choices = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("[role=option], input[type=checkbox]"));
+  if (!choices.length) return;
+  const index = choices.indexOf(target);
+  if (target.matches("input:not([type=checkbox])")) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault(); choices[event.key === "ArrowDown" ? 0 : choices.length - 1].focus();
+      if(event.key === "ArrowUp" && choices[0].matches("input[type=checkbox]")) choices[choices.length - 1].dispatchEvent(new KeyboardEvent("keydown",{key:"End",bubbles:true}));
+    }
+    return;
+  }
+  if (index < 0 || target.matches("input[type=checkbox]")) return;
+  let next = index;
+  if (event.key === "ArrowDown") next = Math.min(index + 1, choices.length - 1);
+  else if (event.key === "ArrowUp") next = Math.max(index - 1, 0);
+  else if (event.key === "Home") next = 0;
+  else if (event.key === "End") next = choices.length - 1;
+  else return;
+  event.preventDefault(); choices[next].focus();
+}
+
 export function AppSelect({
   label,
   value,
@@ -59,7 +143,10 @@ export function AppSelect({
   searchable?: boolean;
 }) {
   const [open, setOpen] = useState(false), [search, setSearch] = useState("");
-  const root = useRef<HTMLDivElement>(null);
+  const {root, menu} = useDropdownPosition(open, () => setOpen(false));
+  const menuId=useId();
+  const orderedValues=sortFilterValues(label,options.map(([value])=>value));
+  options=[...options].sort((left,right)=>orderedValues.indexOf(left[0])-orderedValues.indexOf(right[0]));
   const selected = options.find(([option]) => option === value)?.[1] || value;
   const isProjectSelect = /^projects?$/i.test(label.trim());
   const displayCaption = (caption: string) =>
@@ -75,7 +162,7 @@ export function AppSelect({
     return () => window.removeEventListener("mousedown", close);
   }, []);
   return (
-    <div ref={root} className={`app-select ${variant === "theme" ? "app-select-theme" : ""} ${open ? "open" : ""} ${disabled ? "disabled" : ""}`}>
+    <div ref={root} onBlur={event=>dropdownBlur(event,()=>setOpen(false))} className={`app-select ${variant === "theme" ? "app-select-theme" : ""} ${open ? "open" : ""} ${disabled ? "disabled" : ""}`}>
       {Icon && <Icon className="app-select-icon" />}
       <span className="app-select-label">{label}</span>
       <button
@@ -84,17 +171,19 @@ export function AppSelect({
         aria-label={ariaLabel || label}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={open?menuId:undefined}
         disabled={disabled}
         onClick={() => setOpen((shown) => { if (!shown) setSearch(""); return !shown; })}
-        onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }}
+        onKeyDown={event=>dropdownTriggerKey(event,()=>{setSearch("");setOpen(true)})}
       >
         <span>{displayCaption(selected)}</span><ChevronDown />
       </button>
       {open && (
-        <div className="app-select-menu" role="listbox" aria-label={`${label} options`}>
-          {searchable && <label className="app-select-menu-search"><Search/><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${label.toLowerCase()}`}/></label>}
+        <div id={menuId} ref={menu} popover="manual" onKeyDown={dropdownMenuKey} className="app-select-menu viewport-dropdown" role="listbox" aria-label={`${label} options`}>
+          {searchable && <label className="app-select-menu-search"><Search/><input aria-label={`Search ${label.toLowerCase()}`} autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${label.toLowerCase()}`}/></label>}
+          {value&&!options.some(([option])=>option===value)&&<p className="filter-empty">{displayCaption(value)} - Unavailable</p>}
           {visibleOptions.map(([option, caption]) => (
-            <button key={option} type="button" role="option" aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); }}>
+            <button key={option} type="button" role="option" aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); root.current?.querySelector<HTMLButtonElement>(".app-select-trigger")?.focus(); }}>
               <span>{displayCaption(caption)}</span>{option === value && <Check />}
             </button>
           ))}
@@ -105,16 +194,63 @@ export function AppSelect({
   );
 }
 
-export function CheckboxMultiSelect({label,values,selected,onChange,hideLabel=false}:{label:string;values:string[];selected:string[];onChange:(values:string[])=>void;hideLabel?:boolean}) {
+export function CheckboxMultiSelect({label,values,selected,onChange,hideLabel=false,guidance}:{label:string;values:string[];selected:string[];onChange:(values:string[])=>void;hideLabel?:boolean;guidance?:string}) {
   const [open,setOpen]=useState(false),[search,setSearch]=useState("");
-  const root=useRef<HTMLDivElement>(null);
+  const guidanceId=useId(),menuId=useId();
+  const {root,menu}=useDropdownPosition(open,()=>setOpen(false));
   const selectedLabel=label.replace(/ies$/i,"y").replace(/s$/i,"").replace(/\b\w/g,(letter)=>letter.toUpperCase());
   const isProjectFilter=/^projects?$/i.test(label.trim());
   const isProjectLocationFilter=/^project\s+locations?$/i.test(label.trim());
   const displayItem=(item:string)=>isProjectFilter?formatProjectLabel(item):isProjectLocationFilter?formatProjectLocationLabel(item):item;
-  const visible=values.filter((item)=>displayItem(item).toLowerCase().includes(search.toLowerCase()));
+  const visible=useMemo(()=>sortFilterValues(label,values).filter((item)=>displayItem(item).toLowerCase().includes(search.trim().toLowerCase())),[values,search,label]);
   useEffect(()=>{const close=(event:MouseEvent)=>{if(root.current&&!root.current.contains(event.target as Node))setOpen(false)};window.addEventListener("mousedown",close);return()=>window.removeEventListener("mousedown",close)},[]);
-  return <div ref={root} className={`app-select checkbox-multi-select ${hideLabel?"label-hidden":""} ${open?"open":""} ${selected.length?"has-selection":""}`}>{!hideLabel&&<span className="app-select-label">{label}</span>}<button type="button" className="app-select-trigger" aria-haspopup="listbox" aria-expanded={open} onClick={()=>setOpen((value)=>!value)} onKeyDown={(event)=>{if(event.key==="Escape")setOpen(false)}}><span>{selected.length?`${selectedLabel} (${selected.length})`:`All ${label.toLowerCase()}`}</span><ChevronDown/></button>{open&&<div className="app-select-menu checkbox-multi-menu" role="listbox" aria-label={`${label} filters`}><label className="multi-select-search"><Search/><input autoFocus value={search} onChange={(event)=>setSearch(event.target.value)} placeholder={`Search ${label.toLowerCase()}`}/></label><div>{visible.map((item)=><label className={selected.includes(item)?"selected":""} key={item}><input type="checkbox" checked={selected.includes(item)} onChange={()=>onChange(selected.includes(item)?selected.filter((value)=>value!==item):[...selected,item])}/><span>{displayItem(item)}</span></label>)}</div>{!visible.length&&<p>No matching options</p>}<footer><button type="button" disabled={!selected.length} onClick={()=>onChange([])}>Clear</button><button type="button" onClick={()=>setOpen(false)}>Done</button></footer></div>}</div>
+  const checked=checkedFilterValues(selected,values);
+  const caption=selected.length?`${selectedLabel} (${checked.length})`:`All ${label.toLowerCase()}`;
+  return <div ref={root} onBlur={event=>dropdownBlur(event,()=>setOpen(false))} className={`app-select checkbox-multi-select ${hideLabel?"label-hidden":""} ${open?"open":""} ${selected.length?"has-selection":""}`}>
+    {!hideLabel&&<span className="app-select-label">{label}</span>}
+    <button type="button" className="app-select-trigger" aria-label={caption} aria-describedby={open&&guidance?guidanceId:undefined} aria-haspopup="dialog" aria-expanded={open} aria-controls={open?menuId:undefined} onClick={()=>setOpen(value=>!value)} onKeyDown={event=>dropdownTriggerKey(event,()=>setOpen(true))}><span>{caption}</span><ChevronDown/></button>
+    {open&&<div id={menuId} ref={menu} popover="manual" onKeyDown={dropdownMenuKey} className="app-select-menu checkbox-multi-menu viewport-dropdown" role="dialog" aria-label={`${label} filters`}>
+      <label className="multi-select-search"><Search/><input aria-label={`Search ${label.toLowerCase()}`} autoFocus value={search} onChange={event=>setSearch(event.target.value)} placeholder={`Search ${label.toLowerCase()}`}/></label>
+      {guidance&&<p id={guidanceId} className="filter-link-guidance">{guidance}</p>}
+      <UnavailableSelections values={values} selected={selected} onChange={onChange} formatCaption={displayItem}/>
+      <VirtualRows items={visible} resetKey={search} render={item=><FilterOption values={values} key={item} value={item} caption={displayItem(item)} selected={selected} onChange={onChange}/>}/>
+      {!visible.length&&<p>{values.length?"No matching options":"No available options"}</p>}
+      <footer><FilterSelectAllButton values={search.trim()?visible:values} matching={Boolean(search.trim())} selected={selected} onChange={onChange}/><button type="button" disabled={!selected.length} onClick={()=>onChange([])}>Reset</button><button type="button" onClick={()=>{setOpen(false);root.current?.querySelector<HTMLButtonElement>(".app-select-trigger")?.focus()}}>Done</button></footer>
+    </div>}
+  </div>;
+}
+
+export function FilterOption({value,caption,values,selected,onChange,...attributes}:{value:string;caption:string;values:string[];selected:string[];onChange:(values:string[])=>void}) {
+  const [actions,setActions]=useState(false),checked=checkedFilterValues(selected,values).includes(value);
+  return <div {...attributes} onKeyDown={event=>{if(event.key==="Escape"&&actions){event.preventDefault();event.stopPropagation();setActions(false);event.currentTarget.querySelector<HTMLButtonElement>(".filter-option-more")?.focus()}}} className={`filter-option-row ${checked?"selected":""}`}>
+    <label><input type="checkbox" aria-label={caption} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();onChange(toggleFilterValue(selected,value,values))}}} checked={checked} onChange={()=>onChange(toggleFilterValue(selected,value,values))}/><span>{caption}</span></label>
+    <button type="button" className="filter-option-more" aria-label={`Actions for ${caption}`} aria-expanded={actions} onClick={()=>setActions(open=>!open)}><MoreHorizontal/></button>
+    <div className={`filter-option-actions ${actions?"expanded":""}`}>
+      <button type="button" aria-label={`Only ${caption}`} onClick={()=>{onChange([value]);setActions(false)}}>Only this</button>
+      <button type="button" aria-label={`Exclude ${caption}`} onClick={()=>{onChange(selectAllExcept(values,value));setActions(false)}}>Exclude this</button>
+    </div>
+  </div>;
+}
+
+function UnavailableSelections({values,selected,onChange,formatCaption=(value:string)=>value}:{values:string[];selected:string[];onChange:(values:string[])=>void;formatCaption?:(value:string)=>string}) {
+  const unavailable=selected.filter(token=>!isExcludedValue(token)&&!values.includes(token));
+  if(!unavailable.length)return null;
+  return <section className="filter-unavailable" aria-label="Unavailable selections">{unavailable.map(token=><button type="button" key={token} aria-label={`Remove unavailable ${formatCaption(filterValue(token))}`} onClick={()=>onChange(selected.filter(value=>value!==token))}><span>{formatCaption(filterValue(token))}<small>Unavailable</small></span><X/></button>)}</section>;
+}
+
+export function FilterValueList({field="",values,selected,onChange,formatCaption=(value:string)=>value}:{values:string[];selected:string[];onChange:(values:string[])=>void;formatCaption?:(value:string)=>string;field?:string}) {
+  values=sortFilterValues(field,values);
+  return <><UnavailableSelections values={values} selected={selected} onChange={onChange} formatCaption={formatCaption}/>{!values.length&&<p className="filter-empty">No available options</p>}<FilterBulkActions values={values} selected={selected} onChange={onChange}/><div className="filter-group-actions"><button type="button" disabled={!selected.length} onClick={()=>onChange([])}>Reset</button></div>{values.map(value=><FilterOption values={values} key={value} value={value} caption={formatCaption(value)} selected={selected} onChange={onChange}/>)}</>;
+}
+
+function FilterSelectAllButton({values,matching=false,selected,onChange}:{values:string[];matching?:boolean;selected:string[];onChange:(values:string[])=>void}) {
+  const complete=!selected.some(isExcludedValue)&&selected.length===values.length&&values.every(value=>selected.includes(value));
+  return <button type="button" className="filter-select-all" disabled={!values.length||complete} onClick={()=>onChange([...values])}>{matching?"Select matching":"Select all"} ({values.length})</button>;
+}
+
+function FilterBulkActions({values,matching=values,searching=false,selected,onChange}:{values:string[];matching?:string[];searching?:boolean;selected:string[];onChange:(values:string[])=>void}) {
+  const isExactSelection=(options:string[])=>!selected.some(isExcludedValue)&&selected.length===options.length&&options.every(value=>selected.includes(value));
+  return <section className="filter-bulk-actions"><button type="button" disabled={!values.length||isExactSelection(values)} onClick={()=>onChange([...values])}>Select all {values.length}</button>{searching&&<button type="button" disabled={!matching.length||isExactSelection(matching)} onClick={()=>onChange([...matching])}>Select matching {matching.length}</button>}</section>;
 }
 
 export function KpiCard({
@@ -529,7 +665,7 @@ function DataTable({ rows }: { rows: Row[] }) {
   const displayRows=pivotRows(rows);
   return (
     <div className="table-wrap">
-      <table>
+      <ValueTable>
         <thead>
           <tr>
             <th>Category</th>
@@ -546,7 +682,7 @@ function DataTable({ rows }: { rows: Row[] }) {
             </tr>
           ))}
         </tbody>
-      </table>
+      </ValueTable>
     </div>
   );
 }
@@ -619,10 +755,10 @@ export function FilterDrawer({
 }) {
   const reviewStyle=available.__reviewStyle?.includes("true")||false;
   const datePriority: Record<string, number> = { year: 0, quarter: 1, month: 2 };
-  const availableFilters = Object.entries(available).filter(([field])=>field!=="__reviewStyle").sort(
+  const availableFilters = Object.entries(available).filter(([field])=>field!=="__reviewStyle").map(([field,values]):[string,string[]]=>[field,sortFilterValues(field,values)]).sort(
     ([left], [right]) => (datePriority[left] ?? 3) - (datePriority[right] ?? 3),
   );
-  if(reviewStyle){if(!open)return null;return <><button className="filter-backdrop" aria-label="Close deportation filters" onClick={onClose}/><aside className="case-filter-drawer"><header><div><span className="eyebrow">REVIEW FILTERS</span><h2>Filter all deportation records</h2></div><button onClick={onClose} aria-label="Close filters"><X/></button></header><div className="case-filter-scroll review-checkbox-filters">{availableFilters.map(([field,values])=><details key={field} open={Boolean(filters[field]?.length)}><summary><span>{field.replaceAll("_"," ")}</span>{filters[field]?.length>0&&<b>{filters[field].length}</b>}<ChevronDown/></summary><div>{values.map((item)=><label key={item}><input type="checkbox" checked={filters[field]?.includes(item)||false} onChange={()=>{const selected=filters[field]||[];onChange({...filters,[field]:selected.includes(item)?selected.filter((value)=>value!==item):[...selected,item]})}}/><span>{/project\s+location/i.test(field)?formatProjectLocationLabel(item):/project/i.test(field)?formatProjectLabel(item):formatFilterMonth(item)}</span></label>)}</div></details>)}</div><footer><button className="soft" disabled={!Object.values(filters).some((values)=>values.length)} onClick={onReset}>Clear all</button><button className="primary" onClick={onClose}>Apply filters</button></footer></aside></>}
+  if(reviewStyle){if(!open)return null;return <><button className="filter-backdrop" aria-label="Close deportation filters" onClick={onClose}/><aside className="case-filter-drawer"><header><div><span className="eyebrow">REVIEW FILTERS</span><h2>Filter all deportation records</h2></div><button onClick={onClose} aria-label="Close filters"><X/></button></header><div className="case-filter-scroll review-checkbox-filters">{availableFilters.map(([field,values])=><details key={field} open={Boolean(filters[field]?.length)}><summary><span>{field.replaceAll("_"," ")}</span>{filters[field]?.length>0&&<b>{filters[field].length}</b>}<ChevronDown/></summary><div>{<FilterValueList field={field} values={values} selected={filters[field]||[]} onChange={items=>onChange({...filters,[field]:items})} formatCaption={item=>/project\s+location/i.test(field)?formatProjectLocationLabel(item):/project/i.test(field)?formatProjectLabel(item):formatFilterMonth(item)}/>}</div></details>)}</div><footer><button className="soft" disabled={!Object.values(filters).some((values)=>values.length)} onClick={onReset}>Reset all</button><button className="primary" onClick={onClose}>Apply filters</button></footer></aside></>}
   return (
     <aside className={`filter-drawer glass ${open ? "open" : ""}${reviewStyle ? " review-style-filter" : ""}`}><div className="filter-scroll">
       <div className="filter-head">
@@ -635,7 +771,7 @@ export function FilterDrawer({
         </button>
       </div>
       <button className="reset" onClick={onReset}>
-        {reviewStyle ? "Clear all" : "Reset all filters"}
+        {reviewStyle ? "Reset all" : "Reset all filters"}
       </button>
     <div className="filter-list">
         {availableFilters.map(([field, values]) => (
@@ -668,10 +804,9 @@ function FilterGroup({
     [search, setSearch] = useState("");
   const shown = useMemo(
     () =>
-      values
-        .filter((v) => v.toLowerCase().includes(search.toLowerCase()))
-        .slice(0, 100),
-    [values, search],
+      sortFilterValues(field,values)
+        .filter((v) => v.toLowerCase().includes(search.trim().toLowerCase())),
+    [values, search, field],
   );
   return (
     <div className="filter-group">
@@ -692,23 +827,9 @@ function FilterGroup({
               placeholder="Search values"
             />
           </label>
-          {shown.map((v) => (
-            <label className="check" key={v}>
-              <input
-                type="checkbox"
-                checked={selected.includes(v)}
-                onChange={() =>
-                  onChange(
-                    selected.includes(v)
-                      ? selected.filter((x) => x !== v)
-                      : [...selected, v],
-                  )
-                }
-              />
-              <span className="box">{selected.includes(v) && <Check />}</span>
-              <span>{formatYearMonthFilterValue(field,v)}</span>
-            </label>
-          ))}
+          <UnavailableSelections values={values} selected={selected} onChange={onChange}/>
+          <FilterBulkActions values={values} matching={shown} searching={Boolean(search.trim())} selected={selected} onChange={onChange}/><div className="filter-group-actions"><button type="button" disabled={!selected.length} onClick={()=>onChange([])}>Reset</button></div>
+          {shown.slice(0,100).map(v=><FilterOption values={values} key={v} value={v} caption={formatYearMonthFilterValue(field,v)} selected={selected} onChange={onChange}/>)}
         </div>
       )}
     </div>
@@ -723,7 +844,7 @@ export function ActiveFilters({
   onRemove: (field: string, value: string) => void;
 }) {
   const entries = Object.entries(filters).flatMap(([f, vs]) =>
-    vs.map((v) => [f, v] as const),
+    vs.filter(v=>!isExcludedValue(v)).map((v) => [f, v] as const),
   );
   if (!entries.length) return null;
   return (
@@ -731,7 +852,7 @@ export function ActiveFilters({
       {entries.map(([f, v]) => (
         <button key={`${f}-${v}`} onClick={() => onRemove(f, v)}>
           <span>
-            {f.replaceAll("_", " ")}: {v}
+            {f.replaceAll("_", " ")}: {formatYearMonthFilterValue(f,filterValue(v))}
           </span>
           <X />
         </button>
@@ -753,7 +874,7 @@ export function QualityTable({ rows }: { rows: QualityRow[] }) {
         </div>
       </div>
       <div className="table-wrap">
-        <table>
+        <ValueTable>
           <thead>
             <tr>
               <th>Area</th>
@@ -780,7 +901,7 @@ export function QualityTable({ rows }: { rows: QualityRow[] }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </ValueTable>
       </div>
     </article>
   );
