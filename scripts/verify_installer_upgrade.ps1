@@ -23,7 +23,12 @@ try {
         $CertificateBlob = Get-ItemPropertyValue -LiteralPath $MachineKey -Name Blob
         New-ItemProperty -LiteralPath $UserCertificateKey -Name Blob -Value $CertificateBlob -PropertyType Binary -Force | Out-Null
         if (-not (Test-Path -LiteralPath "Cert:\CurrentUser\$Store\$($Certificate.Thumbprint)")) {throw "Test certificate is missing from $Store."}
-        Write-Output "Approved test certificate ready in $Store."
+        $Registry32 = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser, [Microsoft.Win32.RegistryView]::Registry32)
+        $CertificateKey32 = $Registry32.CreateSubKey("Software\Microsoft\SystemCertificates\$Store\Certificates\$($Certificate.Thumbprint)")
+        $CertificateKey32.SetValue("Blob", $CertificateBlob, [Microsoft.Win32.RegistryValueKind]::Binary)
+        $CertificateKey32.Dispose()
+        $Registry32.Dispose()
+        Write-Output "Approved test certificate ready in both registry views for $Store."
     }
     function Install-Release([string]$Name) {
         Write-Output "Installing $Name in the disposable runner."
@@ -91,5 +96,6 @@ try {
 $Results | ConvertTo-Json | Set-Content -LiteralPath "$SmokeRoot\result.json" -Encoding UTF8
 if (-not $Results.passed) {throw $Results.error}
 Write-Output ($Results | ConvertTo-Json)
+
 
 
