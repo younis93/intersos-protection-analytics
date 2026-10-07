@@ -18,7 +18,12 @@ try {
         New-Item -Path $UserStore -Force | Out-Null
         # Copy the already vetted serialized certificate into the test user's
         # stores without an interactive certificate-import dialog.
-        Copy-Item -LiteralPath $MachineKey -Destination $UserStore -Recurse -Force
+        $UserCertificateKey = "$UserStore\$($Certificate.Thumbprint)"
+        New-Item -Path $UserCertificateKey -Force | Out-Null
+        $CertificateBlob = Get-ItemPropertyValue -LiteralPath $MachineKey -Name Blob
+        New-ItemProperty -LiteralPath $UserCertificateKey -Name Blob -Value $CertificateBlob -PropertyType Binary -Force | Out-Null
+        if (-not (Test-Path -LiteralPath "Cert:\CurrentUser\$Store\$($Certificate.Thumbprint)")) {throw "Test certificate is missing from $Store."}
+        Write-Output "Approved test certificate ready in $Store."
     }
     function Install-Release([string]$Name) {
         Write-Output "Installing $Name in the disposable runner."
@@ -86,4 +91,5 @@ try {
 $Results | ConvertTo-Json | Set-Content -LiteralPath "$SmokeRoot\result.json" -Encoding UTF8
 if (-not $Results.passed) {throw $Results.error}
 Write-Output ($Results | ConvertTo-Json)
+
 
