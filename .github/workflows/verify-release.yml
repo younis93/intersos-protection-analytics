@@ -28,6 +28,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Previous installer download failed.' }
           gh release download "v$env:RELEASE_VERSION" --repo "${{ github.repository }}" --pattern "Iraq-Data-Analysis-Setup-$env:RELEASE_VERSION.exe" --dir "$env:RUNNER_TEMP/upgrade-check"
           if ($LASTEXITCODE -ne 0) { throw 'New installer download failed.' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-installer-${{ inputs.version }}
+          path: ${{ runner.temp }}/upgrade-check/Iraq-Data-Analysis-Setup-${{ inputs.version }}.exe
+          retention-days: 3
       - name: Install, upgrade, launch, and verify saved data
         shell: pwsh
         run: ./scripts/verify_installer_upgrade.ps1 -ArtifactRoot "$env:RUNNER_TEMP/upgrade-check" -PreviousVersion '${{ inputs.previous }}' -Version '${{ inputs.version }}'

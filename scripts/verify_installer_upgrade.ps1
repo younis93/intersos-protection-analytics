@@ -6,12 +6,28 @@ $ApplicationPath = Join-Path $InstallRoot 'Iraq Data Analysis.exe'
 $DataRoot = Join-Path $env:LOCALAPPDATA 'INTERSOS Legal Platform'
 $Results = @{passed=$false;phase='starting'}
 try {
+    # Trust only the approved publisher in this disposable test runner.
+    $CertificatePath = Join-Path $PSScriptRoot '../installer/INTERSOS-Code-Signing.cer'
+    $Certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new((Resolve-Path $CertificatePath).Path)
+    if ($Certificate.Thumbprint -ne 'C4F1B12A3BCCC73BEF903FA3796304CF0E67670D') {throw 'Unexpected test certificate.'}
+    certutil.exe -addstore -f Root $CertificatePath | Out-Null
+    if ($LASTEXITCODE -ne 0) {throw 'Test certificate trust failed.'}
+    certutil.exe -user -addstore -f Root $CertificatePath | Out-Null
+    if ($LASTEXITCODE -ne 0) {throw 'User certificate trust failed.'}
+    certutil.exe -user -addstore -f TrustedPublisher $CertificatePath | Out-Null
+    if ($LASTEXITCODE -ne 0) {throw 'Publisher trust failed.'}
     function Install-Release([string]$Name) {
         $InstallerPath = "$SmokeRoot\Iraq-Data-Analysis-Setup-$Name.exe"
         $Signature = Get-AuthenticodeSignature -LiteralPath $InstallerPath
         if ($Signature.SignerCertificate.Thumbprint -ne "C4F1B12A3BCCC73BEF903FA3796304CF0E67670D") {throw "Unexpected installer signing certificate."}
         $Arguments = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/EXTERNALRELAUNCH',"/DIR=`"$InstallRoot`"","/LOG=`"$SmokeRoot\$Name-install.log`"")
-        $InstallerProcess = Start-Process -FilePath "$SmokeRoot\Iraq-Data-Analysis-Setup-$Name.exe" -ArgumentList $Arguments -WindowStyle Hidden -PassThru -Wait
+        $InstallerProcess = Start-Process -FilePath "$SmokeRoot\Iraq-Data-Analysis-Setup-$Name.exe" -ArgumentList $Arguments -WindowStyle Hidden -PassThru
+        if (-not $InstallerProcess.WaitForExit(180000)) {
+            Get-Content -LiteralPath "$SmokeRoot\$Name-install.log" -Tail 30 -ErrorAction SilentlyContinue
+            Stop-Process -Id $InstallerProcess.Id -ErrorAction SilentlyContinue
+            throw "$Name installer timed out in the clean runner."
+        }
+        $InstallerProcess.Refresh()
         if ($InstallerProcess.ExitCode -ne 0) { throw "$Name installer failed: $($InstallerProcess.ExitCode)" }
     }
     function Check-Application([string]$Version) {
