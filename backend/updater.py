@@ -220,15 +220,17 @@ def _relaunch_command(
 def _start_update_runner(command: list[str], target: Path) -> subprocess.Popen:
     # PowerShell silently exits without executing -File under DETACHED_PROCESS.
     # Give it a hidden console and valid standard handles instead.
-    process = subprocess.Popen(
-        command,
-        close_fds=True,
-        creationflags=(subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
-                       | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    flags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+    arguments = dict(close_fds=True, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        process = subprocess.Popen(command, creationflags=flags | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000), **arguments)
+    except PermissionError as reason:
+        if reason.winerror != 5:
+            raise
+        # Restricted Windows jobs can forbid breakaway. Keep valid hidden
+        # console handles and the same startup verification when retrying.
+        process = subprocess.Popen(command, creationflags=flags, **arguments)
     log = target.with_name("update-runner.log")
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:

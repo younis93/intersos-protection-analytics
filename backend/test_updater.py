@@ -156,6 +156,20 @@ class UpdaterTests(unittest.TestCase):
                 self.assertIn(expected_error, runner_log)
                 self.assertNotIn("Update completed successfully", runner_log)
 
+    def test_restricted_job_retries_without_breakaway(self):
+        with tempfile.TemporaryDirectory() as temp_root:
+            target = Path(temp_root) / "setup.exe"
+            target.with_name("update-runner.log").write_text("Runner started")
+            denied = PermissionError("Breakaway denied")
+            denied.winerror = 5
+            process = object()
+            with patch.object(updater.subprocess, "Popen", side_effect=[denied, process]) as launch:
+                self.assertIs(updater._start_update_runner(["powershell.exe"], target), process)
+            self.assertEqual(launch.call_count, 2)
+            self.assertTrue(launch.call_args_list[0].kwargs["creationflags"] & subprocess.CREATE_BREAKAWAY_FROM_JOB)
+            self.assertFalse(launch.call_args_list[1].kwargs["creationflags"] & subprocess.CREATE_BREAKAWAY_FROM_JOB)
+            self.assertEqual(launch.call_args_list[1].kwargs["stdout"], subprocess.DEVNULL)
+
     def test_update_installs_over_the_running_application_directory(self):
         command = updater._installer_command(
             Path("setup.exe"), Path(r"C:\Users\Person\App Folder"), Path(r"C:\Temp\update.log")
