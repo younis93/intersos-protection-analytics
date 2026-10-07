@@ -1,0 +1,33 @@
+name: Verify Windows installer upgrade
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        required: true
+        default: '1.0.49'
+      previous:
+        required: true
+        default: '1.0.48'
+permissions:
+  contents: read
+jobs:
+  upgrade:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Download published installers
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          PREVIOUS_VERSION: ${{ inputs.previous }}
+        run: |
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP/upgrade-check" -Force | Out-Null
+          gh release download "v$env:PREVIOUS_VERSION" --repo "${{ github.repository }}" --pattern "Iraq-Data-Analysis-Setup-$env:PREVIOUS_VERSION.exe" --dir "$env:RUNNER_TEMP/upgrade-check"
+          if ($LASTEXITCODE -ne 0) { throw 'Previous installer download failed.' }
+          gh release download "v$env:RELEASE_VERSION" --repo "${{ github.repository }}" --pattern "Iraq-Data-Analysis-Setup-$env:RELEASE_VERSION.exe" --dir "$env:RUNNER_TEMP/upgrade-check"
+          if ($LASTEXITCODE -ne 0) { throw 'New installer download failed.' }
+      - name: Install, upgrade, launch, and verify saved data
+        shell: pwsh
+        run: ./scripts/verify_installer_upgrade.ps1 -ArtifactRoot "$env:RUNNER_TEMP/upgrade-check" -PreviousVersion '${{ inputs.previous }}' -Version '${{ inputs.version }}'
