@@ -2628,7 +2628,7 @@ class LegalStore:
         if lawyer and assessment_date:
             dated=assessments.copy()
             dated["_assessment_date"]=pd.to_datetime(dated[assessment_date],errors="coerce",dayfirst=True)
-            dated=dated[dated["_assessment_date"].notna()]
+            dated=dated[dated["_assessment_date"].notna() & (dated["_assessment_date"] >= pd.Timestamp("2026-01-01"))]
             dated["_lawyer"]=dated[lawyer].fillna("Unassigned").astype(str).str.strip().replace("","Unassigned")
             dated["_month"]=dated["_assessment_date"].dt.to_period("M").astype(str)
             if len(dated):
@@ -2713,6 +2713,10 @@ class LegalStore:
                     else:frame=frame[selection_mask(frame[column].fillna("").astype(str).str.strip(), selections)]
             return frame
         frames={name:scoped(name) for name in FILES}
+        assessment_date_column=_find(list(frames["assessments"].columns),"Date of Assessment")
+        if assessment_date_column:
+            dates=pd.to_datetime(frames["assessments"][assessment_date_column],errors="coerce",dayfirst=True)
+            frames["assessments"]=frames["assessments"][dates.notna() & (dates >= pd.Timestamp("2026-01-01"))]
         assessments=frames["assessments"]
         assessment_date=_find(list(assessments.columns),"Date of Assessment")
         def distinct(name:str,*hints:str)->int:

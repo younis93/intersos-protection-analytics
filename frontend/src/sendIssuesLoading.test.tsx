@@ -18,6 +18,8 @@ describe('Send Issues initial loading',()=>{
   it('starts with a loading indicator and skeleton without showing empty results',()=>{
     const markup=renderToStaticMarkup(<SendIssues revision="test"/>);
     expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain('Email preparation is being tested');
+    expect(markup).toContain('Review recipients and message content before sending');
     expect(markup).toContain('role="status"');
     expect(markup).toContain('Loading review findings and lawyer contacts');
     expect(markup).toContain('si-loading-skeleton');

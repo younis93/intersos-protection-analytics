@@ -36,10 +36,12 @@ jobs:
       - name: Test and build
         shell: pwsh
         run: |
-          python -m unittest discover backend
-          python -m pytest backend/test_excel_export.py backend/test_explorer_date_download.py backend/test_further_performance.py backend/test_import_progress.py backend/test_indicator_performance.py
+          python -m pytest backend
+          if ($LASTEXITCODE -ne 0) { throw "Backend tests failed." }
           npm test --prefix frontend
+          if ($LASTEXITCODE -ne 0) { throw "Frontend tests failed." }
           npm run build --prefix frontend
+          if ($LASTEXITCODE -ne 0) { throw "Frontend build failed." }
           python -m PyInstaller --noconfirm --clean --windowed --onedir --name "Iraq Data Analysis" --icon "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico" --distpath packaging-temp/dist --workpath packaging-temp/work --specpath packaging-temp/spec --add-data "$env:GITHUB_WORKSPACE\frontend\dist;frontend\dist" --add-data "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico;." --collect-all polars "$env:GITHUB_WORKSPACE\desktop_launcher.py"
       - name: Sign application and build signed installer
         shell: pwsh
@@ -75,6 +77,7 @@ jobs:
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           generate_release_notes: true
+          body_path: RELEASE_NOTES.md
           files: |
             release/Iraq-Data-Analysis-Setup-${{ env.APP_VERSION }}.exe
             release/update.json

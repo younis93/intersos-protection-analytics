@@ -203,6 +203,10 @@ class DesktopLauncherTests(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == "win32", "Windows named-object integration test")
     def test_windows_mutex_allows_only_one_instance_and_releases_after_close(self):
+        # Isolate the integration test from a running production application.
+        names = patch.multiple(launcher, MUTEX_NAME=f"Local\\INTERSOS.Test.Mutex.{os.getpid()}", ACTIVATION_EVENT_NAME=f"Local\\INTERSOS.Test.Activate.{os.getpid()}")
+        names.start()
+        self.addCleanup(names.stop)
         first = launcher.SingleInstance()
         second = launcher.SingleInstance()
         third = launcher.SingleInstance()

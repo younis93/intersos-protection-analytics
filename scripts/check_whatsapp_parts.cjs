@@ -19,7 +19,7 @@ const root=path.resolve(__dirname,'..'),fixture=path.join(root,'frontend/src/wha
   });
   const url=(process.env.APP_TEST_URL||'http://127.0.0.1:5176')+'/whatsapp-parts-browser-check.html';
   async function open(){await page.getByRole('checkbox',{name:'Select all filtered findings across all pages',exact:true}).check();await page.getByRole('button',{name:'WhatsApp (16)',exact:true}).click();await page.getByRole('heading',{name:'WhatsApp for Alice'}).waitFor();}
-  await page.goto(url);await open();
+  await page.goto(url);await page.getByRole('note').waitFor();assert((await page.getByRole('note').textContent()).includes('Email preparation is being tested'));await open();
   const language=page.getByLabel('Message language');assert.equal(await language.inputValue(),'bilingual');
   assert(await page.locator('.si-whatsapp-part').count()>1);
   await language.selectOption('ar');await page.getByLabel('Name',{exact:true}).fill('Sender');

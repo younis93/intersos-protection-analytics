@@ -13,7 +13,7 @@ manifest = {
     "installerUrl": f"https://github.com/{repository}/releases/download/v{version}/{installer.name}",
     "sizeBytes": installer.stat().st_size,
     "sha256": hashlib.sha256(installer.read_bytes()).hexdigest(),
-    "notes": f"Iraq Data Analysis {version}",
+    "notes": f"Iraq Data Analysis {version}. Independent imports, review and reporting improvements, and WhatsApp language and message parts. Send Issues email preparation is available for testing; review recipients and content before sending.",
     "publishedAt": datetime.now(timezone.utc).isoformat(),
 }
 Path(output_name).write_text(json.dumps(manifest, indent=2), encoding="utf-8")

@@ -29,14 +29,15 @@ def test_optional_files_are_not_required_and_cleanup_is_applied():
     assert not any(column.endswith(": First") for column in store.frames["beneficiaries"].columns)
     assert "Secured documents Files  الرجاء ارفاق الوثيقة الصادرة" not in store.frames["legalservices"].columns
     dates=store.explorer("beneficiaries")["rows"]
-    assert dates[0]["Date of Identification / تاريخ التحديد"]=="2026-01-31"
-    assert dates[1]["Date of Identification / تاريخ التحديد"]=="2026-02-01"
+    assert dates[0]["Date of Identification / تاريخ التحديد"]=="31/01/2026"
+    assert dates[1]["Date of Identification / تاريخ التحديد"]=="01/02/2026"
 
 
 def test_representation_case_load_uses_service_status_and_the_correct_event_month():
     payload=required_payload()
     payload["legalservices"]=csv(**{
         "Service ID":["S1","S2","S3","S4","S5"],
+        "Assessment ID":["A1"]*5,"Beneficiary ID":["B1"]*5,
         "Lawyers":["Lawyer A","Lawyer A","Lawyer A","Lawyer B","Lawyer B"],
         "Type of Service Provided":["Legal Representation"]*4+["Legal Counselling"],
         "Service Status":["In-Process","Completed","Closed","In-Process","In-Process"],
@@ -150,7 +151,8 @@ def test_review_export_includes_selected_rule_page_fields_before_source_fields()
 
 
 def test_review_export_places_dataset_identifiers_before_name():
-    payload=required_payload();payload["awareness"]=csv(**{"Awareness ID":["W1"],"Participant Name":["Participant"]})
+    payload=required_payload();payload["awareness"]=csv(**{"Awareness ID":["W1","W2"],"Participant Name":["Participant","Participant"],"Session Topic":["Documentation","Documentation"]})
+    payload["legalservices"]=payload["legalservices"].replace(b"A2",b"missing-assessment")
     store=LegalStore.from_files(payload,"test")
     assessment_book=load_workbook(io.BytesIO(store.review_export("assessments")),read_only=True,data_only=True)
     service_book=load_workbook(io.BytesIO(store.review_export("legalservices")),read_only=True,data_only=True)
@@ -709,7 +711,7 @@ def test_review_export_uses_the_same_south_duplicate_group():
     workbook=load_workbook(io.BytesIO(exported),read_only=True,data_only=True)
     assert workbook.sheetnames==["North Iraq","South Iraq"]
     rows=list(workbook["South Iraq"].iter_rows(values_only=True))
-    header=list(rows[0]);case_id_index=header.index("Case ID");detail_index=header.index("Review Detail")
+    header=list(rows[0]);case_id_index=header.index("Case ID");detail_index=header.index("Finding detail")
     duplicate_rows=[row for row in rows[1:] if row[header.index("Review Finding")]=="Possible duplicate name"]
     assert {row[case_id_index] for row in duplicate_rows}=={"B1","G1"}
     assert all("South (Baghdad + Gov)" in row[detail_index] for row in duplicate_rows)
@@ -755,7 +757,7 @@ def test_beneficiary_review_export_groups_findings_by_region():
     assert workbook.sheetnames==["North Iraq","AMAL Camp","South Iraq"]
     def case_ids(sheet_name):
         rows=list(workbook[sheet_name].iter_rows(values_only=True));case_index=list(rows[0]).index("Case ID")
-        return {row[case_index] for row in rows[1:]}
+        return {row[case_index] for row in rows[1:] if row[case_index] and row[case_index]!="Case ID"}
     assert case_ids("North Iraq")=={"E","S","M"}
     assert case_ids("AMAL Camp")=={"A"}
     assert case_ids("South Iraq")=={"B","G"}
@@ -1214,7 +1216,7 @@ def test_duplicate_service_without_assessment_id_compares_across_assessments():
         "Service ID":["S1","S2","S3"],
         "Assessment ID":["A1","A2","A1"],
         "Beneficiary ID":["B1","B1","B1"],
-        "Type of Service Provided":["Legal Assistance","Legal Assistance","Legal Representation"],
+        "Type of Service Provided":["Legal Assistance","Legal Assistance","Legal Counselling"],
         "Type of Document":["National ID","National ID","National ID"],
     })
     store=LegalStore.from_files(payload,"test")

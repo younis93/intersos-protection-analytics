@@ -3816,7 +3816,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
               onClick={() => setPage(id)}
             >
               <Icon />
-              <span>{labels[id]}</span>
+              <span>{labels[id]}</span>{id==="send-issues"&&<small className="si-testing-badge">Testing</small>}
               {id==="send-issues"&&sendIssuesStatus!=="idle"?<NavLoadStatus label={labels[id]} status={sendIssuesStatus}/>:loadStatuses[id]&&<NavLoadStatus label={labels[id]} status={loadStatuses[id]}/>}
             </button>
           ))}
