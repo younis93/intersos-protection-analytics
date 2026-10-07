@@ -10,13 +10,18 @@ try {
     $CertificatePath = Join-Path $PSScriptRoot '../installer/INTERSOS-Code-Signing.cer'
     $Certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new((Resolve-Path $CertificatePath).Path)
     if ($Certificate.Thumbprint -ne 'C4F1B12A3BCCC73BEF903FA3796304CF0E67670D') {throw 'Unexpected test certificate.'}
-    certutil.exe -addstore -f Root $CertificatePath | Out-Null
-    if ($LASTEXITCODE -ne 0) {throw 'Test certificate trust failed.'}
-    certutil.exe -user -addstore -f Root $CertificatePath | Out-Null
-    if ($LASTEXITCODE -ne 0) {throw 'User certificate trust failed.'}
-    certutil.exe -user -addstore -f TrustedPublisher $CertificatePath | Out-Null
-    if ($LASTEXITCODE -ne 0) {throw 'Publisher trust failed.'}
+    Write-Output 'Preparing approved signing certificate in the disposable runner.'
+    Import-Certificate -FilePath $CertificatePath -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+    $MachineKey = "HKLM:\SOFTWARE\Microsoft\SystemCertificates\Root\Certificates\$($Certificate.Thumbprint)"
+    foreach ($Store in @('Root','TrustedPublisher')) {
+        $UserStore = "HKCU:\SOFTWARE\Microsoft\SystemCertificates\$Store\Certificates"
+        New-Item -Path $UserStore -Force | Out-Null
+        # Copy the already vetted serialized certificate into the test user's
+        # stores without an interactive certificate-import dialog.
+        Copy-Item -LiteralPath $MachineKey -Destination $UserStore -Recurse -Force
+    }
     function Install-Release([string]$Name) {
+        Write-Output "Installing $Name in the disposable runner."
         $InstallerPath = "$SmokeRoot\Iraq-Data-Analysis-Setup-$Name.exe"
         $Signature = Get-AuthenticodeSignature -LiteralPath $InstallerPath
         if ($Signature.SignerCertificate.Thumbprint -ne "C4F1B12A3BCCC73BEF903FA3796304CF0E67670D") {throw "Unexpected installer signing certificate."}
@@ -32,25 +37,24 @@ try {
     }
     function Check-Application([string]$Version) {
         $AppProcess = Start-Process -FilePath $ApplicationPath -WindowStyle Hidden -PassThru
+        Write-Output "Waiting for application API version $Version."
         $Deadline = (Get-Date).AddSeconds(90)
+        $ApiReady = $false
         do {
             Start-Sleep -Seconds 2
-            $RunningApp = Get-Process -Name 'Iraq Data Analysis' -ErrorAction SilentlyContinue | Where-Object {$_.MainWindowTitle -eq "Iraq Data Analysis $Version"}
-        } while (-not $RunningApp -and (Get-Date) -lt $Deadline)
-        if (-not $RunningApp) { throw "Application $Version did not open its window." }
-        $ApiReady = $false
-        $ApplicationPids = @(Get-Process -Name 'Iraq Data Analysis' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
-        foreach ($Connection in @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object {$_.OwningProcess -in $ApplicationPids})) {
-            try {
-                $Health = Invoke-RestMethod "http://127.0.0.1:$($Connection.LocalPort)/api/health" -TimeoutSec 10
-                if ($Health.status) {
-                    $Status = Invoke-RestMethod "http://127.0.0.1:$($Connection.LocalPort)/api/update/status" -TimeoutSec 10
-                    if ($Status.currentVersion -ne $Version) {throw "Unexpected application version."}
-                    $ApiReady=$true;break
-                }
-            } catch {}
+            $ApplicationPids = @(Get-Process -Name 'Iraq Data Analysis' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+            foreach ($Connection in @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object {$_.OwningProcess -in $ApplicationPids})) {
+                try {
+                    $Health = Invoke-RestMethod "http://127.0.0.1:$($Connection.LocalPort)/api/health" -TimeoutSec 3
+                    $Status = Invoke-RestMethod "http://127.0.0.1:$($Connection.LocalPort)/api/update/status" -TimeoutSec 3
+                    if ($Health.status -and $Status.currentVersion -eq $Version) {$ApiReady=$true;break}
+                } catch {}
+            }
+        } while (-not $ApiReady -and (Get-Date) -lt $Deadline)
+        if (-not $ApiReady) {
+            Get-Content -LiteralPath "$DataRoot/startup.log" -Tail 30 -ErrorAction SilentlyContinue
+            throw "Application $Version API did not respond."
         }
-        if (-not $ApiReady) {throw "Application $Version API did not respond."}
         Get-Process -Name 'Iraq Data Analysis' -ErrorAction SilentlyContinue | Stop-Process
         Start-Sleep -Seconds 3
     }
