@@ -2,8 +2,8 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE_PATH||'playwright');
 const root=path.resolve(__dirname,'..'),fixture=path.join(root,'frontend/src/studioLoadingCheck.tsx'),component=path.join(root,'frontend/src/studioLoadingComponent.tsx'),html=path.join(root,'frontend/studio-loading-check.html');
 (async()=>{let browser;try{
-  fs.writeFileSync(component,fs.readFileSync(path.join(root,'frontend/src/LegalPlatform.tsx'),'utf8')+'\nexport {LegalAnalyticsStudio};\n');
-  fs.writeFileSync(fixture,`import React from 'react';import {createRoot} from 'react-dom/client';import {LegalAnalyticsStudio} from './studioLoadingComponent';import './styles.css';
+  fs.writeFileSync(component,"export {LegalAnalyticsStudio} from './LegalStudioPage';\n");
+  fs.writeFileSync(fixture,`import React from 'react';import {createRoot} from 'react-dom/client';import {LegalAnalyticsStudio} from './studioLoadingComponent';import './styles.css';import './workspace.css';
   const metadata:any={source:'Synthetic loading check',features:{detention:true},availability:{assessments:true,legalservices:true,beneficiaries:true,awareness:false},sheets:['assessments','legalservices','beneficiaries'].map(id=>({id,name:id,rows:2,columns:['Assessment Status','Project','Month']}))};
   createRoot(document.getElementById('root')!).render(<LegalAnalyticsStudio metadata={metadata} theme="glass-light" onOpenCase={()=>{}}/>);`);
   fs.writeFileSync(html,'<div id="root"></div><script type="module" src="/src/studioLoadingCheck.tsx"></script>');
@@ -31,5 +31,6 @@ const root=path.resolve(__dirname,'..'),fixture=path.join(root,'frontend/src/stu
   await page.getByRole('button',{name:'Done',exact:true}).click();
   await tabs.getByRole('button',{name:'Assessments',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('.legal-kpi strong')?.textContent==='2');await page.waitForTimeout(400);assert.equal(requests.length,4);
+  await require('./verify_deferred_styles.cjs')(page);
   assert.deepEqual(errors,[]);console.log(JSON.stringify({initialRequests:1,sectionRequests:1,filterRequests:1,stableLoading:true,sectionDataIsolation:true,pageErrors:errors}));
 }finally{await browser?.close();for(const file of [fixture,component,html])fs.rmSync(file,{force:true});}})().catch(error=>{console.error(error);process.exit(1)});

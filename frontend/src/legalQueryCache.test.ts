@@ -9,6 +9,19 @@ describe("legal query cache", () => {
   beforeEach(() => {invalidateLegalQueries(); setLegalRevision("source-1")});
   afterEach(() => {vi.unstubAllGlobals(); vi.useRealTimers(); invalidateLegalQueries()});
 
+  it("caches Sampling settings separately, invalidates revisions and never caches Sampling exports", async () => {
+    const network=vi.fn(async()=>json({rows:[]}));vi.stubGlobal("fetch",network);
+    const settings={method:"POST",body:JSON.stringify({search:"",filters:{},page:1,removeDuplicateBeneficiaryIds:false,removeDuplicateContacts:false})};
+    await legalFetch('/api/legal/sampling',settings);await legalFetch('/api/legal/sampling',settings);
+    expect(network).toHaveBeenCalledTimes(1);
+    await legalFetch('/api/legal/sampling',{...settings,body:JSON.stringify({removeDuplicateContacts:true})});
+    expect(network).toHaveBeenCalledTimes(2);
+    await legalFetch('/api/legal/sampling/export',settings);await legalFetch('/api/legal/sampling/export',settings);
+    expect(network).toHaveBeenCalledTimes(4);
+    setLegalRevision('sampling-next');await legalFetch('/api/legal/sampling',settings);
+    expect(network).toHaveBeenCalledTimes(5);
+  });
+
   it("shares identical requests and returns independent responses on repeat navigation", async () => {
     const network = vi.fn(async () => json({rows: [1]}));
     vi.stubGlobal("fetch", network);

@@ -1,3 +1,4 @@
+import {RowSelectionCheckbox} from './TableControls';
 import {ValueTable} from "./ValueTable";
 import whatsappLogo from './assets/whatsapp-logo.svg';
 import {excludeValue, filterValue, isExcludedValue} from "./filterSelection";
@@ -13,7 +14,7 @@ import {openIssueEmail,type EmailProvider} from './emailQuickAction';
 import {issueReportHtml,prepareIssueReportPreview,createIssuePdf,downloadIssuePdf,openIssueWhatsapp,type IssueReport} from './issuePdf';
 import {SenderFields} from './IssueComposerFields';
 import {loadSender,saveSender,loadWhatsappLanguage,saveWhatsappSettings,type MessageLanguage,senderSignature,messageBlockReason,validMessageDeadline,type SenderDetails} from './issueComposerSettings';
-import {CheckboxMultiSelect} from './components';
+import {CheckboxMultiSelect} from './SelectionControls';
 import {issueFilterOptions,filterIssueFindings,issueOwner,activeIssueLawyer,type IssueFilters} from './sendIssuesFilters';
 import {whatsappPhone} from './whatsappIssues';
 
@@ -29,12 +30,8 @@ export function issueGroups(rows:IssueFinding[]) {
   return Array.from(groups.entries());
 }
 export function toggleIssueSelection(current:Set<string>,ids:string[],checked:boolean){const next=new Set(current);for(const id of ids){if(checked)next.add(id);else next.delete(id);}return next;}
+function SelectionCheckbox({ids,selected,onChange,label}:{ids:string[];selected:Set<string>;onChange:(checked:boolean)=>void;label:string}){return <RowSelectionCheckbox total={ids.length} selectedCount={ids.filter(id=>selected.has(id)).length} onChange={onChange} label={label}/>;}
 
-function SelectionCheckbox({ids,selected,onChange,label}:{ids:string[];selected:Set<string>;onChange:(checked:boolean)=>void;label:string}){
-  const ref=useRef<HTMLInputElement>(null),count=ids.filter(id=>selected.has(id)).length;
-  useEffect(()=>{if(ref.current)ref.current.indeterminate=count>0&&count<ids.length;},[count,ids.length]);
-  return <input ref={ref} type="checkbox" aria-label={label} checked={ids.length>0&&count===ids.length} onChange={e=>onChange(e.target.checked)}/>;
-}
 function FindingTable({rows,selected,onToggle}:{rows:IssueFinding[];selected:Set<string>;onToggle:(ids:string[],checked:boolean)=>void}){
   const [page,setPage]=useState(1);const pageSize=25;const pages=Math.max(1,Math.ceil(rows.length/pageSize));const current=Math.min(page,pages);
   const duplicates=rows.some(row=>row.duplicateMatches?.length||row.matchingCases);

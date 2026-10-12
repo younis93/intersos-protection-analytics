@@ -4,10 +4,10 @@ on:
     inputs:
       version:
         required: true
-        default: '1.0.49'
+        default: '1.0.50'
       previous:
         required: true
-        default: '1.0.48'
+        default: '1.0.49'
 permissions:
   contents: read
 jobs:

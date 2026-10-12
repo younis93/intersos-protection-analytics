@@ -27,17 +27,11 @@ import {
   getQuality,
   uploadWorkbook,
 } from "./api";
-import {
-  ActiveFilters,
-  ExcelDownloadButton,
-  AppSelect,
-  ChartCard,
-  FilterDrawer,
-  FlowCard,
-  KpiCard,
-  QualityTable,
-  TrendCard,
-} from "./components";
+import {ActiveFilters, FilterDrawer} from './FilterControls';
+import {ExcelDownloadButton, AppSelect} from './SelectionControls';
+import {ChartCard, FlowCard, TrendCard} from './ChartComponents';
+import {KpiCard} from './KpiCard';
+import {QualityTable} from './QualityTable';
 import Studio from "./Studio";
 import DataExplorer from "./DataExplorer";
 import type {

@@ -52,7 +52,7 @@ const addBilingualFont=async(pdf:jsPDF,svg:SVGElement)=>{
 
 export async function exportChart(graphDiv:any,title:string,format:'png'|'pdf'){
   if(!graphDiv)throw new Error('Chart is not ready for export.');
-  const Plotly=(await import('plotly.js-dist-min')).default;
+  const Plotly=(await import('./plotlyEngine')).default;
   const width=1600,height=960;
   const horizontalBars=(graphDiv.data||[]).some((trace:any)=>trace?.type==='bar'&&trace?.orientation==='h');
   const host=document.createElement('div');

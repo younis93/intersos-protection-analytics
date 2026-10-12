@@ -16,5 +16,5 @@ it('moves one live canvas from preparation to processing without restarting the 
   unmountPreparation();
   expect(createElement).toHaveBeenCalledOnce();expect(renderer).toHaveBeenCalledOnce();
   expect(stop).not.toHaveBeenCalled();expect(canvas.parentElement).toBe(processing);
-  unmountProcessing();expect(stop).toHaveBeenCalledOnce();
+  unmountProcessing();await Promise.resolve();expect(stop).toHaveBeenCalledOnce();
 });

@@ -1,8 +1,9 @@
-import {lazy, Suspense, type ComponentProps} from "react";
+import {type ComponentProps} from "react";
+import {deferredComponent} from './DeferredComponent';
 import type StudioComponent from "./Studio";
 
-const Studio = lazy(() => import("./Studio"));
+const Studio = deferredComponent(()=>import('./Studio'),<div className="loading" role="status">Loading Studio…</div>);
 
 export default function LazyStudio(props: ComponentProps<typeof StudioComponent>) {
-  return <Suspense fallback={<div className="loading" role="status">Loading Studio…</div>}><Studio {...props}/></Suspense>;
+  return <Studio {...props}/>;
 }

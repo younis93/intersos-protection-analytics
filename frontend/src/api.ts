@@ -349,6 +349,17 @@ export const exportTableWorkbook = async (filename:string,columns:string[],rows:
   if(!response.ok){const issue=await response.json().catch(()=>({detail:response.statusText}));throw new Error(issue.detail||"Excel export failed");}
   const url=URL.createObjectURL(await response.blob()),link=document.createElement("a");link.href=url;link.download=filename.endsWith(".xlsx")?filename:`${filename}.xlsx`;link.click();window.setTimeout(()=>URL.revokeObjectURL(url),1500);
 };
+
+export const getLegalSampling = (query:import('./samplingTypes').SamplingState,signal?:AbortSignal) =>
+  fetch(`${API}/legal/sampling`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...query,pageSize:100}),signal}).then(parse<import('./samplingTypes').SamplingResult>);
+
+export const exportLegalSampling = async (query:import('./samplingTypes').SamplingState) => {
+  const {page:_,...settings}=query;
+  const response=await fetch(`${API}/legal/sampling/export`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(settings)});
+  if(!response.ok){const issue=await response.json().catch(()=>({detail:response.statusText}));throw new Error(issue.detail||'Sampling export failed');}
+  const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');
+  link.href=url;link.download='sampling.xlsx';link.click();window.setTimeout(()=>URL.revokeObjectURL(url),1500);
+};
 export const exportTableWorkbookSheets = async (filename:string,sheets:{title:string;columns:string[];rows:Record<string,unknown>[]}[]) => {
   const response=await fetch(`${API}/table-workbook`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename,sheets})});
   if(!response.ok){const issue=await response.json().catch(()=>({detail:response.statusText}));throw new Error(issue.detail||"Excel export failed");}

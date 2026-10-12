@@ -42,6 +42,29 @@ function Set-InstallMarker {
     Set-Content -LiteralPath $MarkerPath -Value (Get-Date).ToUniversalTime().ToString('o') -Encoding ascii
 }
 
+function Stop-FrontendNativeToolLocks {
+    param([string]$ModulesPath)
+    # Windows cannot replace loaded .node binaries during npm ci. Only stop
+    # Node processes holding native modules from this exact frontend checkout.
+    $ModulesPrefix = [IO.Path]::GetFullPath($ModulesPath).TrimEnd('\') + '\'
+    foreach ($NodeProcess in (Get-Process -Name node -ErrorAction SilentlyContinue)) {
+        $LoadedModules = @()
+        try { $LoadedModules = @($NodeProcess.Modules) } catch { continue }
+        $ProjectNativeModule = $LoadedModules | Where-Object {
+            $_.FileName -and
+            $_.FileName.StartsWith($ModulesPrefix, [StringComparison]::OrdinalIgnoreCase) -and
+            [IO.Path]::GetExtension($_.FileName) -eq '.node'
+        } | Select-Object -First 1
+        if ($ProjectNativeModule) {
+            Write-Host "Stopping this project's frontend tool (PID $($NodeProcess.Id)) to release locked dependencies..." -ForegroundColor Yellow
+            Stop-Process -Id $NodeProcess.Id -ErrorAction Stop
+            if (-not $NodeProcess.WaitForExit(10000)) {
+                throw "Frontend tool PID $($NodeProcess.Id) did not stop. Close the project's development server and retry."
+            }
+        }
+    }
+}
+
 function Start-PackagedApplication {
     if (-not (Test-Path -LiteralPath $PackagedApp)) {
         throw "The packaged application was not found at $PackagedApp. Run package-windows.ps1 first."
@@ -96,8 +119,11 @@ if ($LaunchOnly) {
 
     if (-not (Test-Path -LiteralPath $FrontendModules) -or (Test-FileNewerThan $FrontendLockfile $FrontendInstallMarker)) {
         Write-Host 'Refreshing changed frontend dependencies...' -ForegroundColor Cyan
+        Stop-FrontendNativeToolLocks $FrontendModules
         & npm.cmd ci --prefix $FrontendRoot
-        if ($LASTEXITCODE -ne 0) { throw 'Frontend dependency refresh failed.' }
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Frontend dependency refresh failed. If npm reports EPERM, close development servers for this project and retry; Windows may still be holding a native tool file.'
+        }
         Set-InstallMarker $FrontendInstallMarker
     }
 

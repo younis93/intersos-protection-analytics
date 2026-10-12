@@ -2916,26 +2916,35 @@ class LegalStore:
         if assessment_date and len(assessments):assessment_month_count=int(pd.to_datetime(assessments[assessment_date],errors="coerce",dayfirst=True).dt.to_period("M").nunique())
         assessment_project=_find(list(assessments.columns),"Projects - المشروع","Project")
         projects=sorted({str(value).strip() for value in assessments[assessment_project].dropna() if str(value).strip()}) if assessment_project else ["Unassigned project"]
+        # Prepare row positions once, rather than normalizing and scanning each
+        # entire dataset again for every project/lawyer pair. Group positions
+        # preserve source order and keep the existing distinct-ID denominators.
+        workload_groups = {}
+        def workload_rows(frame:pd.DataFrame, person:str, project:str, created_by:bool=True)->pd.DataFrame:
+            key=(id(frame),created_by)
+            if key not in workload_groups:
+                person_col=_find(list(frame.columns),*(('Lawyers','Lawyer','Created by') if created_by else ('Lawyers','Lawyer')))
+                project_col=_find(list(frame.columns),'Projects - المشروع','Project')
+                if person_col:
+                    people=frame[person_col].fillna('').astype(str).str.strip()
+                    groups=frame.groupby([people,frame[project_col].fillna('').astype(str).str.strip()],sort=False).indices if project_col else frame.groupby(people,sort=False).indices
+                else:groups={}
+                workload_groups[key]=(bool(project_col),groups)
+            has_project,groups=workload_groups[key]
+            positions=groups.get((person,project) if has_project else person)
+            return frame.iloc[positions] if positions is not None else frame.iloc[0:0]
         for project in projects:
           for person in sorted(lawyer_names):
             row={"project":project,"lawyer":person}
             for name,label,id_hints in (("assessments","assessments",("Assessment ID",)),("legalservices","services",("Service ID",)),("followupslogbooks","followups",("Follow-ups & Logbook ID","Follow-up ID")),("legalfees","fees",("Fee ID",)),("deportationrecords","deportations",("PN ID",)),("awareness","awareness",("Awareness ID",))):
                 frame=frames.get(name,pd.DataFrame());column=_find(list(frame.columns),"Lawyers","Lawyer","Created by");id_col=_find(list(frame.columns),*id_hints)
-                selected=frame[frame[column].fillna("").astype(str).str.strip().eq(person)] if column else frame.iloc[0:0]
-                project_column=_find(list(selected.columns),"Projects - المشروع","Project")
-                if project_column:selected=selected[selected[project_column].fillna("").astype(str).str.strip().eq(project)]
+                selected=workload_rows(frame,person,project)
                 row[label]=int(selected[id_col].map(clean_id).nunique()) if id_col else len(selected)
-            lawyer_assessments=assessments[assessments[_find(list(assessments.columns),"Lawyers","Lawyer")].fillna("").astype(str).str.strip().eq(person)] if _find(list(assessments.columns),"Lawyers","Lawyer") else assessments.iloc[0:0]
-            if assessment_project:lawyer_assessments=lawyer_assessments[lawyer_assessments[assessment_project].fillna("").astype(str).str.strip().eq(project)]
-            lawyer_services=services[services[_find(list(services.columns),"Lawyers","Lawyer")].fillna("").astype(str).str.strip().eq(person)] if _find(list(services.columns),"Lawyers","Lawyer") else services.iloc[0:0]
-            service_project=_find(list(lawyer_services.columns),"Projects - المشروع","Project")
-            if service_project:lawyer_services=lawyer_services[lawyer_services[service_project].fillna("").astype(str).str.strip().eq(project)]
+            lawyer_assessments=workload_rows(assessments,person,project,created_by=False)
+            lawyer_services=workload_rows(services,person,project,created_by=False)
             lawyer_status=_find(list(lawyer_services.columns),"Service Status","Status")
             lawyer_completed=int(lawyer_services[lawyer_status].fillna("").astype(str).str.contains("complete|closed|provided|done|اكتملت",case=False,regex=True).sum()) if lawyer_status else 0
-            fee_lawyer=_find(list(fees.columns),"Lawyers","Lawyer","Created by")
-            lawyer_fee_rows=fees[fees[fee_lawyer].fillna("").astype(str).str.strip().eq(person)] if fee_lawyer else fees.iloc[0:0]
-            fee_project=_find(list(lawyer_fee_rows.columns),"Projects - المشروع","Project")
-            if fee_project:lawyer_fee_rows=lawyer_fee_rows[lawyer_fee_rows[fee_project].fillna("").astype(str).str.strip().eq(project)]
+            lawyer_fee_rows=workload_rows(fees,person,project)
             lawyer_amounts=pd.to_numeric(lawyer_fee_rows[amount_col].astype(str).str.replace(r"[^0-9.\-]","",regex=True),errors="coerce").fillna(0) if amount_col else pd.Series(dtype=float)
             row.update({"monthlyAverage":len(lawyer_assessments)/max(assessment_month_count,1),"completedServices":lawyer_completed,"completionRate":lawyer_completed/max(row["services"],1),"averageCost":float(lawyer_amounts.sum())/max(lawyer_completed,1)})
             if row["assessments"] or row["services"] or row["followups"] or row["fees"] or row["awareness"]:lawyer_rows.append(row)

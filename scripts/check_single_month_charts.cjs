@@ -10,7 +10,7 @@ const root=path.resolve(__dirname,'..'),entry=path.join(root,'frontend/src/singl
    function Harness(){const [config,setConfig]=useState<any>({months:['2026-09'],values:[43],comparison:[32],theme:'glass-light',display:'count'}),[selected,setSelected]=useState<string[]>([]);(window as any).updateChart=(next:any)=>{setSelected([]);setConfig(next)};const rows=config.months.map((label:string,index:number)=>({label,count:config.values[index],percent:config.values[index]/100}));return <main style={{padding:12}}><TrendCard rows={rows} comparisonRows={config.comparison?config.months.map((label:string,index:number)=>({label,count:config.comparison[index],percent:config.comparison[index]/100})):undefined} primaryLabel="Detained assessments" comparisonLabel="Released" title="Detained assessments and releases" theme={config.theme} display={config.display} selected={selected} onSelect={setSelected} onRemove={month=>setSelected(current=>current.filter(value=>value!==month))}/><output data-testid="selected">{selected.join(',')}</output><SingleMonthIndicatorChart month="2026-09" series={[{label:'Detained assessments',values:[config.values[0]],color:'#1683d8'},{label:'Released',values:[config.comparison?.[0]||0],color:'#2f9e68'}]}/></main>};createRoot(document.getElementById('root')!).render(<Harness/>);`);created.push(entry);
   fs.writeFileSync(html,'<div id="root"></div><script type="module" src="/src/singleMonthCheck.tsx"></script>');created.push(html);
   browser=await chromium.launch({executablePath:process.env.EDGE_PATH||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
-  const page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[];page.on('pageerror',error=>errors.push(String(error)));
+  const page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[];page.on('pageerror',error=>errors.push(error.stack||String(error)));
   await page.goto((process.env.APP_TEST_URL||'http://127.0.0.1:5190')+'/single-month-check.html');
   const graph=page.locator('.js-plotly-plot');
   await page.waitForFunction(()=>document.querySelector('.js-plotly-plot')?.data?.[0]?.type==='bar');
@@ -41,7 +41,7 @@ const root=path.resolve(__dirname,'..'),entry=path.join(root,'frontend/src/singl
   assert.equal(await graph.evaluate(node=>node.data[0].text[0]),'43%');
   await update({months:['2026-08','2026-09'],values:[0,43],comparison:[0,32],theme:'glass-light',display:'count'});
   assert.equal(await graph.evaluate(node=>node.getBoundingClientRect().height),initialHeight);
-  for(const theme of ['glass-light','glass-dark'])for(const width of [390,1440]){
+  for(const theme of ['glass-light','glass-dark','unhcr','executive','multicolor'])for(const width of [390,1440]){
    await page.setViewportSize({width,height:900});await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
    await update({months:['2026-09'],values:[43],comparison:[32],theme,display:'count'});
    await page.waitForFunction(()=>document.querySelector('.js-plotly-plot')?.layout?.xaxis?.tickangle===0);
@@ -49,6 +49,6 @@ const root=path.resolve(__dirname,'..'),entry=path.join(root,'frontend/src/singl
    await page.locator(".indicator-analysis-chart").screenshot({path:path.join(output,`single-month-indicator-${theme}-${width}.png`)});
    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'Chart overflows viewport');
   }
-  assert.deepEqual(errors,[]);console.log('Single-month bars: values, zero/equal/large values, percentage, hover, selection/removal, pivot, PNG/PDF, line switching, fixed height, mobile and light/dark passed.');
+  assert.deepEqual(errors,[]);console.log('Single-month bars: values, zero/equal/large values, percentage, hover, selection/removal, pivot, PNG/PDF, line switching, fixed height, mobile and all five themes passed.');
  }finally{if(browser)await browser.close();for(const file of created)fs.unlinkSync(file)}
 })().catch(error=>{console.error(error);process.exitCode=1});

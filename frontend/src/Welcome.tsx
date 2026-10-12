@@ -2,7 +2,7 @@ import {UpdateFallbackNotice} from "./UpdateFallbackNotice";
 import {useEffect,useState} from 'react';
 import {ArrowRight,BriefcaseBusiness,Maximize2,Minimize2,Palette,RefreshCw} from 'lucide-react';
 import {checkForUpdates,getUpdateStatus,installUpdate} from './api';
-import {AppSelect} from './components';
+import {AppSelect} from './SelectionControls';
 import type {Theme,UpdateCheck,UpdateStatus} from './types';
 import {GuardianFox} from './GuardianFox';
 import {AVATAR_ENABLED,RIVE_HOME_AVATAR_ENABLED} from './features';

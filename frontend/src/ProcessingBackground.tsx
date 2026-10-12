@@ -37,5 +37,12 @@ function syncBackground(){
 export function mountProcessingBackground(host:HTMLElement,active:boolean){
   const owner={host,active};owners.push(owner);syncBackground();
   if(!renderer)void loadRenderer().then(value=>{renderer=value;syncBackground();}).catch(()=>{/* CSS fallback stays visible. */});
-  return()=>{const index=owners.indexOf(owner);if(index>=0)owners.splice(index,1);syncBackground();};
+  return()=>{
+    const index=owners.indexOf(owner);if(index>=0)owners.splice(index,1);
+    // A deferred workspace replaces its fallback within one React commit.
+    // Let the next owner adopt the same canvas and running fluid field before
+    // disposing it, avoiding a background reset between those surfaces.
+    if(owners.length)syncBackground();
+    else queueMicrotask(()=>{if(!owners.length)syncBackground()});
+  };
 }

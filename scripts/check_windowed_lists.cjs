@@ -51,7 +51,8 @@ const fs=require("node:fs");
   await page.getByRole("button",{name:"Done",exact:true}).click();
   const table=page.getByTestId("windowed-table");
   assert((await table.locator("tbody tr[data-window-index]").count())<100,"Table rendered too many rows");
-  await table.evaluate(node=>{node.scrollTop=node.scrollHeight});
+  // Measured row heights can change the scroll extent after the first jump.
+  await page.waitForFunction(()=>{const node=document.querySelector('[data-testid="windowed-table"]');node.scrollTop=node.scrollHeight;return [...node.querySelectorAll('td')].some(cell=>cell.textContent==='1999')});
   await table.getByText("1999",{exact:true}).waitFor();
   assert((await table.locator("tbody tr[data-window-index]").count())<100);
   assert.equal(await page.getByTestId("all-records").textContent(),"2000");

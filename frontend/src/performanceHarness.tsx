@@ -2,7 +2,7 @@ import {ValueTable} from "./ValueTable";
 // Standalone development entry used by scripts/check_windowed_lists.cjs.
 import {useMemo, useState} from "react";
 import {createRoot} from "react-dom/client";
-import {CheckboxMultiSelect} from "./components";
+import {CheckboxMultiSelect} from './SelectionControls';
 import {VirtualRows} from "./VirtualRows";
 import "./styles.css";
 

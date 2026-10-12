@@ -12,6 +12,10 @@ import hashlib
 import importlib.util
 import io
 import json
+import cProfile
+import pstats
+import statistics
+import subprocess
 import sys
 from pathlib import Path
 from time import perf_counter
@@ -68,7 +72,31 @@ def main() -> None:
     parser.add_argument("--mb", type=float, default=10)
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--duplicates", action="store_true")
+    parser.add_argument("--profile", action="store_true", help="Separate CPU run; no record values are saved")
+    parser.add_argument("--suite", action="store_true")
+    parser.add_argument("--repeats", type=int, default=5)
     args = parser.parse_args()
+    if args.suite:
+        if args.output is None or args.profile or args.repeats<1:
+            parser.error('--suite requires --output and positive repeats; run --profile separately')
+        results=[]
+        for size in (10,50,100):
+            for duplicates in (False,True):
+                samples=[]
+                for _ in range(args.repeats):
+                    command=[sys.executable,__file__,"--mb",str(size)]
+                    if args.baseline:command.extend(['--baseline',str(args.baseline)])
+                    if duplicates: command.append("--duplicates")
+                    samples.append(json.loads(subprocess.run(command,capture_output=True,text=True,check=True).stdout))
+                    print(f'{size} MB duplicates={duplicates}: run {_+1}/{args.repeats}',flush=True)
+                assert len({sample['result_sha256'] for sample in samples})==1
+                keys=[key for key,value in samples[0].items() if isinstance(value,(int,float))]
+                results.append({'target_mb':size,'duplicates':duplicates,'samples':samples,'summary':{key:{'median':statistics.median(s[key] for s in samples),'min':min(s[key] for s in samples),'max':max(s[key] for s in samples)} for key in keys}})
+                args.output.parent.mkdir(parents=True,exist_ok=True)
+                args.output.write_text(json.dumps({'repeats':args.repeats,'results':results},indent=2),encoding='utf-8')
+                print(f'Completed {size} MB duplicates={duplicates}',flush=True)
+        return
     if args.baseline:
         spec = importlib.util.spec_from_file_location("backend.performance_baseline", args.baseline)
         module = importlib.util.module_from_spec(spec)
@@ -77,6 +105,12 @@ def main() -> None:
     else:
         from backend import legal_platform as module
     payload = synthetic_payload(args.mb)
+    if args.duplicates:
+        frame=pd.read_csv(io.BytesIO(payload['beneficiaries']),dtype=object)
+        frame['Name (Filter Color Red)']=[f'{index//4:08d} اسم تجريبي' for index in range(len(frame))]
+        payload['beneficiaries']=frame.to_csv(index=False).encode('utf-8-sig')
+    profiler=cProfile.Profile() if args.profile else None
+    if profiler: profiler.enable()
     stages = {}
     collecting = True
     if args.baseline:
@@ -123,9 +157,15 @@ def main() -> None:
     # Revision is deliberately different per import; all other output must match.
     checks[0] = {key: value for key, value in checks[0].items() if key != "revision"}
     digest = hashlib.sha256(json.dumps(checks, sort_keys=True, default=str, ensure_ascii=False).encode()).hexdigest()
+    profile=[]
+    if profiler:
+        profiler.disable()
+        for (filename,line,function),(primitive,calls,self_seconds,cumulative,callers) in sorted(pstats.Stats(profiler).stats.items(),key=lambda item:item[1][3],reverse=True)[:40]:
+            profile.append({'module':Path(filename).name,'line':line,'function':function,'calls':calls,'self_seconds':self_seconds,'cumulative_seconds':cumulative})
     result = {"mode": "baseline" if args.baseline else "optimized", "csv_mb": round(sum(map(len, payload.values())) / 1_000_000, 2),
               "rows": {key: len(frame) for key, frame in store.frames.items()}, **timings,
-              "stages_seconds": {key: round(value, 4) for key, value in getattr(store, "import_timings", stages).items()}, "peak_process_mb": round(peak_memory_mb(), 2), "result_sha256": digest}
+              "stages_seconds": {key: round(value, 4) for key, value in getattr(store, "import_timings", stages).items()}, "peak_process_mb": round(peak_memory_mb(), 2), "result_sha256": digest,
+              "profile":profile,"profiled":args.profile,"actual_bytes":sum(map(len,payload.values()))}
     print(json.dumps(result, indent=2))
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

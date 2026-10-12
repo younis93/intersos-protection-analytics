@@ -11,9 +11,9 @@ const temporary = ['frontend/src/overviewCheckComponent.tsx', 'frontend/src/over
   try {
     for (const file of temporary) assert(!fs.existsSync(file), `Temporary file already exists: ${file}`);
     created.push(temporary[0]);
-    fs.writeFileSync(temporary[0], fs.readFileSync(path.join(root, 'frontend/src/LegalPlatform.tsx'), 'utf8') + '\nexport {Overview};\n');
+    fs.writeFileSync(temporary[0], "export {Overview} from './LegalOverviewPage';\n");
     created.push(temporary[1]);
-    fs.writeFileSync(temporary[1], `import React from 'react';import {createRoot} from 'react-dom/client';import {Overview} from './overviewCheckComponent';import {setLegalRevision} from './legalQueryCache';import './styles.css';setLegalRevision('test');
+    fs.writeFileSync(temporary[1], `import React from 'react';import {createRoot} from 'react-dom/client';import {Overview} from './overviewCheckComponent';import {setLegalRevision} from './legalQueryCache';import './styles.css';import './workspace.css';setLegalRevision('test');
       const metadata:any={ready:true,revision:'test',features:{awareness:true,detention:false,deportation:false},overview:{beneficiaries:10,assessments:8,services:6,fees:2,followups:3,awareness:4}};
       createRoot(document.getElementById('root')!).render(<div className="app-shell legal-shell"><aside className="sidebar"><nav><button>Overview</button><button>Indicator Reporting</button></nav></aside><main className="main"><header className="topbar legal-header"><h1>Overview</h1><div id="legal-header-scroll-controls"/></header><section className="content legal-content"><Overview metadata={metadata} theme="glass-light"/></section></main></div>);`);
     created.push(temporary[2]);
@@ -81,7 +81,7 @@ const temporary = ['frontend/src/overviewCheckComponent.tsx', 'frontend/src/over
     await waitForRefresh();
     assert.equal(await page.locator('.active-filters button').filter({hasText:'Beneficiary'}).count(),0);
     assert.equal(await page.getByText('Unavailable for selected case filters',{exact:true}).count(),0);
-    await toolbar.getByRole('button', {name: 'Reset all', exact: true}).click();
+    await toolbar.getByRole('button', {name: /^Reset(?: all)?$/, exact: true}).click();
     await waitForRefresh();
     assert.equal(await page.locator('.executive-kpi').first().locator('strong').textContent(), '10');
     const cachedCalls=calls.length;
@@ -90,13 +90,13 @@ const temporary = ['frontend/src/overviewCheckComponent.tsx', 'frontend/src/over
     await page.locator('h1').click();
     await waitForRefresh();
     assert.equal(calls.length,cachedCalls,'Previously selected filters should reuse cached results');
-    await toolbar.getByRole('button',{name:'Reset all',exact:true}).click();
+    await toolbar.getByRole('button',{name:/^Reset(?: all)?$/,exact:true}).click();
     await waitForRefresh();
     await toolbar.getByRole('button', {name: 'All project', exact: true}).click();
     await page.getByRole('checkbox', {name: 'Fail', exact: true}).check();
     await page.locator('h1').click();
     await page.getByRole('alert').waitFor();
-    await toolbar.getByRole('button', {name: 'Reset all', exact: true}).click();
+    await toolbar.getByRole('button', {name: /^Reset(?: all)?$/, exact: true}).click();
     await waitForRefresh();
     // Hold an old request while an immediate reset publishes the current scope.
     await page.evaluate(async()=>{const {setLegalRevision}=await import('/src/legalQueryCache.ts');setLegalRevision('replacement')});
@@ -106,7 +106,7 @@ const temporary = ['frontend/src/overviewCheckComponent.tsx', 'frontend/src/over
     await page.getByRole('checkbox',{name:'P1',exact:true}).check();
     await oldRequest;
     await page.locator('h1').click();
-    await toolbar.getByRole('button',{name:'Reset all',exact:true}).click();
+    await toolbar.getByRole('button',{name:/^Reset(?: all)?$/,exact:true}).click();
     await waitForRefresh();
     assert.equal(await page.locator('.executive-kpi').first().locator('strong').textContent(),'10');
     holdProject=false;releaseProject();
@@ -123,7 +123,7 @@ const temporary = ['frontend/src/overviewCheckComponent.tsx', 'frontend/src/over
     await waitForRefresh();
     assert.equal(calls.length,rapidCalls+1,'Rapid selections should issue one final request');
     assert.deepEqual(calls.at(-1).projects,['P1','P2']);
-    await toolbar.getByRole('button',{name:'Reset all',exact:true}).click();
+    await toolbar.getByRole('button',{name:/^Reset(?: all)?$/,exact:true}).click();
     await waitForRefresh();
     for (const width of [390, 768, 1440]) {
       await page.setViewportSize({width, height: 900});
@@ -143,6 +143,7 @@ const temporary = ['frontend/src/overviewCheckComponent.tsx', 'frontend/src/over
     await page.locator('.legal-content').evaluate(node => {node.style.height = '400px'; node.style.overflow = 'auto'; node.scrollTop = 300;});
     await page.locator('#legal-header-scroll-controls .header-filter-actions').waitFor({timeout: 5000});
     assert.equal(await page.locator('#legal-header-scroll-controls .checkbox-multi-select').count(), 3);
+    await require('./verify_deferred_styles.cjs')(page);
     assert.deepEqual(errors, []);
     console.log('Overview filters: selection, drawer, apply, remove, reset, errors, slow refresh, cached results, rapid selections, stale responses, desktop/mobile layout, dropdowns, and compact scroll controls passed.');
   } finally {

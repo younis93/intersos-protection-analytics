@@ -2,8 +2,8 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE_PATH||'playwright');
 const root=path.resolve(__dirname,'..'),component=path.join(root,'frontend/src/pageLoadingComponent.tsx'),fixture=path.join(root,'frontend/src/pageLoadingCheck.tsx'),html=path.join(root,'frontend/page-loading-check.html');
 (async()=>{let browser;try{
-  fs.writeFileSync(component,fs.readFileSync(path.join(root,'frontend/src/LegalPlatform.tsx'),'utf8')+'\nexport {FindingTable,HotlineRecordsTable,DeportationRecordsTable,IndicatorReporting};\n');
-  fs.writeFileSync(fixture,`import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {FindingTable,HotlineRecordsTable,DeportationRecordsTable,IndicatorReporting} from './pageLoadingComponent';import DataExplorer from './DataExplorer';import './styles.css';
+  fs.writeFileSync(component,"export {FindingTable} from './LegalReviewPage';\nexport {HotlineRecordsTable} from './LegalHotlinePage';\nexport {DeportationRecordsTable} from './LegalDeportationPage';\nexport {IndicatorReporting} from './LegalIndicatorsPage';\n");
+  fs.writeFileSync(fixture,`import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {FindingTable,HotlineRecordsTable,DeportationRecordsTable,IndicatorReporting} from './pageLoadingComponent';import DataExplorer from './DataExplorer';import './styles.css';import './workspace.css';
   const noop=()=>{};const metadata:any={dataExplorer:{sheets:[{id:'test',name:'Test',rows:250,columns:[{name:'Value',type:'string',values:['A','B']}]}]}};
   function Fixture(){const [filters,setFilters]=useState<any>({}),[search,setSearch]=useState('');const kind=new URLSearchParams(location.search).get('page');return <main style={{padding:20}}><button onClick={()=>setFilters({Project:['P1']})}>Change filter</button><button onClick={()=>setSearch('changed')}>Change search</button>{kind==='deportation'?<DeportationRecordsTable filters={filters} onSearchChange={noop}/>:kind==='hotline'?<HotlineRecordsTable filters={filters} onSearchChange={noop}/>:kind==='review'?<FindingTable dataset="beneficiaries" rule="Invalid age" search={search} filters={filters} nameCompareChars={15} nameCompareCharsInput={15} allowNameVariations={false} exactMatchesOnly={true} onExactMatchesOnlyChange={noop} onNameCompareCharsChange={noop} onAllowNameVariationsChange={noop} nameRecordCount={undefined} eligibleNameRecordCount={undefined} ignoreCourtVerdict={false} onIgnoreCourtVerdictChange={noop} comparisonMonth="" onOpenCase={noop} findingRevision={0} onFindingContextMenu={noop} onBulkExclude={noop}/>:kind==='indicators'?<IndicatorReporting revision={0}/>:<DataExplorer metadata={metadata}/>}</main>};createRoot(document.getElementById('root')!).render(<Fixture/>);`);
   fs.writeFileSync(html,'<div id="root"></div><script type="module" src="/src/pageLoadingCheck.tsx"></script>');
@@ -21,8 +21,8 @@ const root=path.resolve(__dirname,'..'),component=path.join(root,'frontend/src/p
   for(const kind of ['explorer','hotline','deportation','review','indicators']){
     calls.length=0;await page.goto((process.env.APP_TEST_URL||'http://127.0.0.1:5174')+'/page-loading-check.html?page='+kind);
     await page.waitForTimeout(kind==='indicators'?1200:600);
-    assert.equal(calls.length,1,kind+' initial load duplicated');
-    if(kind==='indicators'){assert.equal(await page.locator('.skeleton').count(),0);results.push({page:kind,initialRequests:1,noRenderLoop:true});continue;}
+    assert.equal(calls.length,1,kind+' initial load duplicated '+JSON.stringify({calls,errors}));
+    if(kind==='indicators'){assert.equal(await page.locator('.skeleton').count(),0);await require('./verify_deferred_styles.cjs')(page);results.push({page:kind,initialRequests:1,noRenderLoop:true});continue;}
     if(kind==='review'){await page.getByRole('button',{name:'Change search',exact:true}).click();await page.waitForTimeout(300);assert.equal(calls.length,2,'Review search duplicated');results.push({page:kind,initialRequests:1,searchRequests:1});continue;}
     await page.getByRole('button',{name:kind==='explorer'?'Next':'Next page',exact:true}).click();await page.waitForTimeout(300);
     assert.equal(calls.length,2,kind+' paging duplicated');assert.equal(calls[1].query.page,2);

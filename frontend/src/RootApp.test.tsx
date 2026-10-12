@@ -2,7 +2,7 @@ import {afterEach,describe,expect,it,vi} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
 import RootApp from './RootApp';
 
-vi.mock('./LegalPlatform',()=>({default:()=> <div>Legal workspace</div>}));
+vi.mock('./LazyLegalPlatform',()=>({default:()=> <div>Legal workspace</div>}));
 vi.mock('./Welcome',()=>({default:()=> <div>Welcome</div>}));
 vi.mock('./GuardianFox',()=>({GUARDIAN_FOX_STORAGE_KEY:'guardian-fox'}));
 afterEach(()=>vi.unstubAllGlobals());
@@ -13,10 +13,11 @@ function render(search:string){
  return renderToStaticMarkup(<RootApp/>);
 }
 describe('workspace startup handoff',()=>{
- it('does not repeat the launcher splash or hide the workspace during desktop startup',()=>{
+ it('never recreates the native preparation screen during desktop startup',()=>{
   const markup=render('?appTheme=glass-light&startupEpoch=123456');
   expect(markup).not.toContain('Preparing your workspace');
   expect(markup).not.toContain('app-startup-loading');
+  expect(markup).not.toContain('startup-app-content');
   expect(markup).toContain('aria-hidden="false"');
   expect(markup).not.toContain('inert=""');
   expect(markup).toContain('Legal workspace');

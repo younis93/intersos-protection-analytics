@@ -2,7 +2,7 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE_PATH||'playwright');
 const root=path.resolve(__dirname,'..'),fixture=path.join(root,'frontend/src/sendIssuesReturnCheck.tsx'),component=path.join(root,'frontend/src/sendIssuesReturnComponent.tsx'),html=path.join(root,'frontend/send-issues-return-check.html');
 (async()=>{let browser;try{
- fs.writeFileSync(component,fs.readFileSync(path.join(root,'frontend/src/LegalPlatform.tsx'),'utf8')+'\nexport {NavLoadStatus};\n');
+ fs.writeFileSync(component,"export {NavLoadStatus} from './LegalPlatform';\n");
  fs.writeFileSync(fixture,`import React,{useCallback,useState} from 'react';import {createRoot} from 'react-dom/client';import SendIssues from './SendIssues';import {NavLoadStatus} from './sendIssuesReturnComponent';import {setLegalRevision,invalidateLegalQueries} from './legalQueryCache';import './styles.css';
  setLegalRevision('return-test');(window as any).loadEvents=[];
  function Fixture(){const [visible,setVisible]=useState(true),[status,setStatus]=useState<any>('loading');const report=useCallback((next:any)=>{(window as any).loadEvents.push(next);setStatus(next)},[]);return <main><nav><NavLoadStatus label="Send Issues" status={status==='idle'?'ready':status}/></nav><button onClick={()=>setVisible(value=>!value)}>Toggle page</button><button onClick={()=>invalidateLegalQueries()}>Invalidate data</button>{visible&&<SendIssues revision="0" onLoadStatus={report}/>}</main>};createRoot(document.getElementById('root')!).render(<Fixture/>);`);
@@ -11,6 +11,7 @@ const root=path.resolve(__dirname,'..'),fixture=path.join(root,'frontend/src/sen
  const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];let findings=0,contacts=0;
  page.on('pageerror',error=>errors.push(String(error)));
  await page.route('**/api/legal/send-issues/**',async route=>{
+  if(route.request().method()==='OPTIONS')return route.fulfill({status:204,headers:{'access-control-allow-origin':'*','access-control-allow-methods':'*','access-control-allow-headers':'*','access-control-max-age':'86400'}});
   const isContacts=route.request().url().endsWith('/contacts');if(isContacts)contacts++;else findings++;
   await new Promise(resolve=>setTimeout(resolve,isContacts?700:200));
   const response=isContacts?{contacts:{Alice:'alice@example.org'},whatsappNumbers:{}}:{revision:'r1',lawyers:['Alice'],rows:[{id:'one',lawyer:'Alice',rule:'Invalid age',ruleArabic:'',severity:'Low',row:1,recordId:'B1',caseId:'B1',dataset:'beneficiaries',reviewPage:'Beneficiaries Review',project:'P1',location:'L1',detail:'Synthetic test finding',action:'Check age'}],total:1,contacts:{Alice:'alice@example.org'}};

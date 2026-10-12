@@ -32,6 +32,7 @@ from .indicator_reporting import build_indicator_report, build_indicator_workboo
 from .indicator_reconciliation import IndicatorMasterWorkbook, build_reconciliation_workbook, reconcile as reconcile_indicators
 from . import updater
 from .import_progress import legal_import_tracker, ImportBusyError, ImportCancelled
+from .static_cache import static_cache_policy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -233,11 +234,12 @@ async def prevent_stale_api_state(request, call_next):
     if request.url.path.startswith("/api/") and LOCAL_SESSION_TOKEN:
         supplied_token = request.cookies.get(SESSION_COOKIE, "")
         if not secrets.compare_digest(supplied_token, LOCAL_SESSION_TOKEN):
-            return Response(status_code=403, content="Local application session required.")
+            return Response(status_code=403, content="Local application session required.", headers={"Cache-Control":"no-store"})
     response = await call_next(request)
+    response.headers["Cache-Control"] = static_cache_policy(request.url.path, response.status_code, response.headers.get("content-type", ""), STATIC_DIR)
     if request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
-    elif LOCAL_SESSION_TOKEN:
+    elif LOCAL_SESSION_TOKEN and 'immutable' not in response.headers["Cache-Control"]:
         response.set_cookie(SESSION_COOKIE, LOCAL_SESSION_TOKEN, httponly=True, samesite="strict", path="/")
     if not request.url.path.startswith("/api/") and response.headers.get("content-type", "").split(";", 1)[0] == "text/html":
         # The entry document names build-specific assets. Reusing it after an
@@ -283,6 +285,15 @@ class LegalAnalyticsDashboardRequest(BaseModel):
     pageSize: int = 100
     sortColumn: str = ""
     sortDirection: str = "asc"
+
+
+class SamplingQuery(BaseModel):
+    search: str = ""
+    filters: dict[str, list[str]] = {}
+    removeDuplicateBeneficiaryIds: bool = False
+    removeDuplicateContacts: bool = False
+    page: int = 1
+    pageSize: int = 100
 
 
 class DuplicateExclusionRequest(BaseModel):
@@ -629,6 +640,26 @@ def legal_analytics_dashboard(request: LegalAnalyticsDashboardRequest):
     if request.page<1 or request.pageSize<1 or request.pageSize>10000 or request.sortDirection not in {"asc","desc"}: raise HTTPException(400,"Invalid dashboard query.")
     try:return require_legal_store().analytics_dashboard(request.dataset,request.filters,request.search,request.page,request.pageSize,request.sortColumn,request.sortDirection)
     except ValueError as exc:raise HTTPException(400,str(exc)) from exc
+
+
+@app.post("/api/legal/sampling")
+def legal_sampling(request: SamplingQuery):
+    from .sampling import table
+    if request.page < 1 or request.pageSize < 1 or request.pageSize > 10000:
+        raise HTTPException(400, "Invalid Sampling pagination.")
+    return table(require_legal_store().frames.get("legalservices"), **request.model_dump())
+
+
+@app.post("/api/legal/sampling/export")
+def legal_sampling_export(request: SamplingQuery):
+    from .sampling import export
+    query = request.model_dump(exclude={"page", "pageSize"})
+    try:
+        payload = export(require_legal_store().frames.get("legalservices"), **query)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return Response(payload, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="sampling.xlsx"'})
 
 
 @app.get("/api/legal/explorer-filters/{dataset}")

@@ -1,9 +1,11 @@
+import {Pager,SortableHeader,TableState} from './TableControls';
 import {ValueTable} from "./ValueTable";
 import {useQueryPage} from "./useQueryPage";
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {ChevronLeft,ChevronRight,Columns3,Download,Eye,EyeOff,Filter,RotateCcw,Search,ShieldAlert,X} from 'lucide-react';
 import {exportExplorer,getExplorer,type ExplorerQuery} from './api';
-import {AppSelect,formatNumber} from './components';
+import {AppSelect} from './SelectionControls';
+import {formatNumber} from './formatting';
 import {sortFilterValues,formatTableValue} from './dateFormat';
 import type {ExplorerColumn,ExplorerFilter,ExplorerResult,Metadata} from './types';
 
@@ -68,8 +70,8 @@ export default function DataExplorer({metadata}:{metadata:Metadata}){
     {error&&<div className="error glass">{error}<button onClick={()=>setError('')}>Dismiss</button></div>}
     <section className="explorer-table-card glass">
       <header><div><h3>{sheet.name}</h3><p>{formatNumber(result?.matchedRows||0)} matched of {formatNumber(result?.totalRows||sheet.rows)} rows · {visible.length} of {sheet.columns.length} columns</p></div><div className="explorer-export"><button className={`soft explorer-export-button${exportTask.preparing?' is-preparing':''}`} aria-busy={exportTask.preparing} aria-label={exportTask.preparing?'Cancel Excel download':'Download Excel'} title={exportTask.preparing?'Cancel Excel download':'Download Excel'} onClick={()=>{if(exportTask.preparing)cancelExplorerExportTask();else{setError('');startExplorerExportTask(query)}}}><span className="explorer-export-content"><Download/>Excel</span>{exportTask.preparing&&<><span className="button-spinner explorer-export-spinner" aria-hidden="true"/><span className="explorer-export-cancel"><X/>Cancel</span></>}</button></div></header>
-      <div className={`explorer-table-wrap ${busy?'busy':''}`}><ValueTable><thead><tr>{visible.map(column=><th key={column}><button onClick={()=>sort(column)} title="Sort column">{column}{sortColumn===column?<span>{sortDirection==='asc'?' ↑':' ↓'}</span>:null}</button></th>)}</tr></thead><tbody>{result?.rows.map((row,index)=><tr key={`${page}-${index}`}>{visible.map(column=>{const rendered=display(row[column],sheet.columns.find(item=>item.name===column)?.type==='date');return <td key={column} title={rendered}>{rendered}</td>})}</tr>)}</tbody></ValueTable>{busy&&<div className="explorer-busy">Loading…</div>}{!busy&&result?.rows.length===0&&<div className="explorer-no-results">No rows match the current search and filters.</div>}</div>
-      <footer><span>Page {page} of {pages}</span><div><button className="soft" onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page<=1}><ChevronLeft/>Previous</button><button className="soft" onClick={()=>setPage(p=>Math.min(pages,p+1))} disabled={page>=pages}>Next<ChevronRight/></button></div></footer>
+      <div className={`explorer-table-wrap ${busy?'busy':''}`}><ValueTable><thead><tr>{visible.map(column=><SortableHeader key={column} direction={sortColumn===column?sortDirection:undefined} onSort={()=>sort(column)} buttonProps={{title:"Sort column"}}>{column}{sortColumn===column?<span>{sortDirection==='asc'?' ↑':' ↓'}</span>:null}</SortableHeader>)}</tr></thead><tbody>{result?.rows.map((row,index)=><tr key={`${page}-${index}`}>{visible.map(column=>{const rendered=display(row[column],sheet.columns.find(item=>item.name===column)?.type==='date');return <td key={column} title={rendered}>{rendered}</td>})}</tr>)}</tbody></ValueTable>{busy&&<TableState className="explorer-busy">Loading…</TableState>}{!busy&&result?.rows.length===0&&<TableState className="explorer-no-results">No rows match the current search and filters.</TableState>}</div>
+      <Pager variant="explorer" page={page} total={result?.matchedRows||0} pageSize={PAGE_SIZE} onChange={setPage}/>
     </section>
   </div>
 }

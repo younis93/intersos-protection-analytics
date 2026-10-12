@@ -1,5 +1,5 @@
 import {useLayoutEffect,useRef,useState} from 'react';
-import {animateProcessingCardSize,processingCardHandoffEvent,takeProcessingCardHandoff} from './processingCardTransition';
+import {animateProcessingCard,finishProcessingCardMotion,processingCardMotionEvent} from './processingCardMotion';
 import {Minus,Maximize2,X} from 'lucide-react';
 import ProcessingFolder from './ProcessingFolder';
 import ProcessingBackground from './ProcessingBackground';
@@ -10,11 +10,12 @@ export default function ProcessingRecords({progress,uploadPercent,restoring=fals
   const [minimized,setMinimized]=useState(initialMinimized);
   const cardRef=useRef<HTMLElement>(null);
   useLayoutEffect(()=>{
-    if(minimized||!restoring)return;
+    if(minimized){finishProcessingCardMotion();return}
+    if(!restoring)return;
     let stop=()=>{};
-    const handoff=()=>{const bounds=takeProcessingCardHandoff();if(bounds&&cardRef.current){stop();stop=animateProcessingCardSize(cardRef.current,bounds);}};
-    handoff();window.addEventListener(processingCardHandoffEvent,handoff);
-    return()=>{window.removeEventListener(processingCardHandoffEvent,handoff);stop();};
+    const start=()=>{stop();if(cardRef.current)stop=animateProcessingCard(cardRef.current)};
+    start();window.addEventListener(processingCardMotionEvent,start);
+    return()=>{window.removeEventListener(processingCardMotionEvent,start);stop()};
   },[minimized,restoring]);
   const terminal=Boolean(progress&&['complete','error','cancelled'].includes(progress.state));
   const cancelling=cancelPending||progress?.state==='cancelling';
