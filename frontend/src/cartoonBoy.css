@@ -1,0 +1,132 @@
+/* Joint animation uses SVG coordinates, so the illustration stays crisp at any size. */
+.home-rive-avatar.cartoon-home-avatar{left:16px;bottom:12px;width:152px;height:200px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 24px);padding:0;margin:0;border:0;outline-offset:4px;background:none;box-shadow:none;filter:none;transform:translate3d(var(--boy-x,0),var(--boy-y,0),0);transition:none;animation:boy-arrive 900ms cubic-bezier(.22,1,.36,1) both;touch-action:none;user-select:none;cursor:grab}
+.home-rive-avatar.cartoon-home-avatar[data-activity=walking]{transition:transform var(--boy-travel-ms,6000ms) linear}
+.cartoon-home-avatar::after{display:none}
+.home-rive-avatar.cartoon-home-avatar:hover{filter:none}
+.cartoon-home-avatar:focus-visible{outline:3px solid var(--blue);border-radius:24px}
+.cartoon-boy{display:block;width:100%;height:100%;overflow:visible;pointer-events:none}
+.cartoon-boy g{transform-box:view-box}
+.boy-rig{transform-origin:80px 196px;animation:boy-breathe 4200ms ease-in-out infinite}
+.boy-upper-body{transform-origin:80px 137px;transition:transform 450ms cubic-bezier(.4,0,.2,1)}
+.boy-head{transform-origin:80px 89px;animation:boy-head-idle 5200ms ease-in-out infinite}
+.boy-eyes{transform-origin:82px 65px;animation:boy-blink 4800ms linear infinite}
+.boy-pupils{animation:boy-look 7200ms ease-in-out infinite}
+.boy-arm{transition:transform 450ms cubic-bezier(.4,0,.2,1)}
+.boy-arm-left{transform-origin:59px 100px}
+.boy-arm-right{transform-origin:100px 100px}
+.boy-forearm{transition:transform 450ms cubic-bezier(.4,0,.2,1)}
+.boy-forearm-left{transform-origin:49px 136px}
+.boy-forearm-right{transform-origin:112px 136px}
+.boy-leg-front{transform-origin:71px 140px}
+.boy-leg-back{transform-origin:90px 140px}
+.boy-shin-front{transform-origin:71px 166px}
+.boy-shin-back{transform-origin:90px 166px}
+.boy-leg,.boy-shin{transition:transform 450ms cubic-bezier(.4,0,.2,1)}
+.boy-book,.boy-ball,.boy-thought,.boy-stool{opacity:0;transition:opacity 350ms ease}
+.boy-shadow{transform-origin:80px 201px;animation:boy-shadow-breathe 4200ms ease-in-out infinite}
+.boy-ball{transform-origin:126px 187px}
+.cartoon-home-avatar[data-activity=greeting] .boy-arm-right{animation:boy-wave-arm 2400ms cubic-bezier(.4,0,.2,1) both}
+.cartoon-home-avatar[data-activity=greeting] .boy-forearm-right{animation:boy-wave-hand 2400ms ease-in-out both}
+.cartoon-home-avatar[data-activity=greeting] .boy-head{animation:boy-greeting-nod 2400ms ease-in-out both}
+.cartoon-home-avatar[data-activity=walking] .boy-rig{animation:boy-walk-body 780ms ease-in-out infinite}
+.cartoon-home-avatar[data-activity=walking] .boy-leg-front{animation:boy-stride 780ms ease-in-out infinite}
+.cartoon-home-avatar[data-activity=walking] .boy-leg-back{animation:boy-stride 780ms -390ms ease-in-out infinite}
+.cartoon-home-avatar[data-activity=walking] .boy-shin-front{animation:boy-knee 780ms ease-in-out infinite}
+.cartoon-home-avatar[data-activity=walking] .boy-shin-back{animation:boy-knee 780ms -390ms ease-in-out infinite}
+.cartoon-home-avatar[data-activity=walking] .boy-arm-left{animation:boy-arm-swing 780ms -390ms ease-in-out infinite}
+.cartoon-home-avatar[data-activity=walking] .boy-arm-right{animation:boy-arm-swing 780ms ease-in-out infinite}
+.cartoon-home-avatar[data-activity=walking] .boy-shadow{animation:boy-walk-shadow 390ms ease-in-out infinite}
+.cartoon-home-avatar[data-activity=thinking] .boy-head{animation:boy-think-head 4000ms ease-in-out both}
+.cartoon-home-avatar[data-activity=thinking] .boy-arm-right{transform:rotate(-135deg)}
+.cartoon-home-avatar[data-activity=thinking] .boy-forearm-right{transform:rotate(-162deg)}
+.cartoon-home-avatar[data-activity=thinking] .boy-thought{opacity:1;animation:boy-thought-in 600ms ease-out both}
+.cartoon-home-avatar[data-activity=reading] .boy-book{opacity:1}
+.cartoon-home-avatar[data-activity=reading] .boy-head{transform:rotate(7deg);animation:boy-read-head 3200ms ease-in-out infinite}
+.cartoon-home-avatar[data-activity=reading] .boy-arm-left{transform:rotate(-23deg)}
+.cartoon-home-avatar[data-activity=reading] .boy-forearm-left{transform:rotate(-65deg)}
+.cartoon-home-avatar[data-activity=reading] .boy-arm-right{transform:rotate(23deg)}
+.cartoon-home-avatar[data-activity=reading] .boy-forearm-right{transform:rotate(65deg)}
+.cartoon-home-avatar[data-activity=reading] .boy-pupils{animation:boy-read-eyes 3200ms ease-in-out infinite}
+.cartoon-home-avatar[data-activity=sitting] .boy-upper-body{transform:translateY(14px)}
+.cartoon-home-avatar[data-activity=sitting] .boy-stool{opacity:1}
+.cartoon-home-avatar[data-activity=sitting] .boy-leg-front{transform:rotate(-48deg)}
+.cartoon-home-avatar[data-activity=sitting] .boy-shin-front{transform:rotate(65deg)}
+.cartoon-home-avatar[data-activity=sitting] .boy-leg-back{transform:rotate(48deg)}
+.cartoon-home-avatar[data-activity=sitting] .boy-shin-back{transform:rotate(-65deg)}
+.cartoon-home-avatar[data-activity=playing] .boy-ball{opacity:1;animation:boy-ball-bounce 1200ms cubic-bezier(.36,0,.66,1) infinite}
+.cartoon-home-avatar[data-activity=playing] .boy-leg-back{animation:boy-kick 1200ms ease-in-out infinite}
+.cartoon-home-avatar[data-activity=playing] .boy-arm-left{animation:boy-balance 1200ms ease-in-out infinite}
+.cartoon-home-avatar[data-activity=playing] .boy-head{animation:boy-play-head 1200ms ease-in-out infinite}
+.cartoon-home-avatar[data-activity=stretching] .boy-arm-left{animation:boy-stretch-left 3200ms ease-in-out both}
+.cartoon-home-avatar[data-activity=stretching] .boy-arm-right{animation:boy-stretch-right 3200ms ease-in-out both}
+.cartoon-home-avatar[data-activity=stretching] .boy-upper-body{animation:boy-stretch-body 3200ms ease-in-out both}
+.cartoon-home-avatar[data-activity=looking] .boy-head{animation:boy-look-around 3600ms ease-in-out both}
+.cartoon-home-avatar[data-activity=looking] .boy-pupils{animation:boy-look-around-eyes 3600ms ease-in-out both}
+.cartoon-home-avatar[data-activity=celebrating] .boy-rig{animation:boy-happy-hop 2200ms ease-in-out both}
+.cartoon-home-avatar[data-activity=celebrating] .boy-arm-left{animation:boy-cheer-left 2200ms ease-in-out both}
+.cartoon-home-avatar[data-activity=celebrating] .boy-arm-right{animation:boy-cheer-right 2200ms ease-in-out both}
+.cartoon-home-avatar[data-activity=celebrating] .boy-shadow{animation:boy-hop-shadow 2200ms ease-in-out both}
+.home-rive-avatar.cartoon-home-avatar[data-dragging]{transition:none;cursor:grabbing;filter:none}
+.cartoon-home-avatar[data-dragging] .boy-rig{animation:boy-carried 1200ms ease-in-out infinite}
+.cartoon-home-avatar[data-dragging] .boy-arm-left{transform:rotate(18deg)}
+.cartoon-home-avatar[data-dragging] .boy-arm-right{transform:rotate(-18deg)}
+.cartoon-home-avatar[data-dragging] .boy-shadow{animation:none;opacity:0}
+.home-rive-avatar.cartoon-home-avatar[data-recovery=falling]{transition:transform var(--boy-drop-ms,440ms) cubic-bezier(.42,0,1,1)}
+.cartoon-home-avatar[data-recovery] .boy-rig{transform-origin:80px 120px}
+.cartoon-home-avatar[data-recovery=falling] .boy-rig{animation:boy-fall-tumble 450ms var(--boy-drop-ms,440ms) ease-in-out both}
+.cartoon-home-avatar[data-recovery=down] .boy-rig{animation:none;transform:translateY(50px) rotate(-75deg) scale(.7)}
+.cartoon-home-avatar[data-recovery=getting-up] .boy-rig{animation:boy-get-up 1200ms cubic-bezier(.4,0,.2,1) both}
+.cartoon-home-avatar[data-recovery] .boy-arm-left{transform:rotate(-20deg)}
+.cartoon-home-avatar[data-recovery] .boy-arm-right{transform:rotate(20deg)}
+.cartoon-home-avatar[data-recovery=getting-up] .boy-arm-left{animation:boy-push-up-left 1200ms ease-in-out both}
+.cartoon-home-avatar[data-recovery=getting-up] .boy-arm-right{animation:boy-push-up-right 1200ms ease-in-out both}
+.cartoon-home-avatar[data-recovery=getting-up] .boy-leg-front{animation:boy-rise-knee-left 1200ms ease-in-out both}
+.cartoon-home-avatar[data-recovery=getting-up] .boy-leg-back{animation:boy-rise-knee-right 1200ms ease-in-out both}
+.cartoon-home-avatar[data-recovery=getting-up] .boy-head{animation:boy-rise-head 1200ms ease-in-out both}
+.cartoon-home-avatar[data-recovery=falling] .boy-head{animation:boy-land-head 450ms var(--boy-drop-ms,440ms) ease-in-out both}
+.cartoon-home-avatar[data-recovery=falling] .boy-shadow{animation:boy-land-shadow 450ms var(--boy-drop-ms,440ms) ease-in-out both}
+.cartoon-home-avatar[data-recovery=down] .boy-shadow{animation:none;opacity:.18;transform:scaleX(1.3)}
+.cartoon-home-avatar[data-paused],.cartoon-home-avatar[data-paused] *{animation-play-state:paused!important}
+@keyframes boy-arrive{from{opacity:0}to{opacity:1}}
+@keyframes boy-breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.5px)}}
+@keyframes boy-head-idle{0%,100%{transform:rotate(0)}45%{transform:rotate(-1.5deg)}75%{transform:rotate(1deg)}}
+@keyframes boy-blink{0%,42%,46%,91%,95%,100%{transform:scaleY(1)}44%,93%{transform:scaleY(.08)}}
+@keyframes boy-look{0%,30%,80%,100%{transform:translateX(0)}45%,65%{transform:translateX(-1px)}}
+@keyframes boy-shadow-breathe{0%,100%{transform:scaleX(1);opacity:.16}50%{transform:scaleX(.96);opacity:.13}}
+@keyframes boy-wave-arm{0%,100%{transform:rotate(0)}22%{transform:rotate(-125deg)}38%{transform:rotate(-133deg)}54%{transform:rotate(-123deg)}70%{transform:rotate(-131deg)}82%{transform:rotate(-125deg)}}
+@keyframes boy-wave-hand{0%,100%{transform:rotate(0)}22%{transform:rotate(-14deg)}38%{transform:rotate(12deg)}54%{transform:rotate(-16deg)}70%{transform:rotate(10deg)}82%{transform:rotate(-12deg)}}
+@keyframes boy-greeting-nod{0%,100%{transform:rotate(0)}28%,70%{transform:rotate(-4deg)}48%{transform:rotate(-2deg)}}
+@keyframes boy-walk-body{0%,50%,100%{transform:translateY(0)}25%,75%{transform:translateY(-2px)}}
+@keyframes boy-stride{0%,100%{transform:rotate(-8deg)}50%{transform:rotate(8deg)}}
+@keyframes boy-knee{0%,50%,100%{transform:rotate(0)}25%{transform:rotate(-12deg)}75%{transform:rotate(4deg)}}
+@keyframes boy-arm-swing{0%,100%{transform:rotate(12deg)}50%{transform:rotate(-12deg)}}
+@keyframes boy-walk-shadow{0%,100%{transform:scaleX(1)}50%{transform:scaleX(.9)}}
+@keyframes boy-think-head{0%,100%{transform:rotate(0)}25%,75%{transform:rotate(-7deg)}}
+@keyframes boy-thought-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@keyframes boy-read-head{0%,100%{transform:rotate(5deg) translateY(1px)}50%{transform:rotate(8deg) translateY(2px)}}
+@keyframes boy-read-eyes{0%,100%{transform:translate(-1px,1px)}50%{transform:translate(1px,1px)}}
+@keyframes boy-ball-bounce{0%,100%{transform:translate(0,0) rotate(0)}45%{transform:translate(7px,-26px) rotate(35deg)}}
+@keyframes boy-kick{0%,35%,100%{transform:rotate(0)}15%{transform:rotate(-18deg)}58%{transform:rotate(5deg)}}
+@keyframes boy-balance{0%,100%{transform:rotate(0)}45%{transform:rotate(9deg)}}
+@keyframes boy-play-head{0%,100%{transform:rotate(0)}45%{transform:rotate(4deg)}}
+@keyframes boy-carried{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
+@keyframes boy-fall-tumble{0%{transform:translateY(0) rotate(0) scale(1)}25%{transform:translateY(5px) rotate(-18deg) scale(.95)}78%{transform:translateY(52px) rotate(-79deg) scale(.7)}100%{transform:translateY(50px) rotate(-75deg) scale(.7)}}
+@keyframes boy-get-up{0%,12%{transform:translateY(50px) rotate(-75deg) scale(.7)}45%{transform:translateY(24px) rotate(-28deg) scale(.85)}70%{transform:translateY(6px) rotate(-6deg) scale(.97)}88%{transform:translateY(-2px) rotate(1deg) scale(1)}100%{transform:translateY(0) rotate(0) scale(1)}}
+@keyframes boy-push-up-left{0%,20%{transform:rotate(-20deg)}45%{transform:rotate(-42deg)}75%{transform:rotate(-12deg)}100%{transform:rotate(0)}}
+@keyframes boy-push-up-right{0%,20%{transform:rotate(20deg)}45%{transform:rotate(32deg)}75%{transform:rotate(8deg)}100%{transform:rotate(0)}}
+@keyframes boy-rise-knee-left{0%,100%{transform:rotate(0)}45%{transform:rotate(12deg)}75%{transform:rotate(4deg)}}
+@keyframes boy-rise-knee-right{0%,100%{transform:rotate(0)}45%{transform:rotate(-12deg)}75%{transform:rotate(-4deg)}}
+@keyframes boy-rise-head{0%,100%{transform:rotate(0)}45%{transform:rotate(7deg)}75%{transform:rotate(-2deg)}}
+@keyframes boy-land-head{0%,100%{transform:rotate(0)}35%{transform:rotate(4deg)}}
+@keyframes boy-land-shadow{0%{opacity:0;transform:scaleX(.85)}35%{opacity:.22;transform:scaleX(1.08)}100%{opacity:.16;transform:scaleX(1)}}
+@keyframes boy-stretch-left{0%,100%{transform:rotate(0)}30%,70%{transform:rotate(135deg)}}
+@keyframes boy-stretch-right{0%,100%{transform:rotate(0)}30%,70%{transform:rotate(-135deg)}}
+@keyframes boy-stretch-body{0%,100%{transform:translateY(0)}35%,65%{transform:translateY(-3px)}}
+@keyframes boy-look-around{0%,100%{transform:rotate(0)}25%,40%{transform:rotate(-6deg)}60%,75%{transform:rotate(6deg)}}
+@keyframes boy-look-around-eyes{0%,100%{transform:translateX(0)}25%,40%{transform:translateX(-2px)}60%,75%{transform:translateX(2px)}}
+@keyframes boy-happy-hop{0%,100%{transform:translateY(0) scale(1)}18%{transform:translateY(3px) scale(1.02,.97)}42%{transform:translateY(-18px) scale(.99,1.02)}65%{transform:translateY(2px) scale(1.02,.98)}82%{transform:translateY(0) scale(1)}}
+@keyframes boy-cheer-left{0%,100%{transform:rotate(0)}32%,52%{transform:rotate(115deg)}75%{transform:rotate(15deg)}}
+@keyframes boy-cheer-right{0%,100%{transform:rotate(0)}32%,52%{transform:rotate(-115deg)}75%{transform:rotate(-15deg)}}
+@keyframes boy-hop-shadow{0%,100%{transform:scaleX(1);opacity:.16}42%{transform:scaleX(.7);opacity:.08}65%{transform:scaleX(1.08);opacity:.2}}
+@media(max-width:760px){.home-rive-avatar.cartoon-home-avatar{width:120px;height:158px;bottom:12px}}
+@media(prefers-reduced-motion:reduce){.home-rive-avatar.cartoon-home-avatar,.cartoon-home-avatar *{animation:none!important;transition:none!important}}

@@ -28,7 +28,7 @@ describe('independent legal page availability', () => {
         expect(pages).not.toContain(page);
       }
       expect(pages).toContain('explorer');
-      expect(pages.includes('send-issues')).toBe(datasets.includes('awareness') || datasets.includes('legalhotlines'));
+      expect(pages.includes('send-issues')).toBe(datasets.includes('awareness'));
       const fallback = datasets.includes('deportationrecords') ? 'deportation' : datasets.includes('awareness') ? 'awareness' : 'hotline';
       expect(resolveLegalPage(source, 'overview')).toBe(fallback);
     });
@@ -52,5 +52,30 @@ describe('independent legal page availability', () => {
     expect(isLegalPageAvailable(full, 'detention')).toBe(false);
     expect(isLegalPageAvailable(full, 'deportation')).toBe(true);
     expect(isLegalPageAvailable(full, 'awareness')).toBe(true);
+  });
+
+  for (const dataset of ['beneficiaries', 'assessments', 'legalservices', 'awareness']) {
+    it(`enables Send Issues with only ${dataset}, even with zero findings`, () => {
+      const source = metadata([dataset]);
+      expect(isLegalPageAvailable(source, 'send-issues')).toBe(true);
+      expect(resolveLegalPage(source, 'send-issues')).toBe('send-issues');
+      expect(taskManifest(source).some(task => task.page === 'send-issues')).toBe(true);
+    });
+  }
+
+  for (const datasets of [[], ['legalhotlines'], ['deportationrecords'], ['legalhotlines', 'deportationrecords'], ['legalfees']]) {
+    it(`hides and does not schedule Send Issues for ${datasets.join(', ') || 'no data'}`, () => {
+      const source = metadata(datasets);
+      expect(isLegalPageAvailable(source, 'send-issues')).toBe(false);
+      expect(taskManifest(source).some(task => task.page === 'send-issues')).toBe(false);
+      expect(resolveLegalPage(source, 'send-issues')).not.toBe('send-issues');
+    });
+  }
+
+  it('leaves Send Issues after replacement with Hotline-only data and restores it with relevant data', () => {
+    expect(resolveLegalPage(metadata(['awareness', 'legalhotlines']), 'send-issues')).toBe('send-issues');
+    expect(resolveLegalPage(metadata(['legalhotlines']), 'send-issues')).toBe('hotline');
+    expect(resolveLegalPage(metadata(['deportationrecords']), 'send-issues')).toBe('deportation');
+    expect(resolveLegalPage(metadata(['beneficiaries']), 'send-issues')).toBe('send-issues');
   });
 });

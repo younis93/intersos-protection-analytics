@@ -1,4 +1,5 @@
 import os
+import ctypes
 import pickle
 import sys
 import threading
@@ -57,6 +58,13 @@ class FakeServer:
 
 
 class DesktopLauncherTests(unittest.TestCase):
+    def test_startup_embeds_offline_ring_renderer_and_stops_on_failure(self):
+        html = launcher.startup_html('glass-light')
+        self.assertIn('<canvas class="processing-ring-field" aria-hidden="true">', html)
+        self.assertIn('export function createProcessingRingField', html)
+        self.assertIn('{active: true}', html)
+        self.assertIn('{active: false}', launcher.startup_html('glass-light', failed=True))
+
     def test_native_fullscreen_api_toggles_window(self):
         fullscreen = SimpleNamespace(state=False)
         def toggle():
@@ -76,6 +84,42 @@ class DesktopLauncherTests(unittest.TestCase):
         self.assertTrue(fullscreen.toggle())
         self.assertFalse(fullscreen.toggle())
         self.assertEqual(window.calls, 2)
+
+    def test_saved_title_bar_theme_is_applied_before_show_without_saving_again(self):
+        class BeforeShow:
+            def __init__(self): self.handlers = []
+            def __iadd__(self, handler): self.handlers.append(handler); return self
+        for theme in launcher.THEME_NAMES:
+            with self.subTest(theme=theme):
+                event = BeforeShow()
+                window = SimpleNamespace(events=SimpleNamespace(before_show=event))
+                controller = launcher.NativeFullscreenController("Test window")
+                with patch.object(controller, "set_title_bar_theme", return_value=False) as apply:
+                    controller.attach_window(window, theme)
+                    apply.assert_not_called()
+                    # Unsupported caption colors must not cancel window creation.
+                    self.assertIsNone(event.handlers[0]())
+                    apply.assert_called_once_with(theme, persist=False)
+
+    def test_native_title_bar_uses_attached_64_bit_handle_and_app_palette(self):
+        hwnd = 0x123456789
+        calls = []
+        def set_attribute(handle, attribute, pointer, size):
+            calls.append((handle, attribute, ctypes.cast(pointer, ctypes.POINTER(ctypes.c_uint)).contents.value))
+            return 0
+        dwm = Mock(side_effect=set_attribute)
+        find = Mock(return_value=0)
+        native_api = SimpleNamespace(user32=SimpleNamespace(FindWindowW=find), dwmapi=SimpleNamespace(DwmSetWindowAttribute=dwm))
+        controller = launcher.NativeFullscreenController("Test window")
+        controller.attach_window(SimpleNamespace(native=SimpleNamespace(Handle=SimpleNamespace(ToInt64=lambda:hwnd))))
+        with patch.object(launcher.ctypes, "windll", native_api, create=True), patch.object(launcher, "save_app_theme") as save:
+            self.assertTrue(controller.set_title_bar_theme("glass-light", persist=False))
+            self.assertEqual(calls, [(hwnd,20,0),(hwnd,35,0x00FBF5EE),(hwnd,36,0x00342212)])
+            find.assert_not_called();save.assert_not_called()
+            calls.clear()
+            self.assertTrue(controller.set_title_bar_theme("glass-dark"))
+            self.assertEqual(calls, [(hwnd,20,1),(hwnd,35,0x001E1307),(hwnd,36,0x00FFF7ED)])
+            save.assert_called_once_with("glass-dark")
 
     def test_local_server_starts_and_stops(self):
         uvicorn = SimpleNamespace(Config=Mock(return_value=object()), Server=lambda config: FakeServer(config))

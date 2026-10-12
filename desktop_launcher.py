@@ -295,16 +295,27 @@ def startup_html(theme: str, failed: bool = False, startup_epoch_ms: int | None 
     logo_svg = logo_path.read_text(encoding="utf-8") if logo_path.is_file() else '<svg viewBox="0 0 54 54" width="54" height="54" role="img" aria-label="INTERSOS"><text x="27" y="40" text-anchor="middle" fill="#1683d8" font-size="40">I</text></svg>'
     logo = f'<span class="logo">{logo_svg}</span>'
     progress = "" if failed else '<div class="progress" aria-hidden="true"><i></i></div>'
+    field_path = resource_path("frontend", "dist", "processing-ring-field.js")
+    if not field_path.is_file():
+        field_path = resource_path("frontend", "public", "processing-ring-field.js")
+    field_source = field_path.read_text(encoding="utf-8") if field_path.is_file() else ""
+    field_script = (
+        '<script type="module">' + field_source + '\ncreateProcessingRingField(document.querySelector(".processing-ring-field"), {active: '
+        + ("false" if failed else "true") + '});</script>'
+        if field_source else ""
+    )
     orbit = "" if failed else '<span class="orbit"></span>'
     return f"""<!doctype html><html data-theme="{theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>:root{{--blue:{blue};--bg:{background};--ink:{ink};--muted:{muted};--panel:{panel};--panel-strong:{panel_strong};--line:{line};--startup-offset:-{animation_offset}ms}}*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;color:var(--ink);background:var(--bg);font-family:'Segoe UI',sans-serif}}.startup{{position:fixed;inset:0;display:grid;place-items:center;overflow:hidden;background:var(--bg);isolation:isolate}}.startup:before{{content:"";position:absolute;inset:0;background-image:linear-gradient(color-mix(in srgb,var(--blue) 4%,transparent) 1px,transparent 1px),linear-gradient(90deg,color-mix(in srgb,var(--blue) 4%,transparent) 1px,transparent 1px);background-size:48px 48px;mask-image:radial-gradient(circle at center,#000,transparent 72%);opacity:.55}}.ambient{{position:absolute;border-radius:50%;filter:blur(26px);opacity:.9;will-change:transform}}.one{{width:min(64vw,800px);height:min(64vw,800px);top:-36%;right:-12%;background:radial-gradient(circle,color-mix(in srgb,var(--blue) 25%,transparent),transparent 68%);animation:ambient-one 7s ease-in-out infinite alternate;animation-delay:var(--startup-offset)}}.two{{width:min(56vw,680px);height:min(56vw,680px);left:-15%;bottom:-40%;background:radial-gradient(circle,color-mix(in srgb,#8b78e6 18%,transparent),transparent 68%);animation:ambient-two 8s ease-in-out infinite alternate;animation-delay:var(--startup-offset)}}.card{{position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,1fr);justify-items:center;width:min(440px,calc(100vw - 48px));padding:44px 42px 34px;border:1px solid var(--line);border-radius:28px;background:var(--panel);box-shadow:0 28px 80px color-mix(in srgb,var(--ink) 14%,transparent),inset 0 1px 0 color-mix(in srgb,#fff 75%,transparent);text-align:center;animation:card-enter .58s cubic-bezier(.22,1,.36,1) both}}.mark{{position:relative;isolation:isolate;display:grid;place-items:center;width:76px;height:76px;min-width:76px;min-height:76px;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);margin-bottom:32px;border:1px solid color-mix(in srgb,var(--blue) 24%,var(--line));border-radius:24px;background:color-mix(in srgb,var(--blue) 8%,var(--panel-strong));animation:none}}.mark:before{{content:"";position:absolute;z-index:-1;inset:-9px;border:1px solid color-mix(in srgb,var(--blue) 25%,transparent);border-radius:31px;opacity:.55}}.logo{{position:relative;z-index:2;display:grid;place-items:center;width:54px;height:54px;overflow:hidden;border-radius:8px;}}.mark img{{position:relative;z-index:2;display:block;width:54px;height:54px;object-fit:contain}}.mark b{{position:relative;z-index:2;color:var(--blue);font-size:34px}}.orbit{{position:absolute;z-index:1;inset:-14px;border:1px solid color-mix(in srgb,var(--blue) 28%,transparent);border-radius:34px;animation:orbit 3.8s linear infinite;animation-delay:var(--startup-offset)}}.orbit:after{{content:"";position:absolute;width:7px;height:7px;top:5px;right:6px;border-radius:50%;background:var(--blue);box-shadow:0 0 14px color-mix(in srgb,var(--blue) 72%,transparent)}}.eyebrow{{color:var(--blue);font-size:9px;font-weight:700;letter-spacing:.15em}}h1{{margin:7px 0 8px;font-size:28px;letter-spacing:-.035em}}p{{margin:0;color:var(--muted);font-size:13px}}.progress{{position:relative;width:100%;height:7px;margin:30px 0 25px;overflow:hidden;border-radius:99px;background:color-mix(in srgb,var(--muted) 13%,transparent)}}.progress:after{{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 1px 2px color-mix(in srgb,var(--ink) 8%,transparent)}}.progress i{{display:block;width:38%;height:100%;border-radius:inherit;background:linear-gradient(90deg,color-mix(in srgb,var(--blue) 55%,#fff),var(--blue),color-mix(in srgb,var(--blue) 55%,#fff));animation:progress 1.2s ease-in-out infinite;animation-delay:var(--startup-offset)}}footer{{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px}}footer svg{{width:15px;color:var(--blue)}}@keyframes card-enter{{from{{opacity:0;transform:translateY(14px) scale(.985)}}to{{opacity:1;transform:none}}}}@keyframes breathe{{0%,100%{{transform:scale(1);box-shadow:0 14px 34px color-mix(in srgb,var(--blue) 16%,transparent)}}50%{{transform:scale(1.035);box-shadow:0 18px 42px color-mix(in srgb,var(--blue) 25%,transparent)}}}}@keyframes orbit{{to{{transform:rotate(360deg)}}}}@keyframes progress{{0%{{transform:translateX(-110%)}}100%{{transform:translateX(290%)}}}}@keyframes ambient-one{{to{{transform:translate(-6%,8%) scale(1.08)}}}}@keyframes ambient-two{{to{{transform:translate(8%,-6%) scale(1.1)}}}}html[data-theme=glass-dark] .startup:before{{opacity:.32}}html[data-theme=unhcr] .two,html[data-theme=executive] .two{{opacity:.35}}@media(max-width:560px){{.card{{width:min(420px,calc(100vw - 32px));padding:37px 25px 29px;border-radius:24px}}h1{{font-size:25px}}}}@media(prefers-reduced-motion:reduce){{.card,.mark,.orbit,.ambient{{animation:none!important}}.progress i{{animation-duration:2s}}}}</style></head>
-<body><section class="startup" role="status" aria-live="polite" aria-label="Starting Iraq Data Analysis" aria-busy="true"><div class="ambient one"></div><div class="ambient two"></div><div class="card"><div class="mark">{orbit}{logo}</div><span class="eyebrow">IRAQ DATA ANALYSIS</span><h1>{heading if failed else 'Preparing your workspace'}</h1><p>{detail}</p>{progress}<footer><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><path d="m9 12 2 2 4-4"/></svg><span>Local and private data workspace</span></footer></div></section></body></html>"""
+<style>:root{{--blue:{blue};--bg:{background};--ink:{ink};--muted:{muted};--panel:{panel};--panel-strong:{panel_strong};--line:{line};--startup-offset:-{animation_offset}ms}}*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;color:var(--ink);background:var(--bg);font-family:'Segoe UI',sans-serif}}.startup{{position:fixed;inset:0;display:grid;place-items:center;overflow:hidden;background:color-mix(in srgb,var(--blue) 6%,var(--bg));isolation:isolate}}.processing-ring-field{{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;background:radial-gradient(ellipse at 20% 25%,color-mix(in srgb,var(--blue) 10%,transparent),transparent 65%),radial-gradient(ellipse at 85% 80%,color-mix(in srgb,#52b6d8 12%,transparent),transparent 65%)}}.card{{position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,1fr);justify-items:center;width:min(440px,calc(100vw - 48px));padding:44px 42px 34px;border:1px solid color-mix(in srgb,var(--blue) 14%,var(--panel-strong));border-radius:28px;background:var(--panel-strong);box-shadow:0 24px 80px color-mix(in srgb,var(--blue) 12%,transparent);text-align:center;animation:card-enter .58s cubic-bezier(.22,1,.36,1) both}}.mark{{position:relative;isolation:isolate;display:grid;place-items:center;width:76px;height:76px;min-width:76px;min-height:76px;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);margin-bottom:32px;border:1px solid color-mix(in srgb,var(--blue) 24%,var(--line));border-radius:24px;background:color-mix(in srgb,var(--blue) 8%,var(--panel-strong));animation:none}}.mark:before{{content:"";position:absolute;z-index:-1;inset:-9px;border:1px solid color-mix(in srgb,var(--blue) 25%,transparent);border-radius:31px;opacity:.55}}.logo{{position:relative;z-index:2;display:grid;place-items:center;width:54px;height:54px;overflow:hidden;border-radius:8px;}}.mark img{{position:relative;z-index:2;display:block;width:54px;height:54px;object-fit:contain}}.mark b{{position:relative;z-index:2;color:var(--blue);font-size:34px}}.orbit{{position:absolute;z-index:1;inset:-14px;border:1px solid color-mix(in srgb,var(--blue) 28%,transparent);border-radius:34px;animation:orbit 3.8s linear infinite;animation-delay:var(--startup-offset)}}.orbit:after{{content:"";position:absolute;width:7px;height:7px;top:5px;right:6px;border-radius:50%;background:var(--blue);box-shadow:0 0 14px color-mix(in srgb,var(--blue) 72%,transparent)}}.eyebrow{{color:var(--blue);font-size:9px;font-weight:700;letter-spacing:.15em}}h1{{margin:7px 0 8px;font-size:28px;letter-spacing:-.035em}}p{{margin:0;color:var(--muted);font-size:13px}}.progress{{position:relative;width:100%;height:7px;margin:30px 0 25px;overflow:hidden;border-radius:99px;background:color-mix(in srgb,var(--muted) 13%,transparent)}}.progress:after{{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 1px 2px color-mix(in srgb,var(--ink) 8%,transparent)}}.progress i{{display:block;width:38%;height:100%;border-radius:inherit;background:linear-gradient(90deg,color-mix(in srgb,var(--blue) 55%,#fff),var(--blue),color-mix(in srgb,var(--blue) 55%,#fff));animation:progress 1.2s ease-in-out infinite;animation-delay:var(--startup-offset)}}footer{{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px}}footer svg{{width:15px;color:var(--blue)}}@keyframes card-enter{{from{{opacity:0;transform:translateY(14px) scale(.985)}}to{{opacity:1;transform:none}}}}@keyframes breathe{{0%,100%{{transform:scale(1);box-shadow:0 14px 34px color-mix(in srgb,var(--blue) 16%,transparent)}}50%{{transform:scale(1.035);box-shadow:0 18px 42px color-mix(in srgb,var(--blue) 25%,transparent)}}}}@keyframes orbit{{to{{transform:rotate(360deg)}}}}@keyframes progress{{0%{{transform:translateX(-110%)}}100%{{transform:translateX(290%)}}}}@media(max-width:560px){{.card{{width:min(420px,calc(100vw - 32px));padding:37px 25px 29px;border-radius:24px}}h1{{font-size:25px}}}}@media(prefers-reduced-motion:reduce){{.card,.mark,.orbit{{animation:none!important}}.progress i{{animation-duration:2s}}}}</style></head>
+<body><section class="startup" role="status" aria-live="polite" aria-label="Starting Iraq Data Analysis" aria-busy="true"><canvas class="processing-ring-field" aria-hidden="true"></canvas><div class="card"><div class="mark">{orbit}{logo}</div><span class="eyebrow">IRAQ DATA ANALYSIS</span><h1>{heading if failed else 'Preparing your workspace'}</h1><p>{detail}</p>{progress}<footer><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><path d="m9 12 2 2 4-4"/></svg><span>Local and private data workspace</span></footer></div></section>{field_script}</body></html>"""
 
 
 def saved_legal_files() -> list[Path]:
     values = load_settings().get("legalFiles", [])
     if not isinstance(values, list): return []
-    return [Path(value) for value in values if isinstance(value, str) and Path(value).is_file() and Path(value).suffix.lower() == ".csv"]
+    # Keep missing paths so refresh validates the whole remembered selection,
+    # just as startup restoration does, instead of silently loading a subset.
+    return [Path(value) for value in values if isinstance(value, str) and Path(value).suffix.lower() == ".csv"]
 
 
 def save_legal_files(paths: list[Path]) -> None:
@@ -480,6 +491,24 @@ class StartupRuntime:
                 return
             metrics.mark("local-server-ready")
             start_remembered_restores(backend_main, metrics)
+            # Carry the preparation card dimensions across the native/React
+            # navigation so the processing card can grow from the same size.
+            try:
+                card_bounds = window.evaluate_js("""(() => {
+                    const card = document.querySelector('.startup .card');
+                    if (!card) return null;
+                    const bounds = card.getBoundingClientRect();
+                    return {width: bounds.width, height: bounds.height, fluidState: window.__processingFluidState || null};
+                })()""")
+                if isinstance(card_bounds, dict):
+                    base, separator, fragment = url.partition("#")
+                    handoff = {"startupCardWidth": float(card_bounds["width"]), "startupCardHeight": float(card_bounds["height"])}
+                    if isinstance(card_bounds.get("fluidState"), dict):
+                        handoff["processingFieldState"] = json.dumps(card_bounds["fluidState"], separators=(",", ":"))
+                    query = urlencode(handoff)
+                    url = base + ("&" if "?" in base else "?") + query + (separator + fragment if separator else "")
+            except Exception:
+                pass
             window.load_url(url)
             metrics.mark("dashboard-requested")
         except Exception as exc:
@@ -510,8 +539,14 @@ class NativeFullscreenController:
         self.placement: WindowPlacement | None = None
         self.window: Any | None = None
 
-    def attach_window(self, window: Any) -> None:
+    def attach_window(self, window: Any, startup_theme: str | None = None) -> None:
         self.window = window
+        if startup_theme is not None:
+            # WinForms has created its HWND here, but has not shown the window.
+            # Apply the app palette before Windows paints an OS-themed caption.
+            def apply_startup_theme():
+                self.set_title_bar_theme(startup_theme, persist=False)
+            window.events.before_show += apply_startup_theme
 
     def toggle(self) -> bool:
         if self.window is not None:
@@ -566,7 +601,7 @@ class NativeFullscreenController:
         self.fullscreen = not self.fullscreen
         return self.fullscreen
 
-    def set_title_bar_theme(self, theme: str) -> bool:
+    def set_title_bar_theme(self, theme: str, *, persist: bool = True) -> bool:
         """Synchronize the native Windows caption with the active app theme.
 
         Caption-color support is Windows-version dependent, so a failed DWM call
@@ -575,8 +610,16 @@ class NativeFullscreenController:
         try:
             if theme not in THEME_NAMES:
                 return False
-            save_app_theme(theme)
-            hwnd = ctypes.windll.user32.FindWindowW(None, self.title)
+            if persist: save_app_theme(theme)
+            native = getattr(self.window, "native", None)
+            handle = getattr(native, "Handle", None)
+            if handle is not None:
+                hwnd = handle.ToInt64()
+            else:
+                find_window = ctypes.windll.user32.FindWindowW
+                find_window.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
+                find_window.restype = ctypes.c_void_p
+                hwnd = find_window(None, self.title)
             if not hwnd:
                 return False
             colors = {
@@ -588,11 +631,13 @@ class NativeFullscreenController:
             }
             caption, text, dark_mode = colors.get(theme, colors["glass-light"])
             dwm = ctypes.windll.dwmapi.DwmSetWindowAttribute
+            dwm.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint]
+            dwm.restype = ctypes.c_long
             caption_value, text_value = ctypes.c_uint(caption), ctypes.c_uint(text)
             dark_value = ctypes.c_int(int(dark_mode))
+            dwm(hwnd, 20, ctypes.byref(dark_value), ctypes.sizeof(dark_value))
             caption_result = dwm(hwnd, 35, ctypes.byref(caption_value), ctypes.sizeof(caption_value))
             text_result = dwm(hwnd, 36, ctypes.byref(text_value), ctypes.sizeof(text_value))
-            dwm(hwnd, 20, ctypes.byref(dark_value), ctypes.sizeof(dark_value))
             return caption_result == 0 and text_result == 0
         except Exception:
             return False
@@ -704,7 +749,7 @@ class DesktopApi:
         from backend import main as backend_main
         from backend.legal_platform import LegalStore
         return self._load_legal_candidate(
-            lambda operation: LegalStore.from_folder(folder, exclusions=backend_main.duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=backend_main.synchronize_duplicate_exclusions),
+            lambda operation: LegalStore.from_folder(folder, exclusions=backend_main.duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=backend_main.prepare_import_exclusions),
             lambda: save_legal_folder(folder), operationId, "folder")
 
     def refresh_legal_folder(self, operationId: str | None = None) -> dict[str, Any]:
@@ -741,7 +786,7 @@ class DesktopApi:
                 operation.start(f"Reading:{name}")
                 payload[name] = path.read_bytes()
                 operation.finish(f"Reading:{name}")
-            return LegalStore.from_files(payload, "Selected Legal Platform CSV files", exclusions=backend_main.duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=backend_main.synchronize_duplicate_exclusions)
+            return LegalStore.from_files(payload, "Selected Legal Platform CSV files", exclusions=backend_main.duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=backend_main.prepare_import_exclusions)
         return self._load_legal_candidate(prepare, lambda: save_legal_files(paths), operationId, "files")
 
     def refresh_legal_files(self, operationId: str | None = None) -> dict[str, Any]:
@@ -825,7 +870,7 @@ def main() -> None:
             js_api=desktop_api,
         )
         window.events.shown += lambda: metrics.mark("first-window-shown")
-        fullscreen_controller.attach_window(window)
+        fullscreen_controller.attach_window(window, startup_theme)
         single_instance.watch()
         webview.start(
             runtime.initialize,

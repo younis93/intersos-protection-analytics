@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import io
 import ipaddress
 import os
@@ -30,7 +31,7 @@ from .duplicate_exclusions import DuplicateExclusionRegistry
 from .indicator_reporting import build_indicator_report, build_indicator_workbook, build_narrative_workbook
 from .indicator_reconciliation import IndicatorMasterWorkbook, build_reconciliation_workbook, reconcile as reconcile_indicators
 from . import updater
-from .import_progress import legal_import_tracker, ImportBusyError
+from .import_progress import legal_import_tracker, ImportBusyError, ImportCancelled
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -130,15 +131,33 @@ def synchronize_duplicate_exclusions(store: LegalStore) -> None:
     if changed:
         store.set_review_exclusions(reconciled)
 
+def prepare_import_exclusions(store: LegalStore) -> None:
+    """Prepare reviews without changing saved exclusions before publication."""
+    resolver = getattr(store, "duplicate_contexts_for_exclusions", None)
+    if not callable(resolver): return
+    contexts = resolver(duplicate_exclusions.exclusion_rows())
+    rows, changed = duplicate_exclusions.reconcile_duplicate_contexts(contexts, persist=False)
+    if changed: store.set_review_exclusions(rows)
+    def commit():
+        reconciled, updated = duplicate_exclusions.reconcile_duplicate_contexts(contexts)
+        comparable = lambda values: [{key: value for key, value in row.items() if key != "pendingSince"} for row in values]
+        if comparable(reconciled) != comparable(rows): store.set_review_exclusions(reconciled)
+    store._commit_import_exclusions = commit
+
 def publish_legal_candidate(candidate, operation, before_publish=None):
     global legal_store
+    operation.check_cancelled()
     if not operation.tasks.get("Reconciling exclusions"):
         operation.start("Reconciling exclusions")
-        synchronize_duplicate_exclusions(candidate)
+        prepare_import_exclusions(candidate)
         operation.finish("Reconciling exclusions")
     operation.start("Finalizing metadata")
     metadata = candidate.metadata()
     operation.finish("Finalizing metadata")
+    operation.begin_publication()
+    commit = getattr(candidate, "_commit_import_exclusions", None)
+    if commit: commit()
+    metadata = candidate.metadata()
     if before_publish is not None: before_publish()
     operation.start("Publishing")
     legal_store = candidate
@@ -157,13 +176,13 @@ def load_initial_legal_store() -> None:
         use_files=REMEMBERED_LEGAL_SOURCE=="files"
         if REMEMBERED_LEGAL_SOURCE_CONFIGURED:
             if use_files:
-                candidate = LegalStore.from_files(remembered_legal_file_payload(REMEMBERED_LEGAL_FILES), "Selected Legal Platform CSV files", exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=synchronize_duplicate_exclusions) if REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else None
+                candidate = LegalStore.from_files(remembered_legal_file_payload(REMEMBERED_LEGAL_FILES), "Selected Legal Platform CSV files", exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=prepare_import_exclusions) if REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else None
                 unavailable = "The last selected Legal Platform CSV files are unavailable. Choose a new source."
             else:
-                candidate = LegalStore.from_folder(REMEMBERED_LEGAL_FOLDER, exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=synchronize_duplicate_exclusions) if REMEMBERED_LEGAL_FOLDER and REMEMBERED_LEGAL_FOLDER.is_dir() else None
+                candidate = LegalStore.from_folder(REMEMBERED_LEGAL_FOLDER, exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=prepare_import_exclusions) if REMEMBERED_LEGAL_FOLDER and REMEMBERED_LEGAL_FOLDER.is_dir() else None
                 unavailable = "The last selected Legal Platform folder is unavailable. Choose a new source."
         else:
-            candidate = LegalStore.from_folder(LEGAL_SAMPLE, exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=synchronize_duplicate_exclusions) if LEGAL_SAMPLE.exists() else None
+            candidate = LegalStore.from_folder(LEGAL_SAMPLE, exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=prepare_import_exclusions) if LEGAL_SAMPLE.exists() else None
             unavailable = ""
         if candidate is None and unavailable:
             legal_store = None
@@ -174,6 +193,9 @@ def load_initial_legal_store() -> None:
             publish_legal_candidate(candidate, operation)
         elif operation:
             operation.fail("No remembered Legal Platform source is available.")
+        legal_store_restore_error = ""
+    except ImportCancelled as exc:
+        if operation: operation.fail(exc)
         legal_store_restore_error = ""
     except Exception as exc:
         if operation: operation.fail(exc)
@@ -217,6 +239,10 @@ async def prevent_stale_api_state(request, call_next):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     elif LOCAL_SESSION_TOKEN:
         response.set_cookie(SESSION_COOKIE, LOCAL_SESSION_TOKEN, httponly=True, samesite="strict", path="/")
+    if not request.url.path.startswith("/api/") and response.headers.get("content-type", "").split(";", 1)[0] == "text/html":
+        # The entry document names build-specific assets. Reusing it after an
+        # update can point the webview at files removed by the new build.
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     return response
 
 
@@ -342,6 +368,11 @@ def legal_import_status(operationId: str | None = None):
     from fastapi.responses import JSONResponse
     return JSONResponse(legal_import_tracker.status(operationId), headers={"Cache-Control":"no-store"})
 
+@app.post("/api/legal/import/cancel")
+def legal_import_cancel(operationId: str):
+    try: return legal_import_tracker.cancel(operationId)
+    except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
 
 @app.get("/api/legal/metadata")
 def legal_metadata():
@@ -352,6 +383,13 @@ def legal_metadata():
 def legal_overview(request: OverviewRequest):
     try:
         return require_legal_store().overview(request.projects, request.locations, request.months, request.filters)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+@app.post("/api/legal/overview-filters")
+def legal_overview_filters(request: OverviewRequest):
+    try:
+        return require_legal_store().overview_filters(request.projects, request.locations, request.months, request.filters)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -383,6 +421,7 @@ async def legal_upload(files: list[UploadFile] = File(...), operationId: str | N
     try:
         operation = legal_import_tracker.begin(operationId, "upload")
         for file in files:
+            operation.check_cancelled()
             filename = Path(file.filename or "").name
             parsed = versioned_dataset_name(filename)
             if not parsed: continue
@@ -391,10 +430,18 @@ async def legal_upload(files: list[UploadFile] = File(...), operationId: str | N
             total += len(raw)
             if total > MAX_UPLOAD_BYTES: raise HTTPException(413, "Legal Platform files must total 100 MB or smaller.")
             if version >= versions.get(key, -1):payload[key]=raw;versions[key]=version
-        candidate = await run_in_threadpool(LegalStore.from_files, payload, "Selected Legal Platform folder", exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=synchronize_duplicate_exclusions)
+        candidate = await run_in_threadpool(LegalStore.from_files, payload, "Selected Legal Platform folder", exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=prepare_import_exclusions)
         return publish_legal_candidate(candidate, operation)
     except ImportBusyError as exc:
         raise HTTPException(409, str(exc)) from exc
+    except ImportCancelled as exc:
+        if operation: operation.fail(exc)
+        raise HTTPException(409, "Import cancelled") from exc
+    except asyncio.CancelledError:
+        if operation:
+            operation.cancel()
+            operation.fail(ImportCancelled("Import cancelled"))
+        raise
     except HTTPException as exc:
         if operation: operation.fail(exc.detail)
         raise
@@ -413,14 +460,19 @@ def require_legal_store() -> LegalStore:
 @app.post("/api/legal/review")
 def legal_review(request: LegalQuery):
     if request.page < 1 or request.pageSize < 1 or request.pageSize > 5000: raise HTTPException(400, "Invalid pagination")
-    return require_legal_store().review(request.dataset, request.search, request.rule, request.page, request.pageSize, request.severity,request.lawyer,request.project,request.location,request.date,request.comparisonMonth,request.nameCompareChars,request.allowNameVariations,request.exactMatchesOnly)
+    return require_legal_store().review(request.dataset, request.search, request.rule, request.page, request.pageSize, request.severity,request.lawyer,request.project,request.location,request.date,request.comparisonMonth,request.nameCompareChars,request.allowNameVariations,request.exactMatchesOnly,filters=request.filters)
 
 
 @app.get("/api/legal/review-export/{dataset}")
-def legal_review_export(dataset:str,comparison_month:str="",name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False,rules:str="",severity:str="",lawyer:str="",project:str="",location:str="",date:str="",search:str="",ignore_court_verdict:bool=False,ignore_court_verdict_rules:str=""):
+def legal_review_export(dataset:str,comparison_month:str="",name_compare_chars:int=15,allow_name_variations:bool=False,exact_matches_only:bool=False,rules:str="",severity:str="",lawyer:str="",project:str="",location:str="",date:str="",search:str="",ignore_court_verdict:bool=False,ignore_court_verdict_rules:str="",filters:str="{}"):
+    try:
+        field_filters=json.loads(filters)
+        if not isinstance(field_filters,dict) or any(not isinstance(items,list) or any(not isinstance(item,str) for item in items) for items in field_filters.values()): raise ValueError()
+    except (ValueError,TypeError):
+        raise HTTPException(400,"Invalid review filters")
     selected_rules=[rule.strip() for rule in rules.split(",") if rule.strip()]
     ignored_rules={rule.strip() for rule in ignore_court_verdict_rules.split(",") if rule.strip()}
-    payload=require_legal_store().review_export(dataset,comparison_month,name_compare_chars,allow_name_variations,exact_matches_only,selected_rules,severity,lawyer,project,location,date,search,ignore_court_verdict,ignored_rules)
+    payload=require_legal_store().review_export(dataset,comparison_month,name_compare_chars,allow_name_variations,exact_matches_only,selected_rules,severity,lawyer,project,location,date,search,ignore_court_verdict,ignored_rules,filters=field_filters)
     return Response(payload,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":f'attachment; filename="{dataset}-review-findings.xlsx"'})
 
 

@@ -16,6 +16,7 @@ import {
 } from "./api";
 import {loadIssues} from "./sendIssuesApi";
 import {hasLegalCore, isLegalPageAvailable} from './legalAvailability';
+import {legalPageRank} from './legalPageOrder';
 import type {LegalMetadata, LegalReview} from "./types";
 import {
   subscribeLegalFetchActivity,
@@ -101,7 +102,8 @@ export function taskManifest(metadata:LegalMetadata):PageLoadTask[] {
     secondary("studio:awareness","studio","awareness",()=>core&&has("awareness"),(signal,request)=>analytics("awareness",signal,request)),
     secondary("cases:table","cases","table",()=>core,(signal,request)=>request(()=>getLegalCase("",{},{viewMode:"table",page:1,pageSize:100,sortColumn:"",sortDirection:"asc",columns:[]},signal))),
   ];
-  return tasks.filter((task)=>task.available(metadata));
+  return tasks.filter((task)=>task.available(metadata)).sort((left,right)=>
+    Number(left.phase==='secondary')-Number(right.phase==='secondary')||legalPageRank(left.page)-legalPageRank(right.page));
 }
 
 export class LegalLoadScheduler {

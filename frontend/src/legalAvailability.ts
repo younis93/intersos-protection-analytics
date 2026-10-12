@@ -11,7 +11,7 @@ export function isLegalPageAvailable(metadata: LegalMetadata, page: string): boo
     case 'hotline':
     case 'legalhotlines': return has('legalhotlines');
     case 'explorer': return metadata.sheets.length > 0;
-    case 'send-issues': return hasLegalCore(metadata) || has('awareness') || has('legalhotlines');
+    case 'send-issues': return ['beneficiaries', 'assessments', 'legalservices', 'awareness'].some(has);
     case 'detention': return hasLegalCore(metadata) && Boolean(metadata.features?.detention);
     default: return hasLegalCore(metadata);
   }

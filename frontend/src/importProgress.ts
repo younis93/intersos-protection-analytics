@@ -1,10 +1,15 @@
 import {useEffect,useState} from 'react';
 
 export interface LegalImportProgress {
-  operationId:string|null;state:'idle'|'preparing'|'processing'|'complete'|'error';
+  operationId:string|null;state:'idle'|'preparing'|'processing'|'cancelling'|'cancelled'|'complete'|'error';canCancel?:boolean;
   source?:string;stage:string;dataset:string;completedWork:number;totalWork:number;percent:number|null;error:string;
 }
 const API=(import.meta.env.DEV?'http://127.0.0.1:8000':'')+'/api/legal/import/status';
+export async function cancelImport(operationId:string):Promise<LegalImportProgress>{
+  const response=await fetch(API.replace('/status','/cancel')+'?operationId='+encodeURIComponent(operationId),{method:'POST'});
+  if(!response.ok)throw new Error('Unable to cancel processing. Please try again.');
+  return response.json();
+}
 export async function getImportProgress(operationId:string|null,signal?:AbortSignal):Promise<LegalImportProgress>{
   const response=await fetch(API+(operationId?'?operationId='+encodeURIComponent(operationId):''),{cache:'no-store',signal});
   if(!response.ok)throw new Error('Unable to read import progress.');
@@ -18,7 +23,7 @@ export function pollImportProgress(operationId:string|null,onProgress:(value:Leg
     try{
       const next=await read(operationId,controller.signal);
       if(!controller.signal.aborted&&(!operationId||next.operationId===operationId)){
-        onProgress(next);terminal=next.state==='complete'||next.state==='error';
+        onProgress(next);terminal=['complete','error','cancelled'].includes(next.state);
       }
     }catch{/* The import request reports failures; a missed status update can be retried. */}
     if(!terminal&&!controller.signal.aborted)timer=setTimeout(()=>void poll(),250);

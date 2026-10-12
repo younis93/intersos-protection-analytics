@@ -1,5 +1,5 @@
 import {afterEach, beforeEach, expect, it, vi} from "vitest";
-import {getLegalOverview} from "./api";
+import {getLegalOverview,getLegalOverviewFilters} from "./api";
 import {invalidateLegalQueries, setLegalRevision} from "./legalQueryCache";
 
 beforeEach(()=>{invalidateLegalQueries();setLegalRevision("overview-source")});
@@ -30,4 +30,22 @@ it("rejects a canceled overview request",async()=>{
   controller.abort();
   resolve(new Response("{}",{status:200}));
   await rejected;
+});
+
+it("caches filter-only responses separately and invalidates on import",async()=>{
+  const filterOptions={projects:["P1"],locations:[],months:[],groups:[]};
+  const network=vi.fn(async(_url:RequestInfo|URL,_init?:RequestInit)=>new Response(JSON.stringify({filterOptions}),{status:200}));
+  vi.stubGlobal("fetch",network);
+  const selection={projects:[],locations:[],months:[],filters:{}};
+  expect(await getLegalOverviewFilters(selection)).toEqual({filterOptions});
+  await getLegalOverviewFilters(selection);
+  expect(network).toHaveBeenCalledTimes(1);
+  await getLegalOverviewFilters({...selection,filters:{"beneficiaries::Nationality":[]}});
+  expect(network).toHaveBeenCalledTimes(1);
+  expect(network.mock.calls[0][0]).toContain("/api/legal/overview-filters");
+  await getLegalOverview(selection);
+  expect(network).toHaveBeenCalledTimes(2);
+  setLegalRevision("replacement");
+  await getLegalOverviewFilters(selection);
+  expect(network).toHaveBeenCalledTimes(3);
 });

@@ -29,7 +29,7 @@ from .lawyer_contact_defaults import DEFAULT_LAWYER_CONTACTS
 from .file_security import validate_xlsx_archive
 from .legal_platform import REVIEW_FINDING_ARABIC, _find
 
-DATASETS = {"beneficiaries": "Beneficiaries Review", "assessments": "Assessments Review", "legalservices": "Legal Services Review", "legalhotlines": "Hotline Review", "awareness": "Awareness Review"}
+DATASETS = {"beneficiaries": "Beneficiaries Review", "assessments": "Assessments Review", "legalservices": "Legal Services Review", "awareness": "Awareness Review"}
 UNASSIGNED = "Unassigned"
 
 
@@ -113,9 +113,9 @@ def collect_findings(store) -> tuple[list[str], list[dict[str, Any]]]:
     field_values = IssueFieldValues(store.frames)
     names = set()
     for dataset, frame in store.frames.items():
-        column = _find(list(frame.columns), "Lawyers", "Lawyer")
         if dataset == "legalhotlines":
-            column = next((column for column in frame.columns if normalize_name(str(column)) in {"lawyer", "lawyers"}), None)
+            continue
+        column = _find(list(frame.columns), "Lawyers", "Lawyer")
         if column:
             names.update(str(value).strip() for value in frame[column].fillna("") if str(value).strip())
     canonical: dict[str, list[str]] = defaultdict(list)
@@ -131,18 +131,11 @@ def collect_findings(store) -> tuple[list[str], list[dict[str, Any]]]:
         if dataset in {"beneficiaries", "assessments", "legalservices"} and not core_available:
             continue
         # Match review-page defaults; query each rule to preserve exact duplicate semantics.
-        summary = store.review(dataset, page_size=1, allow_name_variations=dataset == "legalhotlines")
+        summary = store.review(dataset, page_size=1, allow_name_variations=False)
         duplicate_rows={}
         if dataset=="beneficiaries" and hasattr(store,"_name_match_flags"):
             excluded=store._excluded_case_ids("Possible duplicate name")
-            combined={}
-            for item in store._name_match_flags(exact_only=True,excluded_case_ids=excluded)+store._name_match_flags(allow_variations=True,excluded_case_ids=excluded):
-                key=item["row"]
-                if key not in combined: combined[key]=dict(item)
-                peers={peer["row"]:peer for peer in combined[key].get("duplicateMatches",[])}
-                peers.update({peer["row"]:peer for peer in item.get("duplicateMatches",[])})
-                combined[key]["duplicateMatches"]=sorted(peers.values(),key=lambda peer:peer["row"])
-            duplicate_rows["Possible duplicate name"]=list(combined.values())
+            duplicate_rows["Possible duplicate name"]=store._name_match_flags(exact_only=True,excluded_case_ids=excluded)
             duplicate_rows["Possible duplicate contact and name"]=store._contact_name_match_flags(excluded_case_ids=store._excluded_case_ids("Possible duplicate contact and name"))
             for rule,items in duplicate_rows.items():
                 eligible=[item for item in items if not store._is_excluded(item)]
@@ -151,19 +144,24 @@ def collect_findings(store) -> tuple[list[str], list[dict[str, Any]]]:
                     item["duplicateMatches"]=[peer for peer in item.get("duplicateMatches",[]) if peer["row"] in eligible_rows]
                 duplicate_rows[rule]=[item for item in eligible if item["duplicateMatches"]]
         for rule in dict.fromkeys([*summary["rules"],*duplicate_rows]):
+            if dataset == "awareness" and rule == "Possible duplicate participant name":
+                continue
             page = 1
             while True:
                 if rule in duplicate_rows:
                     result={"rows":duplicate_rows[rule],"total":len(duplicate_rows[rule])}
                 else:
                     result = store.review(dataset, rule=rule, page=page, page_size=5000,
-                                          allow_name_variations=dataset == "legalhotlines",
-                                          exact_matches_only=dataset != "legalhotlines")
+                                          allow_name_variations=False,
+                                          exact_matches_only=True)
                 for flag in result["rows"]:
                     if hasattr(store,"_is_excluded") and store._is_excluded(flag): continue
+                    # Apply the review choices to the shared email, WhatsApp and PDF source.
+                    if dataset == "legalservices" and rule in {"Duplicate service", "Duplicate service without Assessment ID"} and re.search(r"court verdict|\bother\b|اخرى", str(flag.get("typeOfDocument", "")), flags=re.I):
+                        continue
                     raw_name = str(flag.get("lawyer", "")).strip()
                     matches = canonical.get(normalize_name(raw_name), [])
-                    if dataset != "legalhotlines" and raw_name and not matches:
+                    if raw_name and not matches:
                         names.add(raw_name)
                         matches = [raw_name]
                     lawyer = matches[0] if len(matches) == 1 else UNASSIGNED
@@ -258,7 +256,9 @@ def render_draft(request: DraftRequest, email: str, rows: list[dict]) -> tuple[s
         direction=''
         blocks.append(f'<table{direction} cellpadding="0" cellspacing="0" border="0" style="width:100%;min-width:780px;border-collapse:collapse;font-size:13px;margin:12px 0 24px;border:1px solid #d4e0eb"><thead><tr>')
         headers=[('#','number'),*columns]
-        for heading,_ in headers: blocks.append(f'<th scope="col" style="padding:11px 10px;background:#eaf1f8;color:#183c60;border:1px solid #d4e0eb;text-align:start;font-weight:700">{esc(heading)}</th>')
+        for heading,key in headers:
+            number_style='white-space:nowrap;min-width:32px;' if key=='number' else ''
+            blocks.append(f'<th scope="col" style="{number_style}padding:11px 10px;background:#eaf1f8;color:#183c60;border:1px solid #d4e0eb;text-align:start;font-weight:700">{esc(heading)}</th>')
         blocks.append('</tr></thead><tbody>')
         for index,row in enumerate(findings):
             number+=1
@@ -272,9 +272,10 @@ def render_draft(request: DraftRequest, email: str, rows: list[dict]) -> tuple[s
             for heading,key in headers:
                 value=row.get('affectedFieldValues', {}).get(key[1]) if isinstance(key, tuple) else values.get(key)
                 text.append(f"{heading}: {value if value not in (None,'') else 'Not available'}")
-                cell_direction=' dir="ltr"' if key in {item[2] for item in identifiers} else ' dir="auto"'
+                cell_direction=' dir="ltr"' if key=='number' or key in {item[2] for item in identifiers} else ' dir="auto"'
                 display_value=re.sub(r',\s*', ',\n',str(value)) if key in {item[2] for item in identifiers} and value is not None else value
-                blocks.append(f'<td{cell_direction} style="padding:11px 10px;vertical-align:top;line-height:1.65;border:1px solid #d4e0eb;white-space:pre-wrap;overflow-wrap:anywhere">{esc(display_value)}</td>')
+                wrapping='white-space:nowrap;overflow-wrap:normal;word-break:normal;min-width:32px' if key=='number' else 'white-space:pre-wrap;overflow-wrap:anywhere'
+                blocks.append(f'<td{cell_direction} style="padding:11px 10px;vertical-align:top;line-height:1.65;border:1px solid #d4e0eb;{wrapping}">{esc(display_value)}</td>')
             blocks.append('</tr>')
         blocks.append('</tbody></table>')
     paragraph('Please confirm once the corrections are complete. If any finding needs clarification, let us know. Thank you for your cooperation.')

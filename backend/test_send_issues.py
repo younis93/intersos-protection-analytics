@@ -47,14 +47,14 @@ def client(tmp_path):
 def test_findings_grouping_pagination_and_safe_fields(client):
     api, store, _ = client
     response = api.post("/api/legal/send-issues/findings", json={"pageSize": 2}).json()
-    assert response["total"] == 5
+    assert response["total"] == 3
     assert response["lawyers"] == ["Alice", "Bob", "No Issues"]
     assert len(response["rows"]) == 2
     assert "phone" not in response["rows"][0]
     assert response["rows"][0]["affectedFields"] == ["Contact Number"]
     rows = api.post("/api/legal/send-issues/findings", json={"lawyer": "Unassigned"}).json()["rows"]
-    assert {row.get("caseId") or row.get("hotlineId") for row in rows} == {"B3", "H1"}
-    assert api.post("/api/legal/send-issues/findings", json={"lawyer": "Alice", "filters": {"dataset": "legalhotlines"}}).json()["total"] == 1
+    assert {row.get("caseId") or row.get("hotlineId") for row in rows} == {"B3"}
+    assert api.post("/api/legal/send-issues/findings", json={"lawyer": "Alice", "filters": {"dataset": "legalhotlines"}}).json()["total"] == 0
     assert any(kwargs.get("exact_matches_only") for _, kwargs in store.calls)
 
 
@@ -65,6 +65,66 @@ def test_contacts_persist_validate_and_reject_unknown(client):
     assert api.put("/api/legal/send-issues/contacts", json={"contacts": {"Alice": "x\r\nBcc: evil@example.org"}}).status_code == 400
     assert api.put("/api/legal/send-issues/contacts", json={"contacts": {"Unknown": "new@example.org"}}).status_code == 400
     assert Contacts(contacts.path).read()["Bob"] == "bob@example.org"
+
+
+def test_hotline_findings_and_exclusive_lawyers_are_excluded(client):
+    api, store, contacts = client
+    # A Hotline-only variant of an existing name must not make that owner ambiguous.
+    store.frames["legalhotlines"] = pd.DataFrame({"Lawyer": ["Hotline Only", "ALICE"]})
+    contacts.save({"Hotline Only": "hotline@example.org"})
+    snapshot = api.post("/api/legal/send-issues/findings", json={}).json()
+    assert snapshot["total"] == 3
+    assert all(row["dataset"] != "legalhotlines" for row in snapshot["rows"])
+    assert next(row for row in snapshot["rows"] if row["caseId"] == "B1")["lawyer"] == "Alice"
+    assert "Hotline Only" not in snapshot["lawyers"] and "ALICE" not in snapshot["lawyers"]
+    assert "Hotline Only" not in snapshot["contacts"]
+    assert "Hotline Only" not in api.get("/api/legal/send-issues/contacts").json()["lawyers"]
+    assert all(dataset != "legalhotlines" for dataset, _ in store.calls)
+    # The contact remains stored for other workflows, without being offered here.
+    assert contacts.read()["Hotline Only"] == "hotline@example.org"
+
+
+def test_hotline_only_source_has_no_send_issues_findings_or_lawyers():
+    store = fake_store()
+    store.frames = {"legalhotlines": pd.DataFrame({"Lawyer": ["Hotline Only"]})}
+    assert collect_findings(store) == ([], [])
+    assert store.calls == []
+
+
+@pytest.mark.parametrize("dataset", ["beneficiaries", "assessments", "legalservices"])
+def test_partial_core_keeps_existing_findings_requirement(dataset):
+    store = fake_store()
+    store.frames = {dataset: pd.DataFrame({"Lawyers": ["Alice"]})}
+    assert collect_findings(store) == (["Alice"], [])
+    assert store.calls == []
+
+
+def test_hotline_review_remains_available_outside_send_issues():
+    from backend.legal_platform import LegalStore
+    from backend.test_legal_platform import required_payload, csv
+    payload = required_payload()
+    payload["legalhotlines"] = csv(**{"Hotline ID": ["H1"], "Contact Number": ["123"], "Lawyer": ["Hotline Only"]})
+    store = LegalStore.from_files(payload, "mixed source")
+    assert store.review("legalhotlines", rule="Invalid contact number")["total"] > 0
+    lawyers, rows = collect_findings(store)
+    assert "Hotline Only" not in lawyers
+    assert all(row["dataset"] != "legalhotlines" for row in rows)
+
+
+def test_send_issues_omits_possible_duplicate_participant_name():
+    from backend.legal_platform import LegalStore
+    from backend.test_legal_platform import required_payload, csv
+    payload = required_payload()
+    payload['awareness'] = csv(**{
+        'Awareness ID': ['W1', 'W2', 'W3'],
+        'Participant Name': ['Same Person'] * 3,
+        'Session Topic': ['Housing', 'Housing', 'Documentation'],
+    })
+    store = LegalStore.from_files(payload, 'test')
+    assert store.review('awareness', rule='Possible duplicate participant name')['total'] == 1
+    rows = collect_findings(store)[1]
+    assert not any(row['rule'] == 'Possible duplicate participant name' for row in rows)
+    assert {row['awarenessId'] for row in rows if row['rule'] == 'Duplicate participant in session'} == {'W1', 'W2'}
 
 
 def test_csv_and_excel_import_matching_preview(client):
@@ -152,7 +212,6 @@ def test_actual_review_exclusions_and_bilingual_coverage():
     ('assessments', 'Assessment without services', 'assessmentId'),
     ('legalservices', 'Legal service date after today', 'serviceId'),
     ('awareness', 'Invalid contact number', 'awarenessId'),
-    ('legalhotlines', 'Invalid contact number', 'hotlineId'),
 ])
 @pytest.mark.parametrize('mode', ['single', 'bulk', 'import'])
 def test_send_issues_snapshot_tracks_review_exclusion_and_restoration(dataset, rule, identifier_type, mode, tmp_path, monkeypatch):
@@ -228,26 +287,26 @@ def test_whatsapp_contacts_persist_and_validate(client):
     assert api.put("/api/legal/send-issues/contacts", json={"contacts": {}, "whatsappNumbers": {"Alice": ""}}).status_code == 200
     assert contacts.read_whatsapp()["Alice"] == ""
 
-def duplicate_store():
+def duplicate_store(third_name='abcdefghijklmnoq'):
     from backend.test_legal_platform import required_payload, csv
     from backend.legal_platform import LegalStore
     payload = required_payload()
-    payload['beneficiaries'] = csv(**{'Case ID':['D1','D2','D3','D4'], 'Name (Filter Color Red)':['abcdefghijklmnop','abcdefghijklmnop','abcdefghijklmnoq','Other Person'], 'Projects':['UNHCR 2026 - Erbil']*4, 'Lawyers':['Alice','Bob','Carol','Alice'], 'Contact Number':['07701234567']*4, 'ID Number':['I1','I2','I3','I4']})
+    payload['beneficiaries'] = csv(**{'Case ID':['D1','D2','D3','D4'], 'Name (Filter Color Red)':['abcdefghijklmnop','abcdefghijklmnop',third_name,'Other Person'], 'Projects':['UNHCR 2026 - Erbil']*4, 'Lawyers':['Alice','Bob','Carol','Alice'], 'Contact Number':['07701234567']*4, 'ID Number':['I1','I2','I3','I4']})
     return LegalStore.from_files(payload,'test')
 
 
-def test_send_duplicates_exact_similar_cross_lawyer_and_independent_contact():
+def test_send_duplicates_only_exact_names_cross_lawyer_and_independent_contact():
     _, rows = collect_findings(duplicate_store())
     names = [row for row in rows if row['rule']=='Possible duplicate name']
-    assert {row['caseId'] for row in names}=={'D1','D2','D3'}
+    assert {row['caseId'] for row in names}=={'D1','D2'}
     first=next(row for row in names if row['caseId']=='D1')
-    assert {(peer['caseId'],peer['lawyer'],peer['matchType']) for peer in first['duplicateMatches']}=={('D2','Bob','exact'),('D3','Carol','similar')}
+    assert {(peer['caseId'],peer['lawyer'],peer['matchType']) for peer in first['duplicateMatches']}=={('D2','Bob','exact')}
     contacts=[row for row in rows if row['rule']=='Possible duplicate contact and name']
     assert {row['caseId'] for row in contacts}=={'D1','D2','D3'}
     assert len({row['id'] for row in rows})==len(rows)
     request=DraftRequest(revision='r',lawyer='Alice',ids=[first['id']])
     body,plain,_=render_draft(request,'alice@example.org',[first])
-    assert 'D2 - Bob (exact)' in body and 'D3 - Carol (similar)' in plain
+    assert 'D2 - Bob (exact)' in body and 'D3' not in plain
     malicious={**first,'matchingCases':'<script>peer</script>'}
     assert '<script>peer</script>' not in render_draft(request,'alice@example.org',[malicious])[0]
 
@@ -257,13 +316,13 @@ def test_send_exclusions_remove_peers_respect_rule_scope_and_restore():
     store.set_review_exclusions([('Possible duplicate name','D2')])
     _,rows=collect_findings(store)
     names=[row for row in rows if row['rule']=='Possible duplicate name']
-    assert {row['caseId'] for row in names}=={'D1','D3'}
+    assert not names
     assert all(peer['caseId']!='D2' for row in names for peer in row['duplicateMatches'])
     assert any(row['caseId']=='D2' and row['rule']=='Possible duplicate contact and name' for row in rows)
     store.set_review_exclusions([('Possible duplicate name','D2'),('Possible duplicate name','D3')])
     assert not any(row['rule']=='Possible duplicate name' for row in collect_findings(store)[1])
     store.set_review_exclusions([])
-    assert len([row for row in collect_findings(store)[1] if row['rule']=='Possible duplicate name'])==3
+    assert len([row for row in collect_findings(store)[1] if row['rule']=='Possible duplicate name'])==2
 
 
 def test_send_closure_categories_and_assessment_exclusion():
@@ -296,16 +355,49 @@ def test_stale_preview_and_download_rejected_after_exclusion(tmp_path):
     assert latest['revision']!=snapshot['revision']
     assert selected['id'] not in {row['id'] for row in latest['rows']}
 
-def test_send_similar_matches_include_only_direct_peers():
+def test_send_similar_names_are_not_included():
     from backend.test_legal_platform import required_payload,csv
     from backend.legal_platform import LegalStore
     payload=required_payload()
     payload['beneficiaries']=csv(**{'Case ID':['X1','X2','X3'],'Name (Filter Color Red)':['abcdefghijklmno','abxdefghijklmno','abxdyfghijklmno'],'Projects':['UNHCR 2026 - Erbil']*3,'Lawyers':['Alice','Bob','']})
     store=LegalStore.from_files(payload,'test')
     names=[row for row in collect_findings(store)[1] if row['rule']=='Possible duplicate name']
-    assert {peer['caseId'] for peer in next(row for row in names if row['caseId']=='X1')['duplicateMatches']}=={'X2'}
-    middle=next(row for row in names if row['caseId']=='X2')
-    assert {(peer['caseId'],peer['lawyer']) for peer in middle['duplicateMatches']}=={('X1','Alice'),('X3','Unassigned')}
+    assert names == []
+
+
+@pytest.mark.parametrize('across_assessments', [False, True])
+def test_send_duplicate_services_ignore_court_verdict_and_other(tmp_path, across_assessments):
+    from backend.test_legal_platform import required_payload, csv
+    from backend.legal_platform import LegalStore
+    payload = required_payload()
+    documents = ['Court Verdict', 'OTHER', 'اخرى', 'Civil ID']
+    payload['legalservices'] = csv(**{
+        'Service ID': [f'S{i}' for i in range(8)],
+        'Assessment ID': ['A1', 'A2'] * 4 if across_assessments else ['A1'] * 8,
+        'Beneficiary ID': ['B1'] * 8,
+        'Type of Service Provided': ['Legal Documentation'] * 8,
+        'Type of Document': [document for document in documents for _ in range(2)],
+        'Lawyers': ['Alice'] * 8,
+    })
+    store = LegalStore.from_files(payload, 'test')
+    rule = 'Duplicate service without Assessment ID' if across_assessments else 'Duplicate service'
+    assert store.review('legalservices', rule=rule)['total'] == 8
+    contacts = Contacts(tmp_path / 'contacts.json')
+    contacts.save({'Alice': 'alice@example.org'})
+    app = FastAPI()
+    app.include_router(make_router(lambda: store, contacts))
+    api = TestClient(app)
+    snapshot = api.post('/api/legal/send-issues/findings', json={}).json()
+    rows = [row for row in snapshot['rows'] if row['rule'] == rule]
+    assert {row['serviceId'] for row in rows} == {'S6', 'S7'}
+    assert all({peer['serviceId'] for peer in row['duplicateMatches']} <= {'S6', 'S7'} for row in rows)
+    preview = api.post('/api/legal/send-issues/preview', json={
+        'revision': snapshot['revision'], 'lawyer': 'Alice', 'ids': [row['id'] for row in rows],
+    })
+    assert preview.status_code == 200
+    for content in [preview.json()['html'], preview.json()['text']]:
+        assert 'Court Verdict' not in content
+        assert 'S6' in content and 'S7' in content
 
 @pytest.mark.parametrize('language',['en','ar','bilingual'])
 def test_message_language_preview_download_and_translated_details(client,language):
@@ -394,7 +486,7 @@ def test_email_tables_preserve_reference_fallback_when_peer_has_identifiers():
 
 
 def test_email_tables_exclude_review_findings_and_matching_peers(tmp_path):
-    store=duplicate_store()
+    store=duplicate_store(third_name='abcdefghijklmnop')
     store.set_review_exclusions([('Possible duplicate name','D2')])
     registry=Contacts(tmp_path/'contacts.json');registry.save({'Alice':'alice@example.org'})
     app=FastAPI();app.include_router(make_router(lambda:store,registry));api=TestClient(app)

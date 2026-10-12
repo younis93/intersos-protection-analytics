@@ -38,7 +38,8 @@
 @media(max-width:1100px){.si-contacts-overlay{padding:24px 24px 24px 80px}}
 @media(max-width:700px){.si-contacts-overlay{padding:12px}.si-contact-dialog{height:92vh;max-height:92vh;border-radius:16px}.si-contact-dialog .si-contact-header{padding:20px 18px}.si-contact-title h2{font-size:20px}.si-contact-icon{display:none}.si-contact-toolbar{padding:14px 18px;flex-wrap:wrap;gap:8px}.si-contact-search{min-width:100%}.si-contact-dialog .si-contact-list{grid-template-columns:1fr;padding:2px 18px 18px}.si-contact-dialog .si-contact-footer{padding:14px 18px}.si-contact-footer>span{width:100%}.si-contact-footer .si-actions{margin-left:auto}.si-contact-dialog>.error,.si-contact-dialog>.si-notice{margin:0 18px 12px}}
 /* Match Indicator Reporting controls while allowing menus to extend below the bar. */
-.send-issues .si-top-filters{grid-template-columns:repeat(4,minmax(130px,1fr)) auto auto;border-radius:16px;overflow:visible}
+.send-issues .si-top-filters{grid-template-columns:repeat(4,minmax(130px,1fr)) auto auto;align-items:center;border-radius:16px;overflow:visible}
+.legal-shell .send-issues .si-top-filters>button{align-self:center;height:var(--lp-control-height,48px);min-height:var(--lp-control-height,48px);margin-block:0;justify-content:center}
 .si-top-filters>.primary,.si-top-filters>.soft{display:flex;align-items:center;gap:8px}
 .si-top-filters .checkbox-multi-menu label{flex-direction:row;align-items:center}
 .si-top-filters .checkbox-multi-menu .multi-select-search{flex-direction:row}
@@ -53,13 +54,28 @@
 /* Pin Send Issues at the same desktop inset as the side navigation. */
 @media(min-width:901px){.legal-shell .legal-content:has(.send-issues){padding-top:10px}.legal-shell .send-issues .si-top-filters{top:10px}}
 .si-top-filters[inert]{opacity:.65;cursor:wait}
-.si-loading-indicator{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px;min-height:26px}.si-loading-indicator svg{width:18px;height:18px;color:var(--blue);animation:spin .8s linear infinite}
-.si-loading-skeleton{display:flex;flex-direction:column;gap:20px}
-.si-loading-skeleton i{display:block;border-radius:7px;background:linear-gradient(90deg,color-mix(in srgb,var(--blue) 8%,var(--panel-strong)) 25%,color-mix(in srgb,var(--blue) 16%,var(--panel-strong)) 50%,color-mix(in srgb,var(--blue) 8%,var(--panel-strong)) 75%);background-size:200% 100%;animation:si-skeleton-shimmer 1.5s ease-in-out infinite}
-.si-skeleton-number{width:55px;height:32px}.si-skeleton-label{width:65%;height:13px}.si-skeleton-lawyers{padding:16px;border-radius:16px}.si-skeleton-search{height:38px;width:100%;margin-bottom:16px}.si-skeleton-person{padding:14px 0;display:grid;gap:10px}.si-skeleton-person i:first-child{height:16px;width:75%}.si-skeleton-person i:last-child{height:12px;width:95%}.si-skeleton-heading{padding:20px;border-radius:16px;display:flex;align-items:center;justify-content:space-between;gap:20px}.si-skeleton-heading i:first-child{height:28px;width:40%}.si-skeleton-heading i:last-child{height:40px;width:30%}.si-skeleton-table{padding:20px;border-radius:16px;overflow:hidden}.si-skeleton-title{height:19px;width:45%;margin-bottom:20px}.si-skeleton-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:18px;padding:17px 0;border-top:1px solid color-mix(in srgb,var(--ink) 8%,transparent)}.si-skeleton-row i{height:14px}
+.send-issues{width:100%;min-width:0}
+.si-loading-skeleton{width:100%;min-width:0}
+.si-loading-skeleton i{display:inline-block;height:1em;max-width:100%;vertical-align:middle;border-radius:5px;background:linear-gradient(90deg,color-mix(in srgb,var(--blue) 8%,var(--panel-strong)) 25%,color-mix(in srgb,var(--blue) 16%,var(--panel-strong)) 50%,color-mix(in srgb,var(--blue) 8%,var(--panel-strong)) 75%);background-size:200% 100%;animation:si-skeleton-shimmer 1.5s ease-in-out infinite}
+.si-skeleton-lawyers{height:calc(100dvh - var(--si-filter-height,80px) - 55px);overflow:hidden}
+.si-skeleton-lawyers>button>*{width:100%;text-align:left}
+.send-issues .si-skeleton-search{height:41px}
+.si-skeleton-search i{width:70%!important;height:13px}
+.si-skeleton-table header>div{min-width:0;max-width:100%}
+.si-skeleton-table td{height:120px;vertical-align:middle}
+.si-skeleton-table td>i{display:block;margin:8px 0}
+.si-skeleton-table .si-table-scroll{overflow:hidden}
+.si-skeleton-heading .si-lawyer-identity h2,.si-skeleton-heading .si-lawyer-identity p{overflow:hidden;white-space:nowrap}
+.si-skeleton-heading .si-lawyer-message-actions i{height:18px;display:block}
+.send-issues .si-skeleton-heading .si-lawyer-message-actions button{background:color-mix(in srgb,var(--blue) 4%,var(--panel-strong));border-color:transparent;box-shadow:none;outline:none}
+.si-skeleton-selection button{min-height:39px}
+.si-skeleton-table footer button{min-height:38px}
+.si-skeleton-table header small{line-height:17px}
+.si-findings{container-type:inline-size}
+@container(max-width:500px){.si-skeleton-table header small{height:34px}}
 @keyframes si-skeleton-shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
-@media(prefers-reduced-motion:reduce){.si-loading-skeleton i,.si-loading-indicator svg{animation:none!important}}
-@media(max-width:700px){.si-loading-skeleton .si-workspace{grid-template-columns:1fr}.si-skeleton-lawyers{max-height:180px;overflow:hidden}.si-skeleton-row{gap:10px}.si-loading-indicator{font-size:12px}}
+@media(prefers-reduced-motion:reduce){.si-loading-skeleton i{animation:none!important}}
+@media(max-width:700px){.si-skeleton-lawyers{height:260px}}
 @media(min-width:901px){.legal-shell{--si-nav-top:16px}.legal-shell .legal-content:has(.send-issues){padding-top:var(--si-nav-top)}.legal-shell .send-issues .si-top-filters{top:var(--si-nav-top)}}
 @media(min-width:901px) and (max-height:1000px){.legal-shell{--si-nav-top:10px}}
 /* Workspace and composer polish. Native modal top layer keeps navigation inert. */
@@ -80,8 +96,24 @@
 .si-chat-preview{overflow:auto}
 .send-issues .si-workspace{grid-template-columns:280px minmax(0,1fr)}
 .send-issues .si-lawyers{padding:14px;top:calc(var(--si-nav-top,16px) + var(--si-filter-height,80px) + 16px);max-height:calc(100dvh - var(--si-filter-height,80px) - 55px);scrollbar-gutter:stable}
+@media(min-width:901px){
+  .legal-shell>main:has(.send-issues){overflow-y:hidden}
+  .legal-shell .send-issues:not(.si-modal-root){height:var(--si-available-height,calc(100dvh - 32px));min-height:0}
+  .send-issues>.si-top-filters,.send-issues>.si-notice,.send-issues>.error{flex-shrink:0}
+  .send-issues>.si-workspace,.send-issues>.si-loading-skeleton{flex:1;min-height:0}
+  .send-issues>.si-loading-skeleton>.si-workspace{height:100%;min-height:0}
+  .send-issues .si-workspace{overflow:hidden;grid-template-rows:minmax(0,1fr)}
+  .send-issues .si-lawyers{position:static;height:100%;max-height:none;min-height:0;overflow:auto;overscroll-behavior:contain}
+  .send-issues .si-skeleton-lawyers{overflow:hidden}
+  .send-issues .si-findings{height:100%;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:4px}
+  .send-issues .si-findings>*{flex-shrink:0}
+}
 .send-issues .si-search{flex-direction:row;gap:10px;padding:0 11px;border:1px solid color-mix(in srgb,var(--ink) 16%,transparent);border-radius:10px;background:var(--panel-strong);margin-bottom:12px}
 .send-issues .si-search input{border:0;background:transparent;padding:11px 0;font-size:13px}
+.send-issues .si-search{transition:border-color .18s ease,box-shadow .18s ease}
+.send-issues .si-search:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 12%,transparent)}
+.send-issues .si-search input:focus,.send-issues .si-search input:focus-visible{outline:none;box-shadow:none}
+.send-issues .si-search:focus-within svg{color:var(--blue)}
 .si-search svg{color:var(--muted);height:18px}
 .si-lawyers>button{padding:14px 12px;gap:8px;border-radius:10px}
 .si-lawyers>button strong{font-size:14px;line-height:1.5}
@@ -112,8 +144,6 @@
 .si-match small{font-size:11px;margin-top:2px}
 .si-table-scroll .si-severity{display:inline-block;font-size:10px;padding:2px 7px;border-radius:5px;background:color-mix(in srgb,var(--muted) 10%,transparent);color:var(--muted);margin-top:10px}
 .si-table-scroll .si-severity-high{background:color-mix(in srgb,#b25a40 9%,transparent);color:#b25a40}
-.si-skeleton-heading{display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,.6fr);gap:22px}
-.si-skeleton-heading .si-skeleton-readiness{grid-column:1/-1;height:12px;width:65%}
 @container(max-width:850px){.si-modal-root .si-composer-body{grid-template-columns:minmax(0,1fr);overflow:auto;display:block}.si-modal-root .si-composer-settings{overflow:visible;padding:0;margin-bottom:20px}.si-modal-root .si-message-preview{height:560px;min-height:0}.si-modal-root .si-message-preview iframe{height:100%;min-height:0;flex:1}.si-modal-root .si-composer>footer{max-height:160px}.si-modal-root .si-composer{overflow:hidden}}
 /* Reserve room for focus outlines inside both message composers' scroll areas. */
 .si-modal-root .si-composer-settings{padding:8px 12px 8px 8px;scroll-padding-block:8px}
@@ -127,11 +157,14 @@
 /* Keep the first menu inside the content area beside the navigation. */
 @media(min-width:761px){.send-issues .si-top-filters>.checkbox-multi-select:first-child .checkbox-multi-menu{left:0;right:auto}}
 
-.si-email-dialog>footer.si-email-actions{justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap}.si-email-action-group{display:flex;flex-direction:column;gap:8px;min-width:0}.si-email-action-label{font-size:11px;font-weight:600;color:var(--muted);line-height:1.4}.si-email-action-buttons{display:flex;flex-wrap:wrap;gap:8px}.si-email-actions .si-email-action-buttons>button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:10px 14px;border-radius:10px;font-size:13px;white-space:nowrap}.si-email-open-group{margin-left:auto;padding-left:20px;border-left:1px solid var(--line)}@media(max-width:650px){.si-email-dialog>footer.si-email-actions{align-items:stretch;gap:16px}.si-email-actions .si-email-action-group{width:100%}.si-email-open-group{margin-left:0;padding-left:0;padding-top:14px;border-left:0;border-top:1px solid var(--line)}.si-email-action-buttons>button{flex:1 1 auto}}
-.si-modal-root .si-email-dialog>footer.si-email-actions{max-height:none;overflow:visible}
+:is(.si-email-dialog,.si-pdf-dialog)>footer.si-email-actions{justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap}.si-email-action-group{display:flex;flex-direction:column;gap:8px;min-width:0}.si-email-action-label{font-size:11px;font-weight:600;color:var(--muted);line-height:1.4}.si-email-action-buttons{display:flex;flex-wrap:wrap;gap:8px}.si-email-actions .si-email-action-buttons>button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:10px 14px;border-radius:10px;font-size:13px;white-space:nowrap}.si-email-open-group{margin-left:auto;padding-left:20px;border-left:1px solid var(--line)}@media(max-width:650px){:is(.si-email-dialog,.si-pdf-dialog)>footer.si-email-actions{align-items:stretch;gap:16px}.si-email-actions .si-email-action-group{width:100%}.si-email-open-group{margin-left:0;padding-left:0;padding-top:14px;border-left:0;border-top:1px solid var(--line)}.si-email-action-buttons>button{flex:1 1 auto}}
+.si-modal-root :is(.si-email-dialog,.si-pdf-dialog)>footer.si-email-actions{max-height:none;overflow:visible}
+@container(max-width:760px){.send-issues .si-lawyer-heading{grid-template-columns:minmax(0,1fr)}.si-message-readiness{grid-column:1}.si-lawyer-message-actions{justify-content:flex-start}}
 
 .si-part-navigation{display:flex;align-items:center;justify-content:space-between;gap:10px;position:sticky;top:0;z-index:1;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--panel-strong)}.si-part-navigation>span{font-size:12px;font-weight:600;text-align:center}.si-part-navigation>button{padding:8px;display:grid;place-items:center}.si-whatsapp-part.active{border-color:var(--blue);box-shadow:0 0 0 1px color-mix(in srgb,var(--blue) 30%,transparent)}.si-whatsapp-part>header{padding:0 0 10px;align-items:center;gap:8px;border-bottom:1px solid var(--line);flex-wrap:wrap;margin-bottom:12px}.si-whatsapp-part>header>small{margin:0;color:var(--muted);font-size:11px}.si-part-select{border:0;background:transparent;color:var(--ink);padding:4px 0;font:inherit;font-size:12px;font-weight:600;cursor:pointer;text-align:start}.si-whatsapp-part>footer{padding:12px 0 0;justify-content:flex-end}.si-whatsapp-part>footer>button{display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;font-size:12px}.si-whatsapp-part>div{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.75}.si-modal-root .si-composer>footer.si-whatsapp-actions{justify-content:space-between;gap:16px;max-height:none;overflow:visible}.si-whatsapp-actions>span{font-size:12px;font-weight:600}.si-whatsapp-actions>span>small{display:block;font-size:11px;font-weight:400;color:var(--muted);margin-top:5px}.si-whatsapp-actions>button{display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px;padding:12px 16px;white-space:nowrap}@media(max-width:650px){.si-whatsapp-actions{flex-wrap:wrap}.si-whatsapp-actions>button{width:100%}}
 
 .si-part-navigation{background:var(--bg);box-shadow:0 3px 10px #00000008}.si-whatsapp-part{scroll-margin-top:70px}.si-whatsapp-part>div{font-family:inherit}
-
-.si-testing-badge{display:inline-flex;align-items:center;padding:3px 7px;border-radius:6px;font-size:10px;font-weight:650;line-height:1.4;background:color-mix(in srgb,#b7791f 12%,var(--panel-strong));color:var(--ink);border:1px solid color-mix(in srgb,#b7791f 30%,var(--line));white-space:nowrap}.si-testing-notice{display:flex;align-items:center;gap:10px;padding:12px 16px;border:1px solid color-mix(in srgb,#b7791f 25%,var(--line));border-radius:12px;background:var(--panel);font-size:12px;line-height:1.5}.si-email-dialog h2 .si-testing-badge{vertical-align:middle;margin-left:6px}
+.si-email-actions .si-email-action-buttons>.si-whatsapp-open{width:auto;min-height:44px;padding:11px 18px;gap:10px;flex:0 0 auto;border-radius:12px}
+.si-whatsapp-open svg{width:22px;height:22px;flex-shrink:0}
+.si-whatsapp-action{align-items:flex-end}
+@media(max-width:650px){.si-whatsapp-action{align-items:stretch}.si-whatsapp-action .si-whatsapp-open{flex:1 1 auto!important}}

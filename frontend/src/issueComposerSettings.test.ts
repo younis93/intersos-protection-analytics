@@ -41,6 +41,12 @@ describe('Sender details and readiness',()=>{
 
 
 describe('WhatsApp saved settings',()=>{
+  it('saves column visibility without changing saved sender details',()=>{
+    const values=new Map<string,string>();vi.stubGlobal('localStorage',{getItem:(key:string)=>values.get(key),setItem:(key:string,value:string)=>values.set(key,value)});
+    const sender={...blankSender,name:'Existing sender'};saveSender(sender);
+    expect(saveWhatsappSettings('en')).toBe(true);
+    expect(loadWhatsappLanguage()).toBe('en');expect(loadSender()).toEqual(sender);
+  });
   it('defaults to bilingual, then restores language and sender without draft content',()=>{
     const values=new Map<string,string>();vi.stubGlobal('localStorage',{getItem:(key:string)=>values.get(key),setItem:(key:string,value:string)=>values.set(key,value)});
     expect(loadWhatsappLanguage()).toBe('bilingual');

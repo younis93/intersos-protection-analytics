@@ -7,11 +7,12 @@ from difflib import SequenceMatcher
 
 import pandas as pd
 
+COMBINED_NAME_RULE = "Duplicate detained-person name and caller match"
 RULES = (
     "Duplicate detained-person name", "Similar detained-person name",
     "Detained-person name matches caller", "Detained without lawyer referral",
     "Not detained and not referred to helpline", "High priority without lawyer referral",
-    "Invalid contact number",
+    "Invalid contact number", COMBINED_NAME_RULE,
 )
 FIELDS = {
     "name": ("Name of the detained person", "اسم الشخص المعتقل"),
@@ -25,12 +26,14 @@ FIELDS = {
     "project": ("Projects", "Project"), "location": ("Project Location",),
 }
 REQUIRED = {
+    COMBINED_NAME_RULE: ("name", "callerName"),
     RULES[0]: ("name",), RULES[1]: ("name",), RULES[2]: ("name", "callerName"),
     RULES[3]: ("beneficiaryDetained", "lawyerReferral"),
     RULES[4]: ("beneficiaryDetained", "helplineReferral"),
     RULES[5]: ("priority", "lawyerReferral"), RULES[6]: ("phone",),
 }
 ACTIONS = {
+    COMBINED_NAME_RULE: "Verify hotline records with the same detained-person name and caller name; correct the source names and retain the correct record.",
     RULES[0]: "Verify the duplicate detained-person records and retain the correct hotline record.",
     RULES[1]: "Verify the possible spelling variation against the hotline source records.",
     RULES[2]: "Verify whether the caller and detained person are the same person and correct the names if needed.",
@@ -39,6 +42,48 @@ ACTIONS = {
     RULES[5]: "Follow up the high-priority request and record the lawyer referral.",
     RULES[6]: "Verify and correct the contact number to a valid 10-digit number.",
 }
+
+
+def hidden_review_filter(field):
+    label=str(field).casefold()
+    return (any(hint.casefold() in label for key in ("name","callerName") for hint in FIELDS[key])
+            or bool(re.search(r"caller.*(?:himself|herself|someone else)|المتصل.*(?:نفسه|شخص اخر|شخص آخر)",label)))
+
+
+def review_field_filters(frame, filters=None, omit_contact_date=False):
+    """Filter original records without changing duplicate detection or source data."""
+    from .legal_platform import display_value, _find
+    from .filter_selection import selection_mask
+    from .linked_filters import available_values
+    fields = {str(column): frame[column].map(lambda value: str(display_value(value)).strip() or "Not recorded")
+              for column in frame.columns if not str(column).startswith("__")}
+    date_column=_find(list(frame.columns),*FIELDS["contactDate"])
+    if date_column:
+        fields[str(date_column)]=pd.to_datetime(frame[date_column],format="mixed",dayfirst=False,errors="coerce").dt.strftime("%Y-%m").fillna("Not recorded")
+    mask = pd.Series(True, index=frame.index)
+    for field, selections in (filters or {}).items():
+        if omit_contact_date and field==date_column: continue
+        if selections:
+            mask &= selection_mask(fields[field], selections) if field in fields else False
+    options={field:values for field,values in available_values(fields,filters).items() if not hidden_review_filter(field)}
+    if date_column:
+        months=options[str(date_column)]
+        options[str(date_column)]=sorted((month for month in months if month!="Not recorded"),reverse=True)+(["Not recorded"] if "Not recorded" in months else [])
+    return {int(index) + 2 for index in frame.index[mask]}, options
+
+
+def filter_review_findings(frame, items, filters=None, row_scope=None):
+    """Expand only duplicate groups seeded by the chosen months, after other filters."""
+    from .legal_platform import _find
+    selected=row_scope[0] if row_scope is not None else review_field_filters(frame,filters)[0]
+    date_column=_find(list(frame.columns),*FIELDS["contactDate"])
+    if not date_column or not (filters or {}).get(date_column):
+        return [item for item in items if item["row"] in selected]
+    eligible=row_scope[1] if row_scope is not None else review_field_filters(frame,filters,omit_contact_date=True)[0]
+    groups={(item["rule"],item["duplicateGroup"]) for item in items
+            if item["row"] in selected and item.get("duplicateGroup")}
+    return [item for item in items if item["row"] in selected or
+            (item["row"] in eligible and item.get("duplicateGroup") and (item["rule"],item["duplicateGroup"]) in groups)]
 
 
 def prepare(frame):
@@ -66,10 +111,12 @@ def prepare(frame):
     return columns, identities, unavailable
 
 
-def findings(store, compare_chars=15, allow_variations=True):
+def findings(store, compare_chars=15, allow_variations=True, group_names=True):
     from .legal_platform import normalize_name, clean_id, display_value
     frame = store.frames.get("legalhotlines", pd.DataFrame())
     columns, identities, unavailable = prepare(frame)
+    represented_columns = {column for column in columns.values() if column}
+    extra_columns = [column for column in frame.columns if column not in represented_columns]
     output = []
     def value(row, key):
         return str(display_value(row.get(columns[key], ""))) if columns[key] else ""
@@ -83,6 +130,7 @@ def findings(store, compare_chars=15, allow_variations=True):
         store._flag(output, "legalhotlines", rule, "High" if rule in RULES[3:6] else "Medium", index, row, detail)
         flag = output[-1]
         flag.update({key: value(row, key) for key in FIELDS})
+        flag["sourceFields"] = {str(column): str(display_value(row.get(column, ""))) for column in extra_columns}
         flag.update(recordId=identities[index], hotlineId=identities[index], lawyer=value(row, "lawyerReferral"), action=ACTIONS[rule], caseId="", assessmentId="", serviceId="")
         # Only expose a case action when a real imported beneficiary is linked.
         case_column = store.frames.get("beneficiaries", pd.DataFrame())
@@ -107,6 +155,23 @@ def findings(store, compare_chars=15, allow_variations=True):
         context = store._duplicate_context(key, [identities[i] for i in members])
         for index in members:
             add(index, RULES[0], f"Normalized name matches {len(members)-1} other record(s)", duplicateGroup=key, duplicateContext=context, nameMatchMode="exact", duplicateSimilarity=100, duplicateMatchRows=[int(peer)+2 for peer in sorted(members) if peer != index])
+    pairs = defaultdict(list)
+    if COMBINED_NAME_RULE not in unavailable:
+        for index, row in frame.iterrows():
+            name = names[index]
+            caller = normalize_name(value(row, "callerName"))
+            if name and caller:
+                pairs[(name, caller)].append(index)
+    for (name, caller), members in pairs.items():
+        if len(members) < 2: continue
+        key = "hotline-name-caller:" + json.dumps([name, caller], ensure_ascii=False, separators=(",", ":"))
+        context = store._duplicate_context(key, [identities[i] for i in members],
+                                           {"detainedPersonName": name, "callerName": caller})
+        for index in members:
+            add(index, COMBINED_NAME_RULE,
+                f"Both normalized detained-person name and caller name match {len(members)-1} other record(s)",
+                duplicateGroup=key, duplicateContext=context, nameMatchMode="exact", duplicateSimilarity=100,
+                duplicateMatchRows=[int(peer)+2 for peer in sorted(members) if peer != index])
     matches = defaultdict(set)
     buckets = defaultdict(list)
     for index, name in names.items():
@@ -149,4 +214,16 @@ def findings(store, compare_chars=15, allow_variations=True):
             digits = re.sub(r"[\s()\-]", "", phone)
             if not re.fullmatch(r"\d{10}", digits):
                 add(index, RULES[6], "Populated contact number must contain exactly 10 digits with no other characters")
-    return output, unavailable
+    if not group_names:
+        return output, unavailable
+    # A record belongs to one name-check table, independent of filters or paging.
+    name_rules = {COMBINED_NAME_RULE, *RULES[:3]}
+    by_record = defaultdict(dict)
+    for flag in output:
+        if flag["rule"] in name_rules:
+            by_record[flag["hotlineId"]][flag["rule"]] = flag
+    grouped = []
+    for flags in by_record.values():
+        flag = next(flags[rule] for rule in (COMBINED_NAME_RULE, RULES[0], RULES[2], RULES[1]) if rule in flags)
+        grouped.append(flag)
+    return grouped + [flag for flag in output if flag["rule"] not in name_rules], unavailable

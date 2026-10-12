@@ -41,4 +41,20 @@ describe('processing progress',()=>{
     stopLate();resolve(snapshot);await vi.advanceTimersByTimeAsync(1000);
     expect(receive).not.toHaveBeenCalled();
   });
+  it('keeps polling while cancelling and stops once the worker has stopped',async()=>{
+    vi.useFakeTimers();const receive=vi.fn();
+    const read=vi.fn().mockResolvedValueOnce({...snapshot,state:'cancelling'}).mockResolvedValue({...snapshot,state:'cancelled'});
+    const stop=pollImportProgress('current',receive,read);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(read).toHaveBeenCalledTimes(2);expect(receive.mock.calls[1][0].state).toBe('cancelled');stop();
+  });
+  it('renders cancellation and failures with dismiss controls and stops folder motion',()=>{
+    for(const state of ['cancelled','error'] as const){
+      const markup=renderToStaticMarkup(<ProcessingRecords progress={{...snapshot,state,error:'Invalid CSV'}} onDismiss={()=>{}}/>);
+      expect(markup).toContain(state==='cancelled'?'Import cancelled':'Import failed');
+      expect(markup).toContain('Dismiss');expect(markup).not.toContain('is-processing');
+    }
+    const markup=renderToStaticMarkup(<ProcessingRecords progress={{...snapshot,state:'cancelling'}} onCancel={()=>{}}/>);
+    expect(markup).toContain('Cancelling...');expect(markup).toContain('disabled');
+  });
 });

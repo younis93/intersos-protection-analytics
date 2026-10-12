@@ -63,15 +63,16 @@ def test_service_and_assessment_duplicates_have_matching_ids_and_lawyers():
     assert [(peer['serviceId'], peer['lawyer']) for peer in service['duplicateMatches']] == [('S2', 'Bob')]
 
 
-def test_hotline_duplicates_preserve_identity_and_lawyer_referral():
+def test_hotline_duplicates_preserve_review_identity_and_stay_out_of_send_issues():
     store = LegalStore.from_files({'legalhotlines': csv(**{'Hotline ID': ['H1', 'H2', 'H3'],
         'Name of the detained person': ['Ahmed Mohammed Hassan'] * 2 + ['Other Person'], 'Refer to Lawyer': ['Alice', 'Bob', 'Other'],
         'Lawyer': ['Alice', 'Bob', 'Other']})}, 'hotline')
-    finding = next(row for row in collect_findings(store)[1] if row['hotlineId'] == 'id:H1' and row['rule'] == 'Duplicate detained-person name')
-    assert [(peer['hotlineId'], peer['lawyer']) for peer in finding['duplicateMatches']] == [('id:H2', 'Bob')]
+    findings = store.review('legalhotlines', rule='Duplicate detained-person name')['rows']
+    assert {(row['hotlineId'], row['lawyer']) for row in findings} == {('id:H1', 'Alice'), ('id:H2', 'Bob')}
+    assert collect_findings(store) == ([], [])
     store.set_review_exclusions([{'dataset': 'legalhotlines', 'rule': 'Duplicate detained-person name', 'identifierType': 'hotlineId', 'identifierValue': 'id:H2'}])
-    finding = next(row for row in collect_findings(store)[1] if row['hotlineId'] == 'id:H1' and row['rule'] == 'Duplicate detained-person name')
-    assert finding['duplicateMatches'] == []
+    assert [row['hotlineId'] for row in store.review('legalhotlines', rule='Duplicate detained-person name')['rows']] == ['id:H1']
+    assert collect_findings(store) == ([], [])
 
 
 def test_historical_duplicates_list_only_earlier_records_and_dates():

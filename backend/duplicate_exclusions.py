@@ -170,7 +170,7 @@ class DuplicateExclusionRegistry:
             self._write(rows)
         return created, len(created), duplicates
 
-    def reconcile_duplicate_contexts(self, contexts: dict[tuple[str, str, str, str], dict[str, Any]]) -> tuple[list[dict[str, Any]], bool]:
+    def reconcile_duplicate_contexts(self, contexts: dict[tuple[str, str, str, str], dict[str, Any]], *, persist: bool = True) -> tuple[list[dict[str, Any]], bool]:
         """Initialize legacy baselines and flag changed duplicate groups."""
         rows = self.exclusion_rows()
         changed = False
@@ -202,7 +202,7 @@ class DuplicateExclusionRegistry:
                 row["pendingRecheck"] = False
                 row.pop("pendingSince", None)
                 changed = True
-        if changed:
+        if changed and persist:
             self._write(rows)
         return rows, changed
 

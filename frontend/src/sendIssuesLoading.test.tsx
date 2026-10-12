@@ -15,13 +15,10 @@ describe('Send Issues initial loading',()=>{
       for(const value of ['Matching records and lawyers','Awareness W2 (row 3)','أحمد علي','Documentation','Bob'])expect(markup).toContain(value);
     }finally{vi.unstubAllGlobals();invalidateLegalQueries();}
   });
-  it('starts with a loading indicator and skeleton without showing empty results',()=>{
+  it('starts with a skeleton without loading text or empty results',()=>{
     const markup=renderToStaticMarkup(<SendIssues revision="test"/>);
     expect(markup).toContain('aria-busy="true"');
-    expect(markup).toContain('Email preparation is being tested');
-    expect(markup).toContain('Review recipients and message content before sending');
-    expect(markup).toContain('role="status"');
-    expect(markup).toContain('Loading review findings and lawyer contacts');
+    expect(markup).not.toContain('Loading review findings and lawyer contacts');
     expect(markup).toContain('si-loading-skeleton');
     expect(markup).not.toContain('Review findings could not be loaded');
     expect(markup).not.toContain('No findings match');
@@ -34,6 +31,6 @@ describe('Send Issues initial loading',()=>{
     expect(markup).not.toContain('si-stats');
     expect(markup).not.toContain('si-skeleton-number');
     expect(markup).toContain('si-skeleton-lawyers');
-    expect(markup.match(/class="glass si-skeleton-table"/g)).toHaveLength(2);
+    expect(markup.match(/class="glass si-group si-skeleton-table"/g)).toHaveLength(2);
   });
 });

@@ -113,3 +113,56 @@ def test_hotline_upload_endpoint_and_refresh(payload, monkeypatch):
     response = upload(required_payload())
     assert response['revision'] != revision
     assert not response['availability']['legalhotlines']
+
+
+@pytest.fixture
+def detention_chart_source():
+    return pd.DataFrame({
+        'Contact Date': ['2026-02-01'] * 7,
+        'Is the beneficiary detained': ['Yes', 'نعم', 'Yes نعم', 'No', '', 'No لا', None],
+        'Governorate of detention': ['Baghdad', '', 'Baghdad', 'Erbil', 'Duhok', '', None],
+        'Detaining Authority': ['Police', 'Court', '', 'Other', 'Unknown', '', None],
+        'Priority': ['High'] * 7,
+    })
+
+
+def test_detention_charts_count_only_normalized_yes_and_use_detained_denominator(detention_chart_source):
+    source = detention_chart_source
+    original = source.copy(deep=True)
+    result = dashboard(source)
+    charts = {chart['id']: chart['rows'] for chart in result['charts']}
+    assert charts['Governorate of detention'] == [
+        {'label': 'Baghdad', 'count': 2, 'percent': 2/3},
+        {'label': 'Not recorded', 'count': 1, 'percent': 1/3},
+    ]
+    assert {row['label']: (row['count'], row['percent']) for row in charts['Detaining Authority']} == {
+        'Police': (1, 1/3), 'Court': (1, 1/3), 'Not recorded': (1, 1/3),
+    }
+    assert result['total'] == result['filteredRows'] == 7
+    assert charts['Priority'] == [{'label': 'High', 'count': 7, 'percent': 1}]
+    assert result['trend'][0]['count'] == 7
+    assert result['trend'][0]['detained'] == 3
+    assert 'Erbil' in result['filterOptions']['Governorate of detention']
+    assert 'Other' in result['filterOptions']['Detaining Authority']
+    assert next(item for item in result['map']['items'] if item['label'] == 'Erbil')['notDetained'] == 1
+    pd.testing.assert_frame_equal(source, original)
+
+
+@pytest.mark.parametrize('filters,expected_count', [
+    ({'Governorate of detention': ['Baghdad']}, 2),
+    ({'Detaining Authority': ['Court']}, 1),
+    ({'Contact Date': ['2026-02'], 'Governorate of detention': ['Not recorded']}, 1),
+    ({'Is the beneficiary detained': ['No']}, 0),
+    ({'Is the beneficiary detained': ['Not recorded']}, 0),
+    ({'Contact Date': ['2026-03']}, 0),
+])
+def test_detention_charts_respect_filters_and_return_empty_rows(detention_chart_source, filters, expected_count):
+    result = dashboard(detention_chart_source, filters)
+    for chart in result['charts']:
+        if chart['id'] not in {'Governorate of detention', 'Detaining Authority'}:
+            continue
+        assert sum(row['count'] for row in chart['rows']) == expected_count
+        if expected_count:
+            assert sum(row['percent'] for row in chart['rows']) == pytest.approx(1)
+        else:
+            assert chart['rows'] == []

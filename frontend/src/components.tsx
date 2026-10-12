@@ -4,6 +4,7 @@ import {checkedFilterValues, selectAllExcept, toggleFilterValue, filterValue, is
 import {VirtualRows} from "./VirtualRows";
 import { createPortal } from "react-dom";
 import Plot from "./LazyPlot";
+import {fullMonthLabel,isSingleMonth,singleMonthTraces} from "./timelineChart";
 import { sortFilterValues, formatFilterMonth, formatYearMonthFilterValue } from "./dateFormat";
 import {
   Check,
@@ -446,6 +447,12 @@ export function TrendCard({
     const match = comparisonByMonth.get(r.label);
     return display === "percent" ? (match?.percent || 0) : (match?.count || 0);
   });
+  const singleMonth=isSingleMonth(rows.map(row=>row.label));
+  const bars=singleMonthTraces(rows.map(row=>row.label),[
+    {label:primaryLabel||(comparisonRows?"Started":title),values:vals,color:"#1683d8",customdata:hoverMetrics?.length?hoverValues:undefined,
+      hovertemplate:hoverMetrics?.length?`<b>${primaryLabel||title}</b>&nbsp;&nbsp;%{y:${display==="percent"?".1%":",.0f"}}<br>${hoverMetricTemplate}<extra></extra>`:undefined},
+    ...(comparisonRows?[{label:comparisonLabel,values:comparisonVals,color:"#2f9e68"}]:[]),
+  ],selected,chartInk(theme),display==="percent");
   const chooseRange = (a: number, b: number) =>
     onSelect?.(
       rows.slice(Math.min(a, b), Math.max(a, b) + 1).map((r) => r.label),
@@ -471,13 +478,13 @@ export function TrendCard({
           </button>
         </div>
       </div>
-      <div className="plot-shell trend">
+      <div className="plot-shell trend" style={{height:330}}>
         <Plot
-          key={`trend-${theme}-${title}-${selected.join("|") || "all"}`}
+          key={`trend-${singleMonth?"bars":"line"}-${theme}-${title}-${selected.join("|") || "all"}`}
           revision={rows.reduce((n, r) => n + r.count, 0)}
           useResizeHandler
           onInitialized={(_, gd) => setGraph(gd)}
-          data={[
+          data={singleMonth?bars:[
             {
               type: "scatter",
               mode: "lines+markers+text",
@@ -542,6 +549,7 @@ export function TrendCard({
             }] : []),
           ]}
           layout={{
+            barmode: "group",
             autosize: true,
             height: 330,
             margin: { l: 50, r: 20, t: 15, b: 82 },
@@ -561,18 +569,21 @@ export function TrendCard({
               font: { family: "DM Sans,Segoe UI,sans-serif", color: chartInk(theme), size: 13 },
               align: "left",
             },
-            shapes: selected.map((month)=>({type:"line" as const,xref:"x" as const,yref:"paper" as const,x0:month,x1:month,y0:0,y1:1,line:{color:"rgba(22,131,216,.38)",width:2,dash:"dot" as const}})),
+            shapes: singleMonth?[]:selected.map((month)=>({type:"line" as const,xref:"x" as const,yref:"paper" as const,x0:month,x1:month,y0:0,y1:1,line:{color:"rgba(22,131,216,.38)",width:2,dash:"dot" as const}})),
             xaxis: {
               gridcolor: chartGrid(theme), fixedrange: false, type: "category",
               tickmode: "array",
               tickvals: rows.map((r) => r.label),
-              ticktext: rows.map((r) => new Intl.DateTimeFormat("en", {month:"short",year:"2-digit",timeZone:"UTC"}).format(new Date(`${r.label}-01T00:00:00Z`))),
-              tickangle: -45,
+              ticktext: rows.map((r) => singleMonth?fullMonthLabel(r.label):new Intl.DateTimeFormat("en", {month:"short",year:"2-digit",timeZone:"UTC"}).format(new Date(`${r.label}-01T00:00:00Z`))),
+              tickangle: singleMonth?0:-45,
+              range: singleMonth?[-.65,.65]:undefined,
               automargin: true,
             },
             yaxis: {
               gridcolor: chartGrid(theme),
               rangemode: "tozero",
+              range: singleMonth?[0,Math.max(1,...vals,...(comparisonRows?comparisonVals:[]))*1.2]:undefined,
+              automargin: true,
               tickformat: display === "percent" ? ".0%" : ",d",
               fixedrange: true,
             },

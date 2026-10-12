@@ -2,6 +2,7 @@ import {afterEach,describe,expect,it,vi} from "vitest";
 import {LegalLoadScheduler,taskManifest,type PageLoadTask,type LoadStatus} from "./legalLoadScheduler";
 import {getLegalCase,getLegalIndicatorsMonthly,getLegalReview} from './api';
 import {invalidateLegalQueries,legalFetch,setLegalRevision} from './legalQueryCache';
+import {legalPageOrder} from './legalPageOrder';
 
 const schedulers:LegalLoadScheduler[]=[];
 const flush=async()=>{for(let index=0;index<8;index++)await Promise.resolve()};
@@ -11,6 +12,18 @@ const task=(id:string,page:string,phase:"main"|"secondary",run:PageLoadTask["run
 afterEach(()=>{schedulers.splice(0).forEach((scheduler)=>scheduler.dispose());vi.unstubAllGlobals();vi.useRealTimers();invalidateLegalQueries()});
 
 describe("legal load scheduler",()=>{
+  it('queues available main pages in sidebar order, with secondary work afterward',()=>{
+    const metadata={availability:{beneficiaries:true,assessments:true,legalservices:true,awareness:true,legalhotlines:true,deportationrecords:true},features:{detention:true},sheets:[{id:'beneficiaries'}]} as unknown as import('./types').LegalMetadata;
+    const tasks=taskManifest(metadata);
+    expect(tasks.filter(task=>task.phase==='main').map(task=>task.page)).toEqual([...legalPageOrder]);
+    const firstSecondary=tasks.findIndex(task=>task.phase==='secondary');
+    expect(tasks.slice(firstSecondary).every(task=>task.phase==='secondary')).toBe(true);
+    expect(tasks.findIndex(task=>task.page==='legalhotlines')).toBeLessThan(tasks.findIndex(task=>task.page==='indicators'));
+  });
+  it('skips unavailable pages without changing sidebar order',()=>{
+    const metadata={availability:{legalhotlines:true},features:{},sheets:[{id:'legalhotlines'}]} as unknown as import('./types').LegalMetadata;
+    expect(taskManifest(metadata).filter(task=>task.phase==='main').map(task=>task.page)).toEqual(['hotline','legalhotlines','explorer']);
+  });
   it("loads the active main view first, then all other mains, then secondary tabs",async()=>{
     vi.useFakeTimers();const order:string[]=[],active=deferred(),other=deferred();
     const scheduler=new LegalLoadScheduler();schedulers.push(scheduler);
@@ -50,13 +63,13 @@ describe("legal load scheduler",()=>{
 });
 
 
-it("includes Send Issues after Awareness Review in the main queue and supports hotline-only sources",()=>{
+it("includes Send Issues after Awareness Review in the main queue and excludes hotline-only sources",()=>{
   const metadata={availability:{beneficiaries:true,assessments:true,legalservices:true,awareness:true},features:{detention:true},sheets:[]} as unknown as import('./types').LegalMetadata;
   const pages=taskManifest(metadata).filter(task=>task.phase==='main').map(task=>task.page);
   expect(pages.indexOf('send-issues')).toBe(pages.indexOf('awareness')+1);
   expect(pages.indexOf('detention')).toBe(pages.indexOf('send-issues')+1);
   const hotline={...metadata,availability:{legalhotlines:true}} as unknown as import('./types').LegalMetadata;
-  expect(taskManifest(hotline).some(task=>task.page==='send-issues')).toBe(true);
+  expect(taskManifest(hotline).some(task=>task.page==='send-issues')).toBe(false);
   expect(taskManifest({...metadata,availability:{}}).some(task=>task.page==='send-issues')).toBe(false);
 });
 

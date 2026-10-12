@@ -1,17 +1,21 @@
+import ReviewFiltersDrawer from "./ReviewFiltersDrawer";
+import {legalPageRank} from './legalPageOrder';
 import {ValueTable} from "./ValueTable";
 import {useQueryPage} from "./useQueryPage";
 import {indicatorPopulationScope} from "./indicatorPopulationScope";
 import {filterValue, isExcludedValue, matchesSelection} from "./filterSelection";
 import ProcessingRecords from './ProcessingRecords';
 import NotificationToast from './NotificationToast';
-import {useImportProgress} from './importProgress';
+import {useImportProgress,cancelImport,getImportProgress,type LegalImportProgress} from './importProgress';
 import {VirtualRows} from "./VirtualRows";
 import {UpdateFallbackNotice} from "./UpdateFallbackNotice";
 import SendIssues from "./SendIssues";
 import {getLegalHotlineDashboard} from "./api";
-import {getLegalOverview} from "./api";
+import {getLegalOverview,getLegalOverviewFilters} from "./api";
+import {isSingleMonth} from "./timelineChart";
+import SingleMonthIndicatorChart from "./SingleMonthIndicatorChart";
 import type {OverviewFilters, LegalOverviewResult} from "./types";
-import { Children, Fragment, isValidElement, memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Children, Fragment, isValidElement, memo, type ReactNode, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { reviewColumnIndices } from "./reviewColumnOrder";
 import { createPortal } from "react-dom";
 import type { jsPDF } from "jspdf";
@@ -216,9 +220,10 @@ const descriptions: Record<LegalPage, string> = {
   "send-issues": "Prepare professional review emails for each lawyer.",
 };
 const REVIEW_CHECK_METHODS: Record<string, { columns: string[]; logic: string }> = {
-  "Duplicate detained-person name": { columns: ["Name of the detained person"], logic: "Compares complete normalized nonblank detained-person names across all hotline records." },
-  "Similar detained-person name": { columns: ["Name of the detained person"], logic: "Compares the configured leading normalized characters, allowing 90% similarity when spelling variations are enabled. Identical full names are listed separately." },
-  "Detained-person name matches caller": { columns: ["Name of the detained person", "Name of the caller"], logic: "Checks whether either name contains the other as complete words within this hotline record." },
+  "Duplicate detained-person name and caller match": { columns: ["Name of the detained person", "Name of the caller"], logic: "Compares both complete normalized names across separate hotline records. Both columns must match the same other record and neither may be blank. It does not compare the detained-person name against the caller name within a record. Each record appears once across the name-check tables: combined, exact duplicate, caller match, then similar name." },
+  "Duplicate detained-person name": { columns: ["Name of the detained person"], logic: "Compares complete normalized nonblank detained-person names across all hotline records. Records with both names duplicated in the same other record are listed in the combined table." },
+  "Similar detained-person name": { columns: ["Name of the detained person"], logic: "Compares the configured leading normalized characters, allowing 90% similarity when spelling variations are enabled. Records already listed in the combined, exact-duplicate, or caller-match table are omitted." },
+  "Detained-person name matches caller": { columns: ["Name of the detained person", "Name of the caller"], logic: "Checks whether either name contains the other as complete words within this hotline record. Records already listed in the combined or exact-duplicate table are omitted." },
   "Detained without lawyer referral": { columns: ["Is the beneficiary detained", "Refer to Lawyer"], logic: "Flags explicit Yes detention answers with a blank lawyer referral." },
   "Not detained and not referred to helpline": { columns: ["Is the beneficiary detained", "Has the beneficiary referred to the helpline?"], logic: "Flags records with explicit No answers to both questions. Blank answers do not count as No." },
   "High priority without lawyer referral": { columns: ["Priority", "Refer to Lawyer"], logic: "Flags High priority records with a blank lawyer referral." },
@@ -305,6 +310,7 @@ const nav: [LegalPage, any][] = [
   ["explorer", TableProperties],
   ["cases", Search],
 ];
+nav.sort(([left],[right])=>legalPageRank(left)-legalPageRank(right));
 const value = (input: unknown) => formatTableValue(input);
 function TableSelectionActions({selected,filename,onClear,showActions=true,iconOnly=false,onDownloadAll,onDownloadSelected}:{selected:Map<string,Record<string,unknown>>;filename:string;onClear:()=>void;showActions?:boolean;iconOnly?:boolean;onDownloadAll?:()=>Promise<void>;onDownloadSelected?:()=>Promise<void>}){
   const [busy,setBusy]=useState(false);const rows=Array.from(selected.values()).map((row)=>Object.fromEntries(Object.entries(row).filter(([key])=>!key.startsWith("__")))),columns=Array.from(new Set(rows.flatMap((row)=>Object.keys(row)))),hasSelection=rows.length>0,downloadLabel=hasSelection?"Download selected records":"Download all filtered records";
@@ -492,6 +498,7 @@ function FindingTable({
   ignoreCourtVerdict,
   onIgnoreCourtVerdictChange,
   filters,
+  fieldFilters,
   comparisonMonth,
   onOpenCase,
   findingRevision,
@@ -514,6 +521,7 @@ function FindingTable({
   ignoreCourtVerdict: boolean;
   onIgnoreCourtVerdictChange: (value: boolean) => void;
   filters: Record<string, string>;
+  fieldFilters: Record<string,string[]>;
   comparisonMonth: string;
   onOpenCase: (caseId: string) => void;
   findingRevision: number;
@@ -541,6 +549,7 @@ function FindingTable({
       allowNameVariations,
       exactMatchesOnly,
       controller.signal,
+      fieldFilters,
     )
       .then((x) => {
         if (controller.signal.aborted) return;
@@ -551,7 +560,7 @@ function FindingTable({
         if (e.name !== "AbortError") setError(e.message);
       });
     return () => controller.abort();
-  }, [dataset, rule, search, page, filters, comparisonMonth, nameCompareChars, allowNameVariations, exactMatchesOnly, findingRevision]);
+  }, [dataset, rule, search, page, filters, fieldFilters, comparisonMonth, nameCompareChars, allowNameVariations, exactMatchesOnly, findingRevision]);
   const copyDuplicateName=async(name:string)=>{
     if(!name)return;
     try{await navigator.clipboard.writeText(name)}catch{const field=document.createElement("textarea");field.value=name;field.style.position="fixed";field.style.opacity="0";document.body.appendChild(field);field.select();document.execCommand("copy");field.remove()}
@@ -571,6 +580,7 @@ function FindingTable({
   useEffect(() => {
     if (selectVisibleRef.current) selectVisibleRef.current.indeterminate = selectedRows.length > 0 && !allVisibleSelected;
   }, [selectedRows.length, allVisibleSelected]);
+  const hotlineSourceColumns = dataset === "legalhotlines" ? Object.keys(result?.rows[0]?.sourceFields || {}) : [];
   const tableHeaders = reviewTableCells(<>
     <th className="review-selection-column"><input ref={selectVisibleRef} aria-label={`Select visible records for ${displayReviewRule(rule)}`} type="checkbox" disabled={!excludableRows.length} checked={allVisibleSelected} onChange={(event) => setSelectedRowKeys(event.target.checked ? visibleRows.map((row, index) => isExcludable(row) ? rowKey(row, index) : "").filter(Boolean) : [])} /></th>
     <th>Finding detail</th>
@@ -584,7 +594,7 @@ function FindingTable({
     <th>Phone number</th>
     {dataset === "beneficiaries" && <th>Date of birth</th>}
     {dataset === "legalhotlines" ? (
-      <><th>Contact date</th><th>Caller name</th><th>Detained</th><th>Helpline referral</th></>
+      <><th>Contact date</th><th>Caller name</th><th>Detained</th><th>Helpline referral</th><th>Priority</th>{hotlineSourceColumns.map((column) => <th key={column}>{column}</th>)}</>
     ) : dataset === "awareness" ? (
       <><th>Awareness ID</th><th>Session topic</th></>
     ) : (
@@ -622,7 +632,7 @@ function FindingTable({
       <td>{r.phone || "-"}</td>
       {dataset === "beneficiaries" && <td>{r.dateOfBirth || "-"}{rule === "Marital status below 18" && r.beneficiaryAge !== null && r.beneficiaryAge !== undefined ? ` (${r.beneficiaryAge})` : ""}</td>}
       {dataset === "legalhotlines" ? (
-        <><td>{r.contactDate}</td><td>{r.callerName}</td><td>{r.beneficiaryDetained}</td><td>{r.helplineReferral}</td></>
+        <><td>{r.contactDate}</td><td>{r.callerName}</td><td>{r.beneficiaryDetained}</td><td>{r.helplineReferral}</td><td>{r.priority || "-"}</td>{hotlineSourceColumns.map((column) => <td key={column}>{r.sourceFields?.[column] || "-"}</td>)}</>
       ) : dataset === "awareness" ? (
         <><td>{r.awarenessId || r.recordId || "-"}</td><td>{r.sessionTopic || "-"}</td></>
       ) : (
@@ -718,7 +728,7 @@ function FindingTable({
               </thead>
               <tbody>
                 {group.rows.map(({row: r, index: i}) => { const cells = cellsForRow(r, i); return (
-                  <tr key={`${r.row}-${i}`} className={(rule === "Duplicate detained-person name" || rule === "Similar detained-person name" || rule === "Duplicate service" || rule === "Duplicate service without Assessment ID" || rule === "Beneficiary has multiple assessments" || rule === "Duplicate participant in session") && r.duplicateGroup ? "duplicate-service-row" : ""} style={(rule === "Duplicate detained-person name" || rule === "Similar detained-person name" || rule === "Duplicate service" || rule === "Duplicate service without Assessment ID" || rule === "Beneficiary has multiple assessments" || rule === "Duplicate participant in session") && r.duplicateGroup ? { background: duplicateColor(r.duplicateGroup) } : undefined} onContextMenu={(event) => {
+                  <tr key={`${r.row}-${i}`} className={(rule === "Duplicate detained-person name and caller match" || rule === "Duplicate detained-person name" || rule === "Similar detained-person name" || rule === "Duplicate service" || rule === "Duplicate service without Assessment ID" || rule === "Beneficiary has multiple assessments" || rule === "Duplicate participant in session") && r.duplicateGroup ? "duplicate-service-row" : ""} style={(rule === "Duplicate detained-person name and caller match" || rule === "Duplicate detained-person name" || rule === "Similar detained-person name" || rule === "Duplicate service" || rule === "Duplicate service without Assessment ID" || rule === "Beneficiary has multiple assessments" || rule === "Duplicate participant in session") && r.duplicateGroup ? { background: duplicateColor(r.duplicateGroup) } : undefined} onContextMenu={(event) => {
                     if ((dataset === "legalhotlines" && r.hotlineId) || (dataset === "assessments" && r.assessmentId) || (dataset === "legalservices" && r.serviceId) || (dataset === "awareness" && (r.awarenessId || r.name)) || (dataset === "beneficiaries" && r.caseId)) onFindingContextMenu(event, r);
                   }}>
                     {columnOrder.map((index) => <Fragment key={index}>{cells[index]}</Fragment>)}
@@ -754,6 +764,7 @@ function ReviewPageBody({
     [ignoreCourtVerdictByRule, setIgnoreCourtVerdictByRule] = useState<Record<string, boolean>>({}),
     [selectedRules, setSelectedRules] = useState<string[]>([]),
     [filters, setFilters] = useState<Record<string, string>>({}),
+    [fieldFilters, setFieldFilters] = useState<Record<string,string[]>>({}),
     [drawer, setDrawer] = useState(false),
     [excludedDuplicates, setExcludedDuplicates] = useState<DuplicateExclusion[]>([]),
     [excludedManagerOpen, setExcludedManagerOpen] = useState(false),
@@ -773,6 +784,7 @@ function ReviewPageBody({
     [exclusionSort, setExclusionSort] = useState<{key:string;direction:"asc"|"desc"}>({key:"rule",direction:"asc"}),
     [exclusionBusy, setExclusionBusy] = useState(false),
     [initialized, setInitialized] = useState(false),
+    [defaultRules, setDefaultRules] = useState<string[]>([]),
     [busy, setBusy] = useState(true),
     [error, setError] = useState("");
   const previousDataset = useRef(dataset);
@@ -780,8 +792,10 @@ function ReviewPageBody({
     if (previousDataset.current === dataset) return;
     previousDataset.current = dataset;
     setSelectedRules([]);
+    setDefaultRules([]);
     setInitialized(false);
     setFilters({});
+    setFieldFilters({});
     setIgnoreCourtVerdictByRule({});
     setAllowNameVariations(dataset === "legalhotlines");
     setExactMatchesOnly(dataset !== "legalhotlines");
@@ -813,6 +827,7 @@ function ReviewPageBody({
       allowNameVariations,
       false,
       controller.signal,
+      fieldFilters,
     )
       .then((result) => {
         if (controller.signal.aborted) return;
@@ -821,10 +836,13 @@ function ReviewPageBody({
           const beneficiaryDefaults = ["Possible duplicate name", "Possible duplicate contact and name", "Invalid contact number", "Case without assessment", "Invalid age"];
           const assessmentDeferredDefaults = new Set(["Representation while not detained", "Detention/immigration inconsistency", "Detained beneficiary below 10 years"]);
           const awarenessDeferredDefaults = new Set(["Possible duplicate participant name"]);
-          const defaults = dataset === "beneficiaries"
-            ? beneficiaryDefaults.filter((rule) => (result.ruleCounts[rule] || 0) > 0)
-            : Object.entries(result.ruleCounts).filter(([rule, count]) => count > 0 && (dataset !== "assessments" || !assessmentDeferredDefaults.has(rule)) && (dataset !== "awareness" || !awarenessDeferredDefaults.has(rule))).map(([rule]) => rule);
+          const defaults = dataset === "legalhotlines"
+            ? ["Duplicate detained-person name and caller match", "High priority without lawyer referral"]
+            : dataset === "beneficiaries"
+              ? beneficiaryDefaults.filter((rule) => (result.ruleCounts[rule] || 0) > 0)
+              : Object.entries(result.ruleCounts).filter(([rule, count]) => count > 0 && (dataset !== "assessments" || !assessmentDeferredDefaults.has(rule)) && (dataset !== "awareness" || !awarenessDeferredDefaults.has(rule))).map(([rule]) => rule);
           setSelectedRules(defaults);
+          setDefaultRules(defaults);
           setInitialized(true);
         }
       })
@@ -835,11 +853,12 @@ function ReviewPageBody({
         if (!controller.signal.aborted) setBusy(false);
       });
     return () => controller.abort();
-  }, [dataset, debouncedSearch, filters, comparisonMonth, appliedNameCompareChars, allowNameVariations, findingRevisions]);
+  }, [dataset, debouncedSearch, filters, fieldFilters, comparisonMonth, appliedNameCompareChars, allowNameVariations, findingRevisions]);
   const amalProjectOnly = dataset === "assessments" && ((filters.project && /\bamal\b/i.test(filters.project)) || (!filters.project && Boolean(summary?.filterOptions.project?.length) && summary!.filterOptions.project.every((project) => /\bamal\b/i.test(project)))),
     rules = Object.entries(summary?.ruleCounts || {}).map(([rule, count]) => [rule, count] as const).filter(([rule]) => !amalProjectOnly || !AMAL_HIDDEN_ASSESSMENT_RULES.has(rule)),
-    orderedRules = dataset === "assessments" ? [...rules.filter(([rule]) => !ASSESSMENT_REVIEW_TAIL_RULES.has(rule)), ...rules.filter(([rule]) => ASSESSMENT_REVIEW_TAIL_RULES.has(rule))] : dataset === "legalservices" ? [...LEGAL_SERVICES_REVIEW_FIRST_RULES.map((rule) => rules.find(([name]) => name === rule)).filter((item): item is typeof rules[number] => Boolean(item)), ...rules.filter(([rule]) => !LEGAL_SERVICES_REVIEW_FIRST_RULES.includes(rule))] : rules,
-    activeFilters = Object.values(filters).filter(Boolean).length,
+    baseOrderedRules = dataset === "assessments" ? [...rules.filter(([rule]) => !ASSESSMENT_REVIEW_TAIL_RULES.has(rule)), ...rules.filter(([rule]) => ASSESSMENT_REVIEW_TAIL_RULES.has(rule))] : dataset === "legalservices" ? [...LEGAL_SERVICES_REVIEW_FIRST_RULES.map((rule) => rules.find(([name]) => name === rule)).filter((item): item is typeof rules[number] => Boolean(item)), ...rules.filter(([rule]) => !LEGAL_SERVICES_REVIEW_FIRST_RULES.includes(rule))] : rules,
+    orderedRules = [...baseOrderedRules.filter(([rule]) => defaultRules.includes(rule)), ...baseOrderedRules.filter(([rule]) => !defaultRules.includes(rule))],
+    activeFilters = Object.values(filters).filter(Boolean).length+Object.values(fieldFilters).reduce((sum,values)=>sum+values.length,0),
     visibleExcludedFindings = excludedDuplicates.filter((entry) => {
       if ((entry.dataset || "beneficiaries") !== dataset || (exclusionRuleFilter && entry.rule !== exclusionRuleFilter)) return false;
       const query=exclusionSearch.trim().toLocaleLowerCase();
@@ -931,7 +950,7 @@ function ReviewPageBody({
             >
               <CheckCheck /> Select all
             </button>
-            <button className="soft review-selector-button clear-selection-button" onClick={() => { setSelectedRules([]); setFilters({}); }}>
+            <button className="soft review-selector-button clear-selection-button" onClick={() => { setSelectedRules([]); setFilters({}); setFieldFilters({}); }}>
               <Eraser /> Reset
             </button>
             {true && (
@@ -961,7 +980,7 @@ function ReviewPageBody({
           ))}
         </div>
       </div>
-      <LegalScrollControls search={search} onSearch={setSearch} searchPlaceholder="Search records" onFilters={()=>setDrawer(true)} activeCount={activeFilters} onClear={()=>setFilters({})}>
+      <LegalScrollControls search={search} onSearch={setSearch} searchPlaceholder="Search records" onFilters={()=>setDrawer(true)} activeCount={activeFilters} onClear={()=>{setFilters({});setFieldFilters({});}}>
       <div className="legal-toolbar review-toolbar professional-review-toolbar">
         <label>
           <Search />
@@ -979,7 +998,7 @@ function ReviewPageBody({
           <SlidersHorizontal />
           Filters{activeFilters > 0 && <b>{activeFilters}</b>}
         </button>
-        <ExcelDownloadButton disabled={selectedRules.length === 0} onClick={()=>downloadExcelUrl(legalReviewExportUrl(dataset, comparisonMonth, appliedNameCompareChars, allowNameVariations, exactMatchesOnly, selectedRules, filters, debouncedSearch, Object.entries(ignoreCourtVerdictByRule).filter(([,ignored])=>ignored).map(([rule])=>rule)),`${dataset}-review-findings.xlsx`)}/>
+        <ExcelDownloadButton disabled={selectedRules.length === 0} onClick={()=>downloadExcelUrl(legalReviewExportUrl(dataset, comparisonMonth, appliedNameCompareChars, allowNameVariations, exactMatchesOnly, selectedRules, filters, debouncedSearch, Object.entries(ignoreCourtVerdictByRule).filter(([,ignored])=>ignored).map(([rule])=>rule),fieldFilters),`${dataset}-review-findings.xlsx`)}/>
       </div>
       </LegalScrollControls>
       {selectedRules.length === 0 ? (
@@ -990,7 +1009,7 @@ function ReviewPageBody({
         </div>
       ) : (
         <div className="finding-tables">
-          {selectedRules.flatMap((rule) => (dataset === "assessments" && rule === "Open assessment with all services closed" ? [true, false] : [undefined]).map((closureRequestGroup) => (
+          {orderedRules.map(([rule]) => rule).filter((rule) => selectedRules.includes(rule)).flatMap((rule) => (dataset === "assessments" && rule === "Open assessment with all services closed" ? [true, false] : [undefined]).map((closureRequestGroup) => (
             <FindingTable
               key={`${rule}-${closureRequestGroup}`}
               closureRequestGroup={closureRequestGroup}
@@ -1009,6 +1028,7 @@ function ReviewPageBody({
               ignoreCourtVerdict={Boolean(ignoreCourtVerdictByRule[rule])}
               onIgnoreCourtVerdictChange={(ignored)=>setIgnoreCourtVerdictByRule((current)=>({...current,[rule]:ignored}))}
               filters={filters}
+              fieldFilters={fieldFilters}
               comparisonMonth={comparisonMonth}
               onOpenCase={onOpenCase}
               findingRevision={findingRevisions[rule] || 0}
@@ -1082,56 +1102,7 @@ function ReviewPageBody({
           </section>
         </div>, document.body,
       )}
-      {drawer && (
-        <>
-          <button
-            className="filter-backdrop"
-            aria-label="Close filters"
-            onClick={() => setDrawer(false)}
-          />
-          <aside className="case-filter-drawer">
-            <header>
-              <div>
-                <span className="eyebrow">REVIEW FILTERS</span>
-                <h2>Filter all finding tables</h2>
-              </div>
-              <button onClick={() => setDrawer(false)}>
-                <X />
-              </button>
-            </header>
-            <div className="case-filter-scroll review-checkbox-filters">
-              {(["project", "location", "date"] as const).map(
-                (key) => (
-                  <details key={key} open>
-                    <summary>
-                      <span>
-                        {key === "location" ? "Project location" : key === "date" ? ({beneficiaries:"Date of identification",assessments:"Date of assessment",legalservices:"Date of Service Provision",awareness:"Date of awareness",legalhotlines:"Contact date"}[dataset] || "Date") : "Project"}
-                      </span>
-                      {filters[key] && <b>1</b>}
-                      <ChevronDown />
-                    </summary>
-                    <div>
-                      <AppSelect label={key === "location" ? "Project location" : key === "date" ? "Date" : "Project"} searchable value={filters[key]||""} options={[["","All values"],...(summary?.filterOptions?.[key]||[]).map(item=>[item,key==="project"?formatProjectLabel(item):item] as [string,string])]} onChange={item=>setFilters(current=>({...current,[key]:item}))}/>
-                    </div>
-                  </details>
-                ),
-              )}
-            </div>
-            <footer>
-              <button
-                className="soft"
-                onClick={() => setFilters({})}
-                disabled={!activeFilters}
-              >
-                Reset all
-              </button>
-              <button className="primary" onClick={() => setDrawer(false)}>
-                Apply filters {activeFilters > 0 && `(${activeFilters})`}
-              </button>
-            </footer>
-          </aside>
-        </>
-      )}
+      {drawer && <ReviewFiltersDrawer dataset={dataset} options={summary?.filterOptions} filters={filters} onChange={setFilters} fieldOptions={summary?.fieldFilterOptions} fieldFilters={fieldFilters} onFieldChange={setFieldFilters} onClose={()=>setDrawer(false)}/>}
     </>
   );
 }
@@ -1342,7 +1313,7 @@ function HotlineDashboard({metadata,theme}:{metadata:LegalMetadata;theme:Theme})
   if(!dash)return <LegalSkeleton variant="deportation"/>;
   const available=dash.filterOptions||{},quickFields=["Contact Date","Is the beneficiary detained","Has the beneficiary referred to the helpline?","Governorate of detention","Priority"];
   return <section className="hotline-dashboard dashboard-content" aria-busy={busy}>
-    <LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={clear}><div className="toolbar hotline-filter-bar">{quickFields.map(field=><CheckboxMultiSelect key={field} hideLabel label={field==="Contact Date"?"Contact Date (month)":field} values={available[field]||[]} selected={filters[field]||[]} onChange={items=>setFilters(current=>({...current,[field]:items}))}/>)}<button className="soft" onClick={clear} disabled={!activeCount}><RotateCcw/>Reset all</button></div></LegalScrollControls>
+    <LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={clear}><div className="toolbar hotline-filter-bar">{quickFields.map(field=><CheckboxMultiSelect key={field} hideLabel label={field==="Contact Date"?"Contact Date (month)":field} values={available[field]||[]} selected={filters[field]||[]} onChange={items=>setFilters(current=>({...current,[field]:items}))}/>)}<button className="soft filter-reset-button" onClick={clear} disabled={!activeCount}><RotateCcw/>Reset</button></div></LegalScrollControls>
     <ActiveFilters filters={filters} onRemove={(field,label)=>setFilters(current=>({...current,[field]:current[field].filter(item=>item!==label)}))}/>
     {busy&&<p role="status">Updating hotline data...</p>}
     <div className="kpi-grid">{dash.kpis.map(item=><KpiCard key={item.label} {...item}/>)}</div>
@@ -1352,7 +1323,7 @@ function HotlineDashboard({metadata,theme}:{metadata:LegalMetadata;theme:Theme})
     <IraqDetentionMapMetrics mode="hotline" items={(dash.map?.items||[]).filter(item=>item.detained>0).map(item=>({...item,count:item.detained,released:0}))} selected={filters["Governorate of detention"]||[]} onSelect={(values)=>{const current=filters["Governorate of detention"]||[],remove=values.length>0&&values.every(value=>current.includes(value));setFilters(existing=>({...existing,"Governorate of detention":remove?current.filter(value=>!values.includes(value)):Array.from(new Set([...current,...values]))}))}}/>
     <div className="overview-analysis-grid">{dash.charts.map(chart=><ChartCard key={chart.id} chart={chart} display="both" theme={theme} onSelect={select}/>)}</div>
     <HotlineRecordsTable filters={filters} onSearchChange={setRecordSearch}/>
-    {drawer&&<><button className="filter-backdrop" aria-label="Close hotline filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer"><header><div><span className="eyebrow">HOTLINE FILTERS</span><h2>Filter hotline records</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header><div className="case-filter-scroll review-checkbox-filters">{Object.entries(available).map(([label,values])=><details key={label} open={Boolean(filters[label]?.length)}><summary><span>{label}</span>{filters[label]?.length>0&&<b>{filters[label].length}</b>}<ChevronDown/></summary><div>{<FilterValueList field={label} values={values} formatCaption={item=>/date/i.test(label)?formatFilterMonth(item):item} selected={filters[label]||[]} onChange={items=>setFilters(current=>({...current,[label]:items}))}/>}</div></details>)}</div><footer><button className="soft" disabled={!activeCount} onClick={clear}>Reset all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {activeCount>0&&`(${activeCount})`}</button></footer></aside></>}
+    {drawer&&<><button className="filter-backdrop" aria-label="Close hotline filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer"><header><div><span className="eyebrow">HOTLINE FILTERS</span><h2>Filter hotline records</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header><div className="case-filter-scroll review-checkbox-filters">{Object.entries(available).map(([label,values])=><details key={label} open={Boolean(filters[label]?.length)}><summary><span>{label}</span>{filters[label]?.length>0&&<b>{filters[label].length}</b>}<ChevronDown/></summary><div>{<FilterValueList field={label} values={values} formatCaption={item=>/date/i.test(label)?formatFilterMonth(item):item} selected={filters[label]||[]} onChange={items=>setFilters(current=>({...current,[label]:items}))}/>}</div></details>)}</div><footer><button className="soft filter-reset-button" disabled={!activeCount} onClick={clear}><RotateCcw/>Reset</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {activeCount>0&&`(${activeCount})`}</button></footer></aside></>}
   </section>;
 }
 
@@ -3306,6 +3277,7 @@ function BeneficiaryIdModal({ids,count,title,onClose,onCopy}:{ids:string[];count
 }
 
 function IndicatorTrendChart({months,series}:{title:string;months:string[];series:{label:string;values:number[];color:string}[]}){
+  if(isSingleMonth(months))return <SingleMonthIndicatorChart month={months[0]} series={series}/>;
   const width=800,height=360,padding={left:62,right:28,top:64,bottom:64},maximum=Math.max(1,...series.flatMap((item)=>item.values)),plotHeight=height-padding.top-padding.bottom;
   const x=(index:number)=>padding.left+(months.length<=1?0:index*(width-padding.left-padding.right)/(months.length-1));
   const y=(number:number)=>height-padding.bottom-(number/maximum)*plotHeight;
@@ -3537,6 +3509,20 @@ function NavLoadStatus({label,status}:{label:string;status:LoadStatus}) {
   return <i className={`nav-load-status nav-load-${status}${visibility === "exiting" ? " nav-load-exiting" : ""}`} title={`${label}: ${status}`} aria-label={`${label} ${status}`}>{status === "ready" ? <CheckCircle2/> : status === "error" ? <AlertTriangle/> : null}</i>;
 }
 
+function LegalPageNavigation({items,page,onNavigate,loadStatuses,sendIssuesStatus}:{items:typeof nav;page:LegalPage;onNavigate:(page:LegalPage)=>void;loadStatuses:Record<string,LoadStatus>;sendIssuesStatus:LoadStatus|'idle'}){
+  const [selectedPage,setSelectedPage]=useState(page);
+  useEffect(()=>setSelectedPage(page),[page]);
+  return <nav>{items.map(([id,Icon])=><button key={id} className={selectedPage===id?"active":""} onClick={()=>{
+    // Commit the small navigation update before rendering the destination page.
+    setSelectedPage(id);
+    startTransition(()=>onNavigate(id));
+  }}>
+    <Icon className="legal-page-nav-icon" data-nav-page={id}/>
+    <span>{labels[id]}</span>
+    {id==="send-issues"&&sendIssuesStatus!=="idle"?<NavLoadStatus label={labels[id]} status={sendIssuesStatus}/>:loadStatuses[id]&&<NavLoadStatus label={labels[id]} status={loadStatuses[id]}/>}
+  </button>)}</nav>;
+}
+
 export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void}) {
   const [metadata, setMetadataState] = useState<LegalMetadata | null>(null),
     [metadataLoading, setMetadataLoading] = useState(true),
@@ -3563,7 +3549,54 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
   const [importOperationId,setImportOperationId]=useState<string|null>(null);
   const restoringData=Boolean(!metadata?.ready&&(metadataLoading||metadata?.loading));
   const importProgress=useImportProgress(uploading||restoringData,uploading?importOperationId:null);
-  const beginImportProgress=()=>{const id=crypto.randomUUID();setImportOperationId(id);return id;};
+  const [processingResult,setProcessingResult]=useState<LegalImportProgress|null>(null);
+  const [cancelPending,setCancelPending]=useState(false),[cancelError,setCancelError]=useState('');
+  const uploadController=useRef<AbortController|null>(null);
+  const cancellation=useRef<LegalImportProgress|null>(null);
+  const beginImportProgress=()=>{const id=crypto.randomUUID();setImportOperationId(id);setProcessingResult(null);setCancelPending(false);setCancelError('');cancellation.current=null;return id;};
+  const importFailure=(reason:any)=>{
+    if(cancellation.current||reason?.name==='AbortError'||String(reason?.message||reason).includes('Import cancelled'))return;
+    setProcessingResult({operationId:importOperationId,state:'error',stage:'',dataset:'',completedWork:0,totalWork:0,percent:null,error:reason?.message||String(reason)||'Unable to import data.'});
+  };
+  const finishImport=async()=>{
+    if(cancellation.current){
+      let status=cancellation.current;
+      while(status.state==='cancelling'){
+        await new Promise(resolve=>window.setTimeout(resolve,250));
+        try{status=await getImportProgress(status.operationId)}catch{continue}
+      }
+      if(status.state==='cancelled'||status.state==='idle')setProcessingResult({...status,state:'cancelled'});
+    }
+    await new Promise(resolve=>window.setTimeout(resolve,300));
+    setUploading(false);setUploadProgress(0);setCancelPending(false);uploadController.current=null;
+  };
+  const cancelProcessing=async()=>{
+    const id=uploading?importOperationId:importProgress?.operationId;
+    if(!id)return;
+    setCancelPending(true);setCancelError('');
+    try{
+      const status=await cancelImport(id);
+      if(['cancelling','cancelled'].includes(status.state)){
+        cancellation.current=status;
+        if(uploadPhase==='uploading'&&uploading)uploadController.current?.abort();
+        if(status.state==='cancelled')setProcessingResult(status);
+        if(!uploading){
+          let terminal=status;
+          while(terminal.state==='cancelling'){
+            await new Promise(resolve=>window.setTimeout(resolve,250));
+            try{terminal=await getImportProgress(id)}catch{continue}
+          }
+          if(terminal.state==='cancelled')setProcessingResult(terminal);
+          setCancelPending(false);
+        }
+      }else setCancelPending(false);
+    }catch(reason:any){setCancelError(reason.message);setCancelPending(false)}
+  };
+  useEffect(()=>{
+    if((uploading||metadata?.loading&&importProgress?.source==='startup')&&(importProgress?.state==='cancelled'||importProgress?.state==='error')){
+      setProcessingResult(importProgress);setCancelPending(false);
+    }
+  },[importProgress,uploading,metadata?.loading]);
   const [sendIssuesStatus,setSendIssuesStatus]=useState<'idle'|'loading'|'ready'|'error'>('idle');
   const [updateInfo, setUpdateInfo] = useState<UpdateCheck | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
@@ -3696,13 +3729,14 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
   useEffect(() => {
     const sync = () => {
       const route = legalRouteFromUrl();
-      setPageState(route.page);
+      startTransition(()=>setPageState(route.page));
       if (route.caseId) setCaseQuery(route.caseId);
     };
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, []);
   const upload = async (files: File[]) => {
+    if(uploading||restoringData)return;
     const selectedFiles = latestLegalFiles(files);
     if (!selectedFiles.length) {
       setError("No supported CSV files were found in the selected folder.");
@@ -3713,22 +3747,21 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
     setUploadProgress(0);
     setUploadPhase("uploading");
     setError("");
+    const controller=new AbortController();uploadController.current=controller;
     try {
       const next = await uploadLegalFolder(selectedFiles, (status) => {
         setUploadPhase(status.phase);
         if (status.percent !== null) setUploadProgress(status.percent);
-      }, operationId);
+      }, operationId,controller.signal);
       setMetadata(next); setDataRevision((value) => value + 1);
     } catch (e: any) {
-      setError(e.message);
+      importFailure(e);
     } finally {
-      window.setTimeout(() => {
-        setUploading(false);
-        setUploadProgress(0);
-      }, 300);
+      await finishImport();
     }
   };
   const selectFolder = async () => {
+    if(uploading||restoringData)return;
     const desktopApi = (window as any).pywebview?.api;
     if (!desktopApi?.choose_legal_folder || !desktopApi?.process_legal_folder) {
       folderInput.current?.click();
@@ -3747,23 +3780,23 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
         setMetadata(next); setDataRevision((value) => value + 1);
       }
     } catch (reason: any) {
-      setError(reason?.message || String(reason) || "Unable to open the selected folder.");
+      importFailure(reason);
     } finally {
-      await new Promise(resolve=>window.setTimeout(resolve,300));
-      setUploading(false);
-      setUploadProgress(0);
+      await finishImport();
     }
   };
   const refreshSelectedFolder = async () => {
+    if(uploading||restoringData)return;
     const desktopApi = (window as any).pywebview?.api;
     if (!desktopApi?.refresh_legal_folder) return;
     const operationId=beginImportProgress();
     setError("");setUploading(true);setUploadProgress(0);setUploadPhase("processing");
     try { const next = await desktopApi.refresh_legal_folder(operationId); setMetadata(next); setDataRevision((value) => value + 1); }
-    catch (reason: any) { setError(reason?.message || "Unable to refresh the selected folder."); }
-    finally { await new Promise(resolve=>window.setTimeout(resolve,300));setUploading(false);setUploadProgress(0); }
+    catch (reason: any) { importFailure(reason); }
+    finally { await finishImport(); }
   };
   const selectFiles = async () => {
+    if(uploading||restoringData)return;
     const desktopApi = (window as any).pywebview?.api;
     if (!desktopApi?.choose_legal_files || !desktopApi?.process_legal_files) { filesInput.current?.click(); return; }
     setError("");
@@ -3774,17 +3807,18 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
       setUploading(true);setUploadProgress(0);setUploadPhase("processing");
       const next = await desktopApi.process_legal_files(paths,operationId);
       setMetadata(next); setDataRevision((value) => value + 1);
-    } catch (reason: any) { setError(reason?.message || "Unable to open the selected CSV files."); }
-    finally { await new Promise(resolve=>window.setTimeout(resolve,300));setUploading(false);setUploadProgress(0); }
+    } catch (reason: any) { importFailure(reason); }
+    finally { await finishImport(); }
   };
   const refreshSelectedFiles = async () => {
+    if(uploading||restoringData)return;
     const desktopApi = (window as any).pywebview?.api;
     if (!desktopApi?.refresh_legal_files) return;
     const operationId=beginImportProgress();
     setError("");setUploading(true);setUploadProgress(0);setUploadPhase("processing");
     try { const next = await desktopApi.refresh_legal_files(operationId);setMetadata(next); setDataRevision((value) => value + 1); }
-    catch (reason: any) { setError(reason?.message || "Unable to refresh the selected CSV files."); }
-    finally { await new Promise(resolve=>window.setTimeout(resolve,300));setUploading(false);setUploadProgress(0); }
+    catch (reason: any) { importFailure(reason); }
+    finally { await finishImport(); }
   };
   const coreAvailable=Boolean(metadata&&hasLegalCore(metadata));
   const availableNav = nav.filter(([id]) => Boolean(metadata&&isLegalPageAvailable(metadata,id)));
@@ -3806,21 +3840,9 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
             <small>Review & analytics</small>
           </div>
         </div>
-        <div className="sidebar-workspace-controls"><button className="soft sidebar-fullscreen" onClick={toggleFullscreen} title={fullscreen ? "Exit full screen" : "Enter full screen"} aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}>{fullscreen ? <Minimize2/> : <Maximize2/>}<span>Full screen</span></button><div className={`data-source-control app-select app-select-theme ${dataMenuOpen?"open":""}`}><Database className="app-select-icon"/><span className="app-select-label">Data source</span><button className="app-select-trigger" disabled={uploading} aria-busy={uploading} aria-haspopup="menu" aria-expanded={dataMenuOpen} onClick={() => setDataMenuOpen((current)=>!current)}><span>{uploading ? uploadPhase === "uploading" ? `Uploading ${uploadProgress}%` : "Processing records…" : "Choose source"}</span><ChevronDown/></button>{dataMenuOpen&&<><button className="data-source-backdrop" aria-label="Close data source menu" onClick={()=>setDataMenuOpen(false)}/><div className="app-select-menu data-source-menu" role="menu"><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFolder()}}><FolderOpen/><span><strong>Select folder</strong><small>Load all supported CSV files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_folder&&<button className="data-source-refresh" aria-label="Refresh selected folder" title="Refresh selected folder" onClick={()=>{setDataMenuOpen(false);refreshSelectedFolder()}}><RefreshCw/></button>}</div><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFiles()}}><Database/><span><strong>Select multiple CSV files</strong><small>Choose individual source files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_files&&<button className="data-source-refresh" aria-label="Refresh selected CSV files" title="Refresh selected CSV files" onClick={()=>{setDataMenuOpen(false);refreshSelectedFiles()}}><RefreshCw/></button>}</div><footer><span>Current source</span><strong>{metadata?.source||"No folder loaded"}</strong></footer></div></>}</div></div>
+        <div className="sidebar-workspace-controls"><button className="soft sidebar-fullscreen" onClick={toggleFullscreen} title={fullscreen ? "Exit full screen" : "Enter full screen"} aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}>{fullscreen ? <Minimize2/> : <Maximize2/>}<span>Full screen</span></button><div className={`data-source-control app-select app-select-theme ${dataMenuOpen?"open":""}`}><Database className="app-select-icon"/><span className="app-select-label">Data source</span><button className="app-select-trigger" disabled={uploading||restoringData} aria-busy={uploading} aria-haspopup="menu" aria-expanded={dataMenuOpen} onClick={() => setDataMenuOpen((current)=>!current)}><span>{uploading ? uploadPhase === "uploading" ? `Uploading ${uploadProgress}%` : "Processing records…" : "Choose source"}</span><ChevronDown/></button>{dataMenuOpen&&<><button className="data-source-backdrop" aria-label="Close data source menu" onClick={()=>setDataMenuOpen(false)}/><div className="app-select-menu data-source-menu" role="menu"><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFolder()}}><FolderOpen/><span><strong>Select folder</strong><small>Load all supported CSV files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_folder&&<button className="data-source-refresh" aria-label="Refresh selected folder" title="Refresh selected folder" onClick={()=>{setDataMenuOpen(false);refreshSelectedFolder()}}><RefreshCw/></button>}</div><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFiles()}}><Database/><span><strong>Select multiple CSV files</strong><small>Choose individual source files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_files&&<button className="data-source-refresh" aria-label="Refresh selected CSV files" title="Refresh selected CSV files" onClick={()=>{setDataMenuOpen(false);refreshSelectedFiles()}}><RefreshCw/></button>}</div><footer><span>Current source</span><strong>{metadata?.source||"No folder loaded"}</strong></footer></div></>}</div></div>
         <div className="legal-sidebar-utilities"><button aria-label="Home" title="Home" onClick={() => {window.location.hash="/"}}><Home/><span>Home</span></button><button className="legal-menu-slide-toggle" aria-label={sidebarCollapsed ? "Expand menu" : "Slide menu left"} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? "Expand menu" : "Slide menu left"} onClick={() => {setDataMenuOpen(false);setSidebarCollapsed((current) => {const next=!current;localStorage.setItem("legal-sidebar-collapsed",String(next));return next})}}><ArrowLeft/><span>{sidebarCollapsed ? "Expand" : "Slide left"}</span></button></div>
-        <nav>
-          {availableNav.map(([id, Icon]) => (
-            <button
-              key={id}
-              className={page === id ? "active" : ""}
-              onClick={() => setPage(id)}
-            >
-              <Icon />
-              <span>{labels[id]}</span>{id==="send-issues"&&<small className="si-testing-badge">Testing</small>}
-              {id==="send-issues"&&sendIssuesStatus!=="idle"?<NavLoadStatus label={labels[id]} status={sendIssuesStatus}/>:loadStatuses[id]&&<NavLoadStatus label={labels[id]} status={loadStatuses[id]}/>}
-            </button>
-          ))}
-        </nav>
+        <LegalPageNavigation items={availableNav} page={page} onNavigate={setPage} loadStatuses={loadStatuses} sendIssuesStatus={sendIssuesStatus}/>
       </aside>
       <main>
         <header className="topbar">
@@ -3857,16 +3879,15 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
             />
           </div>
         </header>
-        <section className="content legal-content">
+        {/* A new source must discard every page's local results, filters and selections. */}
+        <section key={metadata?.revision || "unloaded"} className="content legal-content">
           {error && (
             <div className="error glass">
               {error}
               <button onClick={() => setError("")}>Dismiss</button>
             </div>
           )}
-          {metadataLoading || (!metadata?.ready && metadata?.loading) ? (
-            <LegalSkeleton variant="overview" />
-          ) : !metadata?.ready ? (
+          {!metadata?.ready ? (
             <section className="glass legal-import-source" aria-labelledby="import-data-source-title">
               <header>
                 <span className="legal-import-source-icon"><Database/></span>
@@ -3877,12 +3898,12 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
                 </div>
               </header>
               <div className="legal-import-source-options">
-                <button type="button" className="legal-import-source-option" onClick={()=>void selectFolder()} disabled={uploading}>
+                <button type="button" className="legal-import-source-option" onClick={()=>void selectFolder()} disabled={uploading||restoringData}>
                   <FolderOpen/>
                   <span><strong>Select data folder</strong><small>Load all supported CSV files from one folder.</small></span>
                   <ArrowRight/>
                 </button>
-                <button type="button" className="legal-import-source-option" onClick={()=>void selectFiles()} disabled={uploading}>
+                <button type="button" className="legal-import-source-option" onClick={()=>void selectFiles()} disabled={uploading||restoringData}>
                   <FileText/>
                   <span><strong>Select CSV files</strong><small>Choose individual source files from different locations.</small></span>
                   <ArrowRight/>
@@ -3924,8 +3945,8 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
           ) : <IndicatorReporting revision={dataRevision}/>}
         </section>
       </main>
-      {(uploading||restoringData)&&<ProcessingRecords progress={importProgress} uploadPercent={uploading&&uploadPhase==="uploading"?uploadProgress:undefined} restoring={!uploading}/>}
-      {reviewCaseId && metadata?.ready && coreAvailable && <CaseReviewModal caseId={reviewCaseId} metadata={metadata} onClose={() => setReviewCaseId("")} />}
+      {(uploading||restoringData||cancelPending||processingResult)&&<ProcessingRecords key={importOperationId||"startup"} progress={processingResult||importProgress} uploadPercent={uploading&&uploadPhase==="uploading"?uploadProgress:undefined} restoring={!uploading} onCancel={cancelProcessing} onDismiss={()=>setProcessingResult(null)} cancelPending={cancelPending} cancelError={cancelError}/>}
+      {reviewCaseId && metadata?.ready && coreAvailable && <CaseReviewModal key={metadata.revision} caseId={reviewCaseId} metadata={metadata} onClose={() => setReviewCaseId("")} />}
       <NotificationToast message={copiedValue} label="Copied"/>
       {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?"Updates need configuration":updateInfo?.message?.startsWith("Unable")?"Unable to check for updates":"You’re up to date"}</h2><p>{updateInfo?.available?(updateInfo.notes||"A new signed version of Iraq Data Analysis is ready to install."):(updateInfo?.message||`You are using version ${updateInfo?.currentVersion||"1.0.18"}.`)}</p>{updateInfo?.available&&typeof updateInfo.sizeBytes==="number"&&<small className="update-size">Update size: {formatUpdateSize(updateInfo.sizeBytes)}</small>}{updateStatus&&updateStatus.phase!=="idle"&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.phase==="downloading"&&<small>Downloaded {formatUpdateSize(updateStatus.downloadedBytes)} of {formatUpdateSize(updateStatus.totalBytes||updateInfo?.sizeBytes)}</small>}{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}{updateInfo?.available&&<UpdateFallbackNotice failed={updateStatus?.phase === "error"}/>}<div className="update-actions">{updateInfo?.available&&(!updateStatus||["idle","error"].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>{updateStatus?.phase === "error" ? "Try again" : "Update now"}</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&["installing","restarting"].includes(updateStatus.phase))}>{updateInfo?.available?"Later":"Close"}</button></div></section></div>}
     </div>
@@ -3940,25 +3961,32 @@ function Overview({
 }) {
   const emptyFilters = ():OverviewFilters => ({projects:[],locations:[],months:[],filters:{}});
   const [selection,setSelection]=useState<OverviewFilters>(emptyFilters);
+  const latestSelection=useRef(selection);latestSelection.current=selection;
   const [draft,setDraft]=useState<OverviewFilters>(emptyFilters);
+  const latestDraft=useRef(draft);latestDraft.current=draft;
   const [result,setResult]=useState<LegalOverviewResult|null>(null);
   const [drawer,setDrawer]=useState(false),[filterSearch,setFilterSearch]=useState("");
   const [loading,setLoading]=useState(false),[error,setError]=useState("");
   const [draftOptions,setDraftOptions]=useState<LegalOverviewResult["filterOptions"]|null>(null);
   useEffect(()=>{
     const controller=new AbortController();
+    const current=()=>!controller.signal.aborted&&latestSelection.current===selection;
     setLoading(true);setError("");
-    const timer=window.setTimeout(()=>getLegalOverview(selection,controller.signal).then(next=>{
-      if(!controller.signal.aborted)setResult(next);
-    }).catch(reason=>{if(!controller.signal.aborted)setError(reason.message||"Unable to load overview.")}).finally(()=>{if(!controller.signal.aborted)setLoading(false)}),200);
+    const load=()=>getLegalOverview(selection,controller.signal).then(next=>{
+      if(current())setResult(next);
+    }).catch(reason=>{if(current()&&reason.name!=="AbortError")setError(reason.message||"Unable to load overview.")}).finally(()=>{if(current())setLoading(false)});
+    const active=selection.projects.length||selection.locations.length||selection.months.length||Object.values(selection.filters).some(items=>items.length);
+    const timer=active?window.setTimeout(load,120):undefined;
+    if(!active)void load();
     return()=>{window.clearTimeout(timer);controller.abort()};
   },[selection,metadata.revision]);
   useEffect(()=>{
     if(!drawer)return;
     const controller=new AbortController();
-    const timer=window.setTimeout(()=>getLegalOverview(draft,controller.signal).then(next=>{
-      if(!controller.signal.aborted)setDraftOptions(next.filterOptions);
-    }).catch(reason=>{if(!controller.signal.aborted)setError(reason.message)}),200);
+    const current=()=>!controller.signal.aborted&&latestDraft.current===draft;
+    const timer=window.setTimeout(()=>getLegalOverviewFilters(draft,controller.signal).then(next=>{
+      if(current())setDraftOptions(next.filterOptions);
+    }).catch(reason=>{if(current()&&reason.name!=="AbortError")setError(reason.message)}),120);
     return()=>{window.clearTimeout(timer);controller.abort()};
   },[drawer,draft,metadata.revision]);
   const activeFilters={...selection.filters,Project:selection.projects,"Project location":selection.locations,Date:selection.months};
@@ -3971,7 +3999,7 @@ function Overview({
   const activeCount=Object.values(activeFilters).reduce((sum,items)=>sum+items.length,0);
   const reset=()=>{setSelection(emptyFilters());setDraft(emptyFilters())};
   const openDrawer=()=>{setDraft(selection);setDraftOptions(result?.filterOptions||null);setDrawer(true)};
-  const quickFilters=()=> ([ ["projects","Project"],["locations","Project location"],["months","Date"] ] as const).map(([key,label])=><CheckboxMultiSelect key={key} label={label} values={result?.filterOptions[key]||[]} selected={selection[key]} onChange={items=>setSelection(current=>({...current,[key]:items}))}/>);
+  const quickFilters=(hideLabel=false)=> ([ ["projects","Project"],["locations","Project location"],["months","Date"] ] as const).map(([key,label])=><CheckboxMultiSelect key={key} label={label} hideLabel={hideLabel} values={result?.filterOptions[key]||[]} selected={selection[key]} onChange={items=>setSelection(current=>({...current,[key]:items}))}/>);
   const o = result?.overview || metadata.overview;
   const primary = [
     ["Beneficiaries", o?.beneficiaries, "People registered"],
@@ -3989,13 +4017,13 @@ function Overview({
   const overviewChart=(id:string,title:string,rows:any[])=>({id,title,kind:"bar",multiChoice:false,rows:rows.map((row)=>({label:row.label,count:row.count,percent:0}))});
   return (
     <div className="professional-overview">
-      <LegalScrollControls onFilters={openDrawer} activeCount={activeCount} onClear={reset} compactFilters={quickFilters()}>
-        <div className="overview-filter-bar glass">{quickFilters()}<button className="soft case-filter-button" onClick={openDrawer}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft" onClick={reset} disabled={!activeCount}><RotateCcw/>Reset all</button></div>
+      <LegalScrollControls onFilters={openDrawer} activeCount={activeCount} onClear={reset} compactFilters={quickFilters(true)}>
+        <div className="overview-filter-bar glass">{quickFilters()}<button className="soft case-filter-button" onClick={openDrawer}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft filter-reset-button" onClick={reset} disabled={!activeCount}><RotateCcw/>Reset</button></div>
       </LegalScrollControls>
       {activeCount>0&&<div className="active-filters">{Object.entries(activeFilters).flatMap(([field,items])=>items.map(item=><button key={`${field}-${item}`} onClick={()=>removeFilter(field,item)}><span>{filterLabel(field)}: {isExcludedValue(item)?"Excluding ":""}{formatYearMonthFilterValue(field,filterValue(item))}</span><X/></button>))}</div>}
       {error&&<div className="error glass" role="alert">{error}</div>}
-      {loading&&<div className="overview-filter-status" role="status">Updating overview...</div>}
-      {drawer&&<><button className="filter-backdrop" aria-label="Close overview filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer"><header><div><span className="eyebrow">OVERVIEW FILTERS</span><h2>Filter overview</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header><label className="filter-search"><Search/><input value={filterSearch} onChange={event=>setFilterSearch(event.target.value)} placeholder="Search filters"/></label><div className="case-filter-scroll">{(draftOptions?.groups||[]).flatMap(group=>group.columns.map(option=>({...option,label:`${group.label} · ${option.name}`}))).filter(option=>option.label.toLowerCase().includes(filterSearch.toLowerCase())).map(option=><details key={option.key} open={Boolean(draft.filters[option.key]?.length)}><summary><span>{option.label}</span>{draft.filters[option.key]?.length>0&&<b>{draft.filters[option.key].length}</b>}<ChevronDown/></summary><div><FilterValueList values={option.values} formatCaption={item=>formatYearMonthFilterValue(option.label,item)} selected={draft.filters[option.key]||[]} onChange={items=>setDraft(current=>({...current,filters:{...current.filters,[option.key]:items}}))}/></div></details>)}</div><footer><button className="soft" onClick={reset} disabled={!activeCount&&!Object.values(draft.filters).some(items=>items.length)}>Reset all</button><button className="primary" onClick={()=>{setSelection(draft);setDrawer(false)}}>Apply filters</button></footer></aside></>}
+      {drawer&&<><button className="filter-backdrop" aria-label="Close overview filters" onClick={()=>setDrawer(false)}/><aside className="case-filter-drawer"><header><div><span className="eyebrow">OVERVIEW FILTERS</span><h2>Filter overview</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header><label className="filter-search"><Search/><input value={filterSearch} onChange={event=>setFilterSearch(event.target.value)} placeholder="Search filters"/></label><div className="case-filter-scroll">{(draftOptions?.groups||[]).flatMap(group=>group.columns.map(option=>({...option,label:`${group.label} · ${option.name}`}))).filter(option=>option.label.toLowerCase().includes(filterSearch.toLowerCase())).map(option=><details key={option.key} open={Boolean(draft.filters[option.key]?.length)}><summary><span>{option.label}</span>{draft.filters[option.key]?.length>0&&<b>{draft.filters[option.key].length}</b>}<ChevronDown/></summary><div><FilterValueList values={option.values} formatCaption={item=>formatYearMonthFilterValue(option.label,item)} selected={draft.filters[option.key]||[]} onChange={items=>setDraft(current=>({...current,filters:{...current.filters,[option.key]:items}}))}/></div></details>)}</div><footer><button className="soft filter-reset-button" onClick={reset} disabled={!activeCount&&!Object.values(draft.filters).some(items=>items.length)}><RotateCcw/>Reset</button><button className="primary" onClick={()=>{setSelection(draft);setDrawer(false)}}>Apply filters</button></footer></aside></>}
+      <div className={`overview-results${loading?" refreshing":""}`} aria-busy={loading}>
       <section className="overview-primary-kpis">
         {primary.map(([label, count, detail], index) => (
           <div
@@ -4035,6 +4063,7 @@ function Overview({
         <IraqDetentionMapMetrics items={o?.detention2026?.map||[]} selected={[]} onSelect={()=>{}} showFooter={false}/>
       </section>}
       <section className="glass overview-location-performance"><header><div><span className="eyebrow">LOCATION PERFORMANCE</span><h3>Operational activity by project location</h3></div></header><div className="legal-table-wrap"><ValueTable><thead><tr><th>Project location</th><th>Assessments</th><th>Representation services</th><th>Representation services closed</th><th>Representation services open</th><th>Representation completion</th>{showDetentionDetails && <><th>Detained (2026)</th><th>Released (2026)</th></>}</tr></thead><tbody>{(o?.locationPerformance||[]).map((row)=><tr key={row.location}><td><strong>{row.location}</strong></td><td>{row.assessments.toLocaleString()}</td><td>{row.representationServices.toLocaleString()}</td><td>{row.closedRepresentationServices.toLocaleString()}</td><td>{row.openRepresentationServices.toLocaleString()}</td><td>{row.representationServices?`${(row.completionRate*100).toFixed(1)}%`:"-"}</td>{showDetentionDetails && <><td>{row.detained.toLocaleString()}</td><td>{row.released.toLocaleString()}</td></>}</tr>)}</tbody></ValueTable></div></section>
+      </div>
     </div>
   );
 }

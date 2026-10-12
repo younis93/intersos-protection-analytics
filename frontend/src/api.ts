@@ -1,8 +1,11 @@
 import {legalFetch as fetch, setLegalRevision} from "./legalQueryCache";
 import type {OverviewFilters, LegalOverviewResult} from "./types";
 
+const overviewBody=(selection:OverviewFilters)=>JSON.stringify({...selection,filters:Object.fromEntries(Object.entries(selection.filters).filter(([,values])=>values.length))});
 export const getLegalOverview = (filters:OverviewFilters, signal?:AbortSignal) =>
-  fetch(`${API}/legal/overview`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(filters),signal}).then(parse<LegalOverviewResult>);
+  fetch(`${API}/legal/overview`, {method:"POST",headers:{"Content-Type":"application/json"},body:overviewBody(filters),signal}).then(parse<LegalOverviewResult>);
+export const getLegalOverviewFilters = (filters:OverviewFilters, signal?:AbortSignal) =>
+  fetch(`${API}/legal/overview-filters`, {method:"POST",headers:{"Content-Type":"application/json"},body:overviewBody(filters),signal}).then(parse<Pick<LegalOverviewResult,"filterOptions">>);
 import type {
   Dashboard,
   ExplorerFilter,
@@ -192,11 +195,17 @@ export const uploadLegalFolder = async (
     percent: number | null;
   }) => void,
   operationId?:string,
+  signal?:AbortSignal,
 ) => {
   const body = new FormData();
   files.forEach((file) => body.append("files", file));
   return new Promise<LegalMetadata>((resolve, reject) => {
     const request = new XMLHttpRequest();
+    const abort=()=>request.abort();
+    const cleanup=()=>signal?.removeEventListener('abort',abort);
+    request.onloadend=cleanup;
+    request.onabort=()=>reject(new DOMException('Import cancelled','AbortError'));
+    if(signal?.aborted){reject(new DOMException('Import cancelled','AbortError'));return;}
     request.open("POST", `${API}/legal/upload${operationId?"?operationId="+encodeURIComponent(operationId):""}`);
     onProgress?.({ phase: "uploading", percent: 0 });
     request.upload.onprogress = (event) => {
@@ -211,6 +220,7 @@ export const uploadLegalFolder = async (
     request.onerror = () =>
       reject(new Error("Unable to upload the selected folder."));
     request.onload = () => {
+      if(signal?.aborted){reject(new DOMException('Import cancelled','AbortError'));return;}
       let payload: any;
       try {
         payload = JSON.parse(request.responseText || "{}");
@@ -228,6 +238,7 @@ export const uploadLegalFolder = async (
         );
       }
     };
+    signal?.addEventListener('abort',abort,{once:true});
     request.send(body);
   });
 };
@@ -242,6 +253,7 @@ export const getLegalReview = (
   allowNameVariations = false,
   exactMatchesOnly = false,
   signal?: AbortSignal,
+  fieldFilters: Record<string,string[]> = {},
 ) =>
   fetch(`${API}/legal/review`, {
     method: "POST",
@@ -257,6 +269,7 @@ export const getLegalReview = (
       allowNameVariations,
       exactMatchesOnly,
       ...filters,
+      filters: fieldFilters,
       comparisonMonth,
     }),
     signal,
@@ -271,8 +284,9 @@ export const legalReviewExportUrl = (
   filters: Record<string, string> = {},
   search = "",
   ignoreCourtVerdictRules: string[] = [],
+  fieldFilters: Record<string,string[]> = {},
 ) =>
-  `${API}/legal/review-export/${dataset}?comparison_month=${encodeURIComponent(comparisonMonth)}&name_compare_chars=${nameCompareChars}&allow_name_variations=${allowNameVariations}&exact_matches_only=${exactMatchesOnly}&rules=${encodeURIComponent(rules.join(","))}&severity=${encodeURIComponent(filters.severity || "")}&lawyer=${encodeURIComponent(filters.lawyer || "")}&project=${encodeURIComponent(filters.project || "")}&location=${encodeURIComponent(filters.location || "")}&date=${encodeURIComponent(filters.date || "")}&search=${encodeURIComponent(search)}&ignore_court_verdict_rules=${encodeURIComponent(ignoreCourtVerdictRules.join(","))}`;
+  `${API}/legal/review-export/${dataset}?comparison_month=${encodeURIComponent(comparisonMonth)}&name_compare_chars=${nameCompareChars}&allow_name_variations=${allowNameVariations}&exact_matches_only=${exactMatchesOnly}&rules=${encodeURIComponent(rules.join(","))}&severity=${encodeURIComponent(filters.severity || "")}&lawyer=${encodeURIComponent(filters.lawyer || "")}&project=${encodeURIComponent(filters.project || "")}&location=${encodeURIComponent(filters.location || "")}&date=${encodeURIComponent(filters.date || "")}&search=${encodeURIComponent(search)}&ignore_court_verdict_rules=${encodeURIComponent(ignoreCourtVerdictRules.join(","))}&filters=${encodeURIComponent(JSON.stringify(fieldFilters))}`;
 export const getDuplicateExclusions = () =>
   fetch(`${API}/legal/duplicate-exclusions`, { cache: "no-store" }).then(parse<{rows: DuplicateExclusion[]; count: number}>);
 export const createDuplicateExclusion = (record: Pick<DuplicateExclusion, "caseId" | "rule" | "name" | "project" | "source"> & Partial<Pick<DuplicateExclusion,"dataset"|"identifierType"|"identifierValue"|"duplicateContext">>) =>

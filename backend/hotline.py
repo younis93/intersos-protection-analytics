@@ -69,11 +69,14 @@ def dashboard(source, filters=None,search=""):
     options=available_values(facet_series,selections,search_mask(source,search,join=True))
     options.pop("Month",None)
     options["Contact Date"] = [m for m in options["Contact Date"] if m != "Not recorded"]
+    detained_frame = frame[values(frame, "Is the beneficiary detained").eq("Yes")]
     charts = []
     for field in FIELDS[1:]:
-        counts = values(frame, field).value_counts()
+        chart_frame = detained_frame if field in {"Governorate of detention", "Detaining Authority"} else frame
+        chart_total = len(chart_frame)
+        counts = values(chart_frame, field).value_counts()
         charts.append({"id": field, "title": field, "kind": "bar", "multiChoice": False,
-                       "rows": [{"label": label, "count": int(count), "percent": int(count)/total if total else 0} for label, count in counts.items()]})
+                       "rows": [{"label": label, "count": int(count), "percent": int(count)/chart_total if chart_total else 0} for label, count in counts.items()]})
     months = values(frame, "Contact Date")
     counts = months[months.ne("Not recorded")].value_counts()
     selected = (filters or {}).get("Contact Date") or (filters or {}).get("Month") or options["Contact Date"]

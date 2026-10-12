@@ -100,3 +100,31 @@ def test_api_response(overview_store, monkeypatch):
     assert response.status_code == 200
     assert response.json()["overview"]["services"] == 1
     assert TestClient(main.app).post("/api/legal/overview", json={"months": "bad"}).status_code == 422
+
+
+@pytest.mark.parametrize("query", [{}, {"projects": ["P1"]}, {"locations": ["L1"]}, {"months": ["2026-02"]}, {"projects": ["P1"], "months": ["2026-02"]}, {"filters": {"beneficiaries::Nationality": ["Iraq"]}}, {"projects": [EXCLUDE_PREFIX + "P1"]}])
+def test_filter_only_parity_without_metrics(overview_store, monkeypatch, query):
+    expected = overview_store.overview(**query)["filterOptions"]
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Filter-only requests must not calculate metrics")
+    monkeypatch.setattr(overview_store, "_overview_metrics", forbidden)
+    assert overview_store.overview_filters(**query) == {"filterOptions": expected}
+
+
+def test_filter_only_api_and_validation(overview_store, monkeypatch):
+    from backend import main
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(main, "legal_store", overview_store)
+    client = TestClient(main.app)
+    request = {"projects": ["P1"], "months": ["2026-02"]}
+    response = client.post("/api/legal/overview-filters", json=request)
+    assert response.status_code == 200
+    assert response.json() == {"filterOptions": client.post("/api/legal/overview", json=request).json()["filterOptions"]}
+    assert client.post("/api/legal/overview-filters", json={"months": "bad"}).status_code == 422
+
+
+def test_prepared_values_refresh_after_source_changes(overview_store):
+    for _ in range(2):
+        overview_store.overview(months=["2026-02"])
+    overview_store.frames["assessments"].loc[0, "Date of Assessment"] = overview_store.frames["assessments"].loc[1, "Date of Assessment"]
+    assert overview_store.overview(months=["2026-02"])["overview"]["assessments"] == 2

@@ -6,8 +6,8 @@ const whatsappKey='legal-send-issues-whatsapp-v1';
 export function loadWhatsappLanguage():MessageLanguage{
   try{const language=JSON.parse(localStorage.getItem(whatsappKey)||'{}').language;return ['en','ar','bilingual'].includes(language)?language:'bilingual';}catch{return 'bilingual';}
 }
-export function saveWhatsappSettings(language:MessageLanguage,sender:SenderDetails){
-  try{localStorage.setItem(whatsappKey,JSON.stringify({language}));return saveSender(sender);}catch{return false;}
+export function saveWhatsappSettings(language:MessageLanguage,sender?:SenderDetails){
+  try{localStorage.setItem(whatsappKey,JSON.stringify({language}));return sender?saveSender(sender):true;}catch{return false;}
 }
 export function loadSender():SenderDetails{
   try{const data=JSON.parse(localStorage.getItem(key)||'{}');return Object.fromEntries(Object.keys(blankSender).map(field=>[field,typeof data?.[field]==='string'?data[field]:''])) as unknown as SenderDetails;}catch{return {...blankSender};}
