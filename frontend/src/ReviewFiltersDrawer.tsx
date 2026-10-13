@@ -1,12 +1,10 @@
-import {FilterSection,FilterDrawerShell} from './FilterDrawerShell';
+import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {useState} from 'react';
-import {ChevronDown,Search,X} from 'lucide-react';
-import {AppSelect, FilterValueList} from './SelectionControls';
-import {formatProjectLabel} from './formatting';
+import {formatProjectLabel,formatProjectLocationLabel} from './formatting';
 
 const dateLabels:Record<string,string>={beneficiaries:'Date of identification',assessments:'Date of assessment',legalservices:'Date of Service Provision',awareness:'Date of awareness',legalhotlines:'Contact date'};
 
-// Every review page uses this drawer, including its dropdown sizing and spacing.
+// All review pages share Hotline Review's searchable checkbox sections.
 export default function ReviewFiltersDrawer({dataset,options,filters,onChange,onClose,fieldOptions={},fieldFilters={},onFieldChange}:{
   dataset:string;
   options?:Record<string,string[]>;
@@ -19,35 +17,13 @@ export default function ReviewFiltersDrawer({dataset,options,filters,onChange,on
 }){
   const [fieldSearch,setFieldSearch]=useState('');
   const hotline=dataset==='legalhotlines';
-  const activeCount=Object.values(filters).filter(Boolean).length+(hotline?Object.values(fieldFilters).reduce((sum,values)=>sum+values.length,0):0);
-  return <>
-
-    <FilterDrawerShell className="case-filter-drawer review-filters-drawer" aria-label="Review filters" header={<header>
-        <div><span className="eyebrow">REVIEW FILTERS</span><h2>Filter all finding tables</h2></div>
-        <button type="button" onClick={onClose} aria-label="Close filters"><X/></button>
-      </header>} footer={<footer>
-        <button type="button" className="soft" onClick={()=>{onChange({});if(hotline)onFieldChange?.({});}} disabled={!activeCount}>Reset</button>
-        <button type="button" className="primary" onClick={onClose}>Apply filters {activeCount>0&&`(${activeCount})`}</button>
-      </footer>} backdrop={<button className="filter-backdrop" aria-label="Close filters" onClick={onClose}/>}>
-
-      {hotline&&<label className="filter-search"><Search/><input aria-label="Search hotline filter fields" placeholder="Search fields" value={fieldSearch} onChange={event=>setFieldSearch(event.target.value)}/></label>}
-      <div className="case-filter-scroll review-checkbox-filters">
-        {hotline?Object.entries(fieldOptions).filter(([field])=>field.toLocaleLowerCase().includes(fieldSearch.trim().toLocaleLowerCase())).map(([field,values])=><FilterSection key={field} open={Boolean(fieldFilters[field]?.length)} label={<>{field}</>} badge={<>{Boolean(fieldFilters[field]?.length)&&<b>{fieldFilters[field].length}</b>}</>}>
-
-          <div><FilterValueList field={field} values={values} selected={fieldFilters[field]||[]} onChange={items=>onFieldChange?.({...fieldFilters,[field]:items})}/></div>
-        </FilterSection>):(['project','location','date'] as const).map(key=>{
-          const label=key==='location'?'Project location':key==='date'?'Date':'Project';
-          return <FilterSection key={key} open label={<>{key==='date'?dateLabels[dataset]||'Date':label}</>} badge={<>{filters[key]&&<b>1</b>}</>}>
-
-            <div className="review-filter-field">
-              <AppSelect label={label} searchable value={filters[key]||''}
-                options={[['','All values'],...(options?.[key]||[]).map(item=>[item,key==='project'?formatProjectLabel(item):item] as [string,string])]}
-                onChange={item=>onChange({...filters,[key]:item})}/>
-            </div>
-          </FilterSection>;
-        })}
-      </div>
-
-    </FilterDrawerShell>
-  </>;
+  const groups=hotline?Object.entries(fieldOptions).map(([key,values])=>({key,label:key,values,selected:fieldFilters[key]||[]})):
+    (['project','location','date'] as const).map(key=>({key,label:key==='project'?'Project':key==='location'?'Project location':dateLabels[dataset]||'Date',values:options?.[key]||[],selected:fieldFilters[key]??(filters[key]?[filters[key]]:[])}));
+  const activeCount=Object.values(filters).filter(Boolean).length+Object.values(fieldFilters).reduce((sum,values)=>sum+values.length,0);
+  const changeGroup=(key:string,items:string[])=>{
+    if(!hotline&&filters[key]){const next={...filters};delete next[key];onChange(next)}
+    onFieldChange?.({...fieldFilters,[key]:items});
+  };
+  return <SharedFilterDrawer title="Filter all finding tables" eyebrow="REVIEW FILTERS" className="review-filters-drawer" onClose={onClose} onReset={()=>{onChange({});onFieldChange?.({})}} resetDisabled={!activeCount} search={fieldSearch} onSearchChange={setFieldSearch} searchLabel={hotline?'Search hotline filter fields':'Search review filter fields'}
+    fields={groups.map(group=>({...group,onChange:(items:string[])=>changeGroup(group.key,items),formatCaption:(item:string)=>group.key==='project'?formatProjectLabel(item):group.key==='location'?formatProjectLocationLabel(item):item}))}/>;
 }

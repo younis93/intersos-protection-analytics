@@ -9,18 +9,30 @@ describe('Hotline Review field filters',()=>{
       fieldOptions={{Projects:['Project A'],Gender:['Female','Male'],'Custom field':['Not recorded','Custom value']}}
       fieldFilters={{Gender:['Female','Male']}} onFieldChange={()=>{}}/>);
     expect(markup).toContain('Custom field');
-    expect(markup).toContain('Custom value');
-    expect(markup).toContain('Not recorded');
+    expect(markup).not.toContain('Custom value');
+    expect(markup).not.toContain('Not recorded');
+    expect(markup).toContain('Female');
+    expect(markup).toContain('Male');
     expect(markup).toContain('type="checkbox"');
     expect(markup).not.toContain('app-select-trigger');
-    expect(markup).toContain('Apply filters (2)');
+    expect(markup).toContain('Done');
+    expect(markup).not.toContain('Apply filters');
     expect(markup).toContain('Search hotline filter fields');
   });
-  it('keeps the Beneficiaries Review single-value dropdowns',()=>{
-    const markup=renderToStaticMarkup(<ReviewFiltersDrawer dataset="beneficiaries" options={{project:['A'],location:['B'],date:['2026-01']}} filters={{}} onChange={()=>{}} onClose={()=>{}}/>);
-    expect(markup).toContain('Date of identification');
+  it.each(['beneficiaries','assessments','legalservices','awareness'])('uses Hotline-style searchable checkbox groups for %s Review',dataset=>{
+    const markup=renderToStaticMarkup(<ReviewFiltersDrawer dataset={dataset} options={{project:['A','B'],location:['C'],date:['2026-01']}} filters={{}} fieldFilters={{project:['A','B']}} onChange={()=>{}} onClose={()=>{}}/>);
     expect(markup).toContain('Project location');
-    expect(markup).toContain('app-select-trigger');
+    expect(markup.match(/<summary>/g)).toHaveLength(3);
+    expect(markup).toContain('Search review filter fields');
+    expect(markup).toContain('type="checkbox"');
+    expect(markup).toContain('Select all 2');
+    expect(markup).toContain('Only A');
+    expect(markup).toContain('Exclude B');
+    expect(markup).toContain('Done');
+    expect(markup).not.toContain('Apply filters');
+    expect(markup).not.toContain('app-select-trigger');
+    expect(markup).not.toContain('app-select-label');
+    expect(markup).not.toContain('All values');
   });
   it('preserves multi-value source selections in the export URL',()=>{
     const filters={Gender:['Female','Male'],'Custom field':['Not recorded']};

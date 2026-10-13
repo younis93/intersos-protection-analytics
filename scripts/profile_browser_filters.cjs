@@ -25,7 +25,7 @@ const root=path.resolve(__dirname,'..'),base='http://127.0.0.1:5181';
    const reset=async()=>{const button=toolbar.getByRole('button',{name:/^Reset(?: all)?$/});if(await button.isEnabled())await button.click()};
    await measure('overview_single',async()=>{await toolbar.locator('.app-select-trigger').first().click();await page.locator('.checkbox-multi-menu input[type=checkbox]').first().check();await page.keyboard.press('Escape');},async()=>{await page.waitForTimeout(400);await overviewReady()});
    await measure('overview_reset',reset,overviewReady);
-   await measure('overview_drawer_apply',async()=>{await toolbar.getByRole('button',{name:/^Filters/}).click();await page.getByRole('button',{name:'Apply filters',exact:true}).click()},overviewReady);
+   await measure('overview_drawer_done',async()=>{await toolbar.getByRole('button',{name:/^Filters/}).click();await page.getByRole('button',{name:'Done',exact:true}).click()},overviewReady);
    await measure('overview_repeat',async()=>{await page.evaluate(()=>location.hash='/legal/explorer');await page.getByPlaceholder('Search data',{exact:true}).waitFor();await page.evaluate(()=>location.hash='/legal/overview')},overviewReady);
    await measure('explorer_first',()=>page.evaluate(()=>location.hash='/legal/explorer'),()=>page.getByPlaceholder('Search data',{exact:true}).waitFor());
    for(const [label,value] of [['explorer_empty','__benchmark_missing__'],['explorer_reset','']])await measure(label,()=>page.getByPlaceholder('Search data',{exact:true}).fill(value),async()=>{await page.waitForTimeout(600);await page.locator('.legal-content .skeleton').waitFor({state:'detached',timeout:120000})});

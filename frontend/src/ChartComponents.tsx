@@ -140,6 +140,7 @@ export function TrendCard({
   rows,
   comparisonRows,
   hoverMetrics,
+  singleMonthBreakdown = false,
   primaryLabel,
   comparisonLabel = "Completed",
   display,
@@ -153,6 +154,7 @@ export function TrendCard({
   rows: Row[];
   comparisonRows?: Row[];
   hoverMetrics?: {label:string;icon:string;color:string;rows:{label:string;count:number}[]}[];
+  singleMonthBreakdown?: boolean;
   primaryLabel?: string;
   comparisonLabel?: string;
   display: Display;
@@ -176,7 +178,10 @@ export function TrendCard({
     return display === "percent" ? (match?.percent || 0) : (match?.count || 0);
   });
   const singleMonth=isSingleMonth(rows.map(row=>row.label));
-  const bars=singleMonthTraces(rows.map(row=>row.label),[
+  const breakdown=singleMonth&&singleMonthBreakdown&&Boolean(hoverMetrics?.length);
+  const bars=singleMonthTraces(rows.map(row=>row.label),breakdown?hoverMetrics!.map((metric,index)=>({
+    label:metric.label,color:metric.color,values:rows.map((row,rowIndex)=>display==="percent"?(row.count?hoverValues[rowIndex][index]/row.count:0):hoverValues[rowIndex][index]),
+  })):[
     {label:primaryLabel||(comparisonRows?"Started":title),values:vals,color:"#1683d8",customdata:hoverMetrics?.length?hoverValues:undefined,
       hovertemplate:hoverMetrics?.length?`<b>${primaryLabel||title}</b>&nbsp;&nbsp;%{y:${display==="percent"?".1%":",.0f"}}<br>${hoverMetricTemplate}<extra></extra>`:undefined},
     ...(comparisonRows?[{label:comparisonLabel,values:comparisonVals,color:"#2f9e68"}]:[]),
@@ -310,12 +315,12 @@ export function TrendCard({
             yaxis: {
               gridcolor: chartGrid(theme),
               rangemode: "tozero",
-              range: singleMonth?[0,Math.max(1,...vals,...(comparisonRows?comparisonVals:[]))*1.2]:undefined,
+              range: singleMonth?[0,Math.max(1,...bars.flatMap(trace=>trace.y))*1.2]:undefined,
               automargin: true,
               tickformat: display === "percent" ? ".0%" : ",d",
               fixedrange: true,
             },
-            showlegend: Boolean(comparisonRows),
+            showlegend: Boolean(comparisonRows)||breakdown,
             legend: { orientation: "h", x: 0, y: 1.14 },
           }}
           config={plotConfig}

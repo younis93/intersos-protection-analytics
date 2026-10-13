@@ -1,5 +1,6 @@
+import {formatUpdateSize,UpdateReleaseNotes} from "./UpdateReleaseNotes";
 import {UpdateFallbackNotice} from "./UpdateFallbackNotice";
-import {useEffect,useState} from 'react';
+import {useCallback,useEffect,useRef,useState} from 'react';
 import {ArrowRight,BriefcaseBusiness,Maximize2,Minimize2,Palette,RefreshCw} from 'lucide-react';
 import {checkForUpdates,getUpdateStatus,installUpdate} from './api';
 import {AppSelect} from './SelectionControls';
@@ -11,7 +12,6 @@ import {HomeRiveAvatar} from './HomeRiveAvatar';
 import ProcessingBackground from './ProcessingBackground';
 
 const UPDATE_CHECK_INTERVAL_MS=6*60*60*1000;
-const formatUpdateSize=(bytes?:number)=>`${((bytes||0)/1_000_000).toFixed(1)} MB`;
 
 export interface WorkspaceDefinition {id:string;label:string;description:string;route:string;icon:any;accent:string;badge?:string;enabled:boolean}
 export const workspaces:WorkspaceDefinition[]=[
@@ -28,6 +28,16 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
   const [updateInfo,setUpdateInfo]=useState<UpdateCheck|null>(null);
   const [updateStatus,setUpdateStatus]=useState<UpdateStatus|null>(null);
   const [updateOpen,setUpdateOpen]=useState(false);
+  const [updateChecking,setUpdateChecking]=useState(false),[updateCheckError,setUpdateCheckError]=useState('');
+  const updateRequest=useRef<Promise<UpdateCheck>|null>(null),updateMounted=useRef(false),updateOpenedManually=useRef(false);
+  const refreshUpdate=useCallback(()=>{
+    if(updateRequest.current)return updateRequest.current;
+    setUpdateChecking(true);setUpdateCheckError('');
+    const request=checkForUpdates().then(info=>{if(updateMounted.current){if(info.message?.startsWith('Unable')){setUpdateCheckError(info.message);setUpdateInfo(current=>current||info)}else setUpdateInfo(info)}return info})
+      .catch((reason:unknown)=>{if(updateMounted.current)setUpdateCheckError(reason instanceof Error?reason.message:'Unable to check for updates. Please try again.');throw reason})
+      .finally(()=>{updateRequest.current=null;if(updateMounted.current)setUpdateChecking(false)});
+    updateRequest.current=request;return request;
+  },[]);
   useEffect(()=>{
     document.documentElement.dataset.theme=theme;
     localStorage.setItem('app-theme',theme);
@@ -47,9 +57,9 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
   },[theme]);
   useEffect(()=>{const sync=()=>setFullscreen(Boolean(document.fullscreenElement));document.addEventListener('fullscreenchange',sync);return()=>document.removeEventListener('fullscreenchange',sync)},[]);
   const toggleFullscreen=async()=>{const nativeApi=(window as any).pywebview?.api;if(nativeApi?.toggle_fullscreen)setFullscreen(await nativeApi.toggle_fullscreen());else if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()};
-  useEffect(()=>{let active=true;const refresh=(openWhenAvailable:boolean)=>checkForUpdates().then(info=>{if(!active)return;setUpdateInfo(info);if(openWhenAvailable&&info.available)setUpdateOpen(true)}).catch(()=>{});refresh(true);const timer=window.setInterval(()=>refresh(false),UPDATE_CHECK_INTERVAL_MS);return()=>{active=false;window.clearInterval(timer)}},[]);
+  useEffect(()=>{let active=true;updateMounted.current=true;const refresh=(openWhenAvailable:boolean)=>refreshUpdate().then(info=>{if(active&&openWhenAvailable&&info.available&&!updateOpenedManually.current)setUpdateOpen(true)}).catch(()=>{});void refresh(true);const timer=window.setInterval(()=>void refresh(false),UPDATE_CHECK_INTERVAL_MS);return()=>{active=false;updateMounted.current=false;window.clearInterval(timer)}},[refreshUpdate]);
   useEffect(()=>{if(!updateStatus||!["downloading","verifying","installing","restarting"].includes(updateStatus.phase))return;const timer=window.setInterval(()=>getUpdateStatus().then(setUpdateStatus).catch(()=>{}),700);return()=>window.clearInterval(timer)},[updateStatus?.phase]);
-  const checkUpdates=()=>checkForUpdates().then(info=>{setUpdateInfo(info);setUpdateOpen(true)}).catch(()=>setUpdateOpen(true));
+  const checkUpdates=()=>{updateOpenedManually.current=true;setUpdateOpen(true);void refreshUpdate().catch(()=>{})};
   const beginUpdate=()=>installUpdate().then(setUpdateStatus).catch((error:Error)=>setUpdateStatus({phase:'error',progress:0,error:error.message,currentVersion:updateInfo?.currentVersion||'1.0.0'}));
   const toggleAvatar=()=>setAvatarRevealed(current=>!current);
   return <main className="welcome-page">
@@ -66,6 +76,6 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
       <footer><span>Designed for clear, local and decision-ready legal data review.</span><button type="button" className="designer-unlock" onClick={toggleAvatar} aria-pressed={avatarRevealed} aria-label={`${avatarRevealed?'Hide':'Reveal'} the cartoon boy`}>Designed by <strong>Younis Jamal</strong></button></footer>
     </section>
     {RIVE_HOME_AVATAR_ENABLED&&avatarRevealed&&<HomeRiveAvatar disabled={false} phase="normal"/>}
-    {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?'Updates need configuration':updateInfo?.message?.startsWith('Unable')?'Unable to check for updates':'You’re up to date'}</h2><p>{updateInfo?.available?(updateInfo.notes||'A new signed version of Iraq Data Analysis is ready to install.'):(updateInfo?.message||`You are using version ${updateInfo?.currentVersion||'1.0.0'}.`)}</p>{updateInfo?.available&&typeof updateInfo.sizeBytes==='number'&&<small className="update-size">Update size: {formatUpdateSize(updateInfo.sizeBytes)}</small>}{updateStatus&&updateStatus.phase!=='idle'&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.phase==='downloading'&&<small>Downloaded {formatUpdateSize(updateStatus.downloadedBytes)} of {formatUpdateSize(updateStatus.totalBytes||updateInfo?.sizeBytes)}</small>}{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}{updateInfo?.available&&<UpdateFallbackNotice failed={updateStatus?.phase === "error"}/>}<div className="update-actions">{updateInfo?.available&&(!updateStatus||['idle','error'].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>{updateStatus?.phase === "error" ? "Try again" : "Update now"}</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&['installing','restarting'].includes(updateStatus.phase))}>{updateInfo?.available?'Later':'Close'}</button></div></section></div>}
+    {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon" data-updating={updateChecking||Boolean(updateStatus&&['downloading','verifying','installing','restarting'].includes(updateStatus.phase))} aria-hidden="true"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{!updateInfo&&updateChecking?'Checking for updates…':!updateInfo&&updateCheckError?'Unable to check for updates':updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?'Updates need configuration':updateInfo?.message?.startsWith('Unable')?'Unable to check for updates':'You’re up to date'}</h2>{updateInfo?.available?<UpdateReleaseNotes notes={updateInfo.notes} sizeBytes={updateInfo.sizeBytes}/>:<p>{!updateInfo&&updateChecking?'Looking for the latest version of Iraq Data Analysis.':!updateInfo&&updateCheckError?'Please try checking again.':updateInfo?.message||`You are using version ${updateInfo?.currentVersion||'1.0.0'}.`}</p>}{updateChecking&&updateInfo&&<p role="status" className="update-check-status">Checking for the latest version…</p>}{updateCheckError&&<p role="alert" className="update-check-error">{updateCheckError}</p>}{updateStatus&&updateStatus.phase!=='idle'&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.phase==='downloading'&&<small>Downloaded {formatUpdateSize(updateStatus.downloadedBytes)} of {formatUpdateSize(updateStatus.totalBytes||updateInfo?.sizeBytes)}</small>}{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}{updateInfo?.available&&<UpdateFallbackNotice failed={updateStatus?.phase === "error"}/>}<div className="update-actions">{updateCheckError&&<button className="primary" onClick={checkUpdates}>Check again</button>}{updateInfo?.available&&(!updateStatus||['idle','error'].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>{updateStatus?.phase === "error" ? "Try again" : "Update now"}</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&['installing','restarting'].includes(updateStatus.phase))}>{updateInfo?.available?'Later':'Close'}</button></div></section></div>}
   </main>;
 }

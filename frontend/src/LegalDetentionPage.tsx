@@ -1,3 +1,4 @@
+import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {
 ArrowRight,
 BarChart3,
@@ -21,13 +22,12 @@ reconcileLegalDetention
 } from "./api";
 import { ChartCard,TrendCard } from './ChartComponents';
 import { formatFilterMonth } from "./dateFormat";
-import { FilterDrawerShell,FilterSection } from './FilterDrawerShell';
 import { legalLoadScheduler } from "./legalLoadScheduler";
 import { IraqDetentionMapMetrics } from './LegalMapMetrics';
 import { value } from './LegalRecordCells';
 import { LegalScrollControls } from './LegalScrollControls';
 import { LegalSkeleton } from './LegalSkeleton';
-import { AppSelect,CheckboxMultiSelect,ExcelDownloadButton,FilterValueList } from './SelectionControls';
+import { AppSelect,CheckboxMultiSelect,ExcelDownloadButton } from './SelectionControls';
 import { Pager,RowSelectionCheckbox } from './TableControls';
 import { TableSelectionActions } from './TableSelectionActions';
 import { useDebouncedValue } from "./useDebouncedValue";
@@ -154,7 +154,7 @@ export function DetentionCases({
       {tab!=="reconcile"&&<LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={()=>{setFilters({});setPage(1)}}>
       <div className="glass detention-toolbar">
         {quickFilters()}
-        <div className="detention-toolbar-actions"><button className="soft detention-filter-clear" disabled={!activeCount} onClick={()=>{setFilters({});setPage(1)}}><RotateCcw/>Reset</button><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button></div>
+        <div className="detention-toolbar-actions"><button className="soft case-filter-button" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft detention-filter-clear" disabled={!activeCount} onClick={()=>{setFilters({});setPage(1)}}><RotateCcw/>Reset</button></div>
       </div>
       </LegalScrollControls>}
       {tab==="analysis"&&<>
@@ -255,7 +255,8 @@ export function DetentionCases({
           }):<tr><td colSpan={7}><div className="reconciliation-empty"><CheckCircle2/><strong>All records match for {comparisonResult.month}</strong></div></td></tr>}</tbody></ValueTable></div>
         </>}
       </section>}
-      {drawer&&<><FilterDrawerShell className="case-filter-drawer" header={<header><div><span className="eyebrow">DETENTION FILTERS</span><h2>Filter detention cases</h2></div><button onClick={()=>setDrawer(false)}><X/></button></header>} footer={<footer><button className="soft" disabled={!activeCount} onClick={()=>{setFilters({});setPage(1)}}>Reset all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {activeCount>0&&`(${activeCount})`}</button></footer>} backdrop={<button className="filter-backdrop" aria-label="Close filters" onClick={()=>setDrawer(false)}/>}><div className="case-filter-scroll review-checkbox-filters">{Object.entries(data?.filterOptions||{}).map(([label,values])=><FilterSection key={label} open={Boolean(filters[label]?.length)} label={<>{label}</>} badge={<>{filters[label]?.length>0&&<b>{filters[label].length}</b>}</>}><div>{<FilterValueList field={label} values={values} formatCaption={item=>/date/i.test(label)?formatFilterMonth(item):item} selected={filters[label]||[]} onChange={items=>updateFilter(label,items)}/>}</div></FilterSection>)}</div></FilterDrawerShell></>}
+      {drawer&&<SharedFilterDrawer title="Filter detention cases" eyebrow="DETENTION FILTERS" onClose={()=>setDrawer(false)} onReset={()=>{setFilters({});setPage(1)}} resetDisabled={!activeCount}
+        fields={Object.entries(data?.filterOptions||{}).map(([label,values])=>({key:label,label,values,selected:filters[label]||[],formatCaption:(item:string)=>/date/i.test(label)?formatFilterMonth(item):item,onChange:(items:string[])=>updateFilter(label,items)}))}/>}
       {drillMenu&&createPortal(<div ref={drillMenuRef} className="detention-drill-menu" role="menu" aria-label="Chart table options" style={{left:drillMenu.x,top:drillMenu.y}}><span>Filtered records</span><button role="menuitem" autoFocus onClick={()=>{setDrillMenu(null);setPage(1);setTab("records")}}><TableProperties/><div><strong>Open detail table</strong><small>Keep all active filters</small></div><ArrowRight/></button><button role="menuitem" className="cancel" onClick={()=>setDrillMenu(null)}><X/>Cancel</button></div>,document.body)}
     </div>
   );

@@ -1,7 +1,9 @@
+import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {
 Megaphone,
 RotateCcw,
 Search,
+SlidersHorizontal,
 X
 } from "lucide-react";
 import { useEffect,useState } from "react";
@@ -9,13 +11,12 @@ import { exportLegalExplorer,getLegalExplorer,getLegalHotlineDashboard } from ".
 import { ChartCard,TrendCard } from './ChartComponents';
 import { formatFilterMonth } from "./dateFormat";
 import { ActiveFilters } from './FilterControls';
-import { FilterDrawerShell,FilterSection } from './FilterDrawerShell';
 import { KpiCard } from './KpiCard';
 import { IraqDetentionMapMetrics } from './LegalMapMetrics';
 import { value } from './LegalRecordCells';
 import { LegalScrollControls } from './LegalScrollControls';
 import { LegalSkeleton } from './LegalSkeleton';
-import { CheckboxMultiSelect,FilterValueList } from './SelectionControls';
+import { CheckboxMultiSelect } from './SelectionControls';
 import { Pager,RowSelectionCheckbox,SortableHeader,TableState } from './TableControls';
 import { TableSelectionActions } from './TableSelectionActions';
 import type { Dashboard,LegalExplorerResult,LegalMetadata,Theme } from "./types";
@@ -34,17 +35,18 @@ export function HotlineDashboard({metadata,theme}:{metadata:LegalMetadata;theme:
   if(!dash)return <LegalSkeleton variant="deportation"/>;
   const available=dash.filterOptions||{},quickFields=["Contact Date","Is the beneficiary detained","Has the beneficiary referred to the helpline?","Governorate of detention","Priority"];
   return <section className="hotline-dashboard dashboard-content" aria-busy={busy}>
-    <LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={clear}><div className="toolbar hotline-filter-bar">{quickFields.map(field=><CheckboxMultiSelect key={field} hideLabel label={field==="Contact Date"?"Contact Date (month)":field} values={available[field]||[]} selected={filters[field]||[]} onChange={items=>setFilters(current=>({...current,[field]:items}))}/>)}<button className="soft filter-reset-button" onClick={clear} disabled={!activeCount}><RotateCcw/>Reset</button></div></LegalScrollControls>
+    <LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={clear}><div className="toolbar hotline-filter-bar">{quickFields.map(field=><CheckboxMultiSelect key={field} hideLabel label={field==="Contact Date"?"Contact Date (month)":field} values={available[field]||[]} selected={filters[field]||[]} onChange={items=>setFilters(current=>({...current,[field]:items}))}/>)}<button className="soft case-filter-button" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft filter-reset-button" onClick={clear} disabled={!activeCount}><RotateCcw/>Reset</button></div></LegalScrollControls>
     <ActiveFilters filters={filters} onRemove={(field,label)=>setFilters(current=>({...current,[field]:current[field].filter(item=>item!==label)}))}/>
     {busy&&<TableState as="p">Updating hotline data...</TableState>}
     <div className="kpi-grid">{dash.kpis.map(item=><KpiCard key={item.label} {...item}/>)}</div>
     {dash.total===0&&<p className="glass legal-empty">No hotline records match these filters.</p>}
-    <TrendCard rows={dash.trend} hoverMetrics={[{label:"Detained",icon:"●",color:"#d4852f",rows:dash.trend.map(row=>({label:row.label,count:row.detained}))},{label:"Not detained",icon:"✓",color:"#2f9e68",rows:dash.trend.map(row=>({label:row.label,count:row.notDetained}))}]} primaryLabel="Hotline contacts" display="both" theme={theme} title="Monthly hotline contacts" subtitle="Records by Contact Date" selected={filters["Contact Date"]||[]} onSelect={(months,replace)=>setFilters(current=>({...current,"Contact Date":replace?months:Array.from(new Set([...(current["Contact Date"]||[]),...months]))}))} onRemove={month=>setFilters(current=>({...current,"Contact Date":(current["Contact Date"]||[]).filter(item=>item!==month)}))}/>
+    <TrendCard rows={dash.trend} singleMonthBreakdown hoverMetrics={[{label:"Detained",icon:"●",color:"#d4852f",rows:dash.trend.map(row=>({label:row.label,count:row.detained}))},{label:"Not detained",icon:"✓",color:"#2f9e68",rows:dash.trend.map(row=>({label:row.label,count:row.notDetained}))}]} primaryLabel="Hotline contacts" display="both" theme={theme} title="Monthly hotline contacts" subtitle="Records by Contact Date" selected={filters["Contact Date"]||[]} onSelect={(months,replace)=>setFilters(current=>({...current,"Contact Date":replace?months:Array.from(new Set([...(current["Contact Date"]||[]),...months]))}))} onRemove={month=>setFilters(current=>({...current,"Contact Date":(current["Contact Date"]||[]).filter(item=>item!==month)}))}/>
     {dash.missingContactDates>0&&<p role="note">{dash.missingContactDates.toLocaleString()} records have missing or invalid Contact Dates and are excluded from the timeline.</p>}
     <IraqDetentionMapMetrics mode="hotline" items={(dash.map?.items||[]).filter(item=>item.detained>0).map(item=>({...item,count:item.detained,released:0}))} selected={filters["Governorate of detention"]||[]} onSelect={(values)=>{const current=filters["Governorate of detention"]||[],remove=values.length>0&&values.every(value=>current.includes(value));setFilters(existing=>({...existing,"Governorate of detention":remove?current.filter(value=>!values.includes(value)):Array.from(new Set([...current,...values]))}))}}/>
     <div className="overview-analysis-grid">{dash.charts.map(chart=><ChartCard key={chart.id} chart={chart} display="both" theme={theme} onSelect={select}/>)}</div>
     <HotlineRecordsTable filters={filters} onSearchChange={setRecordSearch}/>
-    {drawer&&<><FilterDrawerShell className="case-filter-drawer" header={<header><div><span className="eyebrow">HOTLINE FILTERS</span><h2>Filter hotline records</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header>} footer={<footer><button className="soft filter-reset-button" disabled={!activeCount} onClick={clear}><RotateCcw/>Reset</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {activeCount>0&&`(${activeCount})`}</button></footer>} backdrop={<button className="filter-backdrop" aria-label="Close hotline filters" onClick={()=>setDrawer(false)}/>}><div className="case-filter-scroll review-checkbox-filters">{Object.entries(available).map(([label,values])=><FilterSection key={label} open={Boolean(filters[label]?.length)} label={<>{label}</>} badge={<>{filters[label]?.length>0&&<b>{filters[label].length}</b>}</>}><div>{<FilterValueList field={label} values={values} formatCaption={item=>/date/i.test(label)?formatFilterMonth(item):item} selected={filters[label]||[]} onChange={items=>setFilters(current=>({...current,[label]:items}))}/>}</div></FilterSection>)}</div></FilterDrawerShell></>}
+    {drawer&&<SharedFilterDrawer title="Filter hotline records" eyebrow="HOTLINE FILTERS" onClose={()=>setDrawer(false)} onReset={clear} resetDisabled={!activeCount}
+      fields={Object.entries(available).map(([label,values])=>({key:label,label,values,selected:filters[label]||[],formatCaption:(item:string)=>/date/i.test(label)?formatFilterMonth(item):item,onChange:(items:string[])=>setFilters(current=>({...current,[label]:items}))}))}/>}
   </section>;
 }
 

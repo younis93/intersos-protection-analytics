@@ -6,7 +6,7 @@ MoreHorizontal,
 Search,
 X
 } from "lucide-react";
-import { type ReactNode,useEffect,useId,useLayoutEffect,useMemo,useRef,useState } from "react";
+import { memo,type ReactNode,useEffect,useId,useLayoutEffect,useMemo,useRef,useState } from "react";
 import { sortFilterValues } from "./dateFormat";
 import { checkedFilterValues,filterValue,isExcludedValue,selectAllExcept,toggleFilterValue } from "./filterSelection";
 import { formatProjectLabel,formatProjectLocationLabel } from './formatting';
@@ -41,7 +41,10 @@ function useDropdownPosition(open: boolean, close: () => void) {
       node.style.top = `${Math.max(y + edge, Math.min(top, y + height - edge - menuHeight))}px`;
     };
     position();
-    (node.querySelector<HTMLElement>("input") || node.querySelector<HTMLElement>("[aria-selected=\"true\"]") || node.querySelector<HTMLElement>("button") || node).focus({preventScroll:true});
+    const firstFocus=node.querySelector<HTMLElement>("input") || node.querySelector<HTMLElement>("[aria-selected=\"true\"]") || node.querySelector<HTMLElement>("button") || node;
+    firstFocus.focus({preventScroll:true});
+    const list=firstFocus.closest<HTMLElement>('[data-virtual-rows]');
+    if(list&&firstFocus.matches('[role=option]'))list.scrollTop+=firstFocus.getBoundingClientRect().top-list.getBoundingClientRect().top;
     const scroll = (event: Event) => { if (!node.contains(event.target as Node)) position(); };
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && node.contains(event.target as Node) && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); close(); trigger.focus({preventScroll:true}); } };
     window.addEventListener("scroll", scroll, true);
@@ -86,7 +89,7 @@ export function dropdownMenuKey(event: React.KeyboardEvent<HTMLDivElement>) {
   if (target.matches("input:not([type=checkbox])")) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault(); choices[event.key === "ArrowDown" ? 0 : choices.length - 1].focus();
-      if(event.key === "ArrowUp" && choices[0].matches("input[type=checkbox]")) choices[choices.length - 1].dispatchEvent(new KeyboardEvent("keydown",{key:"End",bubbles:true}));
+      if(event.key === "ArrowUp") choices[choices.length - 1].dispatchEvent(new KeyboardEvent("keydown",{key:"End",bubbles:true}));
     }
     return;
   }
@@ -124,15 +127,18 @@ export function AppSelect({
   const [open, setOpen] = useState(false), [search, setSearch] = useState("");
   const {root, menu} = useDropdownPosition(open, () => setOpen(false));
   const menuId=useId();
-  const orderedValues=sortFilterValues(label,options.map(([value])=>value));
-  options=[...options].sort((left,right)=>orderedValues.indexOf(left[0])-orderedValues.indexOf(right[0]));
+  options=useMemo(()=>{
+    const orderedValues=sortFilterValues(label,options.map(([value])=>value));
+    const positions=new Map(orderedValues.map((value,index)=>[value,index]));
+    return [...options].sort((left,right)=>positions.get(left[0])!-positions.get(right[0])!);
+  },[label,options]);
   const selected = options.find(([option]) => option === value)?.[1] || value;
   const isProjectSelect = /^projects?$/i.test(label.trim());
   const displayCaption = (caption: string) =>
     isProjectSelect ? formatProjectLabel(caption) : caption;
-  const visibleOptions = searchable
+  const visibleOptions = useMemo(()=>searchable
     ? options.filter(([, caption]) => displayCaption(caption).toLowerCase().includes(search.trim().toLowerCase()))
-    : options;
+    : options,[options,searchable,search,isProjectSelect]);
   useEffect(() => {
     const close = (event: MouseEvent) => {
       if (root.current && !root.current.contains(event.target as Node)) setOpen(false);
@@ -161,11 +167,11 @@ export function AppSelect({
         <div id={menuId} ref={menu} popover="manual" onKeyDown={dropdownMenuKey} className="app-select-menu viewport-dropdown" role="listbox" aria-label={`${label} options`}>
           {searchable && <label className="app-select-menu-search"><Search/><input aria-label={`Search ${label.toLowerCase()}`} autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${label.toLowerCase()}`}/></label>}
           {value&&!options.some(([option])=>option===value)&&<p className="filter-empty">{displayCaption(value)} - Unavailable</p>}
-          {visibleOptions.map(([option, caption]) => (
+          <VirtualRows items={visibleOptions} enabled={visibleOptions.length>60} resetKey={search} initialFocusIndex={searchable?null:Math.max(0,visibleOptions.findIndex(([option])=>option===value))} render={([option, caption]) => (
             <button key={option} type="button" role="option" aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); root.current?.querySelector<HTMLButtonElement>(".app-select-trigger")?.focus(); }}>
               <span>{displayCaption(caption)}</span>{option === value && <Check />}
             </button>
-          ))}
+          )}/>
           {searchable && !visibleOptions.length && <p className="app-select-no-results">No matching options</p>}
         </div>
       )}
@@ -181,9 +187,11 @@ export function CheckboxMultiSelect({label,values,selected,onChange,hideLabel=fa
   const isProjectFilter=/^projects?$/i.test(label.trim());
   const isProjectLocationFilter=/^project\s+locations?$/i.test(label.trim());
   const displayItem=(item:string)=>isProjectFilter?formatProjectLabel(item):isProjectLocationFilter?formatProjectLocationLabel(item):item;
-  const visible=useMemo(()=>sortFilterValues(label,values).filter((item)=>displayItem(item).toLowerCase().includes(search.trim().toLowerCase())),[values,search,label]);
+  const ordered=useMemo(()=>sortFilterValues(label,values),[values,label]);
+  const visible=useMemo(()=>ordered.filter((item)=>displayItem(item).toLowerCase().includes(search.trim().toLowerCase())),[ordered,search,label]);
   useEffect(()=>{const close=(event:MouseEvent)=>{if(root.current&&!root.current.contains(event.target as Node))setOpen(false)};window.addEventListener("mousedown",close);return()=>window.removeEventListener("mousedown",close)},[]);
-  const checked=checkedFilterValues(selected,values);
+  const checked=useMemo(()=>checkedFilterValues(selected,values),[selected,values]);
+  const checkedSet=useMemo(()=>new Set(checked),[checked]);
   const caption=selected.length?`${selectedLabel} (${checked.length})`:`All ${label.toLowerCase()}`;
   return <div ref={root} onBlur={event=>dropdownBlur(event,()=>setOpen(false))} className={`app-select checkbox-multi-select ${hideLabel?"label-hidden":""} ${open?"open":""} ${selected.length?"has-selection":""}`}>
     {!hideLabel&&<span className="app-select-label">{label}</span>}
@@ -192,15 +200,15 @@ export function CheckboxMultiSelect({label,values,selected,onChange,hideLabel=fa
       <label className="multi-select-search"><Search/><input aria-label={`Search ${label.toLowerCase()}`} autoFocus value={search} onChange={event=>setSearch(event.target.value)} placeholder={`Search ${label.toLowerCase()}`}/></label>
       {guidance&&<p id={guidanceId} className="filter-link-guidance">{guidance}</p>}
       <UnavailableSelections values={values} selected={selected} onChange={onChange} formatCaption={displayItem}/>
-      <VirtualRows items={visible} resetKey={search} render={item=><FilterOption values={values} key={item} value={item} caption={displayItem(item)} selected={selected} onChange={onChange}/>}/>
+      <VirtualRows items={visible} enabled={visible.length>60} resetKey={search} render={item=><FilterOption values={values} key={item} value={item} caption={displayItem(item)} selected={selected} checked={checkedSet.has(item)} onChange={onChange}/>}/>
       {!visible.length&&<p>{values.length?"No matching options":"No available options"}</p>}
       <footer><FilterSelectAllButton values={search.trim()?visible:values} matching={Boolean(search.trim())} selected={selected} onChange={onChange}/><button type="button" disabled={!selected.length} onClick={()=>onChange([])}>Reset</button><button type="button" onClick={()=>{setOpen(false);root.current?.querySelector<HTMLButtonElement>(".app-select-trigger")?.focus()}}>Done</button></footer>
     </div>}
   </div>;
 }
 
-export function FilterOption({value,caption,values,selected,onChange,...attributes}:{value:string;caption:string;values:string[];selected:string[];onChange:(values:string[])=>void}) {
-  const [actions,setActions]=useState(false),checked=checkedFilterValues(selected,values).includes(value);
+export const FilterOption=memo(function FilterOption({value,caption,values,selected,onChange,checked:knownChecked,...attributes}:{value:string;caption:string;values:string[];selected:string[];onChange:(values:string[])=>void;checked?:boolean}) {
+  const [actions,setActions]=useState(false),checked=knownChecked??checkedFilterValues(selected,values).includes(value);
   return <div {...attributes} onKeyDown={event=>{if(event.key==="Escape"&&actions){event.preventDefault();event.stopPropagation();setActions(false);event.currentTarget.querySelector<HTMLButtonElement>(".filter-option-more")?.focus()}}} className={`filter-option-row ${checked?"selected":""}`}>
     <label><input type="checkbox" aria-label={caption} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();onChange(toggleFilterValue(selected,value,values))}}} checked={checked} onChange={()=>onChange(toggleFilterValue(selected,value,values))}/><span>{caption}</span></label>
     <button type="button" className="filter-option-more" aria-label={`Actions for ${caption}`} aria-expanded={actions} onClick={()=>setActions(open=>!open)}><MoreHorizontal/></button>
@@ -209,7 +217,7 @@ export function FilterOption({value,caption,values,selected,onChange,...attribut
       <button type="button" aria-label={`Exclude ${caption}`} onClick={()=>{onChange(selectAllExcept(values,value));setActions(false)}}>Exclude this</button>
     </div>
   </div>;
-}
+});
 
 export function UnavailableSelections({values,selected,onChange,formatCaption=(value:string)=>value}:{values:string[];selected:string[];onChange:(values:string[])=>void;formatCaption?:(value:string)=>string}) {
   const unavailable=selected.filter(token=>!isExcludedValue(token)&&!values.includes(token));
@@ -218,8 +226,9 @@ export function UnavailableSelections({values,selected,onChange,formatCaption=(v
 }
 
 export function FilterValueList({field="",values,selected,onChange,formatCaption=(value:string)=>value}:{values:string[];selected:string[];onChange:(values:string[])=>void;formatCaption?:(value:string)=>string;field?:string}) {
-  values=sortFilterValues(field,values);
-  return <><UnavailableSelections values={values} selected={selected} onChange={onChange} formatCaption={formatCaption}/>{!values.length&&<p className="filter-empty">No available options</p>}<FilterBulkActions values={values} selected={selected} onChange={onChange}/><div className="filter-group-actions"><button type="button" disabled={!selected.length} onClick={()=>onChange([])}>Reset</button></div>{values.map(value=><FilterOption values={values} key={value} value={value} caption={formatCaption(value)} selected={selected} onChange={onChange}/>)}</>;
+  values=useMemo(()=>sortFilterValues(field,values),[field,values]);
+  const checked=useMemo(()=>new Set(checkedFilterValues(selected,values)),[selected,values]);
+  return <><UnavailableSelections values={values} selected={selected} onChange={onChange} formatCaption={formatCaption}/>{!values.length&&<p className="filter-empty">No available options</p>}<FilterBulkActions values={values} selected={selected} onChange={onChange}/><div className="filter-group-actions"><button type="button" disabled={!selected.length} onClick={()=>onChange([])}>Reset</button></div><VirtualRows items={values} enabled={values.length>60} render={value=><FilterOption values={values} key={value} value={value} caption={formatCaption(value)} selected={selected} checked={checked.has(value)} onChange={onChange}/>}/></>;
 }
 
 export function FilterSelectAllButton({values,matching=false,selected,onChange}:{values:string[];matching?:boolean;selected:string[];onChange:(values:string[])=>void}) {

@@ -1,3 +1,4 @@
+import {SharedFilterDrawer} from './SharedFilterDrawer';
 
 import {
 CheckCircle2,
@@ -5,6 +6,7 @@ Eye,
 EyeOff,
 FolderOpen,
 RotateCcw,
+SlidersHorizontal,
 X
 } from "lucide-react";
 import { useEffect,useMemo,useState } from "react";
@@ -44,8 +46,9 @@ export function IntelligencePage({page,filters,setFilters}:{page:IntelligencePag
   return <div className={`intelligence-page ${busy?"intelligence-busy":""}`}>
     {error&&<div className="error glass">{error}</div>}
     {data&&<>
-      <LegalScrollControls onFilters={()=>setFilterDrawer(true)} activeCount={activeFilters} onClear={()=>setFilters({})} compactFilters={null}><div className="indicator-filter-bar lawyer-overview-filter-bar">{filterControls}<button className="soft lawyer-filter-clear" disabled={!activeFilters} onClick={()=>setFilters({})}><RotateCcw/>Reset</button></div></LegalScrollControls>
-      {filterDrawer&&<><button className="indicator-filter-drawer-backdrop" aria-label="Close filters" onClick={()=>setFilterDrawer(false)}/><aside className="indicator-filter-drawer glass"><header><div><span>LAWYER OVERVIEW FILTERS</span><h2>Filter Lawyer Overview</h2></div><button className="icon" onClick={()=>setFilterDrawer(false)} aria-label="Close filters"><X/></button></header><div className="indicator-filter-drawer-controls">{filterControls}</div><footer><button className="soft" disabled={!activeFilters} onClick={()=>setFilters({})}>Reset all</button></footer></aside></>}
+      <LegalScrollControls onFilters={()=>setFilterDrawer(true)} activeCount={activeFilters} onClear={()=>setFilters({})} compactFilters={null}><div className="indicator-filter-bar lawyer-overview-filter-bar">{filterControls}<button className="soft case-filter-button" onClick={()=>setFilterDrawer(true)}><SlidersHorizontal/>Filters {activeFilters>0&&<b>{activeFilters}</b>}</button><button className="soft lawyer-filter-clear" disabled={!activeFilters} onClick={()=>setFilters({})}><RotateCcw/>Reset</button></div></LegalScrollControls>
+      {filterDrawer&&<SharedFilterDrawer title="Filter Lawyer Overview" eyebrow="LAWYER OVERVIEW FILTERS" onClose={()=>setFilterDrawer(false)} onReset={()=>setFilters({})} resetDisabled={!activeFilters}
+        fields={(["project","location","lawyer","createdBy","assessmentMonth"] as const).map(key=>({key,label:key==="createdBy"?"Original created by":key==="location"?"Project location":key==="assessmentMonth"?"Assessment date":key,values:filterOptionValues(key),selected:filters[key]||[],onChange:(items:string[])=>setFilters({...filters,[key]:items})}))}/>}
       <section className="intelligence-kpis">{data.kpis.map((item)=><article className="glass" key={item.label}><span>{item.label}</span><strong>{format(item)}</strong><small>{item.label==="Awareness participants"?"Reported separately from case beneficiaries":"Distinct source records"}</small></article>)}</section>
       <section className="glass intelligence-panel intelligence-operational-mix lawyer-section"><header><div><span className="eyebrow">SERVICE DELIVERY PROFILE</span><h3>Service delivery profile</h3></div><small>Leading distribution categories in the current selection</small></header><div className="operational-mix-grid">{data.breakdowns.map((group)=>{const total=Math.max(group.total,1);return <article key={group.title}><strong>{group.title}</strong>{group.items.slice(0,5).map((item)=><div key={item.label}><span title={item.label}>{item.label}</span><b><em>{item.value.toLocaleString()}</em><small>{((item.value/total)*100).toFixed(1)}%</small></b></div>)}</article>})}</div></section>
       <Lawyers data={data.lawyerSummary} workload={data.lawyers} showAwareness={data.kpis.some((item)=>item.label==="Awareness participants")} filters={filters}/>

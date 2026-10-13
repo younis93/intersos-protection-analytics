@@ -1,11 +1,11 @@
+import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {ChartFrame,plotConfig,chartInk as ink,chartGrid as grid} from './ChartPrimitives';
-import {FilterSection,FilterDrawerShell} from './FilterDrawerShell';
 import {ValueTable} from "./ValueTable";
 import {useEffect,useMemo,useState} from 'react';
 import Plot from './LazyPlot';
 import {ChevronDown,LayoutDashboard,RotateCcw,Search,SlidersHorizontal,Table2,X} from 'lucide-react';
 import {getStudio,getLegalExplorerFilters} from './api';
-import {AppSelect, FilterValueList} from './SelectionControls';
+import {AppSelect} from './SelectionControls';
 import {ExportButtons} from './ChartComponents';
 import {formatNumber, formatPercent} from './formatting';
 import {transformStudioResult,type StudioView} from './studioChart';
@@ -74,7 +74,8 @@ export default function Studio({metadata,theme,sourceOptions,studioLoader,exclud
     </div>
     {error&&<div className="error glass">{error}</div>}
     <article className="studio-canvas glass"><div className="card-title"><div><h3>{label(row)}{column?` by ${label(column)}`:''}</h3><p>{result?`${formatNumber(result.total)} filtered ${measure==='beneficiaries'?'beneficiaries':'records'} · 2026 YTD`:''}</p></div><div className="chart-actions">{chartType!=='table'&&<ExportButtons graph={graph} title={`${label(row)}${column?` by ${label(column)}`:''}`}/>}<span className="studio-badge"><Table2/>{chartType==='table'?'Pivot':'Interactive chart'}</span></div></div>{busy&&!result?<div className="loading"><div/><span>Building analysis…</span></div>:chartType==='table'?<StudioTable view={view}/>:chart&&<ChartFrame className="studio-plot"><Plot key={`${source}-${row}-${column}-${chartType}-${theme}`} useResizeHandler onInitialized={(_,graphDiv)=>setGraph(graphDiv)} data={chart.data as any} layout={chart.layout as any} config={plotConfig} style={{width:'100%',height:'100%'}}/></ChartFrame>}</article>
-    {drawer&&<><FilterDrawerShell className="case-filter-drawer analytics-filter-drawer" header={<header><div><span className="eyebrow">ANALYTICS STUDIO FILTERS</span><h2>Filter Custom Builder</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header>} footer={<footer><button className="soft" disabled={!activeCount} onClick={()=>setFilters({})}>Reset all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {activeCount>0&&`(${activeCount})`}</button></footer>} backdrop={<button className="filter-backdrop" aria-label="Close Custom Builder filters" onClick={()=>setDrawer(false)}/>}><label className="filter-search"><Search/><input value={filterSearch} onChange={(event)=>setFilterSearch(event.target.value)} placeholder="Search filters"/></label><div className="case-filter-scroll">{Object.entries(availableFilters).filter(([field])=>field.toLowerCase().includes(filterSearch.toLowerCase())).map(([field,values])=><FilterSection key={field} open={Boolean(filters[field]?.length)} label={<>{label(field)}</>} badge={<>{filters[field]?.length>0&&<b>{filters[field].length}</b>}</>}><div>{<FilterValueList field={field} values={values} formatCaption={value=>filterValueLabel(field,value)} selected={filters[field]||[]} onChange={items=>setFilters(current=>({...current,[field]:items}))}/>}</div></FilterSection>)}</div></FilterDrawerShell></>}
+    {drawer&&<SharedFilterDrawer title="Filter Custom Builder" eyebrow="ANALYTICS STUDIO FILTERS" onClose={()=>setDrawer(false)} onReset={()=>setFilters({})} resetDisabled={!activeCount} search={filterSearch} onSearchChange={setFilterSearch}
+      fields={Object.entries(availableFilters).map(([field,values])=>({key:field,label:label(field),values,selected:filters[field]||[],formatCaption:(value:string)=>filterValueLabel(field,value),onChange:(items:string[])=>setFilters(current=>({...current,[field]:items}))}))}/>}
   </>;
 }
 

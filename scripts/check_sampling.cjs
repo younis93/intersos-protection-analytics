@@ -47,15 +47,15 @@ const root=path.resolve(__dirname,'..'),fixture=path.join(root,'frontend/src/sam
   assert.deepEqual(requests.at(-1).filters,{'Projects - المشروع':['P2'],'Date Service Completed':['2026-02']});
   await page.getByRole('button',{name:/All filters/}).first().click();
   await page.getByRole('textbox',{name:'Search Sampling filters'}).fill('Location');
-  const location=page.locator('.analytics-filter-drawer details').filter({has:page.locator('summary',{hasText:'Project Location'})});
+  const location=page.locator('.shared-filter-drawer details').filter({has:page.locator('summary',{hasText:'Project Location'})});
   await location.locator('summary').click();await location.getByRole('checkbox',{name:'L2',exact:true}).check();await ready();
-  await page.getByRole('button',{name:/Apply filters/}).click();
+  await page.getByRole('button',{name:'Done',exact:true}).click();
   assert.deepEqual(requests.at(-1).filters['Project Location'],['L2']);
   await page.getByRole('textbox',{name:'Search Sampling',exact:true}).fill('no matching person');
   await page.waitForTimeout(400);await ready();assert.equal(await page.locator('.sampling-section .indicator-total-block strong').textContent(),'0');
   await page.getByRole('button',{name:/All filters/}).first().click();await page.getByRole('textbox',{name:'Search Sampling filters'}).fill('');
   await page.getByRole('button',{name:'Remove unavailable P2',exact:true}).waitFor();
-  await page.getByRole('button',{name:/Apply filters/}).click();
+  await page.getByRole('button',{name:'Done',exact:true}).click();
   await page.getByRole('button',{name:'Reset',exact:true}).first().click();await ready();
   assert.equal(await page.getByRole('textbox',{name:'Search Sampling',exact:true}).inputValue(),'');
   assert.equal(await page.getByRole('checkbox',{name:'Remove duplicate Beneficiary IDs',exact:true}).isChecked(),false);
@@ -76,6 +76,6 @@ const root=path.resolve(__dirname,'..'),fixture=path.join(root,'frontend/src/sam
   await page.getByText('Sampling is unavailable. Missing source fields: primary Contact Number.',{exact:true}).waitFor();
   unavailable=false;fail=true;await page.getByRole('textbox',{name:'Search Sampling',exact:true}).fill('retry import');await page.waitForTimeout(400);await ready();
   await page.getByRole('button',{name:'Retry',exact:true}).click();await ready();
-  assert.equal(await page.getByRole('alert').count(),0);
+  await page.getByRole('alert').waitFor({state:'hidden'});
   assert.deepEqual(errors,[]);console.log(JSON.stringify({requests:requests.length,tabState:true,revisionReset:true,searchFiltersReset:true,export:true,unavailableAndRetry:true,themes:screens,pageErrors:errors}));
 }finally{await browser?.close();for(const file of [fixture,html])fs.rmSync(file,{force:true});}})().catch(error=>{console.error(error);process.exit(1)});

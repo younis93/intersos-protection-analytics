@@ -1,3 +1,4 @@
+import {SharedFilterDrawer} from './SharedFilterDrawer';
 
 import {
 RotateCcw,
@@ -6,14 +7,13 @@ SlidersHorizontal,
 X
 } from "lucide-react";
 import { useEffect,useRef,useState } from "react";
-import { getLegalOverview,getLegalOverviewFilters } from "./api";
+import { getLegalOverview } from "./api";
 import { ChartCard,TrendCard } from './ChartComponents';
 import { formatYearMonthFilterValue } from "./dateFormat";
-import { FilterDrawerShell,FilterSection } from './FilterDrawerShell';
 import { filterValue,isExcludedValue } from "./filterSelection";
 import { IraqDetentionMapMetrics } from './LegalMapMetrics';
 import { LegalScrollControls } from './LegalScrollControls';
-import { CheckboxMultiSelect,FilterValueList } from './SelectionControls';
+import { CheckboxMultiSelect } from './SelectionControls';
 import type { LegalMetadata,LegalOverviewResult,OverviewFilters,Theme } from "./types";
 import { ValueTable } from "./ValueTable";
 
@@ -27,12 +27,9 @@ export function Overview({
   const emptyFilters = ():OverviewFilters => ({projects:[],locations:[],months:[],filters:{}});
   const [selection,setSelection]=useState<OverviewFilters>(emptyFilters);
   const latestSelection=useRef(selection);latestSelection.current=selection;
-  const [draft,setDraft]=useState<OverviewFilters>(emptyFilters);
-  const latestDraft=useRef(draft);latestDraft.current=draft;
   const [result,setResult]=useState<LegalOverviewResult|null>(null);
   const [drawer,setDrawer]=useState(false),[filterSearch,setFilterSearch]=useState("");
   const [loading,setLoading]=useState(false),[error,setError]=useState("");
-  const [draftOptions,setDraftOptions]=useState<LegalOverviewResult["filterOptions"]|null>(null);
   useEffect(()=>{
     const controller=new AbortController();
     const current=()=>!controller.signal.aborted&&latestSelection.current===selection;
@@ -45,15 +42,6 @@ export function Overview({
     if(!active)void load();
     return()=>{window.clearTimeout(timer);controller.abort()};
   },[selection,metadata.revision]);
-  useEffect(()=>{
-    if(!drawer)return;
-    const controller=new AbortController();
-    const current=()=>!controller.signal.aborted&&latestDraft.current===draft;
-    const timer=window.setTimeout(()=>getLegalOverviewFilters(draft,controller.signal).then(next=>{
-      if(current())setDraftOptions(next.filterOptions);
-    }).catch(reason=>{if(current()&&reason.name!=="AbortError")setError(reason.message)}),120);
-    return()=>{window.clearTimeout(timer);controller.abort()};
-  },[drawer,draft,metadata.revision]);
   const activeFilters={...selection.filters,Project:selection.projects,"Project location":selection.locations,Date:selection.months};
   const filterLabel=(field:string)=>{
     const group=result?.filterOptions.groups.find(group=>group.columns.some(option=>option.key===field));
@@ -62,8 +50,8 @@ export function Overview({
   };
   const removeFilter=(field:string,item:string)=>setSelection(current=>field==="Project"?{...current,projects:current.projects.filter(value=>value!==item)}:field==="Project location"?{...current,locations:current.locations.filter(value=>value!==item)}:field==="Date"?{...current,months:current.months.filter(value=>value!==item)}:{...current,filters:{...current.filters,[field]:(current.filters[field]||[]).filter(value=>value!==item)}});
   const activeCount=Object.values(activeFilters).reduce((sum,items)=>sum+items.length,0);
-  const reset=()=>{setSelection(emptyFilters());setDraft(emptyFilters())};
-  const openDrawer=()=>{setDraft(selection);setDraftOptions(result?.filterOptions||null);setDrawer(true)};
+  const reset=()=>setSelection(emptyFilters());
+  const openDrawer=()=>setDrawer(true);
   const quickFilters=(hideLabel=false)=> ([ ["projects","Project"],["locations","Project location"],["months","Date"] ] as const).map(([key,label])=><CheckboxMultiSelect key={key} label={label} hideLabel={hideLabel} values={result?.filterOptions[key]||[]} selected={selection[key]} onChange={items=>setSelection(current=>({...current,[key]:items}))}/>);
   const o = result?.overview || metadata.overview;
   const primary = [
@@ -87,7 +75,8 @@ export function Overview({
       </LegalScrollControls>
       {activeCount>0&&<div className="active-filters">{Object.entries(activeFilters).flatMap(([field,items])=>items.map(item=><button key={`${field}-${item}`} onClick={()=>removeFilter(field,item)}><span>{filterLabel(field)}: {isExcludedValue(item)?"Excluding ":""}{formatYearMonthFilterValue(field,filterValue(item))}</span><X/></button>))}</div>}
       {error&&<div className="error glass" role="alert">{error}</div>}
-      {drawer&&<><FilterDrawerShell className="case-filter-drawer" header={<header><div><span className="eyebrow">OVERVIEW FILTERS</span><h2>Filter overview</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header>} footer={<footer><button className="soft filter-reset-button" onClick={reset} disabled={!activeCount&&!Object.values(draft.filters).some(items=>items.length)}><RotateCcw/>Reset</button><button className="primary" onClick={()=>{setSelection(draft);setDrawer(false)}}>Apply filters</button></footer>} backdrop={<button className="filter-backdrop" aria-label="Close overview filters" onClick={()=>setDrawer(false)}/>}><label className="filter-search"><Search/><input value={filterSearch} onChange={event=>setFilterSearch(event.target.value)} placeholder="Search filters"/></label><div className="case-filter-scroll">{(draftOptions?.groups||[]).flatMap(group=>group.columns.map(option=>({...option,label:`${group.label} · ${option.name}`}))).filter(option=>option.label.toLowerCase().includes(filterSearch.toLowerCase())).map(option=><FilterSection key={option.key} open={Boolean(draft.filters[option.key]?.length)} label={<>{option.label}</>} badge={<>{draft.filters[option.key]?.length>0&&<b>{draft.filters[option.key].length}</b>}</>}><div><FilterValueList values={option.values} formatCaption={item=>formatYearMonthFilterValue(option.label,item)} selected={draft.filters[option.key]||[]} onChange={items=>setDraft(current=>({...current,filters:{...current.filters,[option.key]:items}}))}/></div></FilterSection>)}</div></FilterDrawerShell></>}
+      {drawer&&<SharedFilterDrawer title="Filter overview" eyebrow="OVERVIEW FILTERS" onClose={()=>setDrawer(false)} onReset={reset} resetDisabled={!activeCount} search={filterSearch} onSearchChange={setFilterSearch}
+        fields={(result?.filterOptions.groups||[]).flatMap(group=>group.columns.map(option=>({key:option.key,label:`${group.label} · ${option.name}`,values:option.values,selected:selection.filters[option.key]||[],formatCaption:(item:string)=>formatYearMonthFilterValue(option.name,item),onChange:(items:string[])=>setSelection(current=>({...current,filters:{...current.filters,[option.key]:items}}))})))}/> }
       <div className={`overview-results${loading?" refreshing":""}`} aria-busy={loading}>
       <section className="overview-primary-kpis">
         {primary.map(([label, count, detail], index) => (

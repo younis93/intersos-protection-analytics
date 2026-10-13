@@ -1,7 +1,7 @@
 from __future__ import annotations
 from .linked_filters import available_values, without_field, search_mask
 
-from .filter_selection import selection_mask, selection_value, split_selection, selection_caption
+from .filter_selection import selection_mask, selection_value, split_selection, selection_caption, matches_selection
 
 import io
 import re
@@ -43,6 +43,18 @@ def cancellable_import(function):
         finally:
             _active_import.reset(token)
     return run
+
+def _filter_review_selections(rows, dataset, filters, omit="", month_value=None):
+    selections={key:items for key,items in (filters or {}).items() if key in {"severity","lawyer","project","location","date"} and key!=omit and items}
+    if not selections: return rows
+    date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate"}.get(dataset,"")
+    @lru_cache(maxsize=256)
+    def month(value):
+        parsed=pd.to_datetime(value,errors="coerce",dayfirst=True,format="mixed")
+        return "" if pd.isna(parsed) else parsed.strftime("%Y-%m")
+    month_value=month_value or month
+    return [row for row in rows if all(matches_selection(month_value(row.get(date_field,"")) if key=="date" else str(row.get(key,"") or ""),items) for key,items in selections.items())]
+
 
 def _normalized_project(value):
     return re.sub(r"\s+", " ", "" if pd.isna(value) else str(value)).strip().casefold()
@@ -1960,6 +1972,8 @@ class LegalStore:
             if dataset=="legalhotlines":
                 from .hotline_review import filter_review_findings
                 filtered=filter_review_findings(self.frames[dataset],filtered,filters,hotline_scope)
+            else:
+                filtered=_filter_review_selections(filtered,dataset,filters,omit,row_month)
             return filtered
         date_field={"beneficiaries":"identificationDate","assessments":"assessmentDate","legalservices":"serviceDate","awareness":"awarenessDate","legalhotlines":"contactDate"}.get(dataset,"")
         linked_options={key:sorted({(row_month(item.get(date_field,"")) if key=="date" else str(item.get(key,""))) for item in apply_runtime_filters(context["rows"],key) if (row_month(item.get(date_field,"")) if key=="date" else item.get(key))}) for key in ("severity","lawyer","project","location","date")}
@@ -2008,6 +2022,8 @@ class LegalStore:
         if dataset=="legalhotlines":
             from .hotline_review import filter_review_findings
             flags=filter_review_findings(self.frames[dataset],flags,filters)
+        else:
+            flags=_filter_review_selections(flags,dataset,filters)
         ignored_duplicate_rules={"Duplicate service","Duplicate service without Assessment ID"} if ignore_court_verdict else (ignore_court_verdict_rules or set())
         if ignored_duplicate_rules and dataset=="legalservices":
             flags=[row for row in flags if not (row.get("rule") in ignored_duplicate_rules and re.search(r"court verdict|\bother\b|اخرى",str(row.get("typeOfDocument", "")),flags=re.I))]

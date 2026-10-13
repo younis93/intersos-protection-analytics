@@ -26,6 +26,7 @@ legalReviewExportUrl,
 restoreDuplicateExclusion
 } from "./api";
 import { formatProjectLabel } from './formatting';
+import { checkedFilterValues } from './filterSelection';
 import { labels,LegalPage } from './legalPageMetadata';
 import { LegalScrollControls } from './LegalScrollControls';
 import { LegalSkeleton } from './LegalSkeleton';
@@ -235,7 +236,7 @@ export function FindingTable({
   const selectedRows = visibleRows.filter((row, index) => isExcludable(row) && selectedRowKeys.includes(rowKey(row, index)));
   useEffect(() => {
     setSelectedRowKeys([]);
-  }, [dataset, rule, search, page, filters, comparisonMonth, nameCompareChars, allowNameVariations, exactMatchesOnly, findingRevision, ignoreCourtVerdict]);
+  }, [dataset, rule, search, page, filters, fieldFilters, comparisonMonth, nameCompareChars, allowNameVariations, exactMatchesOnly, findingRevision, ignoreCourtVerdict]);
   const hotlineSourceColumns = dataset === "legalhotlines" ? Object.keys(result?.rows[0]?.sourceFields || {}) : [];
   const tableHeaders = reviewTableCells(<>
     <th className="review-selection-column"><RowSelectionCheckbox label={`Select visible records for ${displayReviewRule(rule)}`} total={excludableRows.length} selectedCount={selectedRows.length} disabled={!excludableRows.length} onChange={checked=>setSelectedRowKeys(checked?visibleRows.map((row,index)=>isExcludable(row)?rowKey(row,index):'').filter(Boolean):[])}/></th>
@@ -510,7 +511,8 @@ export function ReviewPageBody({
       });
     return () => controller.abort();
   }, [dataset, debouncedSearch, filters, fieldFilters, comparisonMonth, appliedNameCompareChars, allowNameVariations, findingRevisions]);
-  const amalProjectOnly = dataset === "assessments" && ((filters.project && /\bamal\b/i.test(filters.project)) || (!filters.project && Boolean(summary?.filterOptions.project?.length) && summary!.filterOptions.project.every((project) => /\bamal\b/i.test(project)))),
+  const reviewProjects=filters.project?[filters.project]:fieldFilters.project?.length?checkedFilterValues(fieldFilters.project,summary?.filterOptions.project||[]):summary?.filterOptions.project||[];
+  const amalProjectOnly = dataset === "assessments" && reviewProjects.length>0 && reviewProjects.every(project=>/\bamal\b/i.test(project)),
     rules = Object.entries(summary?.ruleCounts || {}).map(([rule, count]) => [rule, count] as const).filter(([rule]) => !amalProjectOnly || !AMAL_HIDDEN_ASSESSMENT_RULES.has(rule)),
     baseOrderedRules = dataset === "assessments" ? [...rules.filter(([rule]) => !ASSESSMENT_REVIEW_TAIL_RULES.has(rule)), ...rules.filter(([rule]) => ASSESSMENT_REVIEW_TAIL_RULES.has(rule))] : dataset === "legalservices" ? [...LEGAL_SERVICES_REVIEW_FIRST_RULES.map((rule) => rules.find(([name]) => name === rule)).filter((item): item is typeof rules[number] => Boolean(item)), ...rules.filter(([rule]) => !LEGAL_SERVICES_REVIEW_FIRST_RULES.includes(rule))] : rules,
     orderedRules = [...baseOrderedRules.filter(([rule]) => defaultRules.includes(rule)), ...baseOrderedRules.filter(([rule]) => !defaultRules.includes(rule))],
@@ -543,6 +545,7 @@ export function ReviewPageBody({
       setRestoreConfirmation(null);
     } finally { setExclusionBusy(false); }
   };
+  const excelAction=<ExcelDownloadButton disabled={selectedRules.length === 0} onClick={()=>downloadExcelUrl(legalReviewExportUrl(dataset, comparisonMonth, appliedNameCompareChars, allowNameVariations, exactMatchesOnly, selectedRules, filters, debouncedSearch, Object.entries(ignoreCourtVerdictByRule).filter(([,ignored])=>ignored).map(([rule])=>rule),fieldFilters),`${dataset}-review-findings.xlsx`)}/>;
   const toggleRule = (rule: string) =>
     setSelectedRules((current) =>
       current.includes(rule)
@@ -636,7 +639,7 @@ export function ReviewPageBody({
           ))}
         </div>
       </div>
-      <LegalScrollControls search={search} onSearch={setSearch} searchPlaceholder="Search records" onFilters={()=>setDrawer(true)} activeCount={activeFilters} onClear={()=>{setFilters({});setFieldFilters({});}}>
+      <LegalScrollControls compactActions={excelAction} search={search} onSearch={setSearch} searchPlaceholder="Search records" onFilters={()=>setDrawer(true)} activeCount={activeFilters} onClear={()=>{setFilters({});setFieldFilters({});}}>
       <div className="legal-toolbar review-toolbar professional-review-toolbar">
         <label>
           <Search />
@@ -654,7 +657,8 @@ export function ReviewPageBody({
           <SlidersHorizontal />
           Filters{activeFilters > 0 && <b>{activeFilters}</b>}
         </button>
-        <ExcelDownloadButton disabled={selectedRules.length === 0} onClick={()=>downloadExcelUrl(legalReviewExportUrl(dataset, comparisonMonth, appliedNameCompareChars, allowNameVariations, exactMatchesOnly, selectedRules, filters, debouncedSearch, Object.entries(ignoreCourtVerdictByRule).filter(([,ignored])=>ignored).map(([rule])=>rule),fieldFilters),`${dataset}-review-findings.xlsx`)}/>
+        {excelAction}
+
       </div>
       </LegalScrollControls>
       {selectedRules.length === 0 ? (

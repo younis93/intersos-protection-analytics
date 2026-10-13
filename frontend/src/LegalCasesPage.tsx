@@ -1,3 +1,4 @@
+import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {
 ArrowRight,
 Download,
@@ -15,13 +16,11 @@ getLegalCase,
 getLegalCaseFilters
 } from "./api";
 import { formatYearMonthFilterValue } from "./dateFormat";
-import { FilterDrawerShell,FilterSection } from './FilterDrawerShell';
 import { CaseTree,getField } from './LegalCaseTree';
 import { legalLoadScheduler } from "./legalLoadScheduler";
 import { value } from './LegalRecordCells';
 import { LegalScrollControls } from './LegalScrollControls';
 import { LegalSkeleton } from './LegalSkeleton';
-import { FilterValueList } from './SelectionControls';
 import { Pager,RowSelectionCheckbox,SortableHeader } from './TableControls';
 import { TableSelectionActions } from './TableSelectionActions';
 import type { LegalMetadata } from "./types";
@@ -88,34 +87,40 @@ export function Cases({
   useEffect(()=>subscribeCasesExportTask(setExportTask),[]);
   useEffect(()=>{if(exportTask.error)setError(exportTask.error)},[exportTask.error]);
   const liveSearchReady = useRef(false);
+  const previousFilters=useRef(filters);
+  const queryTimer=useRef<number|undefined>(undefined);
+  const latestScope=useRef({query,filters});latestScope.current={query,filters};
   const caseRequest = useRef(0);
   const run = (term=query,nextFilters=filters,nextView=viewMode,nextPage=tablePage,nextSort=sortColumn,nextDirection=sortDirection) => {
+    window.clearTimeout(queryTimer.current);
     setBusy(true);
     setError("");
     const request = ++caseRequest.current;
+    const current=()=>request===caseRequest.current&&term===latestScope.current.query&&nextFilters===latestScope.current.filters;
     getLegalCase(term,nextFilters,{viewMode:nextView,page:nextPage,pageSize:100,sortColumn:nextSort,sortDirection:nextDirection,columns:selectedColumns})
-      .then((next) => {if(request!==caseRequest.current)return;setData(next);if(nextView==="table"&&!selectedColumns.length)setSelectedColumns(next.columns.map((column) => column.key))})
-      .catch((reason) => {if(request===caseRequest.current)setError(reason.message || "Unable to load beneficiary cases.")})
-      .finally(() => {if(request===caseRequest.current)setBusy(false)});
+      .then((next) => {if(!current())return;setData(next);if(nextView==="table"&&!selectedColumns.length)setSelectedColumns(next.columns.map((column) => column.key))})
+      .catch((reason) => {if(current())setError(reason.message || "Unable to load beneficiary cases.")})
+      .finally(() => {if(current())setBusy(false)});
   };
   useEffect(() => {
-    run(initialQuery, {});
-    let active = true;
-
+    run(initialQuery, filters);
     onQueryUsed();
-    return () => {active = false; caseRequest.current++};
+    return () => {window.clearTimeout(queryTimer.current);caseRequest.current++};
   }, []);
   useEffect(() => {
+    const filterChanged=previousFilters.current!==filters;previousFilters.current=filters;
     if (!liveSearchReady.current) {
       liveSearchReady.current = true;
       return;
     }
-    const timer = window.setTimeout(() => {
+    caseRequest.current++;
+    setBusy(true);
+    queryTimer.current = window.setTimeout(() => {
       setTablePage(1);
       run(query, filters, viewMode, 1);
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [query]);
+    }, filterChanged?120:300);
+    return () => window.clearTimeout(queryTimer.current);
+  }, [query,filters]);
   useEffect(()=>{
     const controller=new AbortController();
     const timer=window.setTimeout(()=>getLegalCaseFilters(controller.signal,filters,query).then(next=>{if(!controller.signal.aborted)setFilterOptions(next.groups)}).catch(reason=>{if(!controller.signal.aborted)setError(reason.message)}),200);
@@ -124,9 +129,7 @@ export function Cases({
   const activeCount = Object.values(filters).reduce((sum,items)=>sum+items.length,0);
   const clear = () => {
     setFilters({});
-    setDrawer(false);
     setTablePage(1);
-    run(query,{},viewMode,1);
   };
   return (
     <>
@@ -217,61 +220,8 @@ export function Cases({
           onSort={(column) => {const direction=sortColumn===column&&sortDirection==="asc"?"desc":"asc";setSortColumn(column);setSortDirection(direction);setTablePage(1);run(query,filters,"table",1,column,direction)}}
         />{busy && data && <div className="compact-table-skeleton" aria-label="Refreshing table"><i/><i/><i/></div>}</div>
       )}{" "}
-      {drawer && (
-        <>
-
-          <FilterDrawerShell className="case-filter-drawer" header={<header>
-              <div>
-                <span className="eyebrow">CASE FILTERS</span>
-                <h2>Filter beneficiary cases</h2>
-              </div>
-              <button onClick={() => setDrawer(false)}>
-                <X />
-              </button>
-            </header>} footer={<footer>
-              <button className="soft" onClick={clear} disabled={!activeCount}>
-                Reset all
-              </button>
-              <button
-                className="primary"
-                onClick={() => {
-                  setDrawer(false);
-                  setTablePage(1);run(query,filters,viewMode,1);
-                }}
-              >
-                Apply filters {activeCount > 0 && `(${activeCount})`}
-              </button>
-            </footer>} backdrop={<button
-            className="filter-backdrop"
-            aria-label="Close filters"
-            onClick={() => setDrawer(false)}
-          />}>
-
-            <label className="filter-search">
-              <Search />
-              <input
-                value={filterSearch}
-                onChange={(e) => setFilterSearch(e.target.value)}
-                placeholder="Search filters"
-              />
-            </label>
-            <div className="case-filter-scroll">
-              {filterOptions.flatMap((group) => group.columns.map((option) => ({...option,label: `${group.label} · ${option.name}`}))).filter((option) => option.label.toLowerCase().includes(filterSearch.toLowerCase())).map((option) => (
-                  <FilterSection key={option.key}
-                    open={Boolean(filters[option.key]?.length)} label={<>{option.label}</>} badge={<>{filters[option.key]?.length > 0 && (
-                        <b>{filters[option.key].length}</b>
-                      )}</>}>
-
-                    <div>
-                      <FilterValueList values={option.values} formatCaption={item=>formatYearMonthFilterValue(option.label,item)} selected={filters[option.key]||[]} onChange={items=>{setFilters(current=>({...current,[option.key]:items}));setTablePage(1)}}/>
-                    </div>
-                  </FilterSection>
-                ))}
-            </div>
-
-          </FilterDrawerShell>
-        </>
-      )}
+      {drawer&&<SharedFilterDrawer title="Filter beneficiary cases" eyebrow="CASE FILTERS" onClose={()=>setDrawer(false)} onReset={clear} resetDisabled={!activeCount} search={filterSearch} onSearchChange={setFilterSearch}
+        fields={filterOptions.flatMap(group=>group.columns.map(option=>({key:option.key,label:`${group.label} · ${option.name}`,values:option.values,selected:filters[option.key]||[],formatCaption:(item:string)=>formatYearMonthFilterValue(option.name,item),onChange:(items:string[])=>setFilters(current=>({...current,[option.key]:items}))})))}/>}
     </>
   );
 }

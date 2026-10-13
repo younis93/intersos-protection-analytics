@@ -1,3 +1,4 @@
+import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {
 ArrowRight,
 Download,
@@ -13,12 +14,11 @@ getLegalExplorer,
 getLegalExplorerFilters
 } from "./api";
 import { formatYearMonthFilterValue } from "./dateFormat";
-import { FilterDrawerShell,FilterSection } from './FilterDrawerShell';
 import { hasLegalCore } from './legalAvailability';
 import { renderCell,value } from './LegalRecordCells';
 import { LegalScrollControls } from './LegalScrollControls';
 import { LegalSkeleton } from './LegalSkeleton';
-import { AppSelect,FilterValueList } from './SelectionControls';
+import { AppSelect } from './SelectionControls';
 import { Pager,SortableHeader } from './TableControls';
 import { TableSelectionActions } from './TableSelectionActions';
 import type { LegalExplorerResult,LegalMetadata } from "./types";
@@ -187,69 +187,8 @@ export function Explorer({
           </ValueTable>
         </div>
       </div>}
-      {drawer && (
-        <>
-
-          <FilterDrawerShell className="case-filter-drawer" header={<header>
-              <div>
-                <span className="eyebrow">DATA FILTERS</span>
-                <h2>
-                  Filter {metadata.sheets.find((s) => s.id === dataset)?.name}
-                </h2>
-              </div>
-              <button onClick={() => setDrawer(false)}>
-                <X />
-              </button>
-            </header>} footer={<footer>
-              <button
-                className="soft"
-                onClick={() => {
-                  setFilters({});
-                  setPage(1);
-                }}
-                disabled={!activeCount}
-              >
-                Reset all
-              </button>
-              <button className="primary" onClick={() => setDrawer(false)}>
-                Apply filters {activeCount > 0 && `(${activeCount})`}
-              </button>
-            </footer>} backdrop={<button
-            className="filter-backdrop"
-            aria-label="Close filters"
-            onClick={() => setDrawer(false)}
-          />}>
-
-            <label className="filter-search">
-              <Search />
-              <input
-                value={filterSearch}
-                onChange={(e) => setFilterSearch(e.target.value)}
-                placeholder="Search filters"
-              />
-            </label>
-            <div className="case-filter-scroll">
-              {options
-                .filter((x) =>
-                  x.name.toLowerCase().includes(filterSearch.toLowerCase()),
-                )
-                .map((option) => (
-                  <FilterSection key={option.name}
-                    open={Boolean(filters[option.name]?.length)} label={<>{option.name}</>} badge={<>{filters[option.name]?.length > 0 && (
-                        <b>{filters[option.name].length}</b>
-                      )}</>}>
-
-                    <div>
-                      {<FilterValueList values={option.values} formatCaption={item=>formatYearMonthFilterValue(option.name,item)} selected={filters[option.name]||[]} onChange={items=>{setFilters(current=>({...current,[option.name]:items}));setPage(1)}}/>}
-                      {option.truncated && <small className="filter-value-limit">Showing {option.values.length} of {option.valueCount?.toLocaleString()} values. Use Search data to find a specific record.</small>}
-                    </div>
-                  </FilterSection>
-                ))}
-            </div>
-
-          </FilterDrawerShell>
-        </>
-      )}
+      {drawer&&<SharedFilterDrawer title={`Filter ${metadata.sheets.find(sheet=>sheet.id===dataset)?.name||dataset}`} eyebrow="DATA FILTERS" onClose={()=>setDrawer(false)} onReset={()=>{setFilters({});setPage(1)}} resetDisabled={!activeCount} search={filterSearch} onSearchChange={setFilterSearch}
+        fields={options.map(option=>({key:option.name,label:option.name,values:option.values,selected:filters[option.name]||[],formatCaption:(item:string)=>formatYearMonthFilterValue(option.name,item),onChange:(items:string[])=>{setFilters(current=>({...current,[option.name]:items}));setPage(1)},note:option.truncated?<small className="filter-value-limit">Showing {option.values.length} of {option.valueCount?.toLocaleString()} values. Use Search data to find a specific record.</small>:undefined}))}/>}
     </>
   );
 }

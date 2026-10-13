@@ -1,10 +1,10 @@
+import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {RotateCcw,Search,SlidersHorizontal,X} from 'lucide-react';
 import {useEffect,useState} from 'react';
 import {exportLegalSampling,getLegalSampling} from './api';
 import {formatTableValue,formatYearMonthFilterValue} from './dateFormat';
-import {FilterDrawerShell,FilterSection} from './FilterDrawerShell';
 import {LegalScrollControls} from './LegalScrollControls';
-import {CheckboxMultiSelect,ExcelDownloadButton,FilterValueList} from './SelectionControls';
+import {CheckboxMultiSelect,ExcelDownloadButton} from './SelectionControls';
 import {Pager,TableState} from './TableControls';
 import {useDebouncedValue} from './useDebouncedValue';
 import {ValueTable} from './ValueTable';
@@ -35,8 +35,8 @@ export default function LegalSampling({state,update}:{state:SamplingState;update
           label={/date/i.test(column)?'Date Service Completed month':/location/i.test(column)?'Project Location':'Project'} values={options[column]||[]}
           selected={state.filters[column]||[]} onChange={values=>setFilter(column,values)}/>)}</div>
         <div className="studio-quick-actions">
-          <button className="soft detention-filter-clear" disabled={!changed&&state.page===1} onClick={reset}><RotateCcw/>Reset</button>
           <button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>All filters {active>0&&<b>{active}</b>}</button>
+          <button className="soft detention-filter-clear" disabled={!changed&&state.page===1} onClick={reset}><RotateCcw/>Reset</button>
           <ExcelDownloadButton className="primary studio-excel" onClick={download} disabled={busy||search!==state.search||Boolean(error)||!data?.available}>Excel</ExcelDownloadButton>
         </div>
       </div>
@@ -61,15 +61,7 @@ export default function LegalSampling({state,update}:{state:SamplingState;update
         </ValueTable></div>
       </>}
     </div>
-    {drawer&&<FilterDrawerShell className="case-filter-drawer analytics-filter-drawer"
-      header={<header><div><span className="eyebrow">ANALYTICS STUDIO FILTERS</span><h2>Filter Sampling</h2></div><button onClick={()=>setDrawer(false)} aria-label="Close filters"><X/></button></header>}
-      footer={<footer><button className="soft" disabled={!changed} onClick={reset}>Reset all</button><button className="primary" onClick={()=>setDrawer(false)}>Apply filters {active>0&&`(${active})`}</button></footer>}
-      backdrop={<button className="filter-backdrop" aria-label="Close Sampling filters" onClick={()=>setDrawer(false)}/>}>
-      <label className="filter-search"><Search/><input aria-label="Search Sampling filters" placeholder="Search filters" value={filterSearch} onChange={event=>setFilterSearch(event.target.value)}/></label>
-      <div className="case-filter-scroll">{Object.entries(options).filter(([column])=>column.toLowerCase().includes(filterSearch.toLowerCase())).map(([column,values])=>
-        <FilterSection key={column} open={Boolean(state.filters[column]?.length)} label={column} badge={state.filters[column]?.length?<b>{state.filters[column].length}</b>:null}>
-          <FilterValueList field={column} values={values} selected={state.filters[column]||[]} formatCaption={item=>formatYearMonthFilterValue(column,item)} onChange={items=>setFilter(column,items)}/>
-        </FilterSection>)}</div>
-    </FilterDrawerShell>}
+    {drawer&&<SharedFilterDrawer title="Filter Sampling" eyebrow="ANALYTICS STUDIO FILTERS" onClose={()=>setDrawer(false)} onReset={reset} resetDisabled={!changed} search={filterSearch} onSearchChange={setFilterSearch} searchLabel="Search Sampling filters"
+      fields={Object.entries(options).map(([column,values])=>({key:column,label:column,values,selected:state.filters[column]||[],formatCaption:(item:string)=>formatYearMonthFilterValue(column,item),onChange:(items:string[])=>setFilter(column,items)}))}/>}
   </section>;
 }
