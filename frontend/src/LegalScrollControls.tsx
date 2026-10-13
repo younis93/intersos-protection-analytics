@@ -1,7 +1,6 @@
+import {AnimatedActionIcon} from './AnimatedActionIcon';
 import {
-RotateCcw,
-Search,
-SlidersHorizontal
+Search
 } from "lucide-react";
 import { useEffect,useRef,useState,type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -19,9 +18,9 @@ export function LegalScrollControls({children,search,onSearch,onSearchSubmit,onF
   const compact=<div className="legal-header-scroll-controls header-filter-actions">
     {onSearch&&<label className="legal-header-search"><Search/><input className="table-search-input" value={search||""} onChange={(event)=>onSearch(event.target.value)} onKeyDown={(event)=>{if(event.key==="Enter")onSearchSubmit?.()}} placeholder={searchPlaceholder}/></label>}
     {compactFilters}
-    <button className="soft case-filter-button" onClick={onFilters}><SlidersHorizontal/>{filterLabel} {activeCount>0&&<b>{activeCount}</b>}</button>
+    <button className="soft case-filter-button" onClick={onFilters}><AnimatedActionIcon type="filters" size={16}/>{filterLabel} {activeCount>0&&<b>{activeCount}</b>}</button>
     {compactActions}
-    <button className="soft" onClick={onClear} disabled={!activeCount}><RotateCcw/>Reset</button>
+    <button className="soft" onClick={onClear} disabled={!activeCount}><AnimatedActionIcon type="reset" size={16}/>Reset</button>
   </div>;
   return <><span ref={sentinel} className="legal-scroll-sentinel" aria-hidden="true"/><div className={pinned?"legal-scroll-source legal-scroll-source-pinned":"legal-scroll-source"}>{children}</div>{pinned&&target&&createPortal(compact,target)}</>;
 }

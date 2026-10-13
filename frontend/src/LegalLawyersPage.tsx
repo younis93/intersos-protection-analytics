@@ -1,3 +1,4 @@
+import {AnimatedActionIcon} from './AnimatedActionIcon';
 import {SharedFilterDrawer} from './SharedFilterDrawer';
 
 import {
@@ -5,8 +6,6 @@ CheckCircle2,
 Eye,
 EyeOff,
 FolderOpen,
-RotateCcw,
-SlidersHorizontal,
 X
 } from "lucide-react";
 import { useEffect,useMemo,useState } from "react";
@@ -46,7 +45,7 @@ export function IntelligencePage({page,filters,setFilters}:{page:IntelligencePag
   return <div className={`intelligence-page ${busy?"intelligence-busy":""}`}>
     {error&&<div className="error glass">{error}</div>}
     {data&&<>
-      <LegalScrollControls onFilters={()=>setFilterDrawer(true)} activeCount={activeFilters} onClear={()=>setFilters({})} compactFilters={null}><div className="indicator-filter-bar lawyer-overview-filter-bar">{filterControls}<button className="soft case-filter-button" onClick={()=>setFilterDrawer(true)}><SlidersHorizontal/>Filters {activeFilters>0&&<b>{activeFilters}</b>}</button><button className="soft lawyer-filter-clear" disabled={!activeFilters} onClick={()=>setFilters({})}><RotateCcw/>Reset</button></div></LegalScrollControls>
+      <LegalScrollControls onFilters={()=>setFilterDrawer(true)} activeCount={activeFilters} onClear={()=>setFilters({})} compactFilters={null}><div className="indicator-filter-bar lawyer-overview-filter-bar">{filterControls}<button className="soft case-filter-button" onClick={()=>setFilterDrawer(true)}><AnimatedActionIcon type="filters"/>Filters {activeFilters>0&&<b>{activeFilters}</b>}</button><button className="soft lawyer-filter-clear" disabled={!activeFilters} onClick={()=>setFilters({})}><AnimatedActionIcon type="reset"/>Reset</button></div></LegalScrollControls>
       {filterDrawer&&<SharedFilterDrawer title="Filter Lawyer Overview" eyebrow="LAWYER OVERVIEW FILTERS" onClose={()=>setFilterDrawer(false)} onReset={()=>setFilters({})} resetDisabled={!activeFilters}
         fields={(["project","location","lawyer","createdBy","assessmentMonth"] as const).map(key=>({key,label:key==="createdBy"?"Original created by":key==="location"?"Project location":key==="assessmentMonth"?"Assessment date":key,values:filterOptionValues(key),selected:filters[key]||[],onChange:(items:string[])=>setFilters({...filters,[key]:items})}))}/>}
       <section className="intelligence-kpis">{data.kpis.map((item)=><article className="glass" key={item.label}><span>{item.label}</span><strong>{format(item)}</strong><small>{item.label==="Awareness participants"?"Reported separately from case beneficiaries":"Distinct source records"}</small></article>)}</section>

@@ -14,5 +14,4 @@ export {ChartCard} from './ChartComponents';
 export {TrendCard} from './ChartComponents';
 export {ExportButtons} from './ChartComponents';
 export {FilterDrawer} from './FilterControls';
-export {ActiveFilters} from './FilterControls';
 export {QualityTable} from './QualityTable';

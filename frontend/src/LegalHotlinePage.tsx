@@ -1,16 +1,14 @@
+import {AnimatedActionIcon} from './AnimatedActionIcon';
 import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {
 Megaphone,
-RotateCcw,
 Search,
-SlidersHorizontal,
 X
 } from "lucide-react";
 import { useEffect,useState } from "react";
 import { exportLegalExplorer,getLegalExplorer,getLegalHotlineDashboard } from "./api";
 import { ChartCard,TrendCard } from './ChartComponents';
 import { formatFilterMonth } from "./dateFormat";
-import { ActiveFilters } from './FilterControls';
 import { KpiCard } from './KpiCard';
 import { IraqDetentionMapMetrics } from './LegalMapMetrics';
 import { value } from './LegalRecordCells';
@@ -35,8 +33,7 @@ export function HotlineDashboard({metadata,theme}:{metadata:LegalMetadata;theme:
   if(!dash)return <LegalSkeleton variant="deportation"/>;
   const available=dash.filterOptions||{},quickFields=["Contact Date","Is the beneficiary detained","Has the beneficiary referred to the helpline?","Governorate of detention","Priority"];
   return <section className="hotline-dashboard dashboard-content" aria-busy={busy}>
-    <LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={clear}><div className="toolbar hotline-filter-bar">{quickFields.map(field=><CheckboxMultiSelect key={field} hideLabel label={field==="Contact Date"?"Contact Date (month)":field} values={available[field]||[]} selected={filters[field]||[]} onChange={items=>setFilters(current=>({...current,[field]:items}))}/>)}<button className="soft case-filter-button" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft filter-reset-button" onClick={clear} disabled={!activeCount}><RotateCcw/>Reset</button></div></LegalScrollControls>
-    <ActiveFilters filters={filters} onRemove={(field,label)=>setFilters(current=>({...current,[field]:current[field].filter(item=>item!==label)}))}/>
+    <LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={clear}><div className="toolbar hotline-filter-bar">{quickFields.map(field=><CheckboxMultiSelect key={field} hideLabel label={field==="Contact Date"?"Contact Date (month)":field} values={available[field]||[]} selected={filters[field]||[]} onChange={items=>setFilters(current=>({...current,[field]:items}))}/>)}<button className="soft case-filter-button" onClick={()=>setDrawer(true)}><AnimatedActionIcon type="filters"/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft filter-reset-button" onClick={clear} disabled={!activeCount}><AnimatedActionIcon type="reset"/>Reset</button></div></LegalScrollControls>
     {busy&&<TableState as="p">Updating hotline data...</TableState>}
     <div className="kpi-grid">{dash.kpis.map(item=><KpiCard key={item.label} {...item}/>)}</div>
     {dash.total===0&&<p className="glass legal-empty">No hotline records match these filters.</p>}

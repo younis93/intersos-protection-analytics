@@ -1,3 +1,4 @@
+import {AnimatedActionIcon} from './AnimatedActionIcon';
 
 import {
 AlertTriangle,
@@ -9,7 +10,6 @@ CircleHelp,
 Eraser,
 FileQuestion,
 Search,
-SlidersHorizontal,
 X
 } from "lucide-react";
 import { Children,Fragment,isValidElement,useEffect,useRef,useState,type ReactNode } from "react";
@@ -654,7 +654,7 @@ export function ReviewPageBody({
           className="soft case-filter-button"
           onClick={() => setDrawer(true)}
         >
-          <SlidersHorizontal />
+          <AnimatedActionIcon type="filters"/>
           Filters{activeFilters > 0 && <b>{activeFilters}</b>}
         </button>
         {excelAction}

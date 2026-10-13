@@ -1,16 +1,10 @@
+import {AnimatedActionIcon} from './AnimatedActionIcon';
 import {SharedFilterDrawer} from './SharedFilterDrawer';
 
-import {
-RotateCcw,
-Search,
-SlidersHorizontal,
-X
-} from "lucide-react";
 import { useEffect,useRef,useState } from "react";
 import { getLegalOverview } from "./api";
 import { ChartCard,TrendCard } from './ChartComponents';
 import { formatYearMonthFilterValue } from "./dateFormat";
-import { filterValue,isExcludedValue } from "./filterSelection";
 import { IraqDetentionMapMetrics } from './LegalMapMetrics';
 import { LegalScrollControls } from './LegalScrollControls';
 import { CheckboxMultiSelect } from './SelectionControls';
@@ -43,12 +37,6 @@ export function Overview({
     return()=>{window.clearTimeout(timer);controller.abort()};
   },[selection,metadata.revision]);
   const activeFilters={...selection.filters,Project:selection.projects,"Project location":selection.locations,Date:selection.months};
-  const filterLabel=(field:string)=>{
-    const group=result?.filterOptions.groups.find(group=>group.columns.some(option=>option.key===field));
-    const option=group?.columns.find(option=>option.key===field);
-    return option?`${group!.label} · ${option.name}`:field;
-  };
-  const removeFilter=(field:string,item:string)=>setSelection(current=>field==="Project"?{...current,projects:current.projects.filter(value=>value!==item)}:field==="Project location"?{...current,locations:current.locations.filter(value=>value!==item)}:field==="Date"?{...current,months:current.months.filter(value=>value!==item)}:{...current,filters:{...current.filters,[field]:(current.filters[field]||[]).filter(value=>value!==item)}});
   const activeCount=Object.values(activeFilters).reduce((sum,items)=>sum+items.length,0);
   const reset=()=>setSelection(emptyFilters());
   const openDrawer=()=>setDrawer(true);
@@ -71,9 +59,8 @@ export function Overview({
   return (
     <div className="professional-overview">
       <LegalScrollControls onFilters={openDrawer} activeCount={activeCount} onClear={reset} compactFilters={quickFilters(true)}>
-        <div className="overview-filter-bar glass">{quickFilters()}<button className="soft case-filter-button" onClick={openDrawer}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft filter-reset-button" onClick={reset} disabled={!activeCount}><RotateCcw/>Reset</button></div>
+        <div className="overview-filter-bar glass">{quickFilters()}<button className="soft case-filter-button" onClick={openDrawer}><AnimatedActionIcon type="filters"/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft filter-reset-button" onClick={reset} disabled={!activeCount}><AnimatedActionIcon type="reset"/>Reset</button></div>
       </LegalScrollControls>
-      {activeCount>0&&<div className="active-filters">{Object.entries(activeFilters).flatMap(([field,items])=>items.map(item=><button key={`${field}-${item}`} onClick={()=>removeFilter(field,item)}><span>{filterLabel(field)}: {isExcludedValue(item)?"Excluding ":""}{formatYearMonthFilterValue(field,filterValue(item))}</span><X/></button>))}</div>}
       {error&&<div className="error glass" role="alert">{error}</div>}
       {drawer&&<SharedFilterDrawer title="Filter overview" eyebrow="OVERVIEW FILTERS" onClose={()=>setDrawer(false)} onReset={reset} resetDisabled={!activeCount} search={filterSearch} onSearchChange={setFilterSearch}
         fields={(result?.filterOptions.groups||[]).flatMap(group=>group.columns.map(option=>({key:option.key,label:`${group.label} · ${option.name}`,values:option.values,selected:selection.filters[option.key]||[],formatCaption:(item:string)=>formatYearMonthFilterValue(option.name,item),onChange:(items:string[])=>setSelection(current=>({...current,filters:{...current.filters,[option.key]:items}}))})))}/> }

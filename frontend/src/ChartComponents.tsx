@@ -213,7 +213,7 @@ export function TrendCard({
       </div>
       <ChartFrame className="plot-shell trend" style={{height:330}}>
         <Plot
-          key={`trend-${singleMonth?"bars":"line"}-${theme}-${title}-${selected.join("|") || "all"}`}
+          key={`trend-${theme}-${title}`}
           revision={rows.reduce((n, r) => n + r.count, 0)}
           useResizeHandler
           onInitialized={(_, gd) => setGraph(gd)}
@@ -226,9 +226,9 @@ export function TrendCard({
               y: vals,
               selectedpoints: selected.length ? rows
                 .map((r, i) => (selected.includes(r.label) ? i : -1))
-                .filter((i) => i >= 0) : undefined,
+                .filter((i) => i >= 0) : null,
               selected: { marker: { color: "#1683d8", size: 11 } },
-              unselected: selected.length ? { marker: { opacity: 0.58 } } : undefined,
+              unselected: { marker: { opacity: selected.length ? 0.58 : 1 } },
               line: { color: "#1683d8", width: 3, shape: "spline" },
               marker: {
                 size: 9,
@@ -294,7 +294,8 @@ export function TrendCard({
             },
             dragmode: onSelect ? "select" : false,
             selectdirection: "h",
-            uirevision: "locked",
+            uirevision: `timeline-${singleMonth?"bar":"line"}-${rows.map(row=>row.label).join("|")}`,
+            selectionrevision: JSON.stringify(selected),
             hovermode: "x unified",
             hoverlabel: {
               bgcolor: theme === "glass-dark" ? "#102737" : "#ffffff",
@@ -305,6 +306,9 @@ export function TrendCard({
             shapes: singleMonth?[]:selected.map((month)=>({type:"line" as const,xref:"x" as const,yref:"paper" as const,x0:month,x1:month,y0:0,y1:1,line:{color:"rgba(22,131,216,.38)",width:2,dash:"dot" as const}})),
             xaxis: {
               gridcolor: chartGrid(theme), fixedrange: false, type: "category",
+              autorange: !singleMonth,
+              categoryorder: "array",
+              categoryarray: rows.map(row=>row.label),
               tickmode: "array",
               tickvals: rows.map((r) => r.label),
               ticktext: rows.map((r) => singleMonth?fullMonthLabel(r.label):new Intl.DateTimeFormat("en", {month:"short",year:"2-digit",timeZone:"UTC"}).format(new Date(`${r.label}-01T00:00:00Z`))),
@@ -314,6 +318,7 @@ export function TrendCard({
             },
             yaxis: {
               gridcolor: chartGrid(theme),
+              autorange: !singleMonth,
               rangemode: "tozero",
               range: singleMonth?[0,Math.max(1,...bars.flatMap(trace=>trace.y))*1.2]:undefined,
               automargin: true,

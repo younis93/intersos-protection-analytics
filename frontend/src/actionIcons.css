@@ -1,0 +1,2 @@
+/* Action icons stay still until pointer, keyboard or click interaction. */
+.animated-action-icon .legal-nav-icon-part{animation:none!important;will-change:auto}

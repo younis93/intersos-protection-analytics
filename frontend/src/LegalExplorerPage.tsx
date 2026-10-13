@@ -1,10 +1,9 @@
+import {AnimatedActionIcon} from './AnimatedActionIcon';
 import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {
 ArrowRight,
 Download,
-RotateCcw,
 Search,
-SlidersHorizontal,
 X
 } from "lucide-react";
 import { useEffect,useState } from "react";
@@ -121,31 +120,16 @@ export function Explorer({
           className="soft case-filter-button"
           onClick={() => setDrawer(true)}
         >
-          <SlidersHorizontal />
+          <AnimatedActionIcon type="filters"/>
           Filters{activeCount > 0 && <b>{activeCount}</b>}
         </button>
         <button className="soft explorer-sticky-clear" disabled={!activeCount} onClick={()=>{setFilters({});setPage(1)}}>
-          <RotateCcw />
+          <AnimatedActionIcon type="reset"/>
           Reset
         </button>
         <button className={`primary explorer-sticky-export${exportTask.preparing?" is-preparing":""}`} aria-busy={exportTask.preparing} aria-label={exportTask.preparing?"Cancel Excel download":"Download Excel"} title={exportTask.preparing?"Cancel Excel download":"Download Excel"} onClick={()=>{if(exportTask.preparing)cancelExplorerExportTask();else download()}}><span className="explorer-sticky-export-content"><Download/>Excel</span>{exportTask.preparing&&<><span className="button-spinner explorer-sticky-export-spinner" aria-hidden="true"/><span className="explorer-sticky-export-cancel"><X/>Cancel</span></>}</button>
       </div>
       </LegalScrollControls>
-      {activeCount > 0 && (
-        <div className="explorer-active-filters">
-          <span>
-            {activeCount} active filter{activeCount === 1 ? "" : "s"}
-          </span>
-          <button
-            onClick={() => {
-              setFilters({});
-              setPage(1);
-            }}
-          >
-            Reset all
-          </button>
-        </div>
-      )}
       {busy && !result && <LegalSkeleton variant="explorer" embedded />}
       {!(busy && !result) && <div className="glass legal-table-card compact-explorer">
         <div className="legal-card-heading">

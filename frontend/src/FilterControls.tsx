@@ -1,12 +1,10 @@
 import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {
 ChevronDown,
-Search,
-X
+Search
 } from "lucide-react";
 import { useMemo,useState } from "react";
 import { formatFilterMonth,formatYearMonthFilterValue,sortFilterValues } from "./dateFormat";
-import { filterValue,isExcludedValue } from "./filterSelection";
 import { formatProjectLabel,formatProjectLocationLabel } from './formatting';
 import { FilterBulkActions,FilterOption,UnavailableSelections } from './SelectionControls';
 import type { Filters } from "./types";
@@ -78,31 +76,6 @@ export function FilterGroup({
           <VirtualRows items={shown} enabled={shown.length>60} resetKey={search} render={v=><FilterOption values={values} key={v} value={v} caption={formatYearMonthFilterValue(field,v)} selected={selected} onChange={onChange}/>}/>
         </div>
       )}
-    </div>
-  );
-}
-
-export function ActiveFilters({
-  filters,
-  onRemove,
-}: {
-  filters: Filters;
-  onRemove: (field: string, value: string) => void;
-}) {
-  const entries = Object.entries(filters).flatMap(([f, vs]) =>
-    vs.filter(v=>!isExcludedValue(v)).map((v) => [f, v] as const),
-  );
-  if (!entries.length) return null;
-  return (
-    <div className="active-filters">
-      {entries.map(([f, v]) => (
-        <button key={`${f}-${v}`} onClick={() => onRemove(f, v)}>
-          <span>
-            {f.replaceAll("_", " ")}: {formatYearMonthFilterValue(f,filterValue(v))}
-          </span>
-          <X />
-        </button>
-      ))}
     </div>
   );
 }

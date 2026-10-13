@@ -1,0 +1,38 @@
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE_PATH||'playwright');
+const root=path.resolve(__dirname,'..'),entry=path.join(root,'frontend/src/chartStabilityCheck.tsx'),html=path.join(root,'frontend/chart-stability-check.html');
+(async()=>{let browser;assert(!fs.existsSync(entry)&&!fs.existsSync(html));try{
+ fs.writeFileSync(entry,`import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {ChartCard,TrendCard} from './ChartComponents';import SingleMonthIndicatorChart from './SingleMonthIndicatorChart';import {LawyerChart} from './LegalLawyersPage';import './styles.css';
+ function Fixture(){const [count,setCount]=useState(5),[selected,setSelected]=useState<string[]>([]),[tick,setTick]=useState(0),[scope,setScope]=useState('both'),[busy,setBusy]=useState(false);Object.assign(window,{setCount,setSelected,setTick,setScope,setBusy});return <main className={busy?'overview-results refreshing':'overview-results'}><output>{tick}</output><ChartCard chart={{id:'status',title:'Status',kind:'bar',multiChoice:false,rows:[{label:'Open',count,percent:.5}]}} display="count" theme="glass-light" onSelect={()=>{}}/><TrendCard rows={[{label:'2026-01',count,percent:.5},{label:'2026-02',count:2,percent:.5}].filter(row=>scope==='both'||row.label===scope)} selected={selected} display="count" theme="glass-light"/><SingleMonthIndicatorChart month="2026-01" series={[{label:'Total',color:'blue',values:[count]}]}/><LawyerChart chart={{title:"Distribution",dimension:"Nationality",kind:"bar",items:[{label:"Iraq",count},{label:"Syria",count:30}]}}/></main>};createRoot(document.getElementById('root')!).render(<Fixture/>);`);
+ fs.writeFileSync(html,'<meta name="viewport" content="width=device-width,initial-scale=1"><div id="root"></div><script type="module" src="/src/chartStabilityCheck.tsx"></script>');
+ browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});const page=await browser.newPage(),errors=[];page.on('pageerror',error=>errors.push(String(error)));await page.routeWebSocket('**',()=>{});
+ await page.goto((process.env.APP_TEST_URL||'http://127.0.0.1:5186')+'/chart-stability-check.html');await page.waitForFunction(()=>document.querySelectorAll('.js-plotly-plot').length===2&&[...document.querySelectorAll('.js-plotly-plot')].every(node=>node.data));await page.waitForTimeout(500);
+ const before=await page.evaluate(async()=>{
+   window.trendNode=document.querySelector('.plot-shell.trend .js-plotly-plot');
+   window.setCount(8);window.setSelected(['2026-01']);
+   const samples=[];await new Promise(resolve=>{const start=performance.now();const sample=()=>{samples.push({opacity:getComputedStyle(document.querySelector('.indicator-analysis-chart')).opacity,animations:document.querySelector('.indicator-analysis-chart').getAnimations().length});if(performance.now()-start<500)requestAnimationFrame(sample);else resolve()};requestAnimationFrame(sample)});
+   return {sameTrend:window.trendNode===document.querySelector('.plot-shell.trend .js-plotly-plot'),minOpacity:Math.min(...samples.map(item=>Number(item.opacity))),animatedFrames:samples.filter(item=>item.animations).length,transition:document.querySelector('.js-plotly-plot').layout.transition?.duration??0};
+ });
+ console.log('Chart stability:',JSON.stringify(before));
+ assert.equal(before.sameTrend,true,'Month selection recreated the whole timeline');
+ assert.equal(before.minOpacity,1,'Existing numeric labels faded during refresh');
+ assert.equal(before.animatedFrames,0,'Existing numeric labels replayed entrance motion');
+ assert.equal(before.transition,0,'Number labels must update without Plotly text transitions');
+ await page.waitForFunction(()=>document.querySelector('.js-plotly-plot').data[0].x[0]===8);assert.equal(await page.locator('.single-month-value').textContent(),'8');
+ await page.evaluate(()=>{window.setCount(12);requestAnimationFrame(()=>window.setCount(19))});await page.waitForFunction(()=>document.querySelector('.js-plotly-plot').data[0].x[0]===19);await page.waitForTimeout(300);
+ assert.equal(await page.locator('.single-month-value').textContent(),'19');assert.equal(await page.locator('.indicator-analysis-chart').evaluate(node=>node.getAnimations().length),0);
+ await page.evaluate(()=>window.setTick(1));await page.waitForTimeout(100);assert.equal(await page.locator('.indicator-analysis-chart').evaluate(node=>node.getAnimations().length),0);
+ await page.evaluate(()=>{window.setSelected(['2026-01']);window.setScope('2026-01')});
+ await page.waitForFunction(()=>document.querySelector('.plot-shell.trend .js-plotly-plot').data[0].type==='bar');
+ await page.evaluate(()=>{window.setSelected([]);window.setScope('both')});
+ await page.waitForFunction(()=>document.querySelector('.plot-shell.trend .js-plotly-plot').data[0].type==='scatter');
+ await page.waitForTimeout(150);
+ const restored=await page.locator('.plot-shell.trend .js-plotly-plot').evaluate(node=>({xAuto:node._fullLayout.xaxis.autorange,yAuto:node._fullLayout.yaxis.autorange,xRange:node._fullLayout.xaxis.range,selection:node.data[0].selectedpoints}));
+ console.log('Line restored after clearing month:',JSON.stringify(restored));
+ assert.equal(restored.xAuto,true,'Clearing a single month left the line chart locked to the bar range');assert.equal(restored.yAuto,true);assert.equal(restored.selection,null);
+ assert(restored.xRange[1]>=1,'The second month is outside the restored line chart range');
+ assert.equal(await page.locator('.lawyer-bars i b').first().evaluate(node=>getComputedStyle(node).transitionDuration),'0s','Bar widths are still animated');
+ await page.evaluate(()=>window.setBusy(true));assert.equal(await page.locator('main').evaluate(node=>getComputedStyle(node).opacity),'1','Loading still fades the chart');await page.evaluate(()=>window.setBusy(false));
+ await page.emulateMedia({reducedMotion:'reduce'});await page.evaluate(()=>window.setCount(23));await page.waitForFunction(()=>document.querySelector('.js-plotly-plot').data[0].x[0]===23);assert.deepEqual(errors,[]);
+ console.log('Chart node retention, stable labels, latest rapid updates, ordinary renders and reduced motion passed.');
+}finally{await browser?.close();fs.rmSync(entry,{force:true});fs.rmSync(html,{force:true})}})().catch(error=>{console.error(error);process.exitCode=1});

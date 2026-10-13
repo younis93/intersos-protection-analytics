@@ -1,0 +1,44 @@
+/* Each moving part is an HTML compositor layer containing unchanged SVG geometry. */
+.legal-page-nav-motion{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:0 0 var(--animated-icon-size,18px);width:var(--animated-icon-size,18px);height:var(--animated-icon-size,18px);contain:layout style}
+.legal-page-nav-motion .legal-page-nav-icon{display:block;width:100%;height:100%;flex:none;overflow:visible}
+.studio-heading>.animated-section-icon,.case-search-title>.animated-section-icon{color:var(--blue)}
+.legal-nav-icon-part{position:absolute;inset:0;display:block;width:100%;height:100%;transform:translate3d(0,0,0);will-change:transform,opacity;animation-duration:var(--part-duration);animation-delay:var(--part-delay);animation-timing-function:cubic-bezier(.22,1,.36,1);animation-fill-mode:both}
+.legal-nav-icon-part.nav-part-none{will-change:auto}
+.legal-nav-icon-part.nav-icon-echo{opacity:0;pointer-events:none}
+.nav-part-assemble{animation-name:nav-part-assemble}
+.nav-part-rise{animation-name:nav-part-rise}
+.nav-part-settle{animation-name:nav-part-settle}
+.nav-part-tilt{animation-name:nav-part-tilt}
+.nav-part-call{animation-name:nav-part-call}
+.nav-part-confirm{animation-name:nav-part-confirm}
+.nav-part-handle{animation-name:nav-part-handle}
+.nav-part-flap{animation-name:nav-part-flap}
+.nav-part-send{animation-name:nav-part-send}
+.nav-part-close{animation-name:nav-part-close}
+.nav-part-pulse{animation-name:nav-part-pulse}
+.nav-part-tap{animation-name:nav-part-tap}
+.nav-part-grow{animation-name:nav-part-grow}
+.nav-part-compose{animation-name:nav-part-compose}
+.nav-part-row{animation-name:nav-part-row}
+.nav-part-sweep{animation-name:nav-part-sweep}
+.nav-part-signal{animation-name:nav-part-signal;animation-timing-function:ease-out}
+.nav-part-double-signal{animation-name:nav-part-double-signal;animation-timing-function:ease-out}
+@keyframes nav-part-assemble{from{transform:translate3d(0,1px,0) scale(.7);opacity:.25}to{transform:translate3d(0,0,0) scale(1);opacity:1}}
+@keyframes nav-part-rise{from{transform:translate3d(0,2px,0);opacity:.4}to{transform:translate3d(0,0,0);opacity:1}}
+@keyframes nav-part-settle{from{transform:translate3d(0,-1px,0);opacity:.65}to{transform:translate3d(0,0,0);opacity:1}}
+@keyframes nav-part-tilt{0%{transform:translate3d(0,0,0) rotate(-7deg)}55%{transform:translate3d(0,0,0) rotate(2deg)}100%{transform:translate3d(0,0,0) rotate(0)}}
+@keyframes nav-part-call{0%,100%{transform:translate3d(0,0,0) rotate(0)}20%{transform:translate3d(0,0,0) rotate(-5deg)}45%{transform:translate3d(0,0,0) rotate(4deg)}70%{transform:translate3d(0,0,0) rotate(-2deg)}}
+@keyframes nav-part-confirm{from{transform:translate3d(0,0,0) scale(.5);opacity:0}to{transform:translate3d(0,0,0) scale(1);opacity:1}}
+@keyframes nav-part-handle{0%{transform:translate3d(0,-2px,0)}65%{transform:translate3d(0,.3px,0)}100%{transform:translate3d(0,0,0)}}
+@keyframes nav-part-flap{0%{transform:translate3d(0,0,0) scaleY(.15);opacity:.3}65%,100%{transform:translate3d(0,0,0) scaleY(1);opacity:1}}
+@keyframes nav-part-send{0%,35%,100%{transform:translate3d(0,0,0)}65%{transform:translate3d(1.5px,-.5px,0)}}
+@keyframes nav-part-close{0%{transform:translate3d(0,-2.5px,0);opacity:.65}70%,100%{transform:translate3d(0,0,0);opacity:1}}
+@keyframes nav-part-pulse{0%,100%{transform:translate3d(0,0,0) scale(1);opacity:1}35%{transform:translate3d(0,0,0) scale(.85);opacity:.4}65%{transform:translate3d(0,0,0) scale(1.1);opacity:1}}
+@keyframes nav-part-tap{0%{transform:translate3d(0,0,0) rotate(-12deg)}50%{transform:translate3d(0,0,0) rotate(3deg)}75%{transform:translate3d(0,0,0) rotate(-1deg)}100%{transform:translate3d(0,0,0) rotate(0)}}
+@keyframes nav-part-grow{from{transform:translate3d(0,0,0) scaleY(.2);opacity:.5}to{transform:translate3d(0,0,0) scaleY(1);opacity:1}}
+@keyframes nav-part-compose{0%{transform:translate3d(0,1px,0) scaleY(.5);opacity:.4}70%{transform:translate3d(0,0,0) scaleY(1.05);opacity:1}100%{transform:translate3d(0,0,0) scaleY(1);opacity:1}}
+@keyframes nav-part-row{from{transform:translate3d(-2px,0,0);opacity:.3}to{transform:translate3d(0,0,0);opacity:1}}
+@keyframes nav-part-sweep{0%{transform:translate3d(-1px,1px,0) rotate(-3deg)}60%{transform:translate3d(1px,-.5px,0) rotate(2deg)}100%{transform:translate3d(0,0,0) rotate(0)}}
+@keyframes nav-part-signal{0%{transform:translate3d(0,0,0) scale(1);opacity:0}20%{opacity:.3}80%{transform:translate3d(3px,0,0) scale(1.1);opacity:0}100%{transform:translate3d(0,0,0) scale(1);opacity:0}}
+@keyframes nav-part-double-signal{0%,45%,100%{transform:translate3d(0,0,0) scale(1);opacity:0}15%,60%{opacity:.3}40%,90%{transform:translate3d(3px,0,0) scale(1.1);opacity:0}}
+@media(prefers-reduced-motion:reduce){.legal-nav-icon-part{animation:none!important;transform:none!important;will-change:auto}}

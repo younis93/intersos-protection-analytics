@@ -2,8 +2,18 @@ import {describe,it,expect} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {fullMonthLabel,isSingleMonth,singleMonthTraces} from './timelineChart';
 import SingleMonthIndicatorChart from './SingleMonthIndicatorChart';
+import {IndicatorTrendChart} from './LegalIndicatorsPage';
 
 describe('single-month timelines',()=>{
+  it('renders a single reporting month as bars and multiple reporting months with readable labels',()=>{
+    const single=renderToStaticMarkup(<IndicatorTrendChart title="Quarter selection" months={['2026-07']} series={[{label:'IDP',values:[5],color:'green'}]}/>);
+    expect(single).toContain('July 2026 indicator comparison');
+    expect(single).toContain('data-series="IDP"');
+    const multiple=renderToStaticMarkup(<IndicatorTrendChart title="Quarter selection" months={['2026-07','2026-08']} series={[{label:'IDP',values:[5,8],color:'green'}]}/>);
+    expect(multiple).toContain('Jul 2026');
+    expect(multiple).toContain('Aug 2026');
+    expect(multiple).not.toContain('Invalid Date');
+  });
   it('uses distinct months and retains surrounding zero months',()=>{
     expect(isSingleMonth([])).toBe(false);
     expect(isSingleMonth(['2026-09'])).toBe(true);

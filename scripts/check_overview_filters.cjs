@@ -20,9 +20,10 @@ const temporary = ['frontend/src/overviewCheckComponent.tsx', 'frontend/src/over
     fs.writeFileSync(temporary[2], '<div id="root"></div><script type="module" src="/src/overviewCheck.tsx"></script>');
     browser = await chromium.launch({executablePath: process.env.EDGE_PATH || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', headless: true});
     const page = await browser.newPage();
+    await page.routeWebSocket('**',()=>{});
     const errors = [], calls = [], optionCalls = [];
     let holdProject=false,releaseProject;
-    page.on('pageerror', error => errors.push(String(error)));
+    page.on('pageerror', error => {errors.push(String(error));console.error('Overview browser error:',String(error))});
     const groups = [{dataset: 'beneficiaries', label: 'Beneficiary', columns: [{key: 'beneficiaries::Nationality', name: 'Nationality', values: ['Iraq', 'Syria']}]}, {dataset: 'legalfees', label: 'Legal fee', columns: [{key: 'legalfees::Fee ID', name: 'Fee ID', values: ['F1']}]}];
     await page.route(/\/api\/legal\/overview(?:-filters)?$/, async route => {
       const selection = route.request().postDataJSON();
@@ -60,7 +61,7 @@ const temporary = ['frontend/src/overviewCheckComponent.tsx', 'frontend/src/over
     await page.locator('.overview-results[aria-busy=true]').waitFor();
     assert.equal(await page.locator('.executive-kpi').first().locator('strong').textContent(),'10');
     assert.equal(await page.getByText('Updating overview...',{exact:true}).count(),0);
-    await page.waitForFunction(()=>Number(getComputedStyle(document.querySelector('.overview-results')).opacity)<.8);
+    assert.equal(await page.locator('.overview-results').evaluate(node=>getComputedStyle(node).opacity),'1','Loading must not fade charts');
     assert.equal(await toolbar.evaluate(node=>getComputedStyle(node).opacity),'1');
     await page.locator('h1').click();
     assert.equal((await page.locator('.overview-primary-kpis').boundingBox()).height,beforeBox.height);
@@ -105,23 +106,23 @@ const temporary = ['frontend/src/overviewCheckComponent.tsx', 'frontend/src/over
     await drawer.locator('footer').getByRole('button',{name:'Reset',exact:true}).click();await waitForChart(8);
     assert.equal(await toolbar.getByRole('button',{name:'All project',exact:true}).count(),1);
     await expandNationality();await drawer.getByRole('checkbox',{name:'Iraq',exact:true}).check();await waitForChart(4);
-    const beforeDone=calls.length;await drawer.getByRole('button',{name:'Done',exact:true}).click();assert.equal(calls.length,beforeDone,'Done must only close the drawer');
+    const beforeDone=calls.length;await drawer.getByRole('button',{name:'Done',exact:true}).click();await drawer.waitFor({state:'detached'});assert.equal(calls.length,beforeDone,'Done must only close the drawer');
     await toolbar.getByRole('button',{name:/Filters/}).click();assert.equal(await drawer.getByRole('checkbox',{name:'Iraq',exact:true}).isChecked(),true);
-    await drawer.getByRole('button',{name:'Close filters',exact:true}).click();
+    await drawer.getByRole('button',{name:'Close filters',exact:true}).click();await drawer.waitFor({state:'detached'});
     await toolbar.getByRole('button',{name:'All project location',exact:true}).click();
     assert.equal(await page.locator('.checkbox-multi-menu').getByRole('checkbox').count(),1,'Quick filter options must reflect the live drawer selection');
     assert.equal(await page.locator('.checkbox-multi-menu').getByRole('checkbox',{name:'L1',exact:true}).count(),1);
     await page.locator('.checkbox-multi-menu').getByRole('button',{name:'Done',exact:true}).click();
     await toolbar.getByRole('button',{name:/Filters/}).click();await drawer.getByRole('checkbox',{name:'Syria',exact:true}).check();await waitForChart(5);
-    await page.getByRole('button',{name:'Close filter overview',exact:true}).click({position:{x:10,y:300}});
+    await page.getByRole('button',{name:'Close filter overview',exact:true}).click({position:{x:10,y:300}});await drawer.waitFor({state:'detached'});
     await toolbar.getByRole('button',{name:/Filters/}).click();assert.equal(await drawer.locator('input[type=checkbox]:checked').count(),2);
-    await drawer.getByRole('button',{name:'Done',exact:true}).click();
+    await drawer.getByRole('button',{name:'Done',exact:true}).click();await drawer.waitFor({state:'detached'});
     assert.equal(optionCalls.length,0,'Metrics and linked filter options must come from the same response');
     await page.getByText('Unavailable for selected case filters', {exact: true}).waitFor();
-    while(await page.locator('.active-filters button').filter({hasText:'Beneficiary'}).count()){
-      await page.locator('.active-filters button').filter({hasText:'Beneficiary'}).first().click();await waitForRefresh();
-    }
-    assert.equal(await page.locator('.active-filters button').filter({hasText:'Beneficiary'}).count(),0);
+    assert.equal(await page.locator('.active-filters').count(),0,'Selected filters must not render a chip row');
+    await toolbar.getByRole('button',{name:/Filters/}).click();
+    await drawer.locator('details').getByRole('button',{name:'Reset',exact:true}).click();await waitForRefresh();
+    await drawer.getByRole('button',{name:'Done',exact:true}).click();await drawer.waitFor({state:'detached'});
     assert.equal(await page.getByText('Unavailable for selected case filters',{exact:true}).count(),0);
     assert.equal(await page.locator('.executive-kpi').first().locator('strong').textContent(), '10');
     // Warm a project scope after the rapid-change invalidation above.

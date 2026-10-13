@@ -1,4 +1,5 @@
 import {formatUpdateSize,UpdateReleaseNotes} from "./UpdateReleaseNotes";
+import {AnimatedNavigationIcon} from './AnimatedNavigationIcon';
 
 import { deferredComponent } from './DeferredComponent';
 import { cancelImport,getImportProgress,useImportProgress,type LegalImportProgress } from './importProgress';
@@ -35,6 +36,7 @@ TableProperties,
 Users
 } from "lucide-react";
 import { startTransition,useCallback,useEffect,useRef,useState } from "react";
+import {flushSync} from 'react-dom';
 import {
 checkForUpdates,
 getLegalMetadata,
@@ -136,13 +138,21 @@ export function NavLoadStatus({label,status}:{label:string;status:LoadStatus}) {
 
 export function LegalPageNavigation({items,page,onNavigate,loadStatuses,sendIssuesStatus}:{items:typeof nav;page:LegalPage;onNavigate:(page:LegalPage)=>void;loadStatuses:Record<string,LoadStatus>;sendIssuesStatus:LoadStatus|'idle'}){
   const [selectedPage,setSelectedPage]=useState(page);
+  const navigationFrame=useRef<number|null>(null);
+  useEffect(()=>()=>{if(navigationFrame.current!==null)cancelAnimationFrame(navigationFrame.current)},[]);
   useEffect(()=>setSelectedPage(page),[page]);
   return <nav>{items.map(([id,Icon])=><button key={id} className={selectedPage===id?"active":""} onPointerEnter={()=>preloadLegalPage(id)} onFocus={()=>preloadLegalPage(id)} onClick={()=>{
-    // Commit the small navigation update before rendering the destination page.
-    setSelectedPage(id);
-    startTransition(()=>onNavigate(id));
+    // Give the compositor an initial frame before the destination's render work.
+    flushSync(()=>setSelectedPage(id));
+    if(navigationFrame.current!==null)cancelAnimationFrame(navigationFrame.current);
+    navigationFrame.current=requestAnimationFrame(()=>{
+      navigationFrame.current=requestAnimationFrame(()=>{
+        navigationFrame.current=null;
+        startTransition(()=>onNavigate(id));
+      });
+    });
   }}>
-    <Icon className="legal-page-nav-icon" data-nav-page={id}/>
+    <AnimatedNavigationIcon page={id} Icon={Icon} active={selectedPage===id}/>
     <span>{labels[id]}</span>
     {id==="send-issues"&&sendIssuesStatus!=="idle"?<NavLoadStatus label={labels[id]} status={sendIssuesStatus}/>:loadStatuses[id]&&<NavLoadStatus label={labels[id]} status={loadStatuses[id]}/>}
   </button>)}</nav>;

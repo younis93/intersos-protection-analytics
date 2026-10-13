@@ -1,11 +1,11 @@
+import {AnimatedActionIcon} from './AnimatedActionIcon';
+import {AnimatedSectionIcon} from './AnimatedNavigationIcon';
 import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {
 ArrowRight,
 Download,
 LayoutDashboard,
-RotateCcw,
 Search,
-SlidersHorizontal,
 TableProperties,
 X
 } from "lucide-react";
@@ -137,7 +137,7 @@ export function Cases({
       <LegalScrollControls search={query} onSearch={setQuery} onSearchSubmit={()=>{setTablePage(1);run(query,filters,viewMode,1)}} searchPlaceholder="Search cases" onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={clear}>
       <div className="case-search glass sticky-case-search">
         <div className="case-search-title">
-          <Search />
+          <AnimatedSectionIcon Icon={Search} iconStyle="search" size={25}/>
           <div>
             <strong>Find a beneficiary case</strong>
             <span>Search by Case ID, Assessment ID, Service ID, name, contact number, national ID, UNHCR or ASSIST number.</span>
@@ -150,7 +150,7 @@ export function Cases({
               aria-label="Card view"
               title="Card view"
             >
-              <LayoutDashboard />
+              <AnimatedSectionIcon Icon={LayoutDashboard} iconStyle="layout-dashboard" active={viewMode==="cards"} size={15}/>
             </button>
             <button
               className={viewMode === "table" ? "active" : ""}
@@ -158,7 +158,7 @@ export function Cases({
               aria-label="Table view"
               title="Table view"
             >
-              <TableProperties />
+              <AnimatedSectionIcon Icon={TableProperties} iconStyle="table-properties" active={viewMode==="table"} size={15}/>
             </button>
           </span>
         </div>
@@ -180,10 +180,10 @@ export function Cases({
             className="soft case-filter-button"
             onClick={() => setDrawer(true)}
           >
-            <SlidersHorizontal />
+            <AnimatedActionIcon type="filters"/>
             Filters{activeCount > 0 && <b>{activeCount}</b>}
           </button>
-          <button className="soft case-clear" disabled={!activeCount} onClick={clear}><RotateCcw/>Reset</button>
+          <button className="soft case-clear" disabled={!activeCount} onClick={clear}><AnimatedActionIcon type="reset"/>Reset</button>
         </div>
       </div>
       </LegalScrollControls>

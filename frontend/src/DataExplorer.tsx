@@ -1,8 +1,9 @@
+import {AnimatedActionIcon} from './AnimatedActionIcon';
 import {Pager,SortableHeader,TableState} from './TableControls';
 import {ValueTable} from "./ValueTable";
 import {useQueryPage} from "./useQueryPage";
 import {useEffect,useMemo,useRef,useState} from 'react';
-import {ChevronLeft,ChevronRight,Columns3,Download,Eye,EyeOff,Filter,RotateCcw,Search,ShieldAlert,X} from 'lucide-react';
+import {ChevronLeft,ChevronRight,Columns3,Download,Eye,EyeOff,Search,ShieldAlert,X} from 'lucide-react';
 import {exportExplorer,getExplorer,type ExplorerQuery} from './api';
 import {AppSelect} from './SelectionControls';
 import {formatNumber} from './formatting';
@@ -60,8 +61,8 @@ export default function DataExplorer({metadata}:{metadata:Metadata}){
       <div className="explorer-main-controls">
         <AppSelect label="Worksheet" value={sheet.id} onChange={setSheetId} options={sheets.map(item=>[item.id,`${item.name} · ${formatNumber(item.rows)} rows`])}/>
         <label className="explorer-search"><Search/><input className="table-search-input" value={searchInput} onChange={e=>setSearchInput(e.target.value)} placeholder="Search all columns…"/></label>
-        <button className={filterOpen?'primary':'soft'} onClick={()=>setFilterOpen(v=>!v)}><Filter/>Filters {filters.length>0&&<b>{filters.length}</b>}</button>
-        <button className="soft explorer-clear" onClick={clear} disabled={!searchInput&&!filters.length&&!sortColumn}><RotateCcw/>Reset</button>
+        <button className={filterOpen?'primary':'soft'} onClick={()=>setFilterOpen(v=>!v)}><AnimatedActionIcon type="funnel"/>Filters {filters.length>0&&<b>{filters.length}</b>}</button>
+        <button className="soft explorer-clear" onClick={clear} disabled={!searchInput&&!filters.length&&!sortColumn}><AnimatedActionIcon type="reset"/>Reset</button>
         <button className={columnsOpen?'primary':'soft'} onClick={()=>setColumnsOpen(v=>!v)}><Columns3/>Columns</button>
       </div>
       {filterOpen&&<div className="explorer-filter-grid">{sheet.columns.map(column=><ColumnFilter key={column.name} column={column} value={filters.find(item=>item.column===column.name)} onChange={patch=>updateFilter(column.name,patch)} onRemove={()=>removeFilter(column.name)}/>)}</div>}

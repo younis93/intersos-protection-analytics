@@ -1,5 +1,6 @@
+import {AnimatedActionIcon} from './AnimatedActionIcon';
 import {SharedFilterDrawer} from './SharedFilterDrawer';
-import {RotateCcw,Search,SlidersHorizontal,X} from 'lucide-react';
+import {Search,X} from 'lucide-react';
 import {useEffect,useState} from 'react';
 import {exportLegalSampling,getLegalSampling} from './api';
 import {formatTableValue,formatYearMonthFilterValue} from './dateFormat';
@@ -35,8 +36,8 @@ export default function LegalSampling({state,update}:{state:SamplingState;update
           label={/date/i.test(column)?'Date Service Completed month':/location/i.test(column)?'Project Location':'Project'} values={options[column]||[]}
           selected={state.filters[column]||[]} onChange={values=>setFilter(column,values)}/>)}</div>
         <div className="studio-quick-actions">
-          <button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>All filters {active>0&&<b>{active}</b>}</button>
-          <button className="soft detention-filter-clear" disabled={!changed&&state.page===1} onClick={reset}><RotateCcw/>Reset</button>
+          <button className="primary" onClick={()=>setDrawer(true)}><AnimatedActionIcon type="filters"/>All filters {active>0&&<b>{active}</b>}</button>
+          <button className="soft detention-filter-clear" disabled={!changed&&state.page===1} onClick={reset}><AnimatedActionIcon type="reset"/>Reset</button>
           <ExcelDownloadButton className="primary studio-excel" onClick={download} disabled={busy||search!==state.search||Boolean(error)||!data?.available}>Excel</ExcelDownloadButton>
         </div>
       </div>

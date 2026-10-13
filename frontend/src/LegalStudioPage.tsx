@@ -1,3 +1,7 @@
+import {AnimatedActionIcon} from './AnimatedActionIcon';
+import {AnimatedSectionIcon} from './AnimatedNavigationIcon';
+import type {LucideIcon} from 'lucide-react';
+import type {NavigationIconStyle} from './navigationIconNodes';
 import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {
 ArrowRight,
@@ -6,9 +10,7 @@ BriefcaseBusiness,
 CheckCheck,
 Download,
 Megaphone,
-RotateCcw,
 Search,
-SlidersHorizontal,
 Users,
 X
 } from "lucide-react";
@@ -37,7 +39,7 @@ import { initialSamplingState } from './samplingTypes';
 const Sampling=deferredComponent(()=>import('./LegalSampling'),<div className="glass studio-section-loading" role="status">Loading Sampling…</div>);
 
 export function LegalAnalyticsStudio({metadata,theme,onOpenCase}:{metadata:LegalMetadata;theme:Theme;onOpenCase:(id:string)=>void}){
-  const sectionIcons:Record<string,ReactNode>={assessments:<CheckCheck/>,legalservices:<BriefcaseBusiness/>,sampling:<Users/>,beneficiaries:<Users/>,awareness:<Megaphone/>,builder:<BarChart3/>};
+  const sectionIcons:Record<string,{Icon:LucideIcon;iconStyle:NavigationIconStyle}>={assessments:{Icon:CheckCheck,iconStyle:'check-check'},legalservices:{Icon:BriefcaseBusiness,iconStyle:'briefcase-business'},sampling:{Icon:Users,iconStyle:'users'},beneficiaries:{Icon:Users,iconStyle:'users'},awareness:{Icon:Megaphone,iconStyle:'megaphone'},builder:{Icon:BarChart3,iconStyle:'chart-column'}};
   const sections=[...["assessments","legalservices","beneficiaries"].map((id)=>[id,labels[id as LegalPage].replace(" Review","")] as [string,string]),...(metadata.availability.awareness?[["awareness","Awareness"] as [string,string]]:[]),["builder","Custom Builder"] as [string,string],["sampling","Sampling"] as [string,string]];
   const [samplingState,setSamplingState]=useState(initialSamplingState);
   useEffect(()=>setSamplingState(initialSamplingState()),[metadata.revision]);
@@ -49,7 +51,7 @@ export function LegalAnalyticsStudio({metadata,theme,onOpenCase}:{metadata:Legal
   const studioSourceOptions=useMemo<[string,string][]>(()=>studioSheets.map((sheet)=>[sheet.id,sheet.name]),[studioSheets]);
   const state=useMemo(()=>sectionState[section]||{filters:{},search:"",page:1,sortColumn:"",sortDirection:"asc" as const},[sectionState,section]);
   const update=(patch:Partial<typeof state>)=>setSectionState((current)=>({...current,[section]:{...state,...patch}}));
-  return <div className="legal-analytics-studio"><nav className="glass studio-section-tabs" aria-label="Analytics Studio sections">{sections.map(([id,label])=><button className={section===id?"active":""} key={id} onClick={()=>{legalLoadScheduler.promotePage("studio",id);setSection(id)}}>{sectionIcons[id]}<span>{label}</span></button>)}</nav>{section==="builder"?<Studio metadata={studioMetadata} theme={theme} sourceOptions={studioSourceOptions} studioLoader={getLegalStudio} excludeFields={hideDetentionInfo?isDetentionField:undefined}/>:section==="sampling"?<Sampling state={samplingState} update={patch=>setSamplingState(current=>({...current,...patch}))}/>:<LegalAnalyticsSection key={section} dataset={section} theme={theme} state={state} update={update} onOpenCase={onOpenCase}/>}</div>;
+  return <div className="legal-analytics-studio"><nav className="glass studio-section-tabs" aria-label="Analytics Studio sections">{sections.map(([id,label])=><button className={section===id?"active":""} key={id} onClick={()=>{legalLoadScheduler.promotePage("studio",id);setSection(id)}}><AnimatedSectionIcon Icon={sectionIcons[id].Icon} iconStyle={sectionIcons[id].iconStyle} active={section===id} size={17}/><span>{label}</span></button>)}</nav>{section==="builder"?<Studio metadata={studioMetadata} theme={theme} sourceOptions={studioSourceOptions} studioLoader={getLegalStudio} excludeFields={hideDetentionInfo?isDetentionField:undefined}/>:section==="sampling"?<Sampling state={samplingState} update={patch=>setSamplingState(current=>({...current,...patch}))}/>:<LegalAnalyticsSection key={section} dataset={section} theme={theme} state={state} update={update} onOpenCase={onOpenCase}/>}</div>;
 }
 
 export function LegalAnalyticsSection({dataset,theme,state,update,onOpenCase}:{dataset:string;theme:Theme;state:{filters:Record<string,string[]>;search:string;page:number;sortColumn:string;sortDirection:"asc"|"desc"};update:(patch:Partial<typeof state>)=>void;onOpenCase:(id:string)=>void}){
@@ -67,7 +69,7 @@ export function LegalAnalyticsSection({dataset,theme,state,update,onOpenCase}:{d
     <LegalScrollControls filterLabel="Filters" onFilters={()=>setDrawer(true)} activeCount={active} onClear={clear}>
       <div className="glass studio-quick-toolbar">
       <div className="studio-quick-fields">{quick.map((column)=><CheckboxMultiSelect key={column} hideLabel label={toolbarFilterLabel(column)} values={data?.filterOptions[column]||[]} selected={state.filters[column]||[]} onChange={(values)=>setFilter(column,values)}/>)}</div>
-      <div className="studio-quick-actions"><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {active>0&&<b>{active}</b>}</button><button className="soft detention-filter-clear" disabled={!active} onClick={clear}><RotateCcw/>Reset</button><button className="primary studio-excel" onClick={()=>void exportLegalExplorer("xlsx",dataset,state.search,state.filters)}><Download/>Excel</button></div>
+      <div className="studio-quick-actions"><button className="primary" onClick={()=>setDrawer(true)}><AnimatedActionIcon type="filters"/>Filters {active>0&&<b>{active}</b>}</button><button className="soft detention-filter-clear" disabled={!active} onClick={clear}><AnimatedActionIcon type="reset"/>Reset</button><button className="primary studio-excel" onClick={()=>void exportLegalExplorer("xlsx",dataset,state.search,state.filters)}><Download/>Excel</button></div>
     </div>
     </LegalScrollControls>
     {error&&<div className="error glass">{error}</div>}

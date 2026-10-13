@@ -1,5 +1,8 @@
-import {RotateCcw,Search,X} from 'lucide-react';
-import {useState,type ReactNode} from 'react';
+import {AnimatedActionIcon} from './AnimatedActionIcon';
+import {Search,X} from 'lucide-react';
+import {useEffect,useRef,useState,type ReactNode} from 'react';
+import {prefersReducedMotion,SURFACE_EXIT_MS} from './surfaceMotion';
+import './surfaceMotion.css';
 import {FilterDrawerShell,FilterSection} from './FilterDrawerShell';
 import {FilterValueList} from './SelectionControls';
 
@@ -19,13 +22,24 @@ export function SharedFilterDrawer({open=true,title,eyebrow,fields,onClose,onRes
   search?:string;onSearchChange?:(value:string)=>void;searchLabel?:string;className?:string;
 }){
   const [localSearch,setLocalSearch]=useState('');
+  const [closing,setClosing]=useState(false);
+  const closeTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
+  const closeCallback=useRef(onClose);closeCallback.current=onClose;
+  useEffect(()=>()=>clearTimeout(closeTimer.current),[]);
+  useEffect(()=>{if(!open){clearTimeout(closeTimer.current);closeTimer.current=undefined;setClosing(false)}},[open]);
+  const close=()=>{
+    if(closeTimer.current!==undefined)return;
+    if(prefersReducedMotion()){onClose();return}
+    setClosing(true);
+    closeTimer.current=setTimeout(()=>{closeTimer.current=undefined;setClosing(false);closeCallback.current()},SURFACE_EXIT_MS);
+  };
   const query=search??localSearch;
   const active=fields.some(field=>field.selected.length>0);
   if(!open)return null;
-  return <FilterDrawerShell className={`case-filter-drawer shared-filter-drawer ${className}`.trim()} aria-label={title}
-    header={<header><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2></div><button type="button" onClick={onClose} aria-label="Close filters"><X/></button></header>}
-    footer={<footer><button type="button" className="soft filter-reset-button" disabled={resetDisabled??!active} onClick={onReset}><RotateCcw/>Reset</button><button type="button" className="primary" onClick={onClose}>Done</button></footer>}
-    backdrop={<button type="button" className="filter-backdrop" aria-label={`Close ${title.toLowerCase()}`} onClick={onClose}/> }>
+  return <FilterDrawerShell className={`case-filter-drawer shared-filter-drawer ${className}${closing?' is-closing':''}`.trim()} aria-label={title} inert={closing||undefined}
+    header={<header><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2></div><button type="button" onClick={close} aria-label="Close filters"><X/></button></header>}
+    footer={<footer><button type="button" className="soft filter-reset-button" disabled={resetDisabled??!active} onClick={onReset}><AnimatedActionIcon type="reset"/>Reset</button><button type="button" className="primary" onClick={close}>Done</button></footer>}
+    backdrop={<button type="button" className={`filter-backdrop surface-backdrop${closing?' is-closing':''}`} aria-label={`Close ${title.toLowerCase()}`} onClick={close} disabled={closing}/> }>
     <label className="filter-search"><Search/><input aria-label={searchLabel} placeholder="Search filters" value={query} onChange={event=>(onSearchChange??setLocalSearch)(event.target.value)}/></label>
     <div className="case-filter-scroll">{fields.filter(field=>field.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).map(field=>
       <FilterSection key={field.key} label={field.label} open={Boolean(field.selected.length)} badge={field.selected.length>0&&<b>{field.selected.length}</b>}>

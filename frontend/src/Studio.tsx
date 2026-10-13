@@ -1,9 +1,11 @@
+import {AnimatedActionIcon} from './AnimatedActionIcon';
+import {AnimatedSectionIcon} from './AnimatedNavigationIcon';
 import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {ChartFrame,plotConfig,chartInk as ink,chartGrid as grid} from './ChartPrimitives';
 import {ValueTable} from "./ValueTable";
 import {useEffect,useMemo,useState} from 'react';
 import Plot from './LazyPlot';
-import {ChevronDown,LayoutDashboard,RotateCcw,Search,SlidersHorizontal,Table2,X} from 'lucide-react';
+import {ChevronDown,LayoutDashboard,Search,SlidersHorizontal,Table2,X} from 'lucide-react';
 import {getStudio,getLegalExplorerFilters} from './api';
 import {AppSelect} from './SelectionControls';
 import {ExportButtons} from './ChartComponents';
@@ -50,7 +52,7 @@ export default function Studio({metadata,theme,sourceOptions,studioLoader,exclud
   if(!sources.length||!sourceMeta)return <div className="legal-empty glass"><LayoutDashboard/><h3>Custom Builder is unavailable</h3><p>No loaded source sheet is available for analysis.</p></div>;
   return <>
     <div className="studio-toolbar glass">
-      <div className="studio-heading"><LayoutDashboard/><div><strong>Analysis builder</strong><span>Choose a source, one or two dimensions, and a visual.</span></div></div>
+      <div className="studio-heading"><AnimatedSectionIcon Icon={LayoutDashboard} iconStyle="layout-dashboard" size={25}/><div><strong>Analysis builder</strong><span>Choose a source, one or two dimensions, and a visual.</span></div></div>
       <div className="studio-controls">
         <Select label="Source sheet" value={source} onChange={setSource} options={sources}/>
         <Select label="Rows / X-axis" value={row} onChange={setRow} options={dimensions.map(dimension=>[dimension,label(dimension)])} searchable/>
@@ -69,7 +71,7 @@ export default function Studio({metadata,theme,sourceOptions,studioLoader,exclud
           {showOrientation&&<Select label="Orientation" value={options.orientation} onChange={value=>setOption('orientation',value as StudioOrientation)} options={[['horizontal','Horizontal'],['vertical','Vertical']]}/>}
         </div>
       </section>
-      <div className="studio-actions studio-shared-filter-actions"><button className="primary" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft" disabled={!activeCount} onClick={()=>setFilters({})}><RotateCcw/>Reset</button></div>
+      <div className="studio-actions studio-shared-filter-actions"><button className="primary" onClick={()=>setDrawer(true)}><AnimatedActionIcon type="filters"/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft" disabled={!activeCount} onClick={()=>setFilters({})}><AnimatedActionIcon type="reset"/>Reset</button></div>
       {theme==='multicolor'&&chartType!=='table'&&<section className="studio-color-panel"><div className="studio-color-head"><div><strong>Answer colors</strong><span>Use the curated palette or customize chart and label colors independently.</span></div><label className="color-toggle"><input type="checkbox" checked={customColors} onChange={event=>setCustomColors(event.target.checked)}/><i/><span>Custom colors</span></label></div>{customColors&&<div className="studio-color-grid">{colorKeys.map((key,index)=><div className="answer-color" key={key}><span title={key}>{key}</span><label>Chart<input type="color" value={markColors[key]||palette[index%palette.length]} onChange={event=>setMarkColors(colors=>({...colors,[key]:event.target.value}))}/></label><label>Text<input type="color" value={textColors[key]||defaultText[index%defaultText.length]} onChange={event=>setTextColors(colors=>({...colors,[key]:event.target.value}))}/></label></div>)}</div>}</section>}
     </div>
     {error&&<div className="error glass">{error}</div>}

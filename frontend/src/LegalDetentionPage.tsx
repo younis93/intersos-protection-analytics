@@ -1,13 +1,13 @@
+import {AnimatedActionIcon} from './AnimatedActionIcon';
+import {AnimatedSectionIcon} from './AnimatedNavigationIcon';
 import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {
 ArrowRight,
 BarChart3,
 CheckCircle2,
 FolderOpen,
-RotateCcw,
 Search,
 ShieldCheck,
-SlidersHorizontal,
 TableProperties,
 X
 } from "lucide-react";
@@ -147,14 +147,14 @@ export function DetentionCases({
       )}
       {error && <div className="error glass">{error}</div>}
       <nav className="glass detention-tabs" aria-label="Detention views">
-        <button className={tab==="analysis"?"active":""} onClick={()=>{legalLoadScheduler.promotePage("detention","analysis");setTab("analysis")}}><BarChart3/>Analysis</button>
-        <button className={tab==="records"?"active":""} onClick={()=>{legalLoadScheduler.promotePage("detention","records");setTab("records")}}><TableProperties/>Detention detail table</button>
-        <button className={tab==="reconcile"?"active":""} onClick={()=>setTab("reconcile")}><ShieldCheck/>Platform and Excel Comparison</button>
+        <button className={tab==="analysis"?"active":""} onClick={()=>{legalLoadScheduler.promotePage("detention","analysis");setTab("analysis")}}><AnimatedSectionIcon Icon={BarChart3} iconStyle="chart-column" active={tab==="analysis"} size={17}/>Analysis</button>
+        <button className={tab==="records"?"active":""} onClick={()=>{legalLoadScheduler.promotePage("detention","records");setTab("records")}}><AnimatedSectionIcon Icon={TableProperties} iconStyle="table-properties" active={tab==="records"} size={17}/>Detention detail table</button>
+        <button className={tab==="reconcile"?"active":""} onClick={()=>setTab("reconcile")}><AnimatedSectionIcon Icon={ShieldCheck} iconStyle="shield-check" active={tab==="reconcile"} size={17}/>Platform and Excel Comparison</button>
       </nav>
       {tab!=="reconcile"&&<LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={()=>{setFilters({});setPage(1)}}>
       <div className="glass detention-toolbar">
         {quickFilters()}
-        <div className="detention-toolbar-actions"><button className="soft case-filter-button" onClick={()=>setDrawer(true)}><SlidersHorizontal/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft detention-filter-clear" disabled={!activeCount} onClick={()=>{setFilters({});setPage(1)}}><RotateCcw/>Reset</button></div>
+        <div className="detention-toolbar-actions"><button className="soft case-filter-button" onClick={()=>setDrawer(true)}><AnimatedActionIcon type="filters"/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft detention-filter-clear" disabled={!activeCount} onClick={()=>{setFilters({});setPage(1)}}><AnimatedActionIcon type="reset"/>Reset</button></div>
       </div>
       </LegalScrollControls>}
       {tab==="analysis"&&<>

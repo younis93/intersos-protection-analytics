@@ -1,3 +1,4 @@
+import {AnimatedActionIcon} from './AnimatedActionIcon';
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -7,13 +8,11 @@ import {
   Database,
   Download,
   FileCheck2,
-  Filter,
   Home,
   LayoutDashboard,
   Maximize2,
   Minimize2,
   Palette,
-  RotateCcw,
   RefreshCw,
   ShieldCheck,
   TableProperties,
@@ -27,7 +26,7 @@ import {
   getQuality,
   uploadWorkbook,
 } from "./api";
-import {ActiveFilters, FilterDrawer} from './FilterControls';
+import {FilterDrawer} from './FilterControls';
 import {ExcelDownloadButton, AppSelect} from './SelectionControls';
 import {ChartCard, FlowCard, TrendCard} from './ChartComponents';
 import {KpiCard} from './KpiCard';
@@ -276,7 +275,7 @@ export default function App() {
         <header className="topbar">
           <div className="mobile-brand">Protection Analytics</div>
           <div className={`header-actions ${headerFiltersVisible ? "header-actions-pinned" : ""}`}>
-            {headerFiltersVisible && <div className="header-filter-actions"><button className="primary" onClick={() => setDrawer(true)}><Filter/>Filters {activeCount > 0 && <b>{activeCount}</b>}</button><button className="soft" onClick={clearFilters} disabled={!activeCount}><RotateCcw/>Reset</button></div>}
+            {headerFiltersVisible && <div className="header-filter-actions"><button className="primary" onClick={() => setDrawer(true)}><AnimatedActionIcon type="funnel" size={16}/>Filters {activeCount > 0 && <b>{activeCount}</b>}</button><button className="soft" onClick={clearFilters} disabled={!activeCount}><AnimatedActionIcon type="reset" size={16}/>Reset</button></div>}
             <input
               ref={input}
               hidden
@@ -301,7 +300,7 @@ export default function App() {
             <>
               <div className={`toolbar ${headerFiltersVisible ? "toolbar-header-active" : ""}`}>
                 <button className="primary" onClick={() => setDrawer(true)}>
-                  <Filter />
+                  <AnimatedActionIcon type="funnel"/>
                   Filters {activeCount > 0 && <b>{activeCount}</b>}
                 </button>
                 <button
@@ -309,7 +308,7 @@ export default function App() {
                   onClick={clearFilters}
                   disabled={!activeCount}
                 >
-                  <RotateCcw />
+                  <AnimatedActionIcon type="reset"/>
                   Reset all filters
                 </button>
                 {page !== "executive" && <ExcelDownloadButton className="soft" onClick={()=>downloadExcelUrl(exportUrl(page, filters),`${page}.xlsx`)}/>}
@@ -320,15 +319,6 @@ export default function App() {
                   <AppSelect label="Display" value={display} onChange={(value) => setDisplay(value as Display)} options={[["both", "# + %"], ["count", "Count #"], ["percent", "Percentage %"]]} />
                 </div>
               </div>
-              <ActiveFilters
-                filters={filters}
-                onRemove={(f, v) =>
-                  setFilters((x) => ({
-                    ...x,
-                    [f]: x[f].filter((y) => y !== v),
-                  }))
-                }
-              />
             </>
           )}
       {metadata && !metadata.ready && metadata.loading ? <div className="loading"><div/><span>Restoring local analytics data…</span></div> : metadata && !metadata.ready ? <UploadRequired onUpload={selectWorkbook} uploading={uploading} progress={uploadProgress} phase={uploadPhase} /> : !metadata && !loading ? <AnalyticsUnavailable/> : page === "studio" && metadata ? (

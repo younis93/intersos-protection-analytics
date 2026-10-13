@@ -20,7 +20,7 @@ export function singleMonthTraces(months: string[], series: TimelineSeries[], se
     y: item.values,
     width: series.length > 1 ? .24 : .38,
     marker: {color: item.color, line: {color: item.color, width: 1}},
-    selectedpoints: selected.length ? months.map((month,index)=>selected.includes(month)?index:-1).filter(index=>index>=0) : undefined,
+    selectedpoints: selected.length ? months.map((month,index)=>selected.includes(month)?index:-1).filter(index=>index>=0) : null,
     selected: {marker: {opacity: 1}},
     unselected: {marker: {opacity: .58}},
     text: item.values.map(value=>new Intl.NumberFormat("en-US", percent
