@@ -1200,20 +1200,16 @@ table th[data-value-align]>button>span{text-align:inherit!important}
 
 .legal-copy-toast-error{border-color:color-mix(in srgb,#c0392b 38%,var(--line))}.legal-copy-toast-error>svg,.legal-copy-toast-error>span{color:#c0392b}.legal-copy-toast-dismissible{pointer-events:auto;grid-template-columns:20px minmax(0,1fr) 28px}.legal-copy-toast-dismissible>strong{grid-column:2}.legal-copy-toast-dismissible>button{grid-column:3;grid-row:1/3;display:grid;place-items:center;width:28px;height:28px;padding:4px;border:0;border-radius:7px;background:transparent;color:var(--ink);cursor:pointer}.legal-copy-toast-dismissible>button:hover{background:color-mix(in srgb,var(--ink) 8%,transparent)}.legal-copy-toast-dismissible>button svg{width:16px;height:16px;color:inherit}
 
-/* Single-click Home brand sequence, isolated from navigation and page loading. */
+/* The shaded Earth stays visible at rest; clicks rotate only the globe. */
 .home-logo-motion{position:relative;display:grid;place-items:center;isolation:isolate}
-.home-logo-motion .welcome-logo-mark{position:relative;z-index:1;transform-origin:center 65%}
+.home-logo-motion .welcome-logo-mark{position:relative;z-index:1}
 .home-logo-motion .welcome-logo-word{position:relative;z-index:1}
-.home-logo-sheen{position:absolute;pointer-events:none;inset:0;opacity:0;background:linear-gradient(110deg,transparent 35%,rgba(255,255,255,.8) 49%,transparent 63%);background-size:300% 100%;background-position:100% 0;mask:url('/intersos-symbol-transparent.png') center/contain no-repeat;-webkit-mask:url('/intersos-symbol-transparent.png') center/contain no-repeat}
-.home-logo-motion.is-playing .welcome-logo-mark{animation:home-brand-lift 1600ms cubic-bezier(.4,0,.2,1) both}
-.home-logo-motion.is-playing .home-logo-sheen{animation:home-brand-sheen 1300ms 150ms ease-in-out both}
-.home-logo-motion.is-playing .welcome-logo-word b{animation:home-brand-letter 1050ms calc(250ms + var(--letter)*45ms) cubic-bezier(.4,0,.2,1) both}
-@keyframes home-brand-lift{0%,100%{transform:translateY(0) scale(1)}18%{transform:translateY(1px) scale(.985)}52%{transform:translateY(-5px) scale(1.035)}78%{transform:translateY(-2px) scale(1.01)}}
-@keyframes home-brand-sheen{0%{opacity:0;background-position:100% 0}25%{opacity:.8}70%{opacity:.8}100%{opacity:0;background-position:0% 0}}
-@keyframes home-brand-letter{0%,100%{transform:translateY(0);text-shadow:0 0 0 transparent}40%{transform:translateY(-2px);text-shadow:0 0 14px color-mix(in srgb,var(--blue) 30%,transparent)}}
-@media(prefers-reduced-motion:reduce){
-  .home-logo-motion.is-playing *{animation:none!important}
-}
+.home-logo-motion .welcome-logo-word b{will-change:auto}
+.home-logo-emblem{position:relative;display:block;height:100%;width:auto;aspect-ratio:1;margin-inline:auto}
+.home-logo-motion.is-globe-ready .home-logo-frame{mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1254 1254'%3E%3Cpath fill='white' fill-rule='evenodd' d='M0 0H1254V1254H0Z M266.5 607.5a360 377 0 1 0 720 0a360 377 0 1 0 -720 0Z'/%3E%3C/svg%3E");mask-size:100% 100%;mask-repeat:no-repeat}
+.home-logo-earth{position:absolute;left:21.610845%;top:18.740032%;width:56.698565%;height:59.409888%;opacity:0;pointer-events:none}
+.home-logo-motion.is-highlighted .home-logo-emblem{filter:brightness(1.16)}
+.home-logo-motion.is-globe-ready .home-logo-earth{opacity:1}
 
 .legal-upload-icon .legal-processing-folder{width:80px;height:80px;overflow:hidden}
 .legal-folder-back-start{stop-color:color-mix(in srgb,var(--blue) 85%,#122334)}

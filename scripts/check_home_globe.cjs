@@ -1,0 +1,25 @@
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE_PATH||'playwright');
+const root=path.resolve(__dirname,'..'),entry=path.join(root,'frontend/src/homeGlobeCheck.tsx'),html=path.join(root,'frontend/home-globe-check.html');
+(async()=>{let browser;assert(!fs.existsSync(entry)&&!fs.existsSync(html));try{
+ fs.writeFileSync(entry,`import React from 'react';import {createRoot} from 'react-dom/client';import {HomeLogo} from './HomeLogo';import './styles.css';const root=createRoot(document.getElementById('root')!);(window as any).unmount=()=>root.unmount();root.render(<React.StrictMode><HomeLogo/></React.StrictMode>);`);
+ fs.writeFileSync(html,'<meta name="viewport" content="width=device-width,initial-scale=1"><div id="root" style="display:grid;place-items:center;min-height:90vh"></div><script type="module" src="/src/homeGlobeCheck.tsx"></script>');
+ browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+ const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(String(e)));await page.routeWebSocket('**',()=>{});
+ const url=(process.env.APP_TEST_URL||'http://127.0.0.1:5188')+'/home-globe-check.html';
+ const pixels=()=>page.locator('canvas').evaluate(c=>c.toDataURL());
+ const visible=async()=>{assert.equal(await page.locator('canvas').evaluate(c=>getComputedStyle(c).opacity),'1');assert.notEqual(await page.locator('.home-logo-frame').evaluate(c=>getComputedStyle(c).maskImage),'none');};
+ for(const width of [1440,390])for(const theme of ['glass-light','glass-dark']){
+  await page.setViewportSize({width,height:900});await page.goto(url);await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);await page.locator('.is-globe-ready').waitFor();await visible();const resting=await pixels();
+  await page.getByRole('button').click();await page.waitForTimeout(700);await visible();assert.notEqual(await pixels(),resting);await page.getByRole('button').click();await page.waitForFunction(()=>document.querySelector('button').getAttribute('aria-busy')==='false');await visible();assert.equal(await pixels(),resting);
+  fs.mkdirSync(path.join(root,'output/home-globe'),{recursive:true});await page.screenshot({path:path.join(root,`output/home-globe/permanent-${theme}-${width}.png`)});
+ }
+ const resting=await pixels();await page.getByRole('button').click();await page.waitForTimeout(500);
+ await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,value:true});document.dispatchEvent(new Event('visibilitychange'));});await visible();assert.equal(await pixels(),resting);
+ await page.emulateMedia({reducedMotion:'reduce'});await page.goto(url);await page.locator('.is-globe-ready').waitFor();const reduced=await pixels();await page.getByRole('button').click();await page.waitForTimeout(300);await visible();assert.equal(await pixels(),reduced);assert.equal(await page.locator('button').getAttribute('aria-busy'),'false');
+ await page.emulateMedia({reducedMotion:'no-preference'});await page.getByRole('button').click();await page.waitForTimeout(500);await page.emulateMedia({reducedMotion:'reduce'});await visible();assert.equal(await pixels(),reduced);
+ const failure=await browser.newPage();await failure.routeWebSocket('**',()=>{});await failure.route('**/home-globe-land.svg',route=>route.abort());await failure.goto(url);await failure.waitForTimeout(500);assert.equal(await failure.locator('.is-globe-ready').count(),0);assert.equal(await failure.locator('.home-logo-frame').evaluate(c=>getComputedStyle(c).maskImage),'none');await failure.getByRole('button').click();await failure.waitForTimeout(300);assert.equal(await failure.locator('button').getAttribute('aria-busy'),'false');await failure.close();
+ const noCanvas=await browser.newPage();await noCanvas.routeWebSocket('**',()=>{});await noCanvas.addInitScript(()=>HTMLCanvasElement.prototype.getContext=function(){return null});await noCanvas.goto(url);await noCanvas.waitForTimeout(500);assert.equal(await noCanvas.locator('.is-globe-ready').count(),0);assert.equal(await noCanvas.locator('.home-logo-frame').evaluate(c=>getComputedStyle(c).maskImage),'none');await noCanvas.close();
+ const delayed=await browser.newPage();await delayed.routeWebSocket('**',()=>{});await delayed.route('**/home-globe-land.svg',async route=>{await new Promise(r=>setTimeout(r,500));await route.continue()});await delayed.goto(url);await delayed.evaluate(()=>window.unmount());await delayed.waitForTimeout(700);assert.equal(await delayed.locator('canvas').count(),0);await delayed.close();
+ assert.deepEqual(errors,[]);console.log('PASS: permanent 3D, rotation, repeated clicks, visibility interruption, reduced motion, map/canvas fallback, delayed unmount, desktop/mobile, light/dark.');
+}finally{await browser?.close();fs.rmSync(entry,{force:true});fs.rmSync(html,{force:true})}})().catch(e=>{console.error(e);process.exitCode=1});

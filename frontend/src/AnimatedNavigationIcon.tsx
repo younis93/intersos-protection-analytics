@@ -20,7 +20,7 @@ export const navigationIconMotions:Record<LegalPage,IconMotion>={
   beneficiaries:{style:'users',parts:[part('front-person',[0,3],'rise'),part('back-person',[1,2],'assemble',120)]},
   assessments:{style:'shield-check',parts:[part('shield',[0],'settle'),part('check',[1],'confirm',120)]},
   legalservices:{style:'briefcase-business',parts:[part('case',[0,2,3],'rise'),part('handle',[1],'handle',80)]},
-  'send-issues':{style:'mail',parts:[part('envelope',[1],'send',80),part('flap',[0],'flap',0,{origin:'50% 17%'})]},
+  'send-issues':{style:'mail',parts:[part('envelope',[1],'send',0,{duration:560}),part('flap',[0],'send',0,{duration:560})]},
   detention:{style:'lock-keyhole',parts:[part('lock',[0,1],'settle',70),part('shackle',[2],'close')]},
   deportation:{style:'shield-alert',parts:[part('shield',[0],'settle'),part('warning',[1,2],'pulse',70)]},
   'lawyer-intelligence':{style:'gavel',parts:[part('head',[1,2,3,4],'tap',0,{origin:'25% 85%',duration:560}),part('handle',[0],'tap',15,{origin:'25% 85%',duration:560})]},
