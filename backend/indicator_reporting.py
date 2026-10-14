@@ -450,6 +450,8 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
             matrix_rows = visible_rows
         beneficiary_column = prepared.find(list(frame.columns), "Beneficiary ID", "Case ID", "PN ID"); assessment_column = prepared.find(list(frame.columns), "Assessment ID"); name_column = prepared.find(list(frame.columns), "Name (Filter Color Red)", "Beneficiary Name", "Name")
         counts = {pair: [0] * 12 for pair in matrix_rows}; ids = {pair: [[] for _ in range(12)] for pair in matrix_rows}; assessment_ids = {pair: [[] for _ in range(12)] for pair in matrix_rows}; unclassified = unknown = 0
+        source_records = {pair: [[] for _ in range(12)] for pair in matrix_rows}
+        dataset = next((name for name, candidate in prepared.frames.items() if candidate is frame), None)
         for row in records:
             population, pair, sex, age = prepared.demographics[id(row)]
             if population != population_id: continue
@@ -458,12 +460,14 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
             if not sex or not age: unclassified += 1; continue
             beneficiary_id, assessment_id, name, index = prepared.details[id(row)]
             counts[pair][index] += 1
+            source_records[pair][index].append({"dataset": dataset, "rowIndex": prepared.row_positions[id(frame)][id(row)]})
             if not name: name = beneficiary_names.get(beneficiary_id, "")
             source = source_label or ("assessments.csv" if assessment_column else "source record")
             if beneficiary_id:
                 ids[pair][index].append(f"{beneficiary_id}  |  Assessment ID: {assessment_id}  |  Name: {name}  |  Source: {source}")
             assessment_ids[pair][index].append(assessment_id)
         rows, totals, total_ids = [], [0] * 13, [[] for _ in range(13)]
+        total_source_records = [[] for _ in range(13)]
         for project, location in matrix_rows:
             values = counts[(project, location)] + [sum(counts[(project, location)])]
             totals = [a + b for a, b in zip(totals, values)]
@@ -472,8 +476,11 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
             row_assessment_ids = assessment_ids[(project, location)]
             row_assessment_ids = row_assessment_ids + [[assessment_id for cell_ids in row_assessment_ids for assessment_id in cell_ids]]
             total_ids = [existing + incoming for existing, incoming in zip(total_ids, row_ids)]
-            rows.append({"project": project, "location": location, "values": values, "beneficiaryIds": row_ids, "assessmentIds": row_assessment_ids})
-        return {"rows": rows, "totals": totals, "total": totals[-1], "totalBeneficiaryIds": total_ids, "warnings": {"unclassified": unclassified, "unknownLocation": unknown}}
+            row_records = source_records[(project, location)]
+            row_records = row_records + [[record for cell in row_records for record in cell]]
+            total_source_records = [existing + incoming for existing, incoming in zip(total_source_records, row_records)]
+            rows.append({"project": project, "location": location, "values": values, "beneficiaryIds": row_ids, "assessmentIds": row_assessment_ids, "sourceRecords": row_records})
+        return {"rows": rows, "totals": totals, "total": totals[-1], "totalBeneficiaryIds": total_ids, "totalSourceRecords": total_source_records, "warnings": {"unclassified": unclassified, "unknownLocation": unknown}}
 
     def indicator(identifier: str, title: str, source: str, date_field: str, rule: str, population_group: str, records: list[dict[str, Any]], frame: pd.DataFrame) -> dict[str, Any]:
         source_file = {"Assessments": "assessments.csv", "Legal Services": "legalservices.csv", "Deportation Records": "deportationrecords.csv", "Awareness": "awareness.csv", "Assessments (this year)": "assessments.csv - this year", "Legal Services (carry-over)": "legalservices.csv - carry-over"}.get(source, source)
@@ -483,10 +490,11 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
     def add_sections(left: list[dict[str, Any]], right: list[dict[str, Any]]) -> list[dict[str, Any]]:
         result = []
         for a, b in zip(left, right):
-            rows = [{"project": ar["project"], "location": ar["location"], "values": [x + y for x, y in zip(ar["values"], br["values"])], "beneficiaryIds": [x + y for x, y in zip(ar.get("beneficiaryIds", [[] for _ in ar["values"]]), br.get("beneficiaryIds", [[] for _ in br["values"]]))], "assessmentIds": [x + y for x, y in zip(ar.get("assessmentIds", [[] for _ in ar["values"]]), br.get("assessmentIds", [[] for _ in br["values"]]))]} for ar, br in zip(a["rows"], b["rows"])]
+            rows = [{"project": ar["project"], "location": ar["location"], "values": [x + y for x, y in zip(ar["values"], br["values"])], "beneficiaryIds": [x + y for x, y in zip(ar.get("beneficiaryIds", [[] for _ in ar["values"]]), br.get("beneficiaryIds", [[] for _ in br["values"]]))], "assessmentIds": [x + y for x, y in zip(ar.get("assessmentIds", [[] for _ in ar["values"]]), br.get("assessmentIds", [[] for _ in br["values"]]))], "sourceRecords": [x + y for x, y in zip(ar["sourceRecords"], br["sourceRecords"])]} for ar, br in zip(a["rows"], b["rows"])]
             totals = [x + y for x, y in zip(a["totals"], b["totals"])]
             total_ids = [x + y for x, y in zip(a.get("totalBeneficiaryIds", [[] for _ in totals]), b.get("totalBeneficiaryIds", [[] for _ in totals]))]
-            result.append({"id": a["id"], "label": a["label"], "rows": rows, "totals": totals, "total": totals[-1], "totalBeneficiaryIds": total_ids, "warnings": {"unclassified": a["warnings"]["unclassified"] + b["warnings"]["unclassified"], "unknownLocation": a["warnings"]["unknownLocation"] + b["warnings"]["unknownLocation"]}})
+            total_source_records = [x + y for x, y in zip(a["totalSourceRecords"], b["totalSourceRecords"])]
+            result.append({"id": a["id"], "label": a["label"], "rows": rows, "totals": totals, "total": totals[-1], "totalBeneficiaryIds": total_ids, "totalSourceRecords": total_source_records, "warnings": {"unclassified": a["warnings"]["unclassified"] + b["warnings"]["unclassified"], "unknownLocation": a["warnings"]["unknownLocation"] + b["warnings"]["unknownLocation"]}})
         return result
 
     def parent(identifier: str, title: str, rule: str, children: list[dict[str, Any]], carryover: bool = False, contributions: dict[str, Any] | None = None) -> dict[str, Any]:

@@ -438,6 +438,17 @@ path.detention-map-region{stroke:color-mix(in srgb,var(--muted) 32%,var(--line))
 .drilldown-table th button:hover{background:transparent;box-shadow:none;color:var(--blue);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:4px}.drill-source{display:flex;width:100%;max-width:100%;min-width:0;white-space:nowrap;overflow:visible;text-overflow:clip;font-size:9px;padding:7px 8px}
 .drill-source,.drill-source-legal-services{background:transparent;border:0;border-radius:0;padding:0;color:var(--muted)}
 .drilldown-table-deportation th:nth-child(1),.drilldown-table-deportation td:nth-child(1){width:25%}.drilldown-table-deportation th:nth-child(2),.drilldown-table-deportation td:nth-child(2){width:35%}.drilldown-table-deportation th:nth-child(3),.drilldown-table-deportation td:nth-child(3){width:40%}
+/* Keep long names and source filenames inside their own drill-down cells. */
+.beneficiary-id-list .drilldown-table{min-width:600px}
+.beneficiary-id-list .drilldown-table th button,.beneficiary-id-list .drilldown-table td{white-space:normal;overflow-wrap:anywhere;vertical-align:middle}
+.beneficiary-id-list .drilldown-table td:nth-child(3){overflow:visible;text-overflow:clip}
+.beneficiary-id-list .drilldown-table code{display:block;max-width:100%;white-space:normal;overflow-wrap:anywhere;unicode-bidi:isolate}
+.beneficiary-id-list .drill-source{display:block;width:100%;max-width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere;line-height:1.4;text-align:left;direction:ltr;unicode-bidi:isolate}
+.beneficiary-id-list .drill-case-action{max-width:100%;white-space:normal;padding:6px 8px}
+.beneficiary-id-list .drill-case-action code{min-width:0;color:inherit}
+.beneficiary-id-list .drill-case-action svg{flex:none}
+.beneficiary-id-list .drill-case-action:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.drill-source-summary span{overflow-wrap:anywhere;min-width:0;max-width:100%}
 
 .indicator-group>div{padding:10px 12px 12px}.indicator-card-badges>span{padding:0;border-radius:0;background:transparent;color:var(--blue);font-size:8px;letter-spacing:.08em}.indicator-header-month .checkbox-multi-select{width:100%;min-width:0}.indicator-header-month .app-select-trigger{min-height:40px;padding:8px 10px}.indicator-header-month .checkbox-multi-menu{z-index:110}.indicator-header-project .checkbox-multi-select{width:100%;min-width:0}.indicator-header-project .app-select-trigger{min-height:40px;padding:8px 10px}.indicator-header-project .checkbox-multi-menu{z-index:110}.indicator-header-project .app-select-label,.indicator-header-month .app-select-label{display:none}.indicator-header-project .app-select,.indicator-header-month .app-select{padding-top:0;padding-bottom:0}
 
@@ -693,6 +704,8 @@ path.detention-map-region{stroke:color-mix(in srgb,var(--muted) 32%,var(--line))
 .legal-shell .legal-deportation-dashboard{display:grid;align-content:start;gap:var(--lp-gap)}
 .legal-shell .legal-deportation-dashboard>.toolbar,.legal-shell .legal-deportation-dashboard>.legal-scroll-source>.toolbar{top:9px;margin:0}
 .legal-shell .legal-deportation-dashboard>.kpi-grid,.legal-shell .legal-deportation-dashboard>.dashboard-grid{margin:0}
+.legal-shell .legal-deportation-dashboard .kpi-card{min-height:96px;padding:14px 19px;gap:8px;justify-content:center}
+.legal-shell .legal-deportation-dashboard .kpi-card strong{margin:0;line-height:1.1}
 .legal-shell .legal-deportation-dashboard>.refresh-indicator{position:absolute;top:74px;right:0;margin:0}
 @media(max-width:900px){.legal-shell .legal-deportation-dashboard>.toolbar,.legal-shell .legal-deportation-dashboard>.legal-scroll-source>.toolbar{top:9px}}
 
@@ -787,6 +800,9 @@ path.detention-map-region{stroke:color-mix(in srgb,var(--muted) 32%,var(--line))
 .legal-shell .legal-analytics-studio{gap:var(--lp-gap)}
 .legal-shell .legal-analytics-studio .studio-section-tabs{top:16px;margin-bottom:0}
 .legal-shell .legal-analytics-studio .studio-fixed-section{gap:var(--lp-gap)}
+.legal-shell .legal-analytics-studio .legal-kpi{min-height:88px;padding:12px 18px;gap:4px;justify-content:center}
+.legal-shell .legal-analytics-studio .legal-kpi>span{font-size:12px;line-height:1.35}
+.legal-shell .legal-analytics-studio .legal-kpi>strong{font-size:28px;line-height:1.1;margin:0}
 .legal-shell .legal-analytics-studio .studio-fixed-section{position:relative}.legal-shell .legal-analytics-studio .studio-fixed-section>.legal-scroll-sentinel{position:absolute;top:0;left:0;margin:0}
 .legal-shell .legal-analytics-studio .studio-fixed-toolbar{justify-content:flex-end;min-height:68px}
 .legal-shell .legal-analytics-studio .studio-fixed-toolbar>.soft:last-child{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 7px 16px color-mix(in srgb,var(--blue) 24%,transparent)}
@@ -897,6 +913,9 @@ path.detention-map-region{stroke:color-mix(in srgb,var(--muted) 32%,var(--line))
 .skeleton-toolbar i{display:block;height:var(--lp-control-height);border-radius:13px;background:color-mix(in srgb,var(--muted) 14%,transparent)}.skeleton-toolbar i:last-child{justify-self:end;width:100%;max-width:360px}.skeleton-toolbar.deportation{grid-template-columns:120px 168px 100px minmax(280px,1fr)}
 .skeleton-tabs{display:flex;gap:7px;min-height:58px;padding:9px;border:1px solid var(--line);border-radius:16px;background:var(--panel-strong)}.skeleton-tabs i{display:block;flex:1;height:40px;border-radius:10px;background:color-mix(in srgb,var(--muted) 13%,transparent)}
 .legal-shell .legal-skeleton .skeleton-kpis{grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--lp-gap);margin:0}.legal-shell .legal-skeleton .skeleton-card{height:135px;min-height:135px;padding:var(--lp-panel-padding);border:1px solid var(--line);border-radius:var(--lp-radius);background:var(--panel-strong)}
+.legal-shell .legal-skeleton-deportation .skeleton-card{height:96px;min-height:96px;padding:14px 19px}
+.legal-shell .legal-skeleton-studio .skeleton-card{height:88px;min-height:88px;padding:12px 18px;gap:4px;justify-content:center}
+.legal-shell .legal-skeleton-studio .skeleton-card i:nth-child(3){display:none}
 .legal-shell .legal-skeleton .skeleton-chart-grid{gap:var(--lp-gap)}.legal-shell .legal-skeleton .skeleton-chart{min-height:368px;padding:var(--lp-panel-padding);border-radius:var(--lp-radius);background:var(--panel-strong)}.legal-shell .legal-skeleton-deportation .skeleton-chart:first-child{min-height:430px}.legal-shell .legal-skeleton .skeleton-chart b{height:250px}
 .skeleton-review-tables{display:grid;gap:var(--lp-gap)}.skeleton-review-table{display:grid;gap:0;min-height:300px;border:1px solid var(--line);border-radius:var(--lp-radius);background:var(--panel-strong);overflow:hidden}.skeleton-review-table .skeleton-table{padding:0}.skeleton-review-table .skeleton-table-head{height:72px;border-radius:0}.skeleton-review-table .skeleton-table-row{min-height:var(--lp-table-row);padding:14px var(--lp-panel-padding)}
 .legal-shell .legal-skeleton .skeleton-table{gap:0;border:1px solid var(--line);border-radius:var(--lp-radius);background:var(--panel-strong);overflow:hidden}.legal-shell .legal-skeleton .skeleton-table-head{height:72px;border-radius:0}.legal-shell .legal-skeleton .skeleton-table-row{min-height:var(--lp-table-row);align-items:center;padding:10px var(--lp-panel-padding)}.skeleton-pager{display:flex;justify-content:flex-end;align-items:center;gap:10px;min-height:58px;padding:10px var(--lp-panel-padding);border:1px solid var(--line);border-radius:var(--lp-radius);background:var(--panel-strong)}.skeleton-pager i{display:block;width:88px;height:28px;border-radius:9px;background:color-mix(in srgb,var(--muted) 14%,transparent)}

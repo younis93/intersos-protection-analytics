@@ -163,6 +163,11 @@ export const getLegalMetadata = (signal?: AbortSignal) =>
 export const getLegalDeportationDashboard = (filters:Filters={},signal?:AbortSignal,search="") => fetch(`${API}/legal/deportation-dashboard`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dataset:"deportationrecords",filters,search}),signal}).then(parse<Dashboard>);
 export const getLegalIndicators = (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[],communityTypes:string[]=[],signal?:AbortSignal) =>
   fetch(`${API}/legal/indicators`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.fromEntries(Object.entries({projects,projectLocations,years,quarters,months,communityTypes}).map(([key, values])=>[key,[...new Set(values)].sort()]))),signal}).then(parse<IndicatorReport>);
+export const exportIndicatorSourceRecords = async (revision:string,records:import('./types').IndicatorSourceRecord[]) => {
+  const response=await fetch(`${API}/legal/indicators/records-export`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({revision,records})});
+  if(!response.ok){const issue=await response.json().catch(()=>({detail:response.statusText}));throw new Error(typeof issue.detail==="string"?issue.detail:"Unable to export source records. Refresh Indicator Reporting and try again.")}
+  const url=URL.createObjectURL(await response.blob()),link=document.createElement("a");link.href=url;link.download="indicator-source-records.xlsx";link.click();window.setTimeout(()=>URL.revokeObjectURL(url),1500);
+};
 export const getLegalIndicatorsMonthly = (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[],communityTypes:string[]=[],signal?:AbortSignal) =>
   fetch(`${API}/legal/indicators/monthly`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.fromEntries(Object.entries({projects,projectLocations,years,quarters,months,communityTypes}).map(([key,values])=>[key,[...new Set(values)].sort()]))),signal}).then(parse<{months:string[];reports:{month:string;report:IndicatorReport}[]}>);
 export const exportLegalDetention = async (search:string,filters:Record<string,string[]>,sortColumn:string,sortDirection:"asc"|"desc") => {

@@ -11,7 +11,7 @@ import socket
 import sys
 import unicodedata
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import unquote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StrictInt
 from openpyxl import Workbook
 from .excel_export import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -321,6 +321,16 @@ class IndicatorReportRequest(BaseModel):
     quarters: list[str] = []
     months: list[str] = []
     communityTypes: list[str] = []
+
+
+class IndicatorSourceRecord(BaseModel):
+    dataset: Literal["assessments", "legalservices", "deportationrecords", "awareness", "beneficiaries"]
+    rowIndex: StrictInt = Field(ge=0)
+
+
+class IndicatorRecordsExportRequest(BaseModel):
+    revision: str = Field(min_length=1)
+    records: list[IndicatorSourceRecord] = Field(min_length=1)
 
 
 class OverviewRequest(BaseModel):
@@ -781,8 +791,9 @@ def legal_indicators(request:IndicatorReportRequest):
         cached=store._indicator_cache.get(key)
     if cached is not None:return cached
     revision, prepared = store.indicator_preparation()
-    try:result=build_indicator_report(store.frames,request.fromDate,request.toDate,request.projects,request.projectLocations,request.years,request.quarters,request.months,request.communityTypes,prepared=prepared)
+    try:result=build_indicator_report(prepared.frames,request.fromDate,request.toDate,request.projects,request.projectLocations,request.years,request.quarters,request.months,request.communityTypes,prepared=prepared)
     except ValueError as exc:raise HTTPException(400,str(exc)) from exc
+    result["revision"] = revision
     with store._cache_lock:
         if store.revision == revision:
             store._indicator_cache[key]=result
@@ -808,14 +819,40 @@ def legal_indicators_monthly(request: IndicatorReportRequest):
     revision, prepared = store.indicator_preparation()
     cached = monthly_cached_reports(store, request)
     try:
-        result = build_monthly_reports(store.frames, request.fromDate, request.toDate,
+        result = build_monthly_reports(prepared.frames, request.fromDate, request.toDate,
             request.projects, request.projectLocations, request.years, request.quarters,
             request.months, request.communityTypes, prepared=prepared, cached_reports=cached)
     except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+    for entry in result["reports"]:
+        entry["report"]["revision"] = revision
     with store._cache_lock:
         if store.revision == revision:
-            for entry in result["reports"]: store._indicator_cache[monthly_cache_key(request, entry["month"])] = entry["report"]
+            for entry in result["reports"]:
+                store._indicator_cache[monthly_cache_key(request, entry["month"])] = entry["report"]
     return result
+
+
+@app.post("/api/legal/indicators/records-export")
+def legal_indicator_records_export(request: IndicatorRecordsExportRequest):
+    from .indicator_record_export import build_source_record_workbook
+    store = require_legal_store()
+    with store._cache_lock:
+        if store.revision != request.revision:
+            raise HTTPException(409, "The imported data has changed. Refresh Indicator Reporting and reopen the figure before downloading.")
+        positions: dict[str, list[int]] = {}
+        seen = set()
+        for record in request.records:
+            frame = store.frames.get(record.dataset)
+            if frame is None or record.rowIndex >= len(frame):
+                raise HTTPException(400, "A source record is unavailable. Refresh Indicator Reporting and reopen the figure.")
+            key = (record.dataset, record.rowIndex)
+            if key not in seen:
+                seen.add(key)
+                positions.setdefault(record.dataset, []).append(record.rowIndex)
+        frames = {dataset: store.frames[dataset].iloc[indexes].copy(deep=True) for dataset, indexes in positions.items()}
+    payload = build_source_record_workbook(frames)
+    return Response(payload, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="indicator-source-records.xlsx"'})
 
 
 @app.post("/api/legal/indicators/export")

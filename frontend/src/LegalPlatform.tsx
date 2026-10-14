@@ -577,7 +577,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
             />
           ) : page === "lawyer-intelligence" ? (
             <LawyerOverview metadata={metadata} />
-          ) : <IndicatorReporting revision={dataRevision}/>}
+          ) : <IndicatorReporting revision={dataRevision} onOpenCase={coreAvailable?openReviewCase:undefined} caseReviewOpen={Boolean(reviewCaseId)}/>}
         </section>
       </main>
       {(uploading||restoringData||cancelPending||processingResult)&&<ProcessingRecords key={importOperationId||"startup"} progress={processingResult||importProgress} uploadPercent={uploading&&uploadPhase==="uploading"?uploadProgress:undefined} restoring={!uploading} onCancel={cancelProcessing} onDismiss={()=>setProcessingResult(null)} cancelPending={cancelPending} cancelError={cancelError}/>}
