@@ -791,9 +791,9 @@ def legal_indicators(request:IndicatorReportRequest):
         cached=store._indicator_cache.get(key)
     if cached is not None:return cached
     revision, prepared = store.indicator_preparation()
-    try:result=build_indicator_report(prepared.frames,request.fromDate,request.toDate,request.projects,request.projectLocations,request.years,request.quarters,request.months,request.communityTypes,prepared=prepared)
+    try:result=build_indicator_report(prepared.frames,request.fromDate,request.toDate,request.projects,request.projectLocations,request.years,request.quarters,request.months,request.communityTypes,prepared=prepared,include_source_records=True)
     except ValueError as exc:raise HTTPException(400,str(exc)) from exc
-    result["revision"] = revision
+    result["revision"] = store.data_revision
     with store._cache_lock:
         if store.revision == revision:
             store._indicator_cache[key]=result
@@ -821,10 +821,10 @@ def legal_indicators_monthly(request: IndicatorReportRequest):
     try:
         result = build_monthly_reports(prepared.frames, request.fromDate, request.toDate,
             request.projects, request.projectLocations, request.years, request.quarters,
-            request.months, request.communityTypes, prepared=prepared, cached_reports=cached)
+            request.months, request.communityTypes, prepared=prepared, cached_reports=cached, include_source_records=True)
     except ValueError as exc: raise HTTPException(400, str(exc)) from exc
     for entry in result["reports"]:
-        entry["report"]["revision"] = revision
+        entry["report"]["revision"] = store.data_revision
     with store._cache_lock:
         if store.revision == revision:
             for entry in result["reports"]:
@@ -837,7 +837,7 @@ def legal_indicator_records_export(request: IndicatorRecordsExportRequest):
     from .indicator_record_export import build_source_record_workbook
     store = require_legal_store()
     with store._cache_lock:
-        if store.revision != request.revision:
+        if store.data_revision != request.revision:
             raise HTTPException(409, "The imported data has changed. Refresh Indicator Reporting and reopen the figure before downloading.")
         positions: dict[str, list[int]] = {}
         seen = set()

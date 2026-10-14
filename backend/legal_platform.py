@@ -496,6 +496,7 @@ class LegalStore:
     flags: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     review_exclusions: list[dict[str, Any]] = field(default_factory=list)
     revision: str = field(default_factory=lambda: uuid4().hex, init=False)
+    data_revision: str = field(default_factory=lambda: uuid4().hex, init=False)
     import_timings: dict[str, float] = field(default_factory=dict, init=False, repr=False)
     _overview_prepared: OrderedDict = field(default_factory=OrderedDict, init=False, repr=False)
     _metadata_cache: dict[str, Any] | None = field(default=None, init=False, repr=False)
@@ -528,6 +529,7 @@ class LegalStore:
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
+        self.data_revision = state.get("data_revision", state.get("revision", uuid4().hex))
         self._cache_lock = Lock()
         self._overview_prepared = OrderedDict()
         self._analytics_prepared = {}

@@ -325,7 +325,7 @@ def reporting_period_bounds(from_date, to_date):
     return start, end
 
 
-def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "", to_date: str = "", projects: list[str] | None = None, locations: list[str] | None = None, years: list[str] | None = None, quarters: list[str] | None = None, months: list[str] | None = None, community_types: list[str] | None = None, *, prepared: PreparedIndicatorData | None = None, _batch: dict | None = None) -> dict[str, Any]:
+def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "", to_date: str = "", projects: list[str] | None = None, locations: list[str] | None = None, years: list[str] | None = None, quarters: list[str] | None = None, months: list[str] | None = None, community_types: list[str] | None = None, *, prepared: PreparedIndicatorData | None = None, _batch: dict | None = None, include_source_records: bool = False) -> dict[str, Any]:
     prepared = prepared or PreparedIndicatorData(frames)
     projects, locations, years, quarters, months, community_types = projects or [], locations or [], years or [], quarters or [], months or [], community_types or []
     # The source values often append Arabic text (for example, "Syrian Refugee
@@ -460,7 +460,8 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
             if not sex or not age: unclassified += 1; continue
             beneficiary_id, assessment_id, name, index = prepared.details[id(row)]
             counts[pair][index] += 1
-            source_records[pair][index].append({"dataset": dataset, "rowIndex": prepared.row_positions[id(frame)][id(row)]})
+            if include_source_records:
+                source_records[pair][index].append({"dataset": dataset, "rowIndex": prepared.row_positions[id(frame)][id(row)]})
             if not name: name = beneficiary_names.get(beneficiary_id, "")
             source = source_label or ("assessments.csv" if assessment_column else "source record")
             if beneficiary_id:
@@ -772,6 +773,17 @@ def build_indicator_report(frames: dict[str, pd.DataFrame], from_date: str = "",
     for group in groups:
         for item in group["indicators"]: attach_narrative(item)
     linked_options=prepared.linked_filter_options({"projects":projects,"locations":locations,"years":years,"quarters":quarters,"months":months,"communityTypes":community_types},from_date,to_date)
+    # Keep the established report-builder contract for workbook and diagnostic
+    # callers. Interactive API reports explicitly request export provenance.
+    if not include_source_records:
+        pending = [item for group in groups for item in group["indicators"]]
+        while pending:
+            item = pending.pop()
+            pending.extend(item["children"])
+            for section in item["sections"]:
+                section.pop("totalSourceRecords", None)
+                for row in section["rows"]:
+                    row.pop("sourceRecords", None)
     return {"fromDate": from_date, "toDate": to_date, "ageGroups": list(AGE_GROUPS), "filterOptions": linked_options, "activeFilters": {"projects": projects, "locations": locations, "years": years, "quarters": quarters, "months": months, "communityTypes": community_types}, "groups": groups}
 
 
@@ -1003,7 +1015,7 @@ def available_reporting_months(prepared, community_types=None):
 
 def build_monthly_reports(frames, from_date="", to_date="", projects=None, locations=None,
                           years=None, quarters=None, months=None, community_types=None,
-                          *, prepared=None, cached_reports=None):
+                          *, prepared=None, cached_reports=None, include_source_records=False):
     """Partition eligible source rows once, retaining independent monthly deduplication."""
     prepared = prepared or PreparedIndicatorData(frames)
     reporting_period_bounds(from_date, to_date)
@@ -1019,6 +1031,6 @@ def build_monthly_reports(frames, from_date="", to_date="", projects=None, locat
         report = (cached_reports or {}).get(month)
         if report is None:
             report = build_indicator_report(frames, from_date, to_date, projects, locations,
-                                            years, [], [month], community_types, prepared=prepared, _batch=batch)
+                                            years, [], [month], community_types, prepared=prepared, _batch=batch, include_source_records=include_source_records)
         reports.append({"month": month, "report": report})
     return {"months": selected, "reports": reports}
