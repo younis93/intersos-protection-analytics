@@ -6,6 +6,7 @@ import { cancelImport,getImportProgress,useImportProgress,type LegalImportProgre
 import { legalPageRank } from './legalPageOrder';
 import { LegalSkeleton } from './LegalSkeleton';
 import NotificationToast from './NotificationToast';
+import ImportSourceGuide from './ImportSourceGuide';
 import ProcessingRecords from './ProcessingRecords';
 import { UpdateFallbackNotice } from "./UpdateFallbackNotice";
 
@@ -121,8 +122,14 @@ export const latestLegalFiles = (files: File[]) => {
 };
 
 export function NavLoadStatus({label,status}:{label:string;status:LoadStatus}) {
-  const [visibility,setVisibility] = useState<"visible"|"exiting"|"hidden">("visible");
+  const [visibility,setVisibility] = useState<"visible"|"exiting"|"hidden">(() => status === "ready" ? "hidden" : "visible");
+  const previousStatus = useRef(status);
   useEffect(() => {
+    const previous = previousStatus.current;
+    previousStatus.current = status;
+    // Returning from Home mounts indicators with cached ready statuses.
+    // Only a newly observed completion should start the checkmark timer.
+    if (status === "ready" && previous === "ready") return;
     setVisibility("visible");
     if (status !== "ready") return;
     const exitTimer = window.setTimeout(() => setVisibility("exiting"), 5000);
@@ -475,7 +482,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
             <small>Review & analytics</small>
           </div>
         </div>
-        <div className="sidebar-workspace-controls"><button className="soft sidebar-fullscreen" onClick={toggleFullscreen} title={fullscreen ? "Exit full screen" : "Enter full screen"} aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}>{fullscreen ? <Minimize2/> : <Maximize2/>}<span>Full screen</span></button><div className={`data-source-control app-select app-select-theme ${dataMenuOpen?"open":""}`}><Database className="app-select-icon"/><span className="app-select-label">Data source</span><button className="app-select-trigger" disabled={uploading||restoringData} aria-busy={uploading} aria-haspopup="menu" aria-expanded={dataMenuOpen} onClick={() => setDataMenuOpen((current)=>!current)}><span>{uploading ? uploadPhase === "uploading" ? `Uploading ${uploadProgress}%` : "Processing records…" : "Choose source"}</span><ChevronDown/></button>{dataMenuOpen&&<><button className="data-source-backdrop" aria-label="Close data source menu" onClick={()=>setDataMenuOpen(false)}/><div className="app-select-menu data-source-menu" role="menu"><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFolder()}}><FolderOpen/><span><strong>Select folder</strong><small>Load all supported CSV files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_folder&&<button className="data-source-refresh" aria-label="Refresh selected folder" title="Refresh selected folder" onClick={()=>{setDataMenuOpen(false);refreshSelectedFolder()}}><RefreshCw/></button>}</div><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFiles()}}><Database/><span><strong>Select multiple CSV files</strong><small>Choose individual source files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_files&&<button className="data-source-refresh" aria-label="Refresh selected CSV files" title="Refresh selected CSV files" onClick={()=>{setDataMenuOpen(false);refreshSelectedFiles()}}><RefreshCw/></button>}</div><footer><span>Current source</span><strong>{metadata?.source||"No folder loaded"}</strong></footer></div></>}</div></div>
+        <div className="sidebar-workspace-controls"><button className="soft sidebar-fullscreen" onClick={toggleFullscreen} title={fullscreen ? "Exit full screen" : "Enter full screen"} aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}>{fullscreen ? <Minimize2/> : <Maximize2/>}<span>Full screen</span></button><div className={`data-source-control app-select app-select-theme ${dataMenuOpen?"open":""}`}><Database className="app-select-icon"/><span className="app-select-label">Data source</span><button className="app-select-trigger" disabled={uploading||restoringData} aria-busy={uploading} aria-haspopup="menu" aria-expanded={dataMenuOpen} onClick={() => setDataMenuOpen((current)=>!current)}><span>{uploading ? uploadPhase === "uploading" ? `Uploading ${uploadProgress}%` : "Processing records…" : "Choose source"}</span><ChevronDown/></button>{dataMenuOpen&&<><button className="data-source-backdrop" aria-label="Close data source menu" onClick={()=>setDataMenuOpen(false)}/><div className="app-select-menu data-source-menu" role="menu"><ImportSourceGuide compact/><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFolder()}}><FolderOpen/><span><strong>Select folder</strong><small>Load all supported CSV files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_folder&&<button className="data-source-refresh" aria-label="Refresh selected folder" title="Refresh selected folder" onClick={()=>{setDataMenuOpen(false);refreshSelectedFolder()}}><RefreshCw/></button>}</div><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFiles()}}><Database/><span><strong>Select multiple CSV files</strong><small>Choose individual source files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_files&&<button className="data-source-refresh" aria-label="Refresh selected CSV files" title="Refresh selected CSV files" onClick={()=>{setDataMenuOpen(false);refreshSelectedFiles()}}><RefreshCw/></button>}</div><footer><span>Current source</span><strong>{metadata?.source||"No folder loaded"}</strong></footer></div></>}</div></div>
         <div className="legal-sidebar-utilities"><button aria-label="Home" title="Home" onClick={() => {window.location.hash="/"}}><Home/><span>Home</span></button><button className="legal-menu-slide-toggle" aria-label={sidebarCollapsed ? "Expand menu" : "Slide menu left"} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? "Expand menu" : "Slide menu left"} onClick={() => {setDataMenuOpen(false);setSidebarCollapsed((current) => {const next=!current;localStorage.setItem("legal-sidebar-collapsed",String(next));return next})}}><ArrowLeft/><span>{sidebarCollapsed ? "Expand" : "Slide left"}</span></button></div>
         <LegalPageNavigation items={availableNav} page={page} onNavigate={setPage} loadStatuses={loadStatuses} sendIssuesStatus={sendIssuesStatus}/>
       </aside>
@@ -532,6 +539,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
                   <p>Choose a folder or individual CSV files to begin your data review and analysis.</p>
                 </div>
               </header>
+              <ImportSourceGuide/>
               <div className="legal-import-source-options">
                 <button type="button" className="legal-import-source-option" onClick={()=>void selectFolder()} disabled={uploading||restoringData}>
                   <FolderOpen/>
@@ -544,7 +552,6 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
                   <ArrowRight/>
                 </button>
               </div>
-              <footer><CheckCircle2/><span>Import <strong>deportationrecords.csv</strong>, <strong>awareness.csv</strong>, or <strong>legalhotlines.csv</strong> individually or together. Import beneficiaries, assessments, and legal services together for the full platform.</span></footer>
             </section>
           ) : page === "overview" ? (
             <Overview metadata={metadata} theme={theme as Theme} />

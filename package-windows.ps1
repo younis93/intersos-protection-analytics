@@ -15,6 +15,7 @@ $PackageTemp = Join-Path $ProjectRoot 'packaging-temp'
 $BuildDist = Join-Path $PackageTemp 'dist'
 $BuildWork = Join-Path $PackageTemp 'work'
 $BuildSpec = Join-Path $PackageTemp 'spec'
+$PackagedFrontend = Join-Path $PackageTemp 'frontend-dist'
 $PackagedApp = Join-Path $StagingReleaseRoot 'Iraq Data Analysis.exe'
 
 function Test-FileNewerThan {
@@ -194,14 +195,25 @@ if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'frontend\node_modules'
     if ($LASTEXITCODE -ne 0) { throw 'Frontend dependency installation failed.' }
 }
 
-& npm.cmd run build --prefix (Join-Path $ProjectRoot 'frontend')
+# Build a fresh installer asset snapshot without clearing files used by open desktop windows.
+$FrontendTarget = [System.IO.Path]::GetFullPath($PackagedFrontend)
+if (-not $FrontendTarget.StartsWith($ProjectRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Installer frontend output must stay inside the project workspace.'
+}
+foreach ($FrontendParent in @($PackageTemp, $PackagedFrontend)) {
+    if ((Test-Path -LiteralPath $FrontendParent) -and ((Get-Item -LiteralPath $FrontendParent).Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        throw 'Installer frontend output must not use a linked directory.'
+    }
+}
+& npm.cmd run build --prefix (Join-Path $ProjectRoot 'frontend') -- --outDir $PackagedFrontend --emptyOutDir
 if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
 $InstalledPyInstaller = & $VenvPython -c "import PyInstaller; print(PyInstaller.__version__)" 2>$null
 if ($LASTEXITCODE -ne 0 -or $InstalledPyInstaller -ne '6.21.0') {
     & $VenvPython -m pip install --disable-pip-version-check pyinstaller==6.21.0
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller installation failed.' }
 }
-$PyInstallerArgs = @('--noconfirm', '--windowed', '--onedir', '--name', 'Iraq Data Analysis', '--icon', (Join-Path $ProjectRoot 'intersos-protection-analytics.ico'), '--distpath', $BuildDist, '--workpath', $BuildWork, '--specpath', $BuildSpec, '--add-data', "$ProjectRoot\frontend\dist;frontend\dist", '--add-data', "$ProjectRoot\intersos-protection-analytics.ico;.")
+$PyInstallerArgs = @('--noconfirm', '--windowed', '--onedir', '--name', 'Iraq Data Analysis', '--icon', (Join-Path $ProjectRoot 'intersos-protection-analytics.ico'), '--distpath', $BuildDist, '--workpath', $BuildWork, '--specpath', $BuildSpec, '--add-data', "$PackagedFrontend;frontend\dist", '--add-data', "$ProjectRoot\intersos-protection-analytics.ico;.")
+$PyInstallerArgs += @('--hidden-import', 'win32timezone', '--hidden-import', 'pythoncom', '--hidden-import', 'win32com.client', '--hidden-import', 'win32process', '--hidden-import', 'win32api')
 if ($Clean) { $PyInstallerArgs += '--clean' }
 $PyInstallerArgs += (Join-Path $ProjectRoot 'desktop_launcher.py')
 & $VenvPython -m PyInstaller @PyInstallerArgs

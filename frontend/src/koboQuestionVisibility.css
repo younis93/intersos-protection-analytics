@@ -1,0 +1,110 @@
+.kobo-shell .kobo-visibility{width:min(1280px,calc(100vw - 32px));height:min(860px,calc(100dvh - 36px));max-height:calc(100dvh - 36px);padding:0;overflow:hidden;background:var(--panel-strong);border-radius:22px}
+.kobo-visibility[open]{display:flex;flex-direction:column}
+.kobo-shell .kobo-visibility>header{display:flex;align-items:center;gap:14px;flex:none;padding:20px 24px;margin:0;border-bottom:1px solid var(--line)}
+.kobo-visibility-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:14px;color:var(--blue);background:color-mix(in srgb,var(--blue) 10%,transparent);flex:none}
+.kobo-visibility>header>div{flex:1;min-width:0}
+.kobo-shell .kobo-visibility h2{font-size:21px;margin:0}
+.kobo-shell .kobo-visibility>header p{margin:3px 0 0;font-size:12px}
+.kobo-visibility-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 24px;border-bottom:1px solid var(--line);flex:none;background:var(--panel)}
+.kobo-visibility-search{display:flex;align-items:center;gap:9px;flex:1;min-width:240px;border-radius:12px;padding:10px 12px;background:var(--panel-strong);border:1px solid var(--line)}
+.kobo-visibility-search:focus-within{border-color:var(--blue);box-shadow:0 0 0 2px color-mix(in srgb,var(--blue) 12%,transparent)}
+.kobo-shell .kobo-visibility-search>input{min-width:0;width:100%;border:0;background:transparent;box-shadow:none;padding:0;color:var(--ink);font-size:12px;outline:none}
+.kobo-visibility-search>svg{width:17px;height:17px;color:var(--muted);flex:none}
+.kobo-visibility-search>button{border:0;background:transparent;padding:0;color:var(--muted)}
+.kobo-visibility-toolbar>.app-select{width:185px;min-width:0;margin:0;box-sizing:border-box}
+.kobo-visibility-toolbar>.soft{font-size:11px;min-height:36px;padding:7px 10px}
+.kobo-visibility-status{display:flex;gap:3px;align-items:center;padding:3px;background:var(--panel-strong);border:1px solid var(--line);border-radius:10px}
+.kobo-shell .kobo-visibility-status>button{font-size:11px;padding:7px 10px;border:0;border-radius:7px;background:transparent;color:var(--muted);min-height:32px;box-shadow:none}
+.kobo-visibility-status>button>span{font-size:10px;opacity:.8}
+.kobo-shell .kobo-visibility-status>button[aria-pressed=true]{background:color-mix(in srgb,var(--blue) 10%,var(--panel));color:var(--blue);font-weight:700}
+.kobo-visibility-body{display:grid;grid-template-columns:245px minmax(0,1fr);min-height:0;flex:1}
+.kobo-visibility-groups{overflow:auto;min-height:0;padding:18px 12px;border-inline-end:1px solid var(--line);background:var(--panel);overscroll-behavior:contain}
+.kobo-shell .kobo-visibility-groups h3{font-size:10px;letter-spacing:.08em;color:var(--muted);margin:0 10px 12px}
+.kobo-shell .kobo-visibility-groups>button{display:flex;align-items:flex-start;justify-content:flex-start;width:100%;gap:8px;border:0;border-radius:9px;padding:11px 12px;font-size:12px;text-align:start;background:transparent;color:var(--ink);box-shadow:none}
+.kobo-visibility-groups>button svg{flex:none;width:15px;height:15px;margin-top:2px;color:var(--muted)}
+.kobo-visibility-groups>button>span{min-width:0;overflow-wrap:anywhere;flex:1;line-height:1.5}
+.kobo-visibility-groups>button small{font-size:10px;flex:none;margin-top:2px;font-variant-numeric:tabular-nums}
+.kobo-shell .kobo-visibility-groups>button[aria-current=true]{background:color-mix(in srgb,var(--blue) 10%,var(--panel-strong));color:var(--blue);font-weight:650}
+.kobo-shell .kobo-visibility-groups>p{font-size:10px;line-height:1.7;margin:16px 10px;color:var(--muted)}
+.kobo-visibility-content{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.kobo-visibility-list-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 20px;flex:none}
+.kobo-visibility-list-heading>div{min-width:0}
+.kobo-visibility-list-heading strong{font-size:13px;overflow-wrap:anywhere}
+.kobo-visibility-list-heading small{display:block;font-size:10px;margin-top:4px;color:var(--muted)}
+.kobo-visibility-list-heading button{font-size:11px}
+.kobo-visibility-bulk{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 20px;border-block:1px solid var(--line);background:var(--panel);flex:none}
+.kobo-visibility-bulk>label{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);white-space:nowrap;cursor:pointer}
+.kobo-visibility-bulk>div{display:flex;gap:8px;flex-wrap:wrap}
+.kobo-shell .kobo-visibility-bulk button{display:inline-flex;align-items:center;justify-content:center;gap:7px;font-size:11px;font-weight:650;min-height:40px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:var(--panel-strong);color:var(--ink);box-shadow:0 1px 2px #102b4510;transition:background .15s,border-color .15s,box-shadow .15s}
+.kobo-shell .kobo-visibility-bulk .kobo-visibility-show{background:var(--blue);border-color:var(--blue);color:#fff}
+.kobo-shell .kobo-visibility-bulk .kobo-visibility-hide{background:color-mix(in srgb,#d99a38 12%,var(--panel-strong));border-color:color-mix(in srgb,#b7791f 65%,var(--line));color:var(--ink)}
+.kobo-visibility-bulk .kobo-visibility-hide>svg{color:#b7791f}
+.kobo-shell .kobo-visibility-bulk button:enabled:hover{box-shadow:0 3px 9px #102b4526;filter:brightness(1.04)}
+.kobo-shell .kobo-visibility-bulk button:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+.kobo-shell .kobo-visibility-bulk button:disabled{opacity:.48;box-shadow:none;cursor:default}
+.kobo-visibility-bulk button>svg{width:17px;height:17px;flex-shrink:0}
+.kobo-visibility-show-all>svg{--kobo-icon-motion:kobo-visibility-show-matches}
+.kobo-visibility-hide-all>svg{--kobo-icon-motion:kobo-visibility-hide-matches}
+@keyframes kobo-visibility-show-matches{0%,100%{transform:translateY(0) scale(1)}45%{transform:translateY(-2px) scale(1.1)}}
+@keyframes kobo-visibility-hide-matches{0%,100%{transform:translateX(0) rotate(0)}35%{transform:translateX(-2px) rotate(-8deg)}70%{transform:translateX(2px) rotate(6deg)}}
+@media(max-width:540px){.kobo-shell .kobo-visibility-bulk button{min-height:44px;padding:9px 10px}}
+@media(prefers-reduced-motion:reduce){.kobo-shell .kobo-visibility-bulk button{transition:none}.kobo-visibility-bulk button>svg{--kobo-icon-duration:0s;animation:none!important}}
+.kobo-shell .kobo-visibility button:disabled{opacity:.45;cursor:not-allowed}
+.kobo-visibility-content>[data-virtual-rows]{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.kobo-visibility-row{display:flex;align-items:flex-start;gap:12px;padding:17px 20px;border-bottom:1px solid var(--line);min-width:0;box-sizing:border-box}
+.kobo-visibility-row.is-selected{background:color-mix(in srgb,var(--blue) 5%,var(--panel-strong))}
+.kobo-visibility-row>input{margin:4px 0 0}
+.kobo-filter-field-manager label.kobo-visibility-row{cursor:pointer}
+.kobo-filter-field-state{flex:none;font-size:10px;color:var(--muted);padding:4px 0}
+.kobo-filter-field-manager .is-selected .kobo-filter-field-state{color:var(--blue)}
+.kobo-visibility-row-actions{display:flex;align-items:center;gap:8px;flex:none;flex-wrap:wrap;justify-content:flex-end}
+.kobo-shell .kobo-visibility-answers{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:7px 10px;font-size:11px;border-radius:9px}
+.kobo-visibility-answers svg{width:15px;height:15px;flex:none}
+@media(max-width:700px){.kobo-visibility-row-actions{flex-direction:column;align-items:flex-end}.kobo-shell .kobo-visibility-answers{font-size:10px;padding:7px}.kobo-visibility-row-actions .kobo-visibility-toggle{align-self:flex-end}}
+.kobo-visibility-question{flex:1;min-width:0;overflow-wrap:anywhere}
+.kobo-shell .kobo-visibility-question h3{font-size:13px;line-height:1.6;margin:0;font-weight:650}
+.kobo-shell .kobo-visibility-question>p{font-size:10px;line-height:1.6;margin:4px 0 8px;color:var(--muted)}
+.kobo-visibility-badges{display:flex;flex-wrap:wrap;gap:5px}
+.kobo-visibility-badges>span{display:inline-flex;align-items:center;gap:3px;font-size:9px;line-height:1.5;padding:3px 6px;border-radius:5px;background:color-mix(in srgb,var(--muted) 8%,transparent);color:var(--muted)}
+.kobo-visibility-badges svg{width:11px!important;height:11px!important}
+.kobo-visibility-badges>.is-identifying{background:color-mix(in srgb,#b77922 10%,transparent);color:var(--ink)}
+.kobo-visibility-badges>.is-pending{background:color-mix(in srgb,var(--blue) 9%,transparent);color:var(--blue)}
+.kobo-shell .kobo-visibility-toggle{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:92px;min-height:36px;padding:7px 10px;border:1px solid var(--line);border-radius:9px;background:transparent;color:var(--muted);font-size:11px;box-shadow:none}
+.kobo-shell .kobo-visibility-toggle[aria-checked=true]{border-color:color-mix(in srgb,var(--blue) 18%,var(--line));background:color-mix(in srgb,var(--blue) 7%,transparent);color:var(--blue)}
+.kobo-visibility-summary{min-width:0}
+.kobo-visibility-summary strong{font-size:12px}
+.kobo-shell .kobo-visibility-summary p{font-size:10px;line-height:1.6;margin:4px 0 0}
+.kobo-visibility-empty{flex:1;display:grid;place-content:center;justify-items:center;padding:24px;text-align:center;color:var(--muted)}
+.kobo-visibility-empty>svg{width:30px;height:30px;opacity:.5}
+.kobo-shell .kobo-visibility-empty h3{font-size:15px;margin:12px 0 0}
+.kobo-shell .kobo-visibility-empty p{font-size:12px}
+.kobo-visibility-mobile-group{display:none}
+@media(max-width:850px){.kobo-visibility-body{grid-template-columns:minmax(0,1fr)}.kobo-visibility-groups{display:none}.kobo-visibility-mobile-group{display:block;width:calc(50% - 5px)}.kobo-visibility-mobile-group>.app-select{width:100%;min-width:0;margin:0;box-sizing:border-box}.kobo-visibility-toolbar>.app-select{width:calc(50% - 5px)}.kobo-visibility-search{flex-basis:100%;min-width:0}.kobo-visibility-status{margin-inline-end:auto}}
+@media(max-width:540px){.kobo-shell .kobo-visibility{width:calc(100vw - 16px);height:calc(100dvh - 20px);max-height:calc(100dvh - 20px);border-radius:16px}.kobo-shell .kobo-visibility>header{padding:14px;gap:10px}.kobo-visibility-icon{width:34px;height:34px}.kobo-shell .kobo-visibility h2{font-size:18px}.kobo-shell .kobo-visibility>header p{font-size:10px}.kobo-visibility-toolbar{padding:10px 12px;gap:8px}.kobo-visibility-mobile-group,.kobo-visibility-toolbar>.app-select{width:calc(50% - 4px)}.kobo-shell .kobo-visibility-status>button{padding:6px;font-size:10px}.kobo-visibility-toolbar>.soft{font-size:10px;padding:6px}.kobo-visibility-list-heading{padding:10px 12px}.kobo-visibility-bulk{padding:8px 12px;gap:8px}.kobo-visibility-bulk>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}.kobo-visibility-row{padding:14px 12px;gap:8px}.kobo-shell .kobo-visibility-question h3{font-size:12px}.kobo-shell .kobo-visibility-toggle{min-width:36px;width:36px;padding:8px}.kobo-visibility-toggle>span{display:none}.kobo-shell .kobo-visibility>footer{padding:10px 12px;gap:8px}.kobo-visibility-summary strong{font-size:11px}.kobo-shell .kobo-visibility-summary p{font-size:9px}}
+
+.kobo-visibility-tabs{display:flex;gap:6px;flex:none;padding:10px 24px 0;border-bottom:1px solid var(--line)}
+.kobo-shell .kobo-visibility-tabs>button{border:0;border-bottom:3px solid transparent;border-radius:8px 8px 0 0;background:transparent;color:var(--muted);box-shadow:none;padding:11px 16px;font-size:13px}
+.kobo-shell .kobo-visibility-tabs>button[aria-selected=true]{color:var(--blue);border-bottom-color:var(--blue);background:color-mix(in srgb,var(--blue) 7%,transparent);font-weight:650}
+.kobo-visibility-panel{flex:1;min-height:0;min-width:0;display:flex;flex-direction:column}
+.kobo-visibility-panel[hidden]{display:none}
+.kobo-shell .kobo-visibility .kobo-visibility-options{flex:none;grid-template-columns:repeat(2,minmax(0,1fr));padding:12px 24px;border-bottom:1px solid var(--line)}
+.kobo-visibility-answers-panel{overflow:auto;padding:24px;gap:12px}
+.kobo-shell .kobo-visibility-answers-panel>h3{font-size:17px;margin:0}
+.kobo-shell .kobo-visibility-answers-panel>p{font-size:12px;margin:0;color:var(--muted)}
+.kobo-shell .kobo-visibility-answers-panel>.kobo-toggle-grid{max-width:640px;grid-template-columns:1fr;padding:0}
+.kobo-visibility-tabs>button:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+@media(max-width:540px){.kobo-visibility-tabs{padding:4px 12px 0}.kobo-shell .kobo-visibility-tabs>button{font-size:12px;padding:10px 12px}.kobo-shell .kobo-visibility .kobo-visibility-options{padding:10px 12px;gap:8px}.kobo-visibility-options .kobo-toggle{gap:6px}.kobo-visibility-options .kobo-toggle strong{font-size:11px}.kobo-visibility-options .kobo-toggle small{font-size:10px}.kobo-visibility-answers-panel{padding:16px 12px}}
+
+/* Keep the current visibility and pending action readable at every screen size. */
+.kobo-visibility-row.is-enabled,.kobo-visibility-row.is-hidden{border-inline-start:4px solid var(--visibility-accent)}
+.kobo-visibility-row.is-enabled{--visibility-accent:var(--blue)}
+.kobo-visibility-row.is-hidden{--visibility-accent:#d89228;background:color-mix(in srgb,#d89228 6%,var(--panel-strong))}
+.kobo-visibility-row.is-selected{background:color-mix(in srgb,var(--blue) 9%,var(--panel-strong))}
+.kobo-visibility-row.is-changed{background:color-mix(in srgb,var(--visibility-accent) 13%,var(--panel-strong));border-inline-start-width:5px}
+.kobo-shell .kobo-visibility-row .kobo-visibility-toggle{width:auto;min-width:108px;min-height:42px;padding:9px 12px;font-size:12px;font-weight:700;border:1px solid color-mix(in srgb,var(--visibility-accent) 60%,var(--line));background:color-mix(in srgb,var(--visibility-accent) 17%,var(--panel-strong));color:var(--ink)}
+.kobo-visibility-row .kobo-visibility-toggle>span{display:inline}
+.kobo-visibility-row .kobo-visibility-toggle>svg{color:var(--visibility-accent);width:18px;height:18px}
+.kobo-shell .kobo-visibility-row .kobo-visibility-toggle:hover{background:color-mix(in srgb,var(--visibility-accent) 27%,var(--panel-strong))}
+.kobo-shell .kobo-visibility-row .kobo-visibility-toggle:focus-visible{outline:2px solid var(--visibility-accent);outline-offset:3px}
+.kobo-visibility-row .kobo-visibility-badges>.is-pending{font-size:10px;font-weight:700;padding:4px 7px;color:var(--ink);border:1px dashed var(--visibility-accent);background:color-mix(in srgb,var(--visibility-accent) 16%,var(--panel-strong))}
+@media(max-width:540px){.kobo-shell .kobo-visibility-row .kobo-visibility-toggle{min-width:96px;min-height:40px;padding:8px;font-size:11px}.kobo-visibility-row-actions{gap:10px}}

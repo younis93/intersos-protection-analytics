@@ -1,0 +1,25 @@
+.kobo-dialog.kobo-mark-color-picker{position:fixed;inset:auto;margin:0;width:min(360px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;padding:18px;border:1px solid var(--line);border-radius:16px;color:var(--ink);background:var(--panel-strong);box-shadow:0 18px 60px #102b4533;box-sizing:border-box}
+.kobo-mark-color-picker::backdrop{background:#102b4518}
+.kobo-mark-color-picker>header{display:flex;align-items:center;gap:9px;margin:0 0 10px}
+.kobo-mark-color-picker>header>svg{width:20px;color:var(--blue);flex:none}
+.kobo-mark-color-picker h2{font-size:16px;margin:0;flex:1}
+.kobo-mark-color-picker>header button{padding:5px;display:grid;place-items:center}
+.kobo-mark-color-picker>header button svg{width:17px;height:17px}
+.kobo-mark-color-picker>p{font-size:12px;line-height:1.6;margin:10px 0;color:var(--muted);overflow-wrap:anywhere}
+.kobo-mark-color-picker>.app-select{width:100%;margin:8px 0}
+.kobo-mark-color-inputs{display:flex;gap:12px;margin:14px 0}
+.kobo-mark-color-inputs label{font-size:11px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.kobo-mark-color-inputs label:last-child{flex:1}
+.kobo-mark-color-inputs input{min-width:0;box-sizing:border-box;height:40px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);padding:8px;width:100%}
+.kobo-mark-color-inputs input[type=color]{width:56px;padding:4px;cursor:pointer}
+.kobo-mark-color-picker .kobo-mark-color-swatches{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.kobo-mark-color-picker .kobo-mark-color-swatches>button{width:28px;height:28px;min-width:28px;padding:0;border:2px solid var(--panel-strong);border-radius:7px;box-shadow:0 0 0 1px var(--line)}
+.kobo-mark-color-swatches>button[aria-pressed=true]{outline:2px solid var(--blue);outline-offset:2px}
+.kobo-mark-color-picker .kobo-mark-color-reset{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:7px 10px}
+.kobo-mark-color-reset svg{width:15px;height:15px}
+.kobo-mark-color-picker>footer{display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+.kobo-mark-color-picker>footer button{min-height:38px;padding:8px 16px}
+.kobo-mark-color-picker button:focus-visible,.kobo-mark-color-picker input:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+.kobo-chart[data-color-editable=true] :is(.point,.slice,.scatterlayer .point){cursor:pointer}
+
+.kobo-chart[data-color-editable=true]:focus-visible{outline:2px solid var(--blue);outline-offset:3px;border-radius:8px}

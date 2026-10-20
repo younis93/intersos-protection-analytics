@@ -1482,6 +1482,7 @@ def test_detention_reconciliation_ignores_counselling_assessment_when_excel_is_i
 
 def test_project_reconciliation_compares_dob_and_normalized_detention_governorate():
     payload=required_payload()
+    payload["beneficiaries"]=csv(**{"Case ID":["B1","B2"],"Name (Filter Color Red)":["Person One","Person Two"]})
     payload["assessments"]=csv(**{
         "Assessment ID":["A1","A2"],"Beneficiary ID":["B1","B2"],"Projects":["P1","P2"],
         "Is the beneficiary detained":["Yes","Yes"],"Date of Assessment":["05/01/2026","05/01/2026"],
@@ -1547,6 +1548,7 @@ def test_detention_reconciliation_notes_not_detained_cases_within_selected_filte
 
 def test_detention_reconciliation_reports_blank_case_ids_on_both_sides():
     payload=required_payload()
+    payload["beneficiaries"]=csv(**{"Case ID":["B1","B2"],"Name (Filter Color Red)":["Matched person","Other person"]})
     payload["assessments"]=csv(**{
         "Assessment ID":["A1","A2"],"Beneficiary ID":["B1",""],"Projects":["P1","P1"],
         "Is the beneficiary detained":["Yes","Yes"],"Date of Assessment":["05/01/2026","05/01/2026"],

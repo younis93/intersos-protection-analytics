@@ -1,0 +1,36 @@
+.kobo-dialog.kobo-confirm-dialog{width:min(460px,calc(100vw - 32px));box-sizing:border-box;padding:26px;border-radius:18px}
+.kobo-confirm-dialog>header{align-items:center;margin-bottom:16px}
+.kobo-confirm-icon{display:grid;place-items:center;width:46px;height:46px;border-radius:13px;color:var(--blue);background:color-mix(in srgb,var(--blue) 10%,transparent)}
+.kobo-confirm-icon svg{width:23px;height:23px}
+.kobo-confirm-dialog>header button{display:grid;place-items:center;width:34px;height:34px;padding:8px}
+.kobo-confirm-dialog>header button svg{width:17px;height:17px}
+.kobo-confirm-dialog h2{font-size:20px;line-height:1.4;margin:0 0 12px}
+.kobo-confirm-message p{margin:0 0 12px}
+.kobo-confirm-message .kobo-confirm-note{padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;margin-bottom:0}
+.kobo-confirm-dialog>footer{display:flex;justify-content:flex-end;gap:10px;margin-top:24px}
+.kobo-confirm-dialog>footer button{min-height:40px;padding:10px 16px}
+@media(max-width:480px){.kobo-dialog.kobo-confirm-dialog{padding:22px}.kobo-confirm-dialog>footer button{flex:1}}
+
+.kobo-confirm-dialog{font-family:inherit;color:var(--ink);box-shadow:0 24px 80px #0003}
+.kobo-confirm-dialog::backdrop{background:rgb(15 23 42 / 42%);backdrop-filter:blur(5px)}
+.kobo-confirm-message{line-height:1.65;color:var(--muted);overflow-wrap:anywhere}
+.kobo-confirm-message strong{color:var(--ink)}
+.kobo-confirm-dialog.is-danger .kobo-confirm-icon{color:#dc2626;background:color-mix(in srgb,#dc2626 12%,transparent)}
+.kobo-confirm-dialog button.kobo-confirm-danger{background:#b91c1c;color:#fff;border:1px solid #b91c1c;box-shadow:none}
+.kobo-confirm-dialog button.kobo-confirm-danger:hover:not(:disabled){background:#991b1b;border-color:#991b1b}
+.kobo-confirm-dialog button:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+.kobo-confirm-dialog button:disabled{opacity:.6;cursor:wait}
+.kobo-confirm-dialog>footer button{display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.kobo-confirm-error{padding:12px;border:1px solid color-mix(in srgb,#dc2626 35%,var(--line));border-radius:10px;color:var(--ink);background:color-mix(in srgb,#dc2626 8%,var(--panel));font-size:13px;overflow-wrap:anywhere}
+.kobo-confirm-spinner{width:16px;height:16px;animation:kobo-confirm-spin 1s linear infinite}
+@keyframes kobo-confirm-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.kobo-confirm-spinner{animation:none}}
+
+.kobo-dialog.kobo-confirm-dialog.is-danger>footer.kobo-dialog-actions{padding:16px;margin-top:20px;border:1px solid var(--line);border-radius:18px;align-items:center;justify-content:flex-end;background-color:var(--bg);background-image:linear-gradient(var(--panel-strong),var(--panel-strong))}
+.kobo-dialog.kobo-confirm-dialog.is-danger>footer>.kobo-dialog-action-buttons{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-inline-start:auto;max-width:100%}
+.kobo-dialog.kobo-confirm-dialog.is-danger>footer>.kobo-dialog-action-buttons>button{min-height:42px;margin:0;flex:none}
+@media(max-width:359px){.kobo-dialog.kobo-confirm-dialog.is-danger>footer>.kobo-dialog-action-buttons{width:100%;flex-direction:column;align-items:stretch}.kobo-dialog.kobo-confirm-dialog.is-danger>footer>.kobo-dialog-action-buttons>button{width:100%}}
+.kobo-dialog.kobo-confirm-dialog:not(.is-danger)>footer.kobo-dialog-actions{display:flex;align-items:center;justify-content:flex-end;margin-top:20px;padding:12px;border:1px solid var(--line);border-radius:14px;background-color:var(--bg);background-image:linear-gradient(var(--panel-strong),var(--panel-strong));box-sizing:border-box}
+.kobo-dialog.kobo-confirm-dialog:not(.is-danger)>footer>.kobo-dialog-action-buttons{display:flex;align-items:center;justify-content:flex-end;gap:10px;width:100%;margin:0}
+.kobo-dialog.kobo-confirm-dialog:not(.is-danger)>footer>.kobo-dialog-action-buttons>button{height:44px;min-height:44px;margin:0;flex:none;white-space:nowrap}
+@media(max-width:480px){.kobo-dialog.kobo-confirm-dialog:not(.is-danger)>footer.kobo-dialog-actions{padding:10px}.kobo-dialog.kobo-confirm-dialog:not(.is-danger)>footer>.kobo-dialog-action-buttons>button{flex:1}}

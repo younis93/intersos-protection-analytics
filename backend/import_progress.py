@@ -154,6 +154,7 @@ def import_plan(datasets):
     reviews = [name for name in ("beneficiaries", "assessments", "legalservices", "awareness") if name in datasets and (core or name == "awareness")]
     return [*(f"Reading:{name}" for name in datasets),
             *(task for name in datasets for task in (f"Parsing:{name}", f"Cleaning:{name}")),
+            "Restoring linked fields",
             *(f"Validating:{name}" for name in validation),
             *(["Checking relationships:assessments"] if core else []), "Applying exclusions",
             *(f"Preparing review:{name}" for name in reviews), "Preparing metadata",

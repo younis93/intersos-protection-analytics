@@ -7,7 +7,7 @@ X
 import { useEffect,useRef,useState } from "react";
 import { createPortal } from "react-dom";
 import { exportTableWorkbook } from "./api";
-import { ChartFrame,chartGrid,chartInk,plotConfig } from './ChartPrimitives';
+import { ChartFrame,chartGrid,chartInk,plotConfig,categoryPalette } from './ChartPrimitives';
 import { formatNumber,formatPercent } from './formatting';
 import Plot from "./LazyPlot";
 import { ExcelDownloadButton } from './SelectionControls';
@@ -28,7 +28,7 @@ export const compactDetentionLabel=(title:string,label:string)=>{
   return english.replace(/Other\s*\(please specify in the comments section\)/i,"Other").replace(/Residency department/i,"Residency Department")||label;
 };
 
-export const categoryPalette = ["#1877c9", "#2f9e68", "#d97706", "#7c5cc4", "#d9485f", "#168a91", "#9a6b35", "#536d88", "#b85c9e", "#6d8f38", "#e06b3c", "#3f73a8"];
+export {categoryPalette} from './ChartPrimitives';
 
 export function FlowCard({rows,theme}:{rows:{source:string;target:string;count:number}[];theme:Theme}) {
   const [graph,setGraph]=useState<any>(null);

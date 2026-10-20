@@ -33,9 +33,11 @@ export function HomeLogo({children}:{children?:ReactNode}){
     }).catch(()=>{});
     const onPreference=()=>{if(preference.matches&&busy.current){cancel();highlight()}};
     const onVisibility=()=>{if(document.hidden)cancel()};
+    const themeObserver=new MutationObserver(()=>renderer.current?.(0));
+    themeObserver.observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
     preference.addEventListener('change',onPreference);
     document.addEventListener('visibilitychange',onVisibility);
-    return()=>{disposed=true;cancel(false);renderer.current=undefined;preference.removeEventListener('change',onPreference);document.removeEventListener('visibilitychange',onVisibility)};
+    return()=>{disposed=true;cancel(false);renderer.current=undefined;themeObserver.disconnect();preference.removeEventListener('change',onPreference);document.removeEventListener('visibilitychange',onVisibility)};
   },[]);
   const spin=async()=>{
     if(busy.current)return;
@@ -65,7 +67,7 @@ export function HomeLogo({children}:{children?:ReactNode}){
   return <button type="button" className="welcome-logo-secret" onClick={()=>void spin()} aria-label="Animate INTERSOS home logo" aria-busy={spinning}>
     <span className={`home-logo-motion${ready?' is-globe-ready':''}${spinning?' is-spinning':''}${highlighted?' is-highlighted':''}`}>
       <span className="welcome-logo-mark"><span className="home-logo-emblem">
-        <img className="home-logo-frame" src="/intersos-symbol-transparent.png" alt=""/>
+        <span className="home-logo-frame" aria-hidden="true"/>
         <canvas className="home-logo-earth" ref={canvas} aria-hidden="true"/>
       </span></span>
       <span className="welcome-logo-word" aria-hidden="true">{'INTERSOS'.split('').map((letter,index)=><b key={index} style={{'--letter':index} as CSSProperties}>{letter}</b>)}</span>

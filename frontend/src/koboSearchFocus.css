@@ -1,0 +1,28 @@
+/* Composite search fields own their border and focus ring on the wrapper.
+   Scope to Kobo, including dialogs rendered outside the workspace shell. */
+:is(.kobo-shell,.kobo-dialog) :is(
+ .app-select-menu-search,.multi-select-search,.kobo-visibility-search,
+ .kobo-report-search,.kobo-excel-group-search,.kobo-question-search,
+ .app-search-field,.detention-table-search
+)>input,
+:is(.kobo-shell,.kobo-dialog) :is(
+ .app-select-menu-search,.multi-select-search,.kobo-visibility-search,
+ .kobo-report-search,.kobo-excel-group-search,.kobo-question-search,
+ .app-search-field,.detention-table-search
+)>input:is(:focus,:focus-visible){
+ border:0!important;border-radius:0!important;outline:none!important;outline-offset:0;
+ box-shadow:none!important;background:transparent!important;min-width:0;
+}
+:is(.kobo-shell,.kobo-dialog) :is(
+ .app-select-menu-search,.multi-select-search,.kobo-visibility-search,
+ .kobo-report-search,.kobo-excel-group-search,.kobo-question-search,
+ .app-search-field,.detention-table-search
+):focus-within{
+ border-color:var(--blue)!important;
+ box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 14%,transparent);
+}
+/* These fields have their border on the input rather than an enclosing box. */
+:is(.kobo-shell,.kobo-dialog) :is(.kobo-navigator-search,.kobo-search)>input:is(:focus,:focus-visible){
+ outline:none!important;outline-offset:0;border-color:var(--blue);
+ box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 14%,transparent);
+}

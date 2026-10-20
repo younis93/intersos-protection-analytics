@@ -1,0 +1,13 @@
+.kobo-settings-import{width:min(760px,calc(100vw - 24px));max-height:90dvh;padding:24px;overflow:hidden}
+.kobo-settings-import[open]{display:flex;flex-direction:column;box-sizing:border-box}
+.kobo-settings-import>header{display:flex;align-items:center;justify-content:space-between;flex:none}
+.kobo-settings-import h2{margin:6px 0}
+.kobo-settings-import .kobo-settings-import-body{flex:1;min-height:0;overflow:auto;padding:8px 2px 20px}
+.kobo-settings-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:20px 0}
+.kobo-settings-summary span{padding:14px;border:1px solid var(--line);border-radius:12px}
+.kobo-settings-summary strong{display:block;font-size:24px;color:var(--accent,#1683d8)}
+.kobo-settings-import details{border-top:1px solid var(--line);padding:12px 0}
+.kobo-settings-import summary{cursor:pointer;font-weight:600}
+.kobo-settings-import li{overflow-wrap:anywhere;margin:6px 0}
+.kobo-dialog.kobo-settings-import>.kobo-dialog-actions{border:1px solid var(--line);border-radius:18px;overflow:hidden;margin-top:4px;background-color:var(--bg);background-image:linear-gradient(var(--panel-strong),var(--panel-strong))}
+@media(max-width:600px){.kobo-settings-import{padding:16px}.kobo-settings-summary{grid-template-columns:1fr}.kobo-settings-summary strong{display:inline;margin-inline-end:8px}}

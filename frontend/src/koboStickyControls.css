@@ -1,0 +1,43 @@
+.kobo-analysis-sections{overflow-anchor:none}
+.kobo-controls-sentinel{display:block;height:1px;margin-bottom:-1px;pointer-events:none}
+.kobo-shell .kobo-sticky-controls{position:sticky;top:var(--kobo-nav-top,8px);z-index:25;min-width:0;margin-bottom:18px;border:1px solid color-mix(in srgb,var(--blue) 23%,var(--line));border-radius:16px;background-color:var(--bg);background-image:linear-gradient(var(--panel-strong),var(--panel-strong));box-shadow:0 4px 16px color-mix(in srgb,var(--ink) 6%,transparent);isolation:isolate}
+.kobo-shell .kobo-sticky-controls.is-pinned{box-shadow:0 8px 24px color-mix(in srgb,var(--ink) 12%,transparent)}
+.kobo-shell .kobo-analysis-sections .kobo-sticky-controls .kobo-analysis-toolbar{position:static;top:auto;z-index:auto;margin:0;border:0;border-radius:0 0 16px 16px;background:transparent;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+.kobo-sticky-filter-slot{border-bottom:1px solid color-mix(in srgb,var(--blue) 17%,var(--line))}
+.kobo-shell .kobo-sticky-controls .kobo-response-filters{padding:12px 16px;margin:0;border:0;border-radius:16px 16px 0 0;background:color-mix(in srgb,var(--blue) 3%,transparent);box-shadow:none;min-width:0}
+.kobo-response-filters>header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.kobo-shell .kobo-sticky-controls .kobo-section-icon{display:grid;place-items:center;flex:none;width:32px;height:32px;border:1px solid color-mix(in srgb,var(--blue) 15%,transparent);border-radius:10px;background:color-mix(in srgb,var(--blue) 8%,transparent);color:var(--blue)}
+.kobo-sticky-controls .kobo-section-icon svg{width:18px;height:18px}
+.kobo-shell .kobo-sticky-controls .kobo-filter-toggle{display:flex;align-items:center;gap:9px;min-width:0;min-height:34px}
+.kobo-shell .kobo-sticky-controls :is(.kobo-filter-toggle h2,.kobo-analysis-heading h2){font-size:14px;font-weight:700;line-height:1.4;margin:0}
+.kobo-shell .kobo-sticky-controls .kobo-filter-toggle>svg:last-child{width:15px;flex:none;color:var(--muted)}
+.kobo-filter-count{display:grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:7px;background:color-mix(in srgb,var(--blue) 12%,transparent);color:var(--blue);font-size:11px;font-weight:750}
+.kobo-sticky-controls .kobo-filter-grid{margin-top:12px;min-width:0}
+.kobo-sticky-controls.is-pinned .kobo-filter-grid{max-height:28dvh;overflow:auto;overscroll-behavior:contain;padding:3px 3px 8px}
+.kobo-filter-empty{margin:0;color:var(--muted);font-size:12px}
+.kobo-shell .kobo-sticky-controls .kobo-active-filters{display:flex;flex-wrap:nowrap;gap:8px;overflow-x:auto;overscroll-behavior-x:contain;max-width:100%;margin-top:10px;padding:2px 0 4px}
+.kobo-sticky-controls .kobo-active-filters>span{display:inline-flex;flex:0 0 auto;align-items:center;gap:7px;max-width:min(420px,85vw);min-width:0;white-space:nowrap}
+.kobo-filter-chip-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.kobo-sticky-controls .kobo-active-filters button{flex:none}
+.kobo-sticky-controls .kobo-analysis-toolbar-header{padding:12px 16px}
+.kobo-sticky-controls .kobo-analysis-toolbar-controls{border-top:0;padding-top:0;padding-bottom:12px}
+.kobo-sticky-controls .kobo-analysis-heading small{display:block;margin-top:3px}
+.kobo-sticky-controls .kobo-analysis-view-switch{background:color-mix(in srgb,var(--blue) 3%,transparent)}
+@media(max-width:700px){
+ .kobo-shell .kobo-sticky-controls{max-height:calc(100dvh - var(--kobo-nav-top,8px) - 72px);overflow:auto;overscroll-behavior:contain;border-radius:14px}
+ .kobo-shell .kobo-sticky-controls .kobo-response-filters{padding:10px 12px}
+ .kobo-sticky-controls .kobo-analysis-toolbar-header{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 12px}
+ .kobo-sticky-controls .kobo-analysis-heading{grid-column:1/-1}
+ .kobo-sticky-controls .kobo-analysis-toolbar-header .kobo-analysis-tools{grid-column:1/-1;display:flex;justify-content:flex-start;flex-wrap:wrap}
+ .kobo-sticky-controls .kobo-analysis-view-switch{grid-column:1/-1;width:100%}
+ .kobo-sticky-controls .kobo-analysis-toolbar-controls{padding:0 12px 12px;gap:8px}
+ .kobo-shell .kobo-sticky-controls :is(.kobo-filter-toggle h2,.kobo-analysis-heading h2){font-size:12px}
+ .kobo-shell .kobo-sticky-controls .kobo-section-icon{width:28px;height:28px;border-radius:8px}
+ .kobo-response-filters>header{gap:8px;flex-wrap:wrap}
+ .kobo-shell .kobo-sticky-controls .kobo-filter-actions{gap:5px;flex:none}
+ .kobo-shell .kobo-sticky-controls .kobo-filter-actions button{min-height:32px;padding:6px 8px;font-size:10px}
+ .kobo-shell .kobo-sticky-controls .kobo-filter-toggle{gap:6px}
+ .kobo-shell .kobo-sticky-controls.is-pinned .kobo-filter-actions button:first-child{font-size:0;width:30px;padding:5px}
+ .kobo-sticky-controls.is-pinned .kobo-filter-grid{max-height:24dvh}
+}
+@media print{.kobo-sticky-controls,.kobo-controls-sentinel{display:none!important}}

@@ -16,6 +16,7 @@
     "html2canvas": "^1.4.1",
     "jspdf": "4.2.1",
     "lucide-react": "1.33.0",
+    "plotly.js-basic-dist-min": "3.7.0",
     "plotly.js-cartesian-dist-min": "3.7.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",

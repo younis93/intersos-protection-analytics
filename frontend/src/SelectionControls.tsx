@@ -35,7 +35,10 @@ function useDropdownPosition(open: boolean, close: () => void) {
       const above = Math.max(0, rect.top - y - edge - gap);
       const upwards = below < Math.min(node.scrollHeight, 320) && above > below;
       const available = Math.min(upwards ? above : below, height - edge * 2);
-      Object.assign(node.style, {position: "fixed", margin: "0", right: "auto", bottom: "auto", minWidth: "0", width: `${menuWidth}px`, maxHeight: `${available}px`, left: `${Math.max(x + edge, Math.min(rect.left, x + width - edge - menuWidth))}px`});
+      Object.assign(node.style, {position: "fixed", margin: "0", right: "auto", bottom: "auto", minWidth: "0", width: `${menuWidth}px`, maxWidth: `${width-edge*2}px`, maxHeight: `${available}px`});
+      // Some menus specify a wider CSS width. Clamp their actual rendered bounds.
+      const renderedWidth = node.getBoundingClientRect().width;
+      node.style.left = `${Math.max(x + edge, Math.min(rect.left, x + width - edge - renderedWidth))}px`;
       const menuHeight = Math.min(node.getBoundingClientRect().height, available);
       const top = upwards ? rect.top - gap - menuHeight : rect.bottom + gap;
       node.style.top = `${Math.max(y + edge, Math.min(top, y + height - edge - menuHeight))}px`;
@@ -46,7 +49,11 @@ function useDropdownPosition(open: boolean, close: () => void) {
     const list=firstFocus.closest<HTMLElement>('[data-virtual-rows]');
     if(list&&firstFocus.matches('[role=option]'))list.scrollTop+=firstFocus.getBoundingClientRect().top-list.getBoundingClientRect().top;
     const scroll = (event: Event) => { if (!node.contains(event.target as Node)) position(); };
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && node.contains(event.target as Node) && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); close(); trigger.focus({preventScroll:true}); } };
+    const escape = (event: KeyboardEvent) => {
+      const innermost = (event.target as HTMLElement)?.closest?.('[popover]:popover-open');
+      if (innermost && innermost !== node) return;
+      if (event.key === "Escape" && node.contains(event.target as Node) && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); close(); trigger.focus({preventScroll:true}); }
+    };
     window.addEventListener("scroll", scroll, true);
     window.addEventListener("resize", position);
     viewportListeners(true);
@@ -225,10 +232,10 @@ export function UnavailableSelections({values,selected,onChange,formatCaption=(v
   return <section className="filter-unavailable" aria-label="Unavailable selections">{unavailable.map(token=><button type="button" key={token} aria-label={`Remove unavailable ${formatCaption(filterValue(token))}`} onClick={()=>onChange(selected.filter(value=>value!==token))}><span>{formatCaption(filterValue(token))}<small>Unavailable</small></span><X/></button>)}</section>;
 }
 
-export function FilterValueList({field="",values,selected,onChange,formatCaption=(value:string)=>value}:{values:string[];selected:string[];onChange:(values:string[])=>void;formatCaption?:(value:string)=>string;field?:string}) {
+export function FilterValueList({field="",values,selected,onChange,onReset,formatCaption=(value:string)=>value}:{values:string[];selected:string[];onChange:(values:string[])=>void;onReset?:()=>void;formatCaption?:(value:string)=>string;field?:string}) {
   values=useMemo(()=>sortFilterValues(field,values),[field,values]);
   const checked=useMemo(()=>new Set(checkedFilterValues(selected,values)),[selected,values]);
-  return <><UnavailableSelections values={values} selected={selected} onChange={onChange} formatCaption={formatCaption}/>{!values.length&&<p className="filter-empty">No available options</p>}<FilterBulkActions values={values} selected={selected} onChange={onChange}/><div className="filter-group-actions"><button type="button" disabled={!selected.length} onClick={()=>onChange([])}>Reset</button></div><VirtualRows items={values} enabled={values.length>60} render={value=><FilterOption values={values} key={value} value={value} caption={formatCaption(value)} selected={selected} checked={checked.has(value)} onChange={onChange}/>}/></>;
+  return <><UnavailableSelections values={values} selected={selected} onChange={onChange} formatCaption={formatCaption}/>{!values.length&&<p className="filter-empty">No available options</p>}<FilterBulkActions values={values} selected={selected} onChange={onChange}/><div className="filter-group-actions"><button type="button" disabled={!onReset&&!selected.length} onClick={()=>onReset?onReset():onChange([])}>Reset</button></div><VirtualRows items={values} enabled={values.length>60} render={value=><FilterOption values={values} key={value} value={value} caption={formatCaption(value)} selected={selected} checked={checked.has(value)} onChange={onChange}/>}/></>;
 }
 
 export function FilterSelectAllButton({values,matching=false,selected,onChange}:{values:string[];matching?:boolean;selected:string[];onChange:(values:string[])=>void}) {

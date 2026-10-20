@@ -1,0 +1,21 @@
+.kobo-dialog.kobo-answers[open]{display:flex;flex-direction:column;height:min(820px,calc(100dvh - 32px));max-height:calc(100dvh - 32px);padding:0;overflow:hidden;box-sizing:border-box}
+.kobo-dialog.kobo-answers>header{flex:none;margin:0;padding:22px 24px 12px;align-items:center}
+.kobo-answers-heading{flex:none;min-width:0;max-height:20dvh;overflow:auto;padding:0 24px 16px}
+.kobo-answers-heading>h3{font-size:16px;line-height:1.5;margin:0 0 8px;overflow-wrap:anywhere}
+.kobo-dialog.kobo-answers .kobo-answers-context{margin:0;font-size:12px}
+.kobo-answers>.kobo-visibility-tabs{flex:none;padding:0 24px;border-bottom:1px solid var(--line)}
+.kobo-answers-panel{flex:1;min-height:0;min-width:0;padding:20px 24px;overflow:hidden;box-sizing:border-box}
+.kobo-answers-panel:not([hidden]){display:flex;flex-direction:column;gap:16px}
+.kobo-answers-panel[hidden]{display:none}
+.kobo-answers-panel>.kobo-pivot-toolbar{flex:none;margin:0}
+.kobo-answers-panel>.kobo-search{flex:none;min-width:0}
+.kobo-dialog.kobo-answers .kobo-answers-panel>p{flex:none;margin:0}
+.kobo-dialog.kobo-answers .kobo-answers-panel>.kobo-table-wrap{flex:0 1 auto;min-height:0;max-height:none;margin:0;overflow:auto}
+.kobo-dialog.kobo-answers .kobo-answers-records>.kobo-table-wrap{flex:1}
+.kobo-answers-panel>button{flex:none;align-self:flex-start}
+.kobo-answers-records .kobo-table-wrap thead th{position:sticky;top:0;z-index:2;background-color:var(--bg);background-image:linear-gradient(var(--panel-strong),var(--panel-strong));isolation:isolate}
+.kobo-dialog.kobo-answers>.kobo-dialog-actions{position:static;flex:none;flex-direction:row;flex-wrap:wrap;margin:0;padding:14px 24px;gap:10px;border-top:1px solid var(--line)}
+.kobo-answers>.kobo-dialog-actions>.kobo-toolbar{flex:1;min-width:0;gap:8px}
+.kobo-answers>.kobo-dialog-actions>.kobo-toolbar>span{white-space:nowrap;font-size:12px}
+.kobo-dialog.kobo-answers>.kobo-dialog-actions>.kobo-dialog-action-buttons{width:auto;flex-direction:row;align-self:center;margin-inline-start:auto}
+@media(max-width:540px){.kobo-dialog.kobo-answers[open]{width:calc(100vw - 16px);height:calc(100dvh - 16px);max-height:calc(100dvh - 16px);border-radius:16px}.kobo-dialog.kobo-answers>header{padding:14px 16px 10px}.kobo-answers-heading{padding:0 16px 12px}.kobo-answers-heading>h3{font-size:14px}.kobo-answers>.kobo-visibility-tabs{padding:0 16px}.kobo-answers-panel{padding:16px;gap:12px}.kobo-dialog.kobo-answers>.kobo-dialog-actions{padding:12px 16px}.kobo-answers>.kobo-dialog-actions>.kobo-toolbar button{font-size:11px;padding:8px 6px;min-height:40px}}

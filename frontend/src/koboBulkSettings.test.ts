@@ -1,0 +1,27 @@
+import {describe,it,expect} from 'vitest';
+import {bulkQuestionChanges,bulkQuestionSettings,enabledKoboQuestions,sharedBreakdownFields,sharedBulkValue} from './koboBulkSettings';
+import {resolveKoboColors} from './koboCustomizeOptions';
+import {questionDefaults,type KoboProject,type KoboQuestion,type KoboResult,type KoboSettings} from './koboTypes';
+const q=(id:string,kind:KoboQuestion['kind']='category',repeat=''):KoboQuestion=>({id,name:id,labels:{en:id},kind,repeat,type:'',group:'',metadata:false,identifying:false,choices:[]});
+const questions=[q('gender'),q('needs','multiple'),q('age','number'),q('day','date'),q('hidden'),{...q('meta'),metadata:true},q('visit','text','visits')];
+const settings:KoboSettings={version:1,language:'en',filters:[{field:'gender',kind:'category',values:['f']}],filterFields:['gender'],hidden:['hidden'],metadata:false,hideBlanks:true,hideZero:false,hideEmpty:true,questionSort:'form',questions:{gender:{...questionDefaults,chart:'donut',colors:{f:'#112233'}},needs:{...questionDefaults,bins:7,answerSort:'label-desc'}}};
+const project={form:{questions}} as KoboProject;
+describe('shared question settings',()=>{
+ it('clears mark overrides when palettes or breakdown definitions change, and preserves them for unrelated edits',()=>{
+  const configured=structuredClone(settings);configured.questions.needs.pointColors={example:'#123456'};
+  expect(bulkQuestionChanges(project,configured,{palette:'Blue'}).needs.pointColors).toEqual({});
+  expect(bulkQuestionChanges(project,configured,{breakdowns:['gender']}).needs.pointColors).toEqual({});
+  expect(bulkQuestionChanges(project,configured,{answerSort:'count-desc'}).needs.pointColors).toEqual({example:'#123456'});
+  expect(configured.questions.needs.pointColors).toEqual({example:'#123456'});
+ });
+ it('distinguishes uniform settings and mixed values without creating edits',()=>{expect(sharedBulkValue(['bar','bar'])).toEqual({value:'bar',mixed:false});expect(sharedBulkValue(['bar','pie'])).toEqual({value:undefined,mixed:true});expect(sharedBulkValue([['gender'],['gender']])).toEqual({value:['gender'],mixed:false});expect(bulkQuestionChanges(project,settings,{})).toEqual({})});
+ it('applies a direct custom color without replacing unrelated colors or palettes',()=>{const before=structuredClone(settings);const changes=bulkQuestionChanges(project,settings,{colors:{water:'#ffffff'}});expect(changes.gender.colors).toEqual({f:'#112233',water:'#ffffff'});expect(changes.gender.chart).toBe('donut');expect(changes.gender.palette).toBe(settings.questions.gender.palette);expect(settings).toEqual(before)});
+
+ it('targets enabled questions irrespective of empty results, collapsed groups or search',()=>{expect(enabledKoboQuestions(project,settings).map(q=>q.id)).toEqual(['gender','needs','age','day','visit']);expect(bulkQuestionChanges(project,settings,{})).toEqual({})});
+ it('changes only selected settings and leaves filters and hidden settings intact',()=>{const before=structuredClone(settings);const changes=bulkQuestionChanges(project,settings,{palette:'Teal'});expect(changes.needs.answerSort).toBe('label-desc');expect(changes.needs.bins).toBe(7);expect(changes.gender.chart).toBe('donut');expect(changes.gender.colors).toEqual({});expect(changes.gender.palette).toBe('Teal');expect(changes.hidden).toBeUndefined();expect(changes.meta).toBeUndefined();expect(settings).toEqual(before)});
+ it('omits self-breakdowns, preserves remaining level order and switches incompatible charts',()=>{const changes=bulkQuestionChanges(project,settings,{breakdowns:['gender','needs'],chart:'pie',breakdownDisplay:'percent'});expect(changes.gender.breakdowns).toEqual(['needs']);expect(changes.needs.breakdowns).toEqual(['gender']);expect(changes.gender.chart).toBe('bar');expect(changes.age.chart).toBe('bar');expect(changes.needs.breakdownDisplay).toBe('percent')});
+ it('allows line only on numeric/date questions and resets to automatic explicitly',()=>{expect(bulkQuestionSettings(q('needs','multiple'),settings,{chart:'line'}).chart).toBe('bar');expect(bulkQuestionSettings(q('age','number'),settings,{chart:'line'}).chart).toBe('line');expect(bulkQuestionSettings(q('gender'),settings,{chart:null}).chart).toBeNull()});
+ it('applies numeric/date controls only to their matching kinds',()=>{const changes=bulkQuestionChanges(project,settings,{numericMode:'bins',bins:4,dateUnit:'year'});expect(changes.age.bins).toBe(4);expect(changes.needs.bins).toBe(7);expect(changes.day.dateUnit).toBe('year');expect(changes.gender.dateUnit).toBe('month')});
+ it('offers repeat breakdown fields only when compatible with every target',()=>{const repeated={...project,form:{questions:[...questions,q('visitType','category','visits')]}} as KoboProject;expect(sharedBreakdownFields(repeated,enabledKoboQuestions(repeated,settings)).map(q=>q.id)).not.toContain('visitType');expect(sharedBreakdownFields(repeated,[q('visit','text','visits')]).map(q=>q.id)).toContain('visitType')});
+ it('keeps palette colors stable across sorting, new categories and overrides',()=>{const result={rows:[{id:'yes'},{id:'no'},{id:'عربي'}],breakdowns:[]} as unknown as KoboResult;const initial=resolveKoboColors(result,'Blue',{});const reordered=resolveKoboColors({...result,rows:[{id:'new'},...result.rows].reverse()} as KoboResult,'Blue',{});expect(reordered.yes).toBe(initial.yes);expect(reordered['عربي']).toBe(initial['عربي']);expect(resolveKoboColors(result,'Blue',{yes:'#ABCDEF'}).yes).toBe('#ABCDEF');expect(initial.series).toBe('#174A7E')});
+});

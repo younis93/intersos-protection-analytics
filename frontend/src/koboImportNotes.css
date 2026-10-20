@@ -1,0 +1,31 @@
+.kobo-import-notes-icon{display:grid;place-items:center;width:34px;height:34px;flex-shrink:0;border-radius:10px;background:color-mix(in srgb,#c38b2c 12%,var(--panel));color:#b77919}
+.kobo-import-notes-icon>svg{width:18px;height:18px}
+.kobo-import-notes-body{padding:18px 20px 16px}
+.kobo-import-notes-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.kobo-import-notes-list>li{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.kobo-import-note-dot{width:6px;height:6px;flex-shrink:0;border-radius:50%;background:#bc8429;margin-top:6px}
+.kobo-import-notes-list>li>div{min-width:0;overflow-wrap:anywhere}
+.kobo-import-notes-list strong{font-size:12px;line-height:1.5;font-weight:650;color:var(--ink)}
+.kobo-import-notes-list p{font-size:12px;line-height:1.7;color:var(--muted);margin:4px 0 0}
+.kobo-import-note-rows{display:inline-block;margin-top:8px;font-size:10px;font-weight:600;color:var(--muted)}
+.kobo-import-notes-body>footer{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:16px}
+.kobo-import-notes-body>footer>p{font-size:11px;line-height:1.6;color:var(--muted);margin:0}
+.kobo-import-notes-dialog button.kobo-import-notes-review{gap:8px;min-height:40px;padding:10px 14px;border:1px solid color-mix(in srgb,var(--blue) 22%,var(--line));border-radius:10px;background:color-mix(in srgb,var(--blue) 7%,var(--panel));color:var(--blue);font-size:12px;font-weight:600;flex-shrink:0;box-shadow:none}
+.kobo-import-notes-dialog button.kobo-import-notes-review:hover{background:color-mix(in srgb,var(--blue) 13%,var(--panel));border-color:var(--blue)}
+.kobo-import-notes-dialog button.kobo-import-notes-review>svg{width:15px;height:15px}
+@media(max-width:600px){.kobo-import-notes-body{padding:14px}.kobo-import-notes-list>li{padding:12px}.kobo-import-notes-body>footer{align-items:stretch;flex-direction:column;gap:10px}.kobo-import-notes-dialog button.kobo-import-notes-review{width:100%}}
+
+.kobo-shell .kobo-project-actions>.kobo-import-notes-trigger{border:1px solid color-mix(in srgb,#b77919 28%,var(--line));background:color-mix(in srgb,#b77919 5%,var(--panel-strong));color:var(--ink);box-shadow:none}
+.kobo-shell .kobo-project-actions>.kobo-import-notes-trigger:hover{border-color:#b77919;background:color-mix(in srgb,#b77919 10%,var(--panel-strong))}
+.kobo-import-notes-trigger>svg{color:#b77919}
+.kobo-import-notes-count{display:grid;place-items:center;min-width:20px;height:20px;padding:0 5px;border-radius:6px;background:color-mix(in srgb,#b77919 12%,var(--panel-strong));color:#a36a15;font-size:10px;font-weight:750}
+.kobo-import-notes-dialog{width:min(700px,calc(100vw - 32px));max-height:80dvh;padding:24px;border-radius:20px}
+.kobo-import-notes-dialog::backdrop{background:rgba(10,25,40,.4);backdrop-filter:blur(4px)}
+.kobo-import-notes-dialog>header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}
+.kobo-import-notes-heading{display:flex;align-items:center;gap:12px}
+.kobo-import-notes-heading h2{font-size:19px;margin:0 0 4px}
+.kobo-import-notes-heading p{margin:0;font-size:12px;color:var(--muted)}
+.kobo-import-notes-dialog>header>button{display:grid;place-items:center;width:34px;height:34px;padding:0}
+.kobo-import-notes-dialog>header>button svg{width:17px;height:17px}
+.kobo-import-notes-dialog .kobo-import-notes-body{padding:0}
+@media(max-width:600px){.kobo-import-notes-dialog{padding:18px}.kobo-import-notes-heading h2{font-size:18px}}

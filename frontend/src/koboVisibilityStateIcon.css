@@ -1,0 +1,4 @@
+.kobo-visibility-toggle>.kobo-visibility-state-icon{flex:none;animation:none!important;transform:none!important}
+.kobo-visibility-state-icon [data-eye-slash]{stroke-dasharray:1;stroke-dashoffset:1;transition:stroke-dashoffset 350ms cubic-bezier(.22,1,.36,1)}
+.kobo-visibility-state-icon[data-hidden=true] [data-eye-slash]{stroke-dashoffset:0}
+@media(prefers-reduced-motion:reduce){.kobo-visibility-state-icon [data-eye-slash]{transition:none!important;animation:none!important}}

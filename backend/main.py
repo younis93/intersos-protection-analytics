@@ -1009,5 +1009,8 @@ def legal_export(dataset: str):
 from .send_issues import make_router as make_send_issues_router
 app.include_router(make_send_issues_router(require_legal_store))
 
+from .kobo_api import make_router as make_kobo_router
+app.include_router(make_kobo_router())
+
 if STATIC_DIR.exists():
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="dashboard")

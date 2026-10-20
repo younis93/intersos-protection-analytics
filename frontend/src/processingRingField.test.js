@@ -2,7 +2,7 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {createProcessingRingField} from '../public/processing-ring-field.js';
 
 afterEach(()=>vi.unstubAllGlobals());
-function setup({active=true,reduced=false,available=true,compiles=true,initialState,search=''}={}){
+function setup({active=true,speed=1,reduced=false,available=true,compiles=true,initialState,search=''}={}){
   const context=Object.fromEntries(['shaderSource','compileShader','attachShader','linkProgram','useProgram','bindBuffer','bufferData','enableVertexAttribArray','vertexAttribPointer','viewport','uniform2f','uniform1f','uniform3fv','drawArrays','deleteBuffer','deleteProgram','deleteShader'].map(name=>[name,vi.fn()]));
   Object.assign(context,{createShader:()=>({}),createProgram:()=>({}),createBuffer:()=>({}),getShaderParameter:()=>compiles,getProgramParameter:()=>true,getAttribLocation:()=>0,getUniformLocation:(_,name)=>name,getExtension:()=>null});
   const canvas={getContext:()=>available?context:null,getBoundingClientRect:()=>({width:390,height:844,left:0,top:0}),dataset:{},addEventListener:vi.fn(),removeEventListener:vi.fn()};
@@ -15,7 +15,7 @@ function setup({active=true,reduced=false,available=true,compiles=true,initialSt
   vi.stubGlobal('requestAnimationFrame',raf);vi.stubGlobal('cancelAnimationFrame',cancel);
   vi.stubGlobal('ResizeObserver',class{observe(){}disconnect=disconnect});
   vi.stubGlobal('MutationObserver',class{observe(){}disconnect=disconnect});
-  return {stop:createProcessingRingField(canvas,{active}),canvas,media,doc,win,raf,cancel,disconnect,context};
+  return {stop:createProcessingRingField(canvas,{active,speed}),canvas,media,doc,win,raf,cancel,disconnect,context};
 }
 it('renders fluid light, caps resolution and releases GPU resources/listeners on unmount',()=>{
   const s=setup();expect(s.canvas.dataset.motion).toBe('running');expect(s.canvas.width).toBe(488);
@@ -57,4 +57,12 @@ it('restores native startup background state from the handoff URL',()=>{
 it('falls back safely when handoff state is malformed',()=>{
   const s=setup({search:'?processingFieldState=invalid'});
   expect(s.context.uniform1f).toHaveBeenCalledWith('time',0);s.stop();
+});
+it.each([1,3])('advances the fluid phase at the requested speed %s without changing the restored phase',speed=>{
+  const s=setup({speed,initialState:{elapsed:10}});
+  expect(s.context.uniform1f).toHaveBeenCalledWith('time',10);
+  s.raf.mock.calls[0][0](100);
+  s.raf.mock.calls[0][0](140);
+  expect(s.win.__processingFluidState.elapsed).toBeCloseTo(10+.04*speed);
+  s.stop();
 });

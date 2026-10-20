@@ -189,9 +189,9 @@ class PreparedIndicatorData:
                 if identifier and label:
                     self.names = {clean_id(row.get(identifier, "")): clean_id(row.get(label, "")) for row in rows}
             else:
-                beneficiary_column = _find(list(frame.columns), "Beneficiary ID", "Case ID", "PN ID")
+                beneficiary_column = _find(list(frame.columns), "Awareness ID") if name == "awareness" else _find(list(frame.columns), "Beneficiary ID", "Case ID", "PN ID")
                 assessment_column = _find(list(frame.columns), "Assessment ID")
-                name_column = _find(list(frame.columns), "Name (Filter Color Red)", "Beneficiary Name", "Name")
+                name_column = _find(list(frame.columns), "Participant Name", "Name") if name == "awareness" else _find(list(frame.columns), "Name (Filter Color Red)", "Beneficiary Name", "Name")
                 detained_column = _find(list(frame.columns), "Is the beneficiary detained")
                 for row in rows:
                     self.demographics[id(row)] = (_population(row.get(cols["community"], "")), _report_pair(row, cols),

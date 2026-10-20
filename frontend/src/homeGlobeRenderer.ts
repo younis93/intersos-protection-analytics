@@ -34,7 +34,7 @@ export function createGlobeRenderer(canvas:HTMLCanvasElement,map:GlobeMap){
   const height=Math.round(width*745/711);
   canvas.width=width;canvas.height=height;
   const frame=context.createImageData(width,height);
-  const offsets:number[]=[],longitudes:number[]=[],rows:number[]=[],fractions:number[]=[],lights:number[]=[],edges:number[]=[];
+  const offsets:number[]=[],longitudes:number[]=[],rows:number[]=[],fractions:number[]=[],edges:number[]=[];
   const tilt=15*Math.PI/180,heading=20*Math.PI/180;
   const sinTilt=Math.sin(tilt),cosTilt=Math.cos(tilt);
   for(let y=0;y<height;y++){
@@ -50,12 +50,20 @@ export function createGlobeRenderer(canvas:HTMLCanvasElement,map:GlobeMap){
       longitudes.push((.5+longitude/(Math.PI*2))*map.width);
       rows.push(Math.floor(v)*map.width);
       fractions.push(v-Math.floor(v));
-      lights.push(.84+.14*nz-.065*nx+.035*ny);
       edges.push(Math.min(1,(1-radius)*Math.min(width,height)/2));
     }
   }
-  const pixelOffsets=Int32Array.from(offsets),u=Float32Array.from(longitudes),row=Int32Array.from(rows),fy=Float32Array.from(fractions),light=Float32Array.from(lights),edge=Float32Array.from(edges);
+  const pixelOffsets=Int32Array.from(offsets),u=Float32Array.from(longitudes),row=Int32Array.from(rows),fy=Float32Array.from(fractions),edge=Float32Array.from(edges);
+  let lastColor='',rgb=new Uint8ClampedArray([39,146,210,255]);
   return (angle:number)=>{
+    const color=getComputedStyle(canvas).color;
+    if(color!==lastColor){
+      context.clearRect(0,0,1,1);
+      context.fillStyle=color;
+      context.fillRect(0,0,1,1);
+      rgb=context.getImageData(0,0,1,1).data;
+      lastColor=color;
+    }
     const shift=angle/(Math.PI*2)*map.width;
     for(let pixel=0;pixel<pixelOffsets.length;pixel++){
       const longitude=((u[pixel]+shift)%map.width+map.width)%map.width;
@@ -64,10 +72,10 @@ export function createGlobeRenderer(canvas:HTMLCanvasElement,map:GlobeMap){
       const north=map.land[top+x]*(1-fx)+map.land[top+nextX]*fx;
       const south=map.land[bottom+x]*(1-fx)+map.land[bottom+nextX]*fx;
       const land=(north*(1-fy[pixel])+south*fy[pixel])/255;
-      const offset=pixelOffsets[pixel],shade=light[pixel];
-      frame.data[offset]=39*shade;
-      frame.data[offset+1]=146*shade;
-      frame.data[offset+2]=210*shade;
+      const offset=pixelOffsets[pixel];
+      frame.data[offset]=rgb[0];
+      frame.data[offset+1]=rgb[1];
+      frame.data[offset+2]=rgb[2];
       frame.data[offset+3]=255*(1-land)*edge[pixel];
     }
     context.putImageData(frame,0,0);

@@ -237,6 +237,23 @@ def load_settings() -> dict[str, Any]:
 
 
 THEME_NAMES = {"glass-light", "glass-dark", "unhcr", "executive", "multicolor"}
+STARTUP_ROUTES = {"home": "#/", "legal": "#/legal/overview", "kobo": "#/kobo"}
+
+
+def saved_startup_page() -> str:
+    page = load_settings().get("startupPage", "home")
+    return page if isinstance(page, str) and page in STARTUP_ROUTES else "home"
+
+
+def save_startup_page(page: str) -> bool:
+    if not isinstance(page, str) or page not in STARTUP_ROUTES:
+        raise ValueError("Choose Home, Legal, or Kobo as the startup page.")
+    target = settings_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    settings = load_settings()
+    settings["startupPage"] = page
+    target.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    return True
 
 
 def saved_app_theme() -> str:
@@ -664,6 +681,12 @@ class DesktopApi:
     def get_saved_app_theme(self) -> str:
         return saved_app_theme()
 
+    def get_saved_startup_page(self) -> str:
+        return saved_startup_page()
+
+    def save_startup_page(self, page: str) -> bool:
+        return save_startup_page(page)
+
     def open_issue_whatsapp(self, recipient: str) -> bool:
         if not isinstance(recipient, str) or not re.fullmatch(r"[1-9][0-9]{7,14}", recipient):
             raise ValueError("Add a valid number including its country code.")
@@ -849,7 +872,9 @@ def main() -> None:
     # native persisted theme in the initial URL so React cannot reset it to light
     # while the bridge is still starting.
     startup_epoch_ms = int(time.time() * 1000)
-    url = f"http://127.0.0.1:{port}/?appTheme={startup_theme}&startupEpoch={startup_epoch_ms}#/legal/overview"
+    startup_page = saved_startup_page()
+    startup_route = "#/" if "--home" in sys.argv else STARTUP_ROUTES[startup_page]
+    url = f"http://127.0.0.1:{port}/?appTheme={startup_theme}&startupPage={startup_page}&startupEpoch={startup_epoch_ms}{startup_route}"
     runtime = StartupRuntime(startup_theme)
 
     webview.settings["ALLOW_DOWNLOADS"] = True

@@ -1,0 +1,11 @@
+const assert=require('node:assert/strict'),fs=require('node:fs');
+const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {mock}=require('./benchmark_kobo_scroll.cjs');
+const base=process.argv[2]||'http://127.0.0.1:5358';
+(async()=>{const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});try{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(String(e)));
+ const calls=await mock(page,5,f=>{f.results.forEach((q,i)=>{q.rows=q.rows.slice(0,4);q.chart=['column','bar','line','pie','donut'][i];q.label+=' - احتياجات المجتمع';q.rows[0].label='Refugee registered with UNHCR or authorities';q.appearance={metric:'percent',labels:'both',legend:['bottom','right','top','left','hidden'][i],fontSize:14,height:[720,560,420,320,560][i],grid:'hide',bars:'group'};if(i>=3){q.breakdowns=[];q.breakdownFields=[]}f.settings.questions[q.id]={appearance:q.appearance};})});
+ await page.goto(base+'/#/kobo/scroll');const first=page.locator('#question-q0');await first.waitFor();await first.getByRole('button',{name:'Export question',exact:true}).click();const pngDownload=page.waitForEvent('download');await first.getByRole('button',{name:'Chart PNG',exact:true}).click();fs.mkdirSync('output/kobo-appearance',{recursive:true});const png=await pngDownload;await png.saveAs('output/kobo-appearance/chart.png');assert.equal(await png.failure(),null);
+ await page.getByRole('button',{name:'Export',exact:true}).click();const pdfDownload=page.waitForEvent('download',{timeout:60000});await page.getByRole('button',{name:'Report PDF',exact:true}).click();const pdf=await pdfDownload;await pdf.saveAs('output/kobo-appearance/report.pdf');assert.equal(await pdf.failure(),null);assert.equal(calls(),1);assert.equal(await page.locator('body > div[style*="-10000px"]').count(),0);assert.deepEqual(errors,[]);
+ console.log('PASS: PNG and worker PDF with 5 chart types, custom dimensions/fonts/legend positions, respondent labels, Arabic, no extra analysis requests or chart hosts.');
+}finally{await browser.close()}})().catch(e=>{console.error(e);process.exit(1)});

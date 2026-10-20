@@ -1,3 +1,4 @@
+import {AwarenessIdButton} from './DeportationCaseModal';
 import {AnimatedActionIcon} from './AnimatedActionIcon';
 
 import {
@@ -291,7 +292,7 @@ export function FindingTable({
       {dataset === "legalhotlines" ? (
         <><td>{r.contactDate}</td><td>{r.callerName}</td><td>{r.beneficiaryDetained}</td><td>{r.helplineReferral}</td><td>{r.priority || "-"}</td>{hotlineSourceColumns.map((column) => <td key={column}>{r.sourceFields?.[column] || "-"}</td>)}</>
       ) : dataset === "awareness" ? (
-        <><td>{r.awarenessId || r.recordId || "-"}</td><td>{r.sessionTopic || "-"}</td></>
+        <><td><AwarenessIdButton awarenessId={r.awarenessId || r.recordId}/></td><td>{r.sessionTopic || "-"}</td></>
       ) : (
         <>{(dataset !== "legalservices" || (rule !== "Duplicate service" && rule !== "Duplicate service without Assessment ID")) && <td>{r.caseId || "-"}</td>}{(rule === "Possible duplicate name" || rule === "Possible duplicate contact and name") && <><td>{r.identificationDate || "-"}</td><td>{r.createdOn || "-"}</td><td>{r.feeId || "-"}</td><td>{r.amountSpentIqd || "-"}</td><td>{r.legalServiceNeeded || "-"}</td></>}<td>{r.assessmentId || "-"}</td>{dataset === "assessments" && <td>{r.assessmentDate || "-"}</td>}{rule === "Open counselling-only assessment" && <><td>{r.assessmentStatus || "-"}</td><td>{r.legalServiceNeeded || "-"}</td></>}{rule === "Detention/immigration inconsistency" && <><td>{r.beneficiaryDetained || "-"}</td><td>{r.immigrationRelatedCharge || "-"}</td></>}{rule === "Detained beneficiary below 10 years" && <><td>{r.beneficiaryDetained || "-"}</td><td>{r.dateOfBirth || "-"}</td><td>{r.beneficiaryAge ?? "-"}</td></>}{rule === "Selected month with previous assessment" && <td>{r.createdOn || "-"}</td>}{rule === "Representation while not detained" && <td>{r.typeOfDocument || "-"}</td>}{rule === "Type of document in Assessments vs Services" && <><td>{r.comparisonFinding || "-"}</td><td>{r.assessmentDocuments || "-"}</td><td>{r.serviceDocuments || "-"}</td></>}{rule === "Type of Legal Service in Assessment vs Services" && <><td>{r.requestedServiceTypes || "-"}</td><td>{r.providedServiceTypes || "-"}</td></>}{(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <><td>{r.caseId || "-"}</td><td>{r.serviceTypeProvided || "-"}</td><td>{r.typeOfDocument || "-"}</td><td>{r.courtVerdictDetail || "-"}</td><td>{r.otherDocumentDetail || "-"}</td><td>{r.legalConcernSpecified || "-"}</td><td>{r.legalConcern || "-"}</td></>}<td>{r.serviceId || "-"}</td></>
       )}

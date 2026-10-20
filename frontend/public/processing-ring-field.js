@@ -37,7 +37,7 @@ void main(){
   gl_FragColor=vec4(mix(light,night,dark),1.);
 }`;
 
-export function createProcessingRingField(canvas, {active = true} = {}) {
+export function createProcessingRingField(canvas, {active = true, speed = 1} = {}) {
   const gl = canvas.getContext('webgl', {alpha:true,antialias:false,depth:false,powerPreference:'low-power'});
   canvas.dataset.renderer = 'fallback';
   canvas.dataset.motion = 'static';
@@ -89,7 +89,7 @@ export function createProcessingRingField(canvas, {active = true} = {}) {
   }
   function draw(now,moving){
     if(!program||lost||disposed)return;
-    if(moving&&lastDraw)elapsed+=Math.min(now-lastDraw,80)/1000;
+    if(moving&&lastDraw)elapsed+=Math.min(now-lastDraw,80)/1000*speed;
     lastDraw=moving?now:0;
     const hover=moving&&now-pointerAt<2500?1:0;
     presence+=(hover-presence)*.045;

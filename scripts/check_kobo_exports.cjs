@@ -1,0 +1,38 @@
+const assert=require('node:assert/strict'),fs=require('node:fs');
+const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {mock}=require('./benchmark_kobo_scroll.cjs');
+const base=process.argv[2]||'http://127.0.0.1:5197';
+(async()=>{const b=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});try{
+ const p=await b.newPage({viewport:{width:1440,height:1000}}),errors=[],downloads=[],requests=[],cancelled=[];let ready=false,fail=false;
+ await p.clock.install();p.setDefaultTimeout(20000);p.on('pageerror',e=>errors.push(String(e)));p.on('download',d=>downloads.push(d));
+ const calls=await mock(p,8,f=>{f.results.forEach((q,i)=>{q.rows=q.rows.slice(0,5);if(i<4){q.breakdowns=[];q.breakdownFields=[];q.chart=['pie','donut','line','column'][i]}q.label+=' - احتياجات المجتمع'});});
+ await p.route('**/projects/scroll/exports',async route=>{requests.push(route.request().postDataJSON());await new Promise(r=>setTimeout(r,150));await route.fulfill({json:{id:'export-'+requests.length,state:'queued',progress:0,message:'Preparing results'}})});
+ await p.route('**/api/kobo/exports/*',async route=>{const id=route.request().url().split('/').pop();if(route.request().method()==='DELETE'){cancelled.push(id);await route.fulfill({json:{cancelled:true}});return}await route.fulfill({json:{id,state:fail?'error':ready?'complete':'running',progress:ready?100:35,message:fail?'Synthetic failure':ready?'Ready':'Creating grouped analysis'}})});
+ await p.route('**/api/kobo/exports/*/download',route=>route.fulfill({body:Buffer.from('fixture'),contentType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+ await p.goto(base+'/#/kobo/scroll');await p.locator('#question-q0').waitFor();
+ const tray=p.getByRole('complementary',{name:'Export files'});
+ async function excel(){await p.getByRole('button',{name:'Export',exact:true}).click();await p.getByRole('button',{name:'Download Excel',exact:true}).click();await p.getByRole('button',{name:'Start Excel export',exact:true}).click()}
+ await excel();await tray.waitFor();assert(await tray.evaluate(e=>e.classList.contains('is-minimized')));assert.equal(await p.getByRole('dialog').count(),0);
+ await p.getByRole('textbox',{name:'Search questions',exact:true}).fill('q3');await p.locator('#question-q3').waitFor();await p.getByRole('button',{name:'Clear question search',exact:true}).click();
+ await p.evaluate(()=>location.hash='#/');await tray.getByText(/Exporting 1 file/).first().waitFor();assert(await tray.isVisible());
+ await p.evaluate(()=>location.hash='#/legal/overview');assert(await tray.isVisible());
+ ready=true;await tray.getByRole('button',{name:'Download again',exact:true}).waitFor();assert.equal(downloads.length,1);await tray.getByRole('button',{name:'Download again',exact:true}).click();await p.waitForTimeout(100);assert.equal(downloads.length,2);
+ await p.evaluate(()=>location.hash='#/kobo/scroll');await p.locator('#question-q0').waitFor();
+ assert.equal(await tray.getByRole('button',{name:/Restore export details|Minimize export details/}).count(),0);assert(await tray.getByText('Excel file ready',{exact:true}).isVisible());
+ fs.mkdirSync('output/kobo-exports',{recursive:true});await tray.screenshot({path:'output/kobo-exports/expanded.png'});
+ await tray.getByRole('button',{name:'Dismiss',exact:true}).click();ready=false;await excel();await tray.getByText('Creating grouped analysis',{exact:true}).waitFor();await tray.getByRole('button',{name:'Cancel',exact:true}).click();await tray.getByText('Export cancelled',{exact:true}).waitFor();assert.equal(cancelled.length,1);
+ await tray.getByRole('button',{name:'Dismiss',exact:true}).click();fail=true;await excel();await tray.getByRole('button',{name:'Retry',exact:true}).waitFor();fail=false;ready=true;await tray.getByRole('button',{name:'Retry',exact:true}).click();await tray.getByRole('button',{name:'Download again',exact:true}).waitFor();assert.deepEqual(requests.at(-1),requests.at(-2));await tray.getByRole('button',{name:'Dismiss',exact:true}).click();
+ const before=calls();await p.getByRole('button',{name:'Export',exact:true}).click();await p.getByRole('button',{name:'Report PDF',exact:true}).click();
+ await p.getByRole('textbox',{name:'Search questions',exact:true}).fill('q4');await p.locator('#question-q4').waitFor();
+ await tray.getByRole('button',{name:'Download again',exact:true}).waitFor({timeout:60000});assert.equal(calls(),before,'PDF must reuse a matching completed analysis');
+ const pdf=downloads.at(-1);await pdf.saveAs('output/kobo-exports/report.pdf');assert.equal((await pdf.failure()),null);
+ await p.setViewportSize({width:390,height:844});await tray.screenshot({path:'output/kobo-exports/mobile.png'});assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+ await p.evaluate(()=>document.documentElement.dataset.theme='glass-dark');await tray.screenshot({path:'output/kobo-exports/dark.png'});
+ await tray.getByRole('button',{name:'Dismiss',exact:true}).click();
+ await p.getByRole('button',{name:'Export',exact:true}).click();await p.getByRole('button',{name:'Report PDF',exact:true}).click();
+ await tray.getByText(/Creating PDF:/).waitFor();const priorDownloads=downloads.length;
+ await tray.screenshot({path:'output/kobo-exports/processing.png'});await tray.getByRole('button',{name:'Cancel',exact:true}).click();await tray.getByText('Export cancelled',{exact:true}).waitFor();await p.waitForTimeout(500);assert.equal(downloads.length,priorDownloads);assert.equal(await p.locator('body > div[style*="-10000px"]').count(),0,'Cancelled PDF must release offscreen charts');await tray.getByRole('button',{name:'Dismiss',exact:true}).click();
+ const question=p.locator('#question-q4');await question.getByRole('button',{name:'Export question',exact:true}).click();await question.getByRole('button',{name:'Question PDF',exact:true}).click();await tray.getByRole('button',{name:'Download again',exact:true}).waitFor();assert.equal(downloads.at(-1).suggestedFilename(),'Scroll benchmark-q4.pdf');await downloads.at(-1).saveAs('output/kobo-exports/question.pdf');
+ await p.clock.fastForward(3600001);await tray.getByText('This file has expired. Start a new export.',{exact:true}).waitFor();await tray.getByRole('button',{name:'Dismiss',exact:true}).click();
+ assert.deepEqual(errors,[]);console.log('PASS: background Excel/PDF, snapshot reuse, cross-workspace navigation, auto download once, Download again, cancel, retry, expiry, themes, mobile, mixed Arabic labels.');
+}finally{await b.close()}})().catch(e=>{console.error(e);process.exitCode=1});

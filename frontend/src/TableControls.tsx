@@ -1,5 +1,12 @@
-import {ChevronLeft,ChevronRight} from 'lucide-react';
+import './recordsTable.css';
+import {ChevronLeft,ChevronRight,Search,X} from 'lucide-react';
 import {useLayoutEffect,useRef,type ComponentPropsWithoutRef,type ReactNode} from 'react';
+
+/** Shared search field used by record tables and project collections. */
+export function SearchField({value,onChange,label,placeholder=label,clearable=false}:{value:string;onChange:(value:string)=>void;label:string;placeholder?:string;clearable?:boolean}){
+ const input=useRef<HTMLInputElement>(null);
+ return <label className="detention-table-search app-search-field"><Search aria-hidden="true"/><input ref={input} className="table-search-input" type="text" aria-label={label} placeholder={placeholder} value={value} onChange={event=>onChange(event.target.value)}/>{clearable&&value&&<button type="button" className="soft app-search-clear" aria-label={`Clear ${label.toLowerCase()}`} title="Clear search" onClick={()=>{onChange('');input.current?.focus()}}><X aria-hidden="true"/></button>}</label>;
+}
 
 export function pageCount(total:number,pageSize:number){return Math.max(1,Math.ceil(total/Math.max(1,pageSize)))}
 

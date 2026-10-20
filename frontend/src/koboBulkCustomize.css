@@ -1,0 +1,34 @@
+.kobo-bulk-customize fieldset{display:grid;gap:14px;border:0;padding:0;margin:0;min-width:0}
+.kobo-bulk-customize fieldset:disabled{opacity:.55}
+.kobo-bulk-enable{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:650;cursor:pointer;line-height:1.5}
+.kobo-bulk-enable input{accent-color:var(--blue);flex-shrink:0}
+.kobo-shell .kobo-bulk-customize .kobo-bulk-hint{font-size:11px;line-height:1.7;margin:0}
+.kobo-bulk-customize .kobo-customize-preview>.app-select{width:100%;min-width:0;box-sizing:border-box;margin-bottom:18px}
+.kobo-bulk-customize .kobo-preview-heading small{font-size:11px;color:var(--muted);display:block;margin-top:8px}
+.kobo-shell .kobo-options-popup{padding:12px;gap:12px}
+.kobo-options-heading{display:grid;gap:3px;padding:2px 3px}
+.kobo-options-heading strong{font-size:14px}
+.kobo-options-heading small,.kobo-options-footer small{font-size:10px;color:var(--muted)}
+.kobo-shell .kobo-options-customize{display:flex;align-items:center;gap:12px;text-align:start;width:100%;padding:13px;border:0;border-radius:12px;background:color-mix(in srgb,var(--blue) 9%,var(--panel));color:var(--ink)}
+.kobo-options-customize>svg{width:22px!important;height:22px!important;color:var(--blue);flex-shrink:0}
+.kobo-options-customize>span{display:grid;gap:4px}
+.kobo-options-customize strong{font-size:12px}
+.kobo-options-customize small{font-size:10px;color:var(--muted)}
+.kobo-options-section{display:grid;gap:10px;border-top:1px solid var(--line);padding-top:12px}
+.kobo-shell .kobo-options-section h3{margin:0;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.kobo-options-group-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kobo-shell .kobo-options-group-actions>button,.kobo-shell .kobo-options-footer>button{display:flex;justify-content:center;align-items:center;gap:6px;min-height:36px;padding:7px;border:0;border-radius:9px;background:var(--panel);color:var(--ink);font-size:10px}
+.kobo-options-group-actions>button svg{width:14px!important;height:14px!important;flex-shrink:0}
+.kobo-options-footer{display:grid;gap:8px;border-top:1px solid var(--line);padding-top:12px}
+.kobo-shell .kobo-options-popup .kobo-toggle-grid{gap:5px}
+.kobo-shell .kobo-options-popup .kobo-toggle{border:0;padding:5px 4px;background:transparent}
+
+.kobo-options-footer{position:sticky;bottom:0;z-index:20;background-color:var(--bg);background-image:linear-gradient(var(--panel-strong),var(--panel-strong));padding-bottom:8px}
+
+.kobo-bulk-setting-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:22px 0 10px;min-height:28px}
+.kobo-bulk-setting-heading h4{margin:0;font-size:12px;font-weight:650}
+.kobo-bulk-setting-heading>div{display:flex;align-items:center;gap:7px}
+.kobo-bulk-changed,.kobo-bulk-mixed{font-size:10px;padding:4px 7px;border-radius:6px;color:var(--muted);background:var(--panel)}
+.kobo-bulk-changed{color:var(--blue);background:color-mix(in srgb,var(--blue) 10%,var(--panel))}
+.kobo-bulk-customize .kobo-bulk-setting-heading button{display:flex;align-items:center;gap:4px;min-height:26px;padding:3px 6px;font-size:10px;box-shadow:none;background:transparent;border-color:transparent}
+.kobo-bulk-setting-heading button svg{width:12px;height:12px}

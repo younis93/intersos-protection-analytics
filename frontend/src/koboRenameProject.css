@@ -1,0 +1,21 @@
+.kobo-rename-project{width:min(460px,calc(100vw - 32px));padding:26px;border-radius:20px}
+.kobo-rename-project header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.kobo-rename-icon{display:grid;place-items:center;width:42px;height:42px;border-radius:12px;background:color-mix(in srgb,var(--blue) 10%,var(--panel));color:var(--blue)}
+.kobo-rename-icon svg{width:20px;height:20px}
+.kobo-rename-project header button{display:grid;place-items:center;width:34px;height:34px;padding:0}
+.kobo-rename-project header button svg{width:17px;height:17px}
+.kobo-rename-project h2{margin:0;font-size:21px}
+.kobo-rename-project p{font-size:12px;line-height:1.6;color:var(--muted)}
+.kobo-rename-project label{display:block;margin:22px 0 8px;font-size:12px;font-weight:650}
+.kobo-rename-project input{display:block;width:100%;min-width:0;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel-strong);color:var(--ink);font:inherit}
+.kobo-rename-project input:focus{border-color:var(--blue);outline:2px solid color-mix(in srgb,var(--blue) 20%,transparent);outline-offset:2px}
+.kobo-rename-project footer{display:flex;justify-content:flex-end;gap:10px;margin-top:24px}
+.kobo-rename-project footer button{display:flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:10px 16px}
+.kobo-rename-project footer svg{width:16px;height:16px}
+.kobo-edit-settings{margin-top:24px}.kobo-edit-settings>p{margin-bottom:0}.kobo-rename-project input{box-sizing:border-box}@media(max-width:480px){.kobo-rename-project{padding:20px}}
+.kobo-project-title-row{display:flex;align-items:center;gap:10px;min-width:0}
+.kobo-project-title-row h1,.kobo-project-title-row h2{min-width:0}
+.kobo-shell .kobo-project-title-row .kobo-rename-button{display:grid;place-items:center;flex-shrink:0;width:30px;min-height:30px;height:30px;margin-top:7px;padding:0;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);box-shadow:none}
+.kobo-shell .kobo-project-title-row .kobo-rename-button:hover{color:var(--blue);border-color:var(--line);background:var(--panel-strong)}
+.kobo-rename-button svg{width:15px;height:15px}
+.kobo-project-card .kobo-project-title-row{align-items:baseline}

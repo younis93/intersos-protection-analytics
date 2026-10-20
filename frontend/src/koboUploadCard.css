@@ -1,0 +1,14 @@
+.kobo-dialog .kobo-upload-card{display:flex;flex-direction:column;align-items:stretch;gap:16px;min-width:0;padding:20px;border:1px solid color-mix(in srgb,var(--blue) 26%,var(--line));border-radius:16px;background:color-mix(in srgb,var(--blue) 5%,var(--panel));box-sizing:border-box}
+.kobo-upload-card-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.kobo-upload-card-icon{display:grid;place-items:center;width:42px;height:42px;flex:none;border-radius:12px;background:color-mix(in srgb,var(--blue) 12%,var(--panel));color:var(--blue)}
+.kobo-dialog .kobo-upload-card-icon svg{width:23px;height:23px;color:inherit}
+.kobo-upload-card-format{font-size:11px;font-weight:700;letter-spacing:.05em;padding:4px 8px;border:1px solid var(--line);border-radius:7px;color:var(--muted)}
+.kobo-dialog .kobo-upload-card h3{margin:0;font-size:16px;line-height:1.5}
+.kobo-dialog .kobo-upload-card p{margin:4px 0 0;font-size:12px;line-height:1.6;color:var(--muted)}
+.kobo-upload-card-selection{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);min-width:0}
+.kobo-upload-card-selection strong{min-width:0;overflow-wrap:anywhere;font-size:12px;line-height:1.6;color:var(--ink)}
+.kobo-upload-card-selection>span{flex:none;font-size:11px;color:var(--muted);line-height:1.8}
+.kobo-dialog .kobo-upload-card-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:0;margin-top:auto}
+.kobo-dialog .kobo-upload-card-actions button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:10px 16px;font-size:12px;line-height:1.4}
+.kobo-upload-card-actions button svg{width:17px;height:17px;color:inherit;flex:none}
+@media(max-width:600px){.kobo-dialog .kobo-upload-card{padding:16px}.kobo-upload-card-actions>button{flex:1}.kobo-upload-card-selection>span{flex-shrink:0}}

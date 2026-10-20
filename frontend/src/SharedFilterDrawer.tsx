@@ -14,6 +14,8 @@ export interface DrawerFilterField {
   onChange:(values:string[])=>void;
   formatCaption?:(value:string)=>string;
   note?:ReactNode;
+  onResetSelection?:()=>void;
+  defaultExpanded?:boolean;
 }
 
 /** Shared Overview layout. Pages own live selections, queries and reset semantics. */
@@ -42,8 +44,8 @@ export function SharedFilterDrawer({open=true,title,eyebrow,fields,onClose,onRes
     backdrop={<button type="button" className={`filter-backdrop surface-backdrop${closing?' is-closing':''}`} aria-label={`Close ${title.toLowerCase()}`} onClick={close} disabled={closing}/> }>
     <label className="filter-search"><Search/><input aria-label={searchLabel} placeholder="Search filters" value={query} onChange={event=>(onSearchChange??setLocalSearch)(event.target.value)}/></label>
     <div className="case-filter-scroll">{fields.filter(field=>field.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).map(field=>
-      <FilterSection key={field.key} label={field.label} open={Boolean(field.selected.length)} badge={field.selected.length>0&&<b>{field.selected.length}</b>}>
-        <div><FilterValueList field={field.label} values={field.values} selected={field.selected} onChange={field.onChange} formatCaption={field.formatCaption}/>{field.note}</div>
+      <FilterSection key={field.key} label={field.label} open={field.defaultExpanded??Boolean(field.selected.length)} badge={field.selected.length>0&&<b>{field.selected.length}</b>}>
+        <div><FilterValueList field={field.label} values={field.values} selected={field.selected} onChange={field.onChange} onReset={field.onResetSelection} formatCaption={field.formatCaption}/>{field.note}</div>
       </FilterSection>)}</div>
   </FilterDrawerShell>;
 }

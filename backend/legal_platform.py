@@ -287,6 +287,12 @@ def _find_cached(columns: tuple[str, ...], *needles: str) -> str | None:
     for needle in needles:
         wanted = normalized_header(needle)
         for original, lower in lowered:
+            suffix = lower[len(wanted):].lstrip(" /:-_") if lower.startswith(wanted) else ""
+            if lower.startswith(wanted) and (not suffix or not (suffix[0].isascii() and suffix[0].isalnum())):
+                return original
+    for needle in needles:
+        wanted = normalized_header(needle)
+        for original, lower in lowered:
             if wanted in lower:
                 return original
     return None
@@ -627,6 +633,12 @@ class LegalStore:
             timings["cleaning"] += perf_counter() - stage
             operation.finish(f"Cleaning:{name}")
             if progress: progress(operation.snapshot()["percent"])
+        from .linked_csv_enrichment import enrich_linked_csvs
+        operation.start("Restoring linked fields")
+        stage = perf_counter()
+        enrich_linked_csvs(frames, dates, warnings, clean_id=clean_id, checkpoint=operation.check_cancelled)
+        timings["linked_enrichment"] = perf_counter() - stage
+        operation.finish("Restoring linked fields")
         result = cls(frames, source, warnings, dates)
         result._import_operation = operation
         stage = perf_counter()

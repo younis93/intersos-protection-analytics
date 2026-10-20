@@ -1,0 +1,7 @@
+.kobo-deferred-question{min-width:0}
+.kobo-deferred-question.is-ready{content-visibility:auto;contain-intrinsic-block-size:auto var(--question-estimate,800px)}
+.kobo-question-placeholder{box-sizing:border-box;padding:24px;border:1px solid var(--line);border-radius:var(--lp-radius,20px);margin-bottom:20px;display:flex;flex-direction:column;gap:12px;color:var(--muted)}
+.kobo-question-placeholder>span{font-size:10px;color:var(--blue)}
+.kobo-question-placeholder>strong{font-size:14px;color:var(--ink)}
+.kobo-question-placeholder>div{height:180px;margin-top:16px;border-radius:12px;background:color-mix(in srgb,var(--blue) 4%,var(--panel))}
+@media print{.kobo-deferred-question.is-ready{content-visibility:visible;contain-intrinsic-block-size:none}}

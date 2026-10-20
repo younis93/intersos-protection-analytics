@@ -1,0 +1,19 @@
+/* Keep selection controls visible inside each table's horizontal scroller. */
+table > :is(thead, tbody) > tr > :is(th, td):first-child:has(input[type="checkbox"]),
+.si-table-scroll th.si-select-column {
+  position: sticky;
+  left: 0;
+  z-index: 7;
+  background: linear-gradient(var(--panel-strong), var(--panel-strong)), var(--bg) !important;
+  box-shadow: 1px 0 0 var(--line), 6px 0 12px color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+table > thead > tr > th:first-child:has(input[type="checkbox"]),
+.si-table-scroll th.si-select-column {
+  z-index: 9;
+}
+
+table > tbody > tr:hover > td:first-child:has(input[type="checkbox"]),
+table > tbody > tr > td:first-child:has(input[type="checkbox"]:checked) {
+  background: linear-gradient(color-mix(in srgb, var(--blue) 8%, transparent), color-mix(in srgb, var(--blue) 8%, transparent)), linear-gradient(var(--panel-strong), var(--panel-strong)), var(--bg) !important;
+}

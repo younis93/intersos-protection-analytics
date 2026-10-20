@@ -38,7 +38,7 @@ def test_import_is_ready_with_metadata_and_monotonic_progress():
     assert progress == sorted(progress)
     assert store._metadata_cache is not None
     assert store.metadata()["revision"] == store.revision
-    assert {"csv_read", "cleaning", "validation", "review_preparation", "metadata", "total"} == set(store.import_timings)
+    assert {"csv_read", "cleaning", "linked_enrichment", "validation", "review_preparation", "metadata", "total"} == set(store.import_timings)
     revision = store.revision
     store.set_review_exclusions([])
     assert store.revision == revision

@@ -1,0 +1,13 @@
+.kobo-shell .kobo-page-heading.kobo-project-heading{display:grid;grid-template-columns:minmax(160px,1fr) auto auto;align-items:center;gap:24px;margin-bottom:0;padding-block:8px 12px}
+.kobo-project-identity{min-width:0}
+.kobo-project-identity .eyebrow{font-size:10px;letter-spacing:.14em}
+.kobo-project-heading .kobo-project-identity h1{margin:7px 0 0;font-size:26px;line-height:1.2;letter-spacing:-.025em;overflow-wrap:anywhere}
+.kobo-header-submissions{display:grid;gap:4px;padding-inline-end:24px;border-inline-end:1px solid var(--line);white-space:nowrap}
+.kobo-header-submissions>span{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.kobo-header-submissions>div{font-size:13px;color:var(--muted);line-height:1.1}
+.kobo-header-submissions strong{font-size:25px;font-weight:750;letter-spacing:-.03em;color:var(--ink)}
+.kobo-shell .kobo-page-heading.kobo-project-heading .kobo-project-actions{gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.kobo-project-actions>button,.kobo-project-actions>.kobo-action-menu>.app-select-trigger{min-height:44px;border-radius:12px;padding:10px 15px;font-size:12px;gap:8px}
+.kobo-project-actions svg{width:17px;height:17px;flex-shrink:0}
+@media(max-width:1150px){.kobo-shell .kobo-page-heading.kobo-project-heading{grid-template-columns:minmax(0,1fr) auto;gap:18px}.kobo-header-submissions{padding-inline-end:0;border:0;text-align:end}.kobo-shell .kobo-page-heading.kobo-project-heading .kobo-project-actions{grid-column:1/-1;justify-content:flex-start}}
+@media(max-width:600px){.kobo-shell .kobo-page-heading.kobo-project-heading{gap:16px 12px}.kobo-project-heading .kobo-project-identity h1{font-size:23px}.kobo-shell .kobo-page-heading.kobo-project-heading .kobo-project-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.kobo-shell .kobo-project-heading .kobo-project-actions>button,.kobo-shell .kobo-project-heading .kobo-project-actions>.kobo-action-menu>.app-select-trigger{width:100%;justify-content:center;padding-inline:10px}.kobo-project-actions>.kobo-action-menu{min-width:0}.kobo-project-actions>.kobo-import-notes-trigger{grid-column:1/-1}}

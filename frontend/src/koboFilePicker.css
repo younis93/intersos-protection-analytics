@@ -1,0 +1,2 @@
+.kobo-dialog .kobo-upload-card-actions>.kobo-file-picker-remove{flex:none;width:42px;min-width:42px;height:42px;padding:10px;color:var(--muted)}
+.kobo-dialog .kobo-upload-card-actions>.kobo-file-picker-remove:hover:not(:disabled){color:var(--blue);border-color:color-mix(in srgb,var(--blue) 30%,var(--line))}

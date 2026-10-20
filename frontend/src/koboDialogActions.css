@@ -1,0 +1,14 @@
+.kobo-dialog .kobo-dialog-actions{position:sticky;bottom:0;z-index:30;isolation:isolate;display:flex;align-items:center;justify-content:space-between;gap:16px;flex:none;padding:16px 24px;border-top:1px solid var(--line);background:var(--panel-strong);background-color:var(--bg);background-image:linear-gradient(var(--panel-strong),var(--panel-strong));box-sizing:border-box}
+.kobo-dialog .kobo-dialog-action-buttons{display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0;max-width:100%;margin-inline-start:auto;flex:none}
+.kobo-dialog .kobo-dialog-action-buttons>button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:42px;padding:10px 16px;margin:0;font-size:12px;white-space:normal;line-height:1.4;box-sizing:border-box}
+.kobo-dialog .kobo-dialog-action-buttons>button:disabled{cursor:not-allowed}
+.kobo-dialog .kobo-dialog-actions>p{margin:0;color:var(--muted);font-size:11px;line-height:1.6}
+.kobo-dialog.kobo-confirm-dialog>.kobo-dialog-actions{padding:20px 0 0;margin-top:20px;border-top:0}
+.kobo-appearance-control>.app-select{width:100%;min-width:0;box-sizing:border-box}
+.kobo-appearance-hint{font-size:11px!important;line-height:1.7}
+.kobo-shell .kobo-customize-tabs>button{flex-direction:column;gap:5px;font-size:10px;padding:9px 4px}
+@media(max-width:760px){.kobo-dialog .kobo-dialog-actions{flex-wrap:wrap;padding:12px 16px;gap:10px}.kobo-dialog .kobo-dialog-actions>p{flex-basis:100%}.kobo-dialog .kobo-dialog-action-buttons{width:auto;flex-wrap:wrap;justify-content:flex-end}.kobo-dialog .kobo-dialog-action-buttons>button{flex:initial}.kobo-dialog .kobo-mapping-confirm>.kobo-dialog-action-buttons{max-width:100%}}
+@media(max-width:340px){.kobo-dialog .kobo-dialog-action-buttons{width:100%;flex-direction:column;align-items:stretch}.kobo-dialog .kobo-dialog-action-buttons>button{width:100%}}
+
+.kobo-customize-tabs{z-index:20;background-color:var(--bg);background-image:linear-gradient(var(--panel-strong),var(--panel-strong));isolation:isolate}
+@media(max-width:800px){.kobo-dialog footer.kobo-dialog-actions{flex-direction:column;flex-wrap:nowrap;align-items:stretch}.kobo-dialog footer.kobo-dialog-actions>p{flex-basis:auto}.kobo-dialog footer.kobo-dialog-actions>.kobo-dialog-action-buttons{align-self:flex-end;max-width:100%;width:auto}.kobo-dialog .kobo-mapping-confirm>div:first-child{max-width:100%}}

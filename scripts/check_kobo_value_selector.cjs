@@ -1,0 +1,24 @@
+const assert=require('node:assert/strict'),fs=require('node:fs');
+const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {mock}=require('./benchmark_kobo_scroll.cjs');
+(async()=>{const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});try{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(String(e)));
+ await page.addInitScript(()=>{window.__copies=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{write:async items=>{const item=items[0];window.__copies.push({html:await(await item.getType('text/html')).text(),text:await(await item.getType('text/plain')).text()})}}});});
+ let fixture,requestedSettings;
+ const calls=await mock(page,2,f=>{fixture=f;f.results.forEach((q,i)=>{q.rows=q.rows.slice(0,3);if(!i){q.breakdowns=[];q.breakdownFields=[];q.rows.forEach(r=>delete r.series)}})});
+ await page.route('**/analysis',route=>{const request=route.request().postDataJSON();requestedSettings=request.settings;const questions=fixture.results.filter(q=>!request.question||q.id===request.question).map(q=>({...q,...(request.settings.questions[q.id]||{})}));return route.fulfill({json:{total:320,filtered:320,questions,filterSummary:[],groups:fixture.groups,settings:request.settings}})});
+ await page.goto('http://127.0.0.1:5359/#/kobo/scroll');const card=page.locator('#question-q0');await card.locator('.kobo-value-selector').waitFor();assert.equal(await card.locator('.kobo-value-custom').innerText(),'Custom');
+ for(const [label,mode,columns] of [['Counts','count',2],['Percentages','percent',2],['Counts and percentages','both',3]]){
+  await card.getByRole('button',{name:label,exact:true}).click();await page.waitForFunction(({mode})=>{const el=document.querySelector('#question-q0 .js-plotly-plot');return el&&el.data?.[0]?.text?.some(t=>mode==='both'?t.includes(' / '):mode==='percent'?t.includes('%'):!t.includes('%'))},{mode});
+  await page.waitForFunction(()=>document.querySelector('#question-q0 .kobo-value-custom')===null);assert.equal(await card.locator('.kobo-pivot-table thead tr').last().locator('th').count(),columns);assert.equal(await card.locator('.kobo-pivot-table tfoot td').count(),columns-1);
+  fs.mkdirSync('output/kobo-value-selector',{recursive:true});const download=page.waitForEvent('download');await card.getByRole('button',{name:'Export question',exact:true}).click();await card.getByRole('button',{name:'Question PDF',exact:true}).click();await(await download).saveAs(`output/kobo-value-selector/${mode}.pdf`);
+  await card.getByRole('button',{name:'Copy table for q0',exact:true}).click();await page.waitForFunction(()=>window.__copies.length>0);const copied=await page.evaluate(()=>window.__copies.pop());assert(copied.text.includes(mode==='both'?'Answer\tCount\tPercent':mode==='count'?'Answer\tCount':'Answer\tPercent'));assert.equal(copied.html.includes('>#</th>'),mode!=='percent');assert.equal(copied.html.includes('>%</th>'),mode!=='count');
+  await page.waitForTimeout(350);assert.equal(requestedSettings.questions.q0.breakdownDisplay,mode);assert.equal(requestedSettings.questions.q0.appearance.labels,mode);assert.equal(await card.getByRole('button',{name:label,exact:true}).getAttribute('aria-pressed'),'true');
+ }
+ const group=card.getByRole('group',{name:'Table and chart values: q0'}),copy=card.getByRole('button',{name:'Copy table for q0'});const g=await group.boundingBox(),c=await copy.boundingBox();assert(g.x+g.width<=c.x,'selector is left of Copy');assert.equal(await card.getByRole('group',{name:'Breakdown values',exact:true}).count(),0);
+ fs.mkdirSync('output/kobo-value-selector',{recursive:true});await card.screenshot({path:'output/kobo-value-selector/desktop.png'});
+ await page.setViewportSize({width:390,height:844});await card.screenshot({path:'output/kobo-value-selector/mobile.png'});assert(await card.evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+ const percent=card.getByRole('button',{name:'Percentages',exact:true});await percent.focus();await page.keyboard.press('Space');assert.equal(await percent.getAttribute('aria-pressed'),'true');
+ const grouped=page.locator('#question-q1');await grouped.scrollIntoViewIfNeeded();await grouped.getByRole('button',{name:'Counts',exact:true}).click();assert.equal(await grouped.locator('.kobo-pivot-table thead tr').last().locator('th').count(),8);assert.equal(await grouped.getByRole('group',{name:'Breakdown values',exact:true}).count(),0);assert.deepEqual(errors,[]);
+ console.log('PASS: selector placement, custom preservation, all three table/chart modes, saved settings, totals, grouped pivots, mobile and keyboard activation.');
+}finally{await browser.close()}})().catch(e=>{console.error(e);process.exit(1)});

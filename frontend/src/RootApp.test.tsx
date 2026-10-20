@@ -7,12 +7,18 @@ vi.mock('./Welcome',()=>({default:()=> <div>Welcome</div>}));
 vi.mock('./GuardianFox',()=>({GUARDIAN_FOX_STORAGE_KEY:'guardian-fox'}));
 afterEach(()=>vi.unstubAllGlobals());
 
-function render(search:string){
- vi.stubGlobal('window',{location:{hash:'#/legal/overview',search}});
+function render(search:string,hash='#/legal/overview'){
+ vi.stubGlobal('window',{location:{hash,search}});
  vi.stubGlobal('localStorage',{getItem:()=>null});
  return renderToStaticMarkup(<RootApp/>);
 }
 describe('workspace startup handoff',()=>{
+ it('routes Kobo projects without opening the Legal workspace',()=>{
+  const markup=render('','#/kobo/example/report');
+  expect(markup).toContain('Opening Kobo Analysis');
+  expect(markup).toContain('kobo-loading-card');
+  expect(markup).not.toContain('Legal workspace');
+ });
  it('never recreates the native preparation screen during desktop startup',()=>{
   const markup=render('?appTheme=glass-light&startupEpoch=123456');
   expect(markup).not.toContain('Preparing your workspace');

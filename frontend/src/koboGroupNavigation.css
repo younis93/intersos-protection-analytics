@@ -1,0 +1,27 @@
+/* Only the form-group list scrolls; workspace controls remain in place. */
+@media(min-width:901px){
+ .kobo-shell .sidebar>nav{flex:0 0 auto;overflow:visible}
+ .kobo-shell .sidebar>.kobo-group-navigation-host{display:flex;flex:1 1 auto;min-height:0;overflow:hidden}
+}
+.kobo-sidebar-groups{display:flex;flex-direction:column;min-height:0;width:100%;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);color:var(--muted)}
+.kobo-sidebar-groups h2{display:flex;align-items:center;gap:7px;margin:0;padding:0 10px 10px;font-size:10px;font-weight:600;letter-spacing:.04em}
+.kobo-sidebar-groups h2 svg{width:14px;height:14px}
+.kobo-sidebar-group-list{min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin;padding:2px 2px 8px}
+.kobo-sidebar-group-row{display:flex;align-items:center;gap:1px;min-width:0;margin:2px 0}
+.kobo-sidebar-branch,.kobo-sidebar-branch-space{width:22px;flex:0 0 22px}
+.kobo-sidebar-groups button{border:0;background:transparent;color:inherit;cursor:pointer;box-shadow:none}
+.kobo-sidebar-branch{display:grid;place-items:center;height:30px;padding:3px;border-radius:7px}
+.kobo-sidebar-branch svg{width:13px;height:13px;transition:transform .15s}
+.kobo-sidebar-branch[aria-expanded=false] svg{transform:rotate(-90deg)}
+.kobo-sidebar-groups[dir=rtl] .kobo-sidebar-branch[aria-expanded=false] svg{transform:rotate(90deg)}
+.kobo-sidebar-group-link{display:flex;align-items:center;gap:8px;flex:1;min-width:0;text-align:start;padding:9px 8px;border-radius:9px;font-size:11px;line-height:1.5}
+.kobo-sidebar-group-link>span{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;flex:1;min-width:0}
+.kobo-sidebar-group-link>small{font-size:10px;font-variant-numeric:tabular-nums;opacity:.8;flex:none}
+.kobo-sidebar-groups button:hover{background:color-mix(in srgb,currentColor 7%,transparent)}
+.kobo-sidebar-group-link[aria-current=location]{color:var(--blue);background:color-mix(in srgb,var(--blue) 10%,transparent);font-weight:600}
+.kobo-sidebar-groups button:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
+:root:is([data-theme=unhcr],[data-theme=executive]) .kobo-sidebar-groups{color:rgba(255,255,255,.8)}
+:root:is([data-theme=unhcr],[data-theme=executive]) .kobo-sidebar-group-link[aria-current=location]{color:#fff;background:rgba(255,255,255,.16)}
+.kobo-shell.sidebar-collapsed .kobo-group-navigation-host{display:none}
+@media(max-width:900px){.kobo-shell .kobo-group-navigation-host{display:none}}
+@media(prefers-reduced-motion:reduce){.kobo-sidebar-branch svg{transition:none}}

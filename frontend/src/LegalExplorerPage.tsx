@@ -1,3 +1,5 @@
+import {isAwarenessIdColumn} from './awarenessCase';
+import {AwarenessIdButton} from './DeportationCaseModal';
 import {AnimatedActionIcon} from './AnimatedActionIcon';
 import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {
@@ -152,7 +154,7 @@ export function Explorer({
                 <tr key={i}><td><input aria-label="Select record" type="checkbox" checked={selectedRows.has(String((row as any).__rowKey))} onChange={()=>setSelectedRows((current)=>{const next=new Map(current),key=String((row as any).__rowKey);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td>
                   {result?.columns.map((c) => (
                     <td key={c}>
-                      {hasLegalCore(metadata) && ((dataset === "beneficiaries" && c === "Case ID") || (["assessments","legalservices","followupslogbooks","legalfees"].includes(dataset) && c === "Beneficiary ID")) ? (
+                      {dataset==="awareness"&&isAwarenessIdColumn(c)?<AwarenessIdButton awarenessId={row[c]} identifierColumn={c}/>:hasLegalCore(metadata) && ((dataset === "beneficiaries" && c === "Case ID") || (["assessments","legalservices","followupslogbooks","legalfees"].includes(dataset) && c === "Beneficiary ID")) ? (
                         <button
                           className="table-action"
                           onClick={() => onOpenCase(String(row[c] || ""))}

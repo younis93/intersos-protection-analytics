@@ -1,24 +1,37 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import Welcome from './Welcome';
+import KoboExportTray from './KoboExportTray';
 import {GUARDIAN_FOX_STORAGE_KEY} from './GuardianFox';
 import LegalPlatform from './LazyLegalPlatform';
+import KoboAnalysis from './LazyKoboAnalysis';
 import StartupScreen from './StartupScreen';
 import {beginProcessingCardMotion} from './processingCardMotion';
+import {readStartupPage} from './startupPage';
 
-type Workspace='welcome'|'legal';
+type Workspace='welcome'|'legal'|'kobo';
 type StartupPhase='visible'|'exiting'|'hidden';
 const STARTUP_MINIMUM_MS=700;
 const STARTUP_EXIT_MS=360;
 const STARTUP_MAXIMUM_MS=8000;
-const workspaceFromUrl=():Workspace=>{const hash=window.location.hash;if(!hash||hash==='#'||hash==='#/')return 'welcome';if(!hash.startsWith('#/legal'))window.history.replaceState(null,'',`${window.location.pathname}${window.location.search}#/legal/overview`);return 'legal'};
+const workspaceFromUrl=():Workspace=>{const hash=window.location.hash;if(!hash||hash==='#'||hash==='#/')return 'welcome';if(hash==='#/kobo'||hash.startsWith('#/kobo/'))return 'kobo';if(!hash.startsWith('#/legal'))window.history.replaceState(null,'',`${window.location.pathname}${window.location.search}#/legal/overview`);return 'legal'};
 
 
-export default function RootApp(){
+function WorkspaceApp(){
  // Desktop preparation belongs exclusively to the native launcher. Browser
  // launches use this root's preparation screen instead.
  const startupEpoch=Number(new URLSearchParams(window.location.search).get('startupEpoch'));
  const desktopStartup=Number.isFinite(startupEpoch)&&startupEpoch>0;
- const [workspace,setWorkspace]=useState<Workspace>(workspaceFromUrl);
+ const [workspace,setWorkspace]=useState<Workspace>(()=>{
+  if(!window.location.hash){
+   const preference=readStartupPage();
+   if(preference!=='home'){
+    const route=preference==='legal'?'#/legal/overview':'#/kobo';
+    window.history.replaceState(null,'',`${window.location.pathname}${window.location.search}${route}`);
+    return preference;
+   }
+  }
+  return workspaceFromUrl();
+ });
  const [startupReady,setStartupReady]=useState(false);
  const [startupPhase,setStartupPhase]=useState<StartupPhase>(()=>desktopStartup?'hidden':'visible');
  const startupBeganAt=useRef(performance.now());
@@ -45,5 +58,8 @@ export default function RootApp(){
  const markStartupReady=useCallback(()=>setStartupReady(true),[]);
  const unlockFox=()=>{setFoxUnlocked(true);try{localStorage.setItem(GUARDIAN_FOX_STORAGE_KEY,'true')}catch{/* The fox remains available for this session. */}};
  if(workspace==='welcome')return <Welcome foxUnlocked={foxUnlocked} onFoxUnlock={unlockFox}/>;
+ if(workspace==='kobo')return <KoboAnalysis/>;
  return <><div className={desktopStartup?'desktop-app-content':'startup-app-content'} aria-hidden={startupPhase!=='hidden'} inert={startupPhase!=='hidden'?true:undefined}><LegalPlatform onStartupReady={markStartupReady}/></div>{startupPhase!=='hidden'&&<StartupScreen phase={startupPhase}/>}</>;
 }
+
+export default function RootApp(){return <><WorkspaceApp/><KoboExportTray/></>}

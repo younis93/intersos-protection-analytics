@@ -1,0 +1,32 @@
+.kobo-question-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0}
+.kobo-shell .kobo-compare{width:min(1480px,calc(100vw - 32px));height:min(880px,calc(100dvh - 40px));max-height:calc(100dvh - 40px);padding:0;overflow:hidden;border-radius:22px;background:var(--panel-strong)}
+.kobo-compare[open]{display:flex;flex-direction:column}
+.kobo-shell .kobo-compare>header{display:flex;align-items:center;gap:14px;margin:0;padding:20px 24px;border-bottom:1px solid var(--line);flex:none}
+.kobo-compare-icon{display:grid;place-items:center;width:44px;height:44px;flex:none;border-radius:14px;background:color-mix(in srgb,var(--blue) 10%,transparent);color:var(--blue)}
+.kobo-compare>header>div{flex:1;min-width:0}
+.kobo-shell .kobo-compare h2{font-size:21px;margin:0}
+.kobo-shell .kobo-compare>header p{font-size:12px;margin:5px 0 0;color:var(--muted)}
+.kobo-compare>header>button{flex:none}
+.kobo-compare-body{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;padding:20px;overflow:auto;min-height:0;flex:1;align-items:start;overscroll-behavior:contain;background:color-mix(in srgb,var(--bg) 65%,var(--panel))}
+.kobo-compare-panel{min-width:0;padding:20px;border:1px solid var(--line);border-radius:16px;background:var(--panel-strong)}
+.kobo-compare-panel-heading{display:flex;align-items:center;gap:8px;color:var(--blue);font-size:11px;font-weight:700;margin-bottom:18px}
+.kobo-compare-panel-heading svg{width:17px;height:17px}
+.kobo-compare-question{margin-bottom:18px;overflow-wrap:anywhere}
+.kobo-shell .kobo-compare h3{font-size:16px;line-height:1.55;margin:6px 0}
+.kobo-compare .eyebrow{font-size:10px}
+.kobo-shell .kobo-compare-group{font-size:11px;color:var(--muted);margin:5px 0 14px;line-height:1.6}
+.kobo-compare-counts{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:11px;color:var(--muted)}
+.kobo-compare-counts strong{color:var(--ink);margin-inline-start:4px;font-variant-numeric:tabular-nums}
+.kobo-compare-panel>.app-select{width:100%;min-width:0;margin:0 0 18px;box-sizing:border-box}
+.kobo-compare .app-select-trigger>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.kobo-compare .app-select-menu button{white-space:normal;overflow-wrap:anywhere;text-align:start;line-height:1.6}
+.kobo-compare .kobo-pivot-wrap{overflow:auto;max-height:440px;overscroll-behavior:contain}
+.kobo-compare .kobo-pivot-display{justify-content:space-between;flex-wrap:wrap}
+.kobo-shell .kobo-compare .kobo-basis{font-size:11px;line-height:1.7;overflow-wrap:anywhere;margin:14px 0 0}
+.kobo-compare-more{margin-top:12px}
+.kobo-compare-placeholder{display:grid;justify-items:center;align-content:center;min-height:240px;padding:22px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:12px;background:var(--panel)}
+.kobo-compare-placeholder>svg{width:34px;height:34px;margin-bottom:12px;color:var(--blue);opacity:.65}
+.kobo-shell .kobo-compare-placeholder h3{font-size:14px;color:var(--ink)}
+.kobo-shell .kobo-compare-placeholder p,.kobo-shell .kobo-compare-message{font-size:12px;line-height:1.7;color:var(--muted)}
+.kobo-shell .kobo-compare>footer{flex:none;padding:13px 24px;border-top:1px solid var(--line);font-size:11px;line-height:1.6;color:var(--muted);background:var(--panel-strong)}
+@media(max-width:760px){.kobo-shell .kobo-compare{width:calc(100vw - 16px);height:calc(100dvh - 20px);max-height:calc(100dvh - 20px);border-radius:16px}.kobo-shell .kobo-compare>header{padding:16px;gap:10px}.kobo-shell .kobo-compare h2{font-size:18px}.kobo-compare-icon{width:36px;height:36px}.kobo-compare-body{grid-template-columns:minmax(0,1fr);padding:12px;gap:12px}.kobo-compare-panel{padding:16px}.kobo-shell .kobo-compare>footer{padding:10px 16px}.kobo-question-actions{flex-shrink:1}}

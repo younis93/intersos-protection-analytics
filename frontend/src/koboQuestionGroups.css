@@ -1,0 +1,7 @@
+.kobo-group-heading>button{display:flex;width:100%;align-items:center;justify-content:space-between;gap:16px;border:0;padding:8px 0;background:transparent;color:inherit;font:inherit;text-align:start;cursor:pointer}
+.kobo-group-heading>button>span{min-width:0;overflow-wrap:anywhere}
+.kobo-group-heading>button>svg{flex-shrink:0;transition:transform .2s}
+.kobo-group-heading>button[aria-expanded=false]>svg{transform:rotate(-90deg)}
+.kobo-group-heading>button:hover{color:var(--blue)}
+.kobo-question-group .kobo-question-group{margin-inline-start:14px}
+@media(prefers-reduced-motion:reduce){.kobo-group-heading>button>svg{transition:none}}

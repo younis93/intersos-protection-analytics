@@ -1,0 +1,195 @@
+.kobo-dialog.is-wide.kobo-import-dialog{width:min(1180px,calc(100vw - 32px));padding:0;max-height:92vh}
+.kobo-dialog.kobo-import-dialog>header{position:sticky;top:0;z-index:40;margin:0;padding:20px 28px;background-color:var(--bg);background-image:linear-gradient(var(--panel-strong),var(--panel-strong));border-bottom:1px solid var(--line)}
+.kobo-dialog.kobo-import-dialog>header h2{font-size:20px}
+.kobo-mapping-review{padding:22px 28px 0}
+.kobo-import-steps{display:flex;align-items:center;gap:28px;margin:0 0 26px;padding:0;list-style:none}
+.kobo-import-steps li{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--muted)}
+.kobo-import-steps li>span{display:grid;place-items:center;width:25px;height:25px;flex:none;border-radius:50%;border:1px solid var(--line);background:var(--panel);font-size:11px;font-weight:750}
+.kobo-import-steps li>span svg{width:13px;height:13px}
+.kobo-import-steps .is-complete>span{color:#23846d;background:color-mix(in srgb,#23846d 10%,var(--panel));border-color:color-mix(in srgb,#23846d 24%,var(--line))}
+.kobo-import-steps .is-current{font-weight:750;color:var(--ink)}
+.kobo-import-steps .is-current>span{color:white;background:var(--blue);border-color:var(--blue)}
+.kobo-mapping-intro{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:20px}
+.kobo-mapping-intro h3{font-size:21px;letter-spacing:-.025em;margin:7px 0;line-height:1.4}
+.kobo-mapping-intro p{max-width:650px;margin:0;font-size:12px!important;line-height:1.7}
+.kobo-import-source{display:flex;align-items:center;gap:11px;flex:none;padding:13px 16px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+.kobo-import-source>svg{width:24px;height:24px;color:var(--blue)}
+.kobo-import-source>span{display:grid;gap:5px}
+.kobo-import-source strong{font-size:13px}
+.kobo-import-source small{font-size:10px}
+.kobo-mapping-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}
+.kobo-mapping-summary>button{justify-content:flex-start!important;text-align:start;gap:13px!important;padding:16px;border-radius:15px;border:1px solid var(--line);color:var(--ink);background:var(--panel);cursor:pointer;transition:border-color .15s,background .15s}
+.kobo-mapping-summary>button:hover{border-color:var(--blue);background:color-mix(in srgb,var(--blue) 4%,var(--panel))}
+.kobo-summary-icon{display:grid;place-items:center;width:37px;height:37px;flex:none;border-radius:11px;background:color-mix(in srgb,var(--blue) 9%,var(--panel));color:var(--blue)}
+.kobo-mapping-summary .is-matched .kobo-summary-icon{color:#23846d;background:color-mix(in srgb,#23846d 10%,var(--panel))}
+.kobo-mapping-summary .is-pending .kobo-summary-icon{color:#b77b20;background:color-mix(in srgb,#d99a38 12%,var(--panel))}
+.kobo-mapping-summary .is-excluded .kobo-summary-icon{color:var(--muted);background:color-mix(in srgb,var(--muted) 9%,var(--panel))}
+.kobo-mapping-summary>button>span:last-child{display:grid;gap:4px}
+.kobo-mapping-summary strong{font-size:24px;line-height:1.15}
+.kobo-mapping-summary small{font-size:11px;line-height:1.4}
+.kobo-mapping-warnings{margin:14px 0;border:1px solid color-mix(in srgb,#d99a38 28%,var(--line));border-radius:12px;background:color-mix(in srgb,#d99a38 5%,var(--panel))}
+.kobo-mapping-warnings summary{display:flex;align-items:center;gap:9px;padding:12px 15px;cursor:pointer;font-size:12px;font-weight:650}
+.kobo-mapping-warnings summary>svg{width:16px;height:16px;color:#b77b20}
+.kobo-mapping-warnings summary b{margin-inline-start:7px;font-size:10px;padding:2px 6px;border-radius:6px;background:color-mix(in srgb,#d99a38 13%,var(--panel))}
+.kobo-mapping-warnings p{margin:0 15px 12px!important;font-size:12px!important}
+.kobo-mapping-workbench{margin-top:22px}
+.kobo-mapping-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow:auto}
+.kobo-mapping-tabs>button{position:relative;gap:8px!important;padding:12px 15px;white-space:nowrap;border:0;border-radius:9px 9px 0 0;background:transparent;color:var(--muted);font-size:12px;font-weight:650;cursor:pointer}
+.kobo-mapping-tabs>button[aria-selected=true]{color:var(--blue);background:color-mix(in srgb,var(--blue) 6%,transparent)}
+.kobo-mapping-tabs>button[aria-selected=true]::after{content:'';position:absolute;bottom:-1px;inset-inline:10px;height:3px;border-radius:3px;background:var(--blue)}
+.kobo-mapping-tabs>button>span{display:grid;place-items:center;min-width:22px;padding:2px 5px;border-radius:6px;background:color-mix(in srgb,var(--muted) 10%,transparent);font-size:10px;color:inherit}
+.kobo-mapping-tools{display:flex;align-items:center;gap:10px;padding:16px 0}
+.kobo-mapping-tools .kobo-search{min-width:160px;position:relative}
+.kobo-mapping-tools .kobo-search>svg{position:absolute;inset-inline-start:12px;width:16px;pointer-events:none}
+.kobo-mapping-tools .kobo-search input{padding-inline-start:37px;font-size:12px}
+.kobo-mapping-tools>button{flex:none;font-size:11px;min-height:39px}
+.kobo-mapping-tools>.app-select{width:180px;flex:none}
+.kobo-mapping-columns{display:grid;gap:12px;padding-bottom:18px}
+.kobo-mapping-card{border:1px solid var(--line);border-radius:15px;background:var(--panel);overflow:hidden}
+.kobo-mapping-card.needs-review{border-color:color-mix(in srgb,#d99a38 32%,var(--line))}
+.kobo-mapping-card>header{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:10px 17px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--panel-strong) 65%,transparent)}
+.kobo-column-origin{display:flex;gap:7px;align-items:center;min-width:0;font-size:10px;color:var(--muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.kobo-column-origin>span{opacity:.5}
+.kobo-mapping-status{display:inline-flex;align-items:center;gap:5px;flex:none;font-size:10px;font-weight:700;padding:5px 8px;border-radius:7px}
+.kobo-mapping-status>svg{width:12px!important;height:12px!important}
+.kobo-mapping-status.is-pending{color:#a46a12;background:color-mix(in srgb,#d99a38 12%,var(--panel))}
+.kobo-mapping-status.is-matched{color:#23846d;background:color-mix(in srgb,#23846d 10%,var(--panel))}
+.kobo-mapping-status.is-excluded{color:var(--muted);background:color-mix(in srgb,var(--muted) 9%,var(--panel))}
+.kobo-mapping-connection{display:grid;grid-template-columns:minmax(0,1fr) 36px minmax(0,1.1fr);align-items:center;gap:18px;padding:20px 18px}
+.kobo-source-column{min-width:0}
+.kobo-mapping-field-label{display:block;font-size:9px;letter-spacing:.08em;font-weight:700;color:var(--muted);margin-bottom:9px}
+.kobo-source-column>strong{display:block;font-size:13px;font-weight:650;line-height:1.7;overflow-wrap:anywhere}
+.kobo-source-column>p{margin:9px 0 0!important;font-size:11px!important;line-height:1.6!important;max-width:420px}
+.kobo-source-column>details{font-size:11px;margin-top:8px}
+.kobo-source-column>details summary{color:var(--blue);cursor:pointer}
+.kobo-source-column>details p{font-size:11px!important;overflow-wrap:anywhere}
+.kobo-mapping-arrow{width:29px;height:29px;padding:6px;border:1px solid var(--line);border-radius:50%;color:var(--muted);box-sizing:border-box}
+.kobo-target-question{display:grid;gap:10px;min-width:0}
+.kobo-target-question .app-select{width:100%;min-width:0}
+.kobo-target-question .app-select-trigger{width:100%;max-width:100%;min-height:52px}
+.kobo-target-question .app-select-trigger>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kobo-target-question .app-select-value{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kobo-question-kind{font-size:10px;color:var(--muted);padding-inline-start:12px}
+.kobo-mapping-card>footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 17px;border-top:1px solid var(--line);background:color-mix(in srgb,var(--panel-strong) 40%,transparent)}
+.kobo-match-suggestions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.kobo-match-suggestions small{font-size:10px}
+.kobo-match-suggestions button,.kobo-column-actions button{font-size:11px;padding:7px 10px}
+.kobo-column-actions{margin-inline-start:auto;flex:none}
+.kobo-mapping-empty{display:grid;place-items:center;align-content:center;text-align:center;gap:9px;padding:40px 20px;min-height:200px;border:1px dashed var(--line);border-radius:15px}
+.kobo-mapping-empty h4{font-size:17px;margin:4px 0 0}
+.kobo-mapping-empty p{max-width:470px;margin:0 0 8px!important;font-size:12px!important}
+.kobo-mapping-empty>svg{width:26px;height:26px;color:var(--muted)}
+.kobo-ready-icon{display:grid;place-items:center;width:43px;height:43px;border-radius:50%;color:#23846d;background:color-mix(in srgb,#23846d 12%,var(--panel))}
+.kobo-ready-icon svg{width:23px;height:23px}
+.kobo-more-columns{justify-self:center;font-size:12px}
+.kobo-answer-review{border:1px solid var(--line);border-radius:12px;margin:0 0 20px;background:var(--panel)}
+.kobo-answer-review>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;cursor:pointer;font-size:12px;font-weight:650}
+.kobo-answer-review>summary>span:last-child{font-size:10px;font-weight:500}
+.kobo-answer-review .is-clear{color:#23846d}
+.kobo-answer-review .has-issues{color:#b77b20}
+.kobo-answer-review>div{padding:0 16px 16px}
+.kobo-answer-review section{padding:13px 0;border-top:1px solid var(--line)}
+.kobo-answer-review section strong{font-size:12px;line-height:1.6}
+.kobo-answer-review p{font-size:11px!important}
+.kobo-review-consent{display:flex;gap:10px;align-items:flex-start;font-size:12px;line-height:1.6;margin-top:12px}
+.kobo-review-consent input{margin:3px 0 0}
+.kobo-review-consent span{display:grid;gap:4px}
+.kobo-review-consent small{font-size:10px;font-weight:400}
+.kobo-mapping-confirm{position:sticky;bottom:0;z-index:30;display:flex;align-items:center;justify-content:space-between;gap:22px;margin:0 -28px;padding:17px 28px;border-top:1px solid var(--line);background-color:var(--bg);background-image:linear-gradient(var(--panel-strong),var(--panel-strong));box-shadow:0 -8px 24px color-mix(in srgb,var(--ink) 4%,transparent)}
+.kobo-mapping-confirm>div{display:grid;gap:6px;max-width:620px;flex:1}
+.kobo-review-consent-footer{margin-top:2px;font-size:11px}
+.kobo-mapping-confirm strong{font-size:12px}
+.kobo-mapping-confirm small{font-size:10px;line-height:1.5}
+.kobo-mapping-confirm>button{flex:none;gap:10px;min-height:44px;padding-inline:20px}
+.kobo-mapping-confirm>button:disabled{background:color-mix(in srgb,var(--muted) 10%,var(--panel-strong));color:var(--muted);border:1px solid var(--line);box-shadow:none;cursor:not-allowed;opacity:1;transform:none}
+.kobo-mapping-progress{width:170px;height:4px;border-radius:5px;background:color-mix(in srgb,var(--muted) 14%,transparent);overflow:hidden;margin-bottom:2px}
+.kobo-mapping-progress>span{display:block;height:100%;background:#38a58e;border-radius:5px;transition:width .2s}
+.kobo-mapping-error{white-space:pre-wrap;font-size:12px!important;padding:12px 15px}
+[data-theme=glass-dark] .kobo-mapping-status.is-pending{color:#efbd69}
+[data-theme=glass-dark] .kobo-mapping-status.is-matched,[data-theme=glass-dark] .kobo-answer-review .is-clear{color:#72cdb6}
+@media(max-width:760px){.kobo-mapping-intro{align-items:flex-start;flex-direction:column;gap:14px}.kobo-import-source{padding:10px 13px}.kobo-mapping-summary{gap:8px}.kobo-mapping-summary>button{padding:12px;gap:9px!important;align-items:flex-start;flex-direction:column}.kobo-mapping-summary small{font-size:10px}.kobo-mapping-tools{flex-wrap:wrap}.kobo-mapping-tools .kobo-search{flex-basis:100%}.kobo-mapping-connection{grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr);gap:12px}.kobo-mapping-arrow{width:24px;height:24px}.kobo-mapping-confirm{gap:14px}}
+@media(max-width:540px){.kobo-dialog.is-wide.kobo-import-dialog{width:calc(100vw - 16px);max-height:95vh}.kobo-dialog.kobo-import-dialog>header{padding:15px 16px}.kobo-dialog.kobo-import-dialog>header h2{font-size:17px}.kobo-mapping-review{padding:17px 16px 0}.kobo-import-steps{gap:14px;margin-bottom:22px}.kobo-import-steps li{font-size:10px;gap:5px}.kobo-import-steps li>span{width:21px;height:21px;font-size:10px}.kobo-mapping-intro h3{font-size:18px}.kobo-mapping-summary strong{font-size:21px}.kobo-summary-icon{width:29px;height:29px;border-radius:8px}.kobo-mapping-tabs>button{font-size:11px;padding:11px 8px;gap:5px!important}.kobo-mapping-tabs>button>span{font-size:9px;min-width:18px;padding:2px 4px}.kobo-mapping-connection{grid-template-columns:1fr;padding:16px;gap:13px}.kobo-mapping-arrow{display:none}.kobo-mapping-card>header{padding:10px 12px;gap:8px}.kobo-column-origin{max-width:56%;font-size:9px}.kobo-mapping-status{font-size:9px}.kobo-mapping-card>footer{flex-wrap:wrap;padding:10px 12px}.kobo-match-suggestions{width:100%}.kobo-column-actions{margin-inline-start:0}.kobo-mapping-confirm{margin:0 -16px;padding:14px 16px;flex-direction:column;align-items:stretch;gap:12px}.kobo-mapping-confirm>div{max-width:none}.kobo-mapping-confirm>button{width:100%;font-size:12px}.kobo-mapping-progress{width:100%}.kobo-mapping-confirm small{font-size:9px}.kobo-mapping-empty{padding:28px 15px}.kobo-mapping-tools>button{flex:1}.kobo-mapping-tools>.app-select{width:100%}}
+
+.kobo-dialog.kobo-repair-dialog>header{backdrop-filter:blur(16px)}
+.kobo-repair-dialog>p,.kobo-repair-dialog>.kobo-notice{margin:20px 28px}
+.kobo-repair-dialog>.kobo-notice{padding:18px;line-height:1.6}
+.kobo-repair-dialog>.kobo-notice>.kobo-field{margin-top:14px;min-width:0}
+.kobo-repair-dialog input[type=file]{max-width:100%;font-size:12px}
+.kobo-repair-dialog .kobo-answer-review section>details{padding:10px 12px;border:1px solid var(--line);border-radius:10px;overflow-wrap:anywhere}
+@media(max-width:760px){.kobo-repair-dialog>p,.kobo-repair-dialog>.kobo-notice{margin:16px}.kobo-repair-dialog>.kobo-notice{padding:14px}}
+
+.kobo-review-sources{margin:20px 28px 0;padding:16px 18px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+.kobo-review-loaded{display:flex;align-items:flex-start;gap:11px}
+.kobo-review-loaded>svg{width:20px;height:20px;flex-shrink:0;color:var(--blue);margin-top:1px}
+.kobo-review-loaded strong{font-size:13px}
+.kobo-dialog .kobo-review-loaded p{font-size:12px;margin:4px 0 12px}
+.kobo-review-source-details{border-top:1px solid var(--line);padding:11px 0}
+.kobo-review-source-details:last-child{padding-bottom:0}
+.kobo-review-source-details>summary{font-size:12px;font-weight:600;cursor:pointer;color:var(--muted)}
+.kobo-review-source-details>summary:hover{color:var(--blue)}
+.kobo-review-source-details>div{padding-top:8px;overflow-wrap:anywhere}
+.kobo-review-source-details .kobo-field{margin:14px 0;min-width:0}
+@media(max-width:760px){.kobo-review-sources{margin:16px 16px 0;padding:14px}}
+
+.kobo-reupload-options{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px}
+@media(max-width:540px){.kobo-reupload-options{grid-template-columns:1fr}}
+
+/* Version-aware source reconciliation. */
+.kobo-link-summary{grid-template-columns:repeat(5,minmax(0,1fr))}
+.kobo-link-summary>button{padding:13px;gap:9px!important;min-width:0}
+.kobo-link-summary .kobo-summary-icon{width:30px;height:30px;border-radius:9px}
+.kobo-link-summary .kobo-summary-icon svg{width:17px;height:17px}
+.kobo-link-summary strong{font-size:22px}
+.kobo-form-changes,.kobo-merge-group{border:1px solid var(--line);border-radius:15px;padding:16px;background:var(--panel);min-width:0}
+.kobo-form-changes{margin-block:18px}
+.kobo-form-changes summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;font-weight:700;cursor:pointer}
+.kobo-form-changes summary>span{margin-inline-start:auto;font-size:11px;font-weight:400;color:var(--muted)}
+.kobo-form-changes p{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:12px!important;overflow-wrap:anywhere;border-top:1px solid var(--line);padding-top:10px}
+.kobo-form-changes p>span{color:var(--muted)}
+.kobo-source-samples{display:flex;gap:6px;flex-wrap:wrap;margin-top:13px;min-width:0}
+.kobo-source-samples small{flex-basis:100%;font-size:10px;color:var(--muted)}
+.kobo-source-samples>span{max-width:100%;overflow-wrap:anywhere;font-size:11px;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong)}
+.kobo-link-action{justify-self:start;font-size:12px;min-height:36px}
+.kobo-suggested-links{padding:0 18px 14px;overflow-wrap:anywhere}
+.kobo-suggested-links button{max-width:100%;white-space:normal!important;overflow-wrap:anywhere}
+.kobo-mapping-card>footer>small{font-size:10px;color:var(--muted)}
+.kobo-answer-links{border-top:1px solid var(--line);padding:13px 18px;font-size:12px}
+.kobo-answer-links summary{cursor:pointer;font-weight:650;display:flex;justify-content:space-between;gap:12px}
+.kobo-answer-links summary span{font-size:10px;color:var(--muted);font-weight:400}
+.kobo-answer-links p{font-size:11px!important;line-height:1.7}
+.kobo-answer-link-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.kobo-answer-link-row>span{display:grid;gap:4px;overflow-wrap:anywhere;font-size:12px}
+.kobo-answer-link-row small{font-size:10px;color:var(--muted)}
+.kobo-answer-link-row .app-select,.kobo-merge-group>.app-select{min-width:0;width:100%}
+.kobo-answer-link-row .app-select-trigger{max-width:100%;min-width:0}
+.kobo-answer-link-row .app-select-value{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kobo-add-answer{display:flex;gap:8px;margin-top:12px}
+.kobo-add-answer input{flex:1;min-width:0;font:inherit;font-size:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink)}
+.kobo-add-answer button{flex:none;font-size:11px}
+.kobo-merge-group>header{display:flex;align-items:center;gap:12px}
+.kobo-merge-group h4{font-size:15px;margin:0;overflow-wrap:anywhere}
+.kobo-merge-group p,.kobo-no-source p{font-size:11px!important;overflow-wrap:anywhere;line-height:1.7}
+.kobo-merge-group>details{padding:12px 0;border-top:1px solid var(--line);font-size:12px}
+.kobo-merge-group>details>summary{cursor:pointer;font-weight:650;margin-bottom:12px}
+.kobo-merge-group>details .kobo-mapping-card{margin-top:12px}
+.kobo-merge-order{list-style:none;padding:0;margin:12px 0;display:grid;gap:8px;counter-reset:merge}
+.kobo-merge-order li{display:flex;align-items:center;gap:6px;padding:10px;border:1px solid var(--line);border-radius:10px;counter-increment:merge;min-width:0}
+.kobo-merge-order li::before{content:counter(merge);font-size:11px;color:var(--muted);padding-inline:4px}
+.kobo-merge-order li>span{display:grid;gap:5px;flex:1;min-width:0;font-size:12px;overflow-wrap:anywhere}
+.kobo-merge-order small{font-size:10px;color:var(--muted)}
+.kobo-merge-order button{padding:7px;font-size:11px;flex:none}
+.kobo-merge-order button svg{width:15px;height:15px}
+.kobo-conflict-count{color:var(--ink);font-weight:700;border-inline-start:3px solid #d99a38;padding-inline-start:10px}
+.kobo-no-source{display:flex;align-items:flex-start;gap:12px;padding:16px;border:1px dashed var(--line);border-radius:12px;background:var(--panel)}
+.kobo-no-source>svg{width:19px;height:19px;flex:none;color:var(--muted)}
+.kobo-no-source strong{font-size:13px;overflow-wrap:anywhere}
+.kobo-no-source small,.kobo-link-check-status{font-size:11px;color:var(--muted)}
+.kobo-link-check-status{min-height:22px;margin-bottom:8px}
+@media(max-width:900px){.kobo-link-summary{grid-template-columns:repeat(3,minmax(0,1fr))}.kobo-link-summary>button{flex-direction:row;align-items:center}}
+@media(max-width:540px){.kobo-link-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.kobo-link-summary>button{padding:11px}.kobo-form-changes summary>span{margin-inline-start:0;flex-basis:100%}.kobo-answer-link-row{grid-template-columns:1fr}.kobo-add-answer{flex-direction:column}.kobo-merge-order li{flex-wrap:wrap}.kobo-merge-order li>span{flex-basis:calc(100% - 32px)}.kobo-answer-links{padding:13px}.kobo-merge-group{padding:13px}.kobo-mapping-card>footer>small{flex-basis:100%}}
+.kobo-mapping-explanation{padding:16px 18px;margin:14px 0;border:1px solid #e2b66e;border-radius:14px;background:color-mix(in srgb,#e6ac45 7%,var(--panel-strong));color:var(--ink)}
+.kobo-mapping-explanation h4{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:13px}
+.kobo-mapping-explanation h4 svg{width:18px;height:18px;flex:none;color:#aa6b12}
+.kobo-mapping-explanation p{margin:8px 0;font-size:12px;line-height:1.7}
+.kobo-mapping-explanation strong{display:block;margin-bottom:3px}
+.kobo-import-warning-columns{max-height:150px;overflow:auto;overscroll-behavior:contain;margin:8px 0 16px;padding-inline-start:22px;font-size:12px;line-height:1.7}
