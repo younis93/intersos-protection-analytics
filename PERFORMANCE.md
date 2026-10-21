@@ -239,3 +239,43 @@ A 250 ms idle delay remains after foreground activity; completed background task
 | Unrelated background request paused on navigation | No | Yes |
 
 Monthly report digests match. The opened-page timing difference is timer noise; this benchmark demonstrates reduced queue waits and requests, not a measured speedup in foreground backend computation. Results are saved in `output/performance/loading-queue.json`.
+
+
+## Kobo native Excel exports, 20 October 2026
+
+Compared the checkpoint at `117911c` with the revised exporter using 400 synthetic responses, two multi-select questions with 40 options each, two selections per response, ordinary questions, and the same export settings. No real response data was used.
+
+| Measurement | Checkpoint | Revised |
+| --- | ---: | ---: |
+| Export duration | 225.07 s | 141.24 s |
+| Workbook size | 2,161,007 bytes | 489,505 bytes |
+| Query rows per multi-select question | 16,000 | 1,240 |
+| Pivot caches | 3 | 3 |
+
+This run was 37.2% faster and 77.3% smaller. Query rows fell by 92.3% while retaining full permitted response details. Timings are single desktop Excel measurements and vary with hardware, Excel startup, background work and survey shape. Both runs occurred while other synthetic Excel acceptance checks were active. Size and query-row counts are deterministic for the fixture; the revised format can have less benefit for questions with very few options.
+
+Ordinary pivots share Data-table caches. Multi-select references contain selected-answer rows, one denominator row per respondent, and excluded category seeds for zero-option display. Denominator and seed rows never appear in count drill-through. Query tables, hidden totals and charts retain independent question slicers. Saved pivot caches remain enabled so Show Details works immediately after reopening.
+
+Reproduction: save the checkpoint's `backend/kobo_excel*.py` files in a baseline directory, then run `python scripts/benchmark_kobo_excel.py --baseline-dir <directory>`. Workbooks and measurements are written under `output/kobo-excel-optimized`. Native acceptance commands are `python scripts/check_kobo_excel_optimized.py`, plus `--edge` for Arabic/repeat/blank/empty cases and `--breakdowns` for three-level breakdowns and footer alignment.
+
+### Actual full-project benchmark after removing serial workbook bottlenecks
+
+Three consecutive exports of the saved Household Assessment 2026 project completed below the five-minute target on this PC (Ryzen 7 5800H, 32 GiB RAM). The database was opened read-only. Each run exported all 344 responses and 91 configured questions, including 21 multi-select queries. Five questions have no recorded answers and retain their question headings and empty-state text; the other 86 have native count pivots and charts. The earlier synthetic comparison above does not establish performance for this workbook structure.
+
+| Run | Total duration | Final file bytes | Peak Excel process memory | Peak Python process memory | Preparation workers |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 170.65 s | 10,354,339 | 4,543,873,024 | 316,379,136 | 4 |
+| 2 | 173.20 s | 10,354,220 | 4,916,850,688 | 327,507,968 | 4 |
+| 3 | 203.42 s | 10,354,073 | 5,148,577,792 | 333,619,200 | 4 |
+
+These are per-process peak working sets, not combined machine or child-process memory. Normal application activity and frontend/backend tests were present during the measurement session. Durations include export cleanup. There is no completed full-project baseline file from the earlier twenty-minute timeout, so no actual-project size reduction percentage is claimed.
+
+The third run spent 5.00 s preparing the workbook, 2.77 s starting Excel, 42.45 s creating/loading its query references, 29.74 s creating pivots, 8.57 s writing report formulas, 14.67 s building charts, 89.53 s connecting slicers, 0.11 s in the deliberate final calculation, 4.56 s finishing chart labels and 3.25 s saving. Slicer connections are now the largest remaining cost. Calculation has little effect on this workbook, so extra CPU calculation threads alone would not solve it.
+
+Preparation creates Data tables, helper formulas, cached initial helper values and lookup tables through a file writer. Native ADO recordsets bootstrap the already-prepared multi-select query results without running Power Query twice. Saved query connections still point at the real Data-based M expressions. All caches use loaded table ranges. Early-bound Excel dispatch and direct A1 ranges avoid repeated COM type discovery, rectangular writes replace formula loops, and final label formatting reuses series objects. Excel table auto-fill preferences are temporarily disabled during construction and restored before saving and cleanup.
+
+Reproduce with `python scripts/benchmark_kobo_project.py --output output/kobo-project-export-final --runs 3`. Aggregate stage/query timings, process memory and sizes are in that directory's `results.json`; workbook-adjacent progress/timing JSON contains no response values. Generated XLSX files contain real project data and stay local. `python scripts/check_kobo_project_export.py output/kobo-project-export-final/run-3.xlsx` verified all 91 headings, 86 count pivots/charts, 21 native queries, 22 shared/independent caches and 608 answer counts against the saved project analysis. The generated workbook opens read-only during that check.
+
+Native acceptance passed full permitted double-click records, identifying-field exclusions, independent named slicers, respondent percentages, chart updates, Data edits/appends with one Refresh All, and save/reopen. Separate checks passed Arabic duplicate captions, repeat-parent context, duplicate selections, blanks, empty data and three-level breakdown combinations. Newly written empty tables use an insertion row that Excel removes immediately on opening, preserving zero response rows while avoiding Excel's rejection of a header-only input table.
+
+`python scripts/check_kobo_export_jobs.py` passed queued, preparation, Excel startup and active Excel cancellation through the production job manager. A separate idle Excel instance remained alive throughout those cancellations. Preparation cancellation took 3.80 s and the slowest status request was 0.0001 s; this checks backend responsiveness rather than measuring browser frame rates. Cancellation signals preparation before Excel startup and allows an in-flight COM startup to announce/acquire process ownership before forced cleanup. The successful follow-up job retained legacy API fields and the new stage/timing/count metadata. All 184 Kobo backend tests and 477 frontend tests passed; the frontend production build passed with its existing bundle-size warning.

@@ -67,6 +67,15 @@ def test_sheet_specific_pivot_formulas_escape_names_and_coerce_empty_values():
     assert formula.startswith('IFERROR(N(GETPIVOTDATA(')
 
 
+def test_sparse_counts_read_visible_pivot_and_denominators_do_not_filter_by_answer():
+    result = {'_source': {'sparse': True}, '_countPivot': "'Report'!$A$20",
+              'rows': [{'id': 'food', 'label': 'Food'}]}
+    count = pivot_value("'Totals'!$A$1", 'Responses', 'food', ['North'], result)
+    denominator = pivot_value("'Totals'!$A$1", 'Answered total', 'food', ['North'], result)
+    assert "'Report'!$A$20" in count and '"#"' in count and '"Answer","Food"' in count
+    assert "'Totals'!$A$1" in denominator and 'AnswerCode' not in denominator and '"Food"' not in denominator
+
+
 def test_slicer_connections_defer_pivot_updates_and_restore_them_on_failure(monkeypatch):
     import backend.kobo_excel_slicers as native
     pivots = [SimpleNamespace(ManualUpdate=False), SimpleNamespace(ManualUpdate=False)]

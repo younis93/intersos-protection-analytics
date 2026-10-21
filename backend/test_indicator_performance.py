@@ -10,20 +10,23 @@ from scripts.benchmark_indicator_performance import digest, filter_scenarios, sy
 
 
 # Generated from the pre-optimization implementation with synthetic_frames(120).
+# Rebased for the approved awareness session-ID/participant-name correction.
+# Audited all 12 payloads against the preceding implementation: only awareness
+# source descriptors changed; counts, ordering and narratives remain identical.
 # Full payload hashes protect warnings, row order, deduplication, IDs and narratives.
 LEGACY_DIGESTS = [
     "8db02b90c3209e341bb0aeb5cb1a9cd82cd6274c66287cd937808339c0895d11",
-    "7da3add2fe5286193180dc6c7f448a770bfbcf378ceaca5f022ca5c6fc3d3a1b",
-    "420ed199a4e2d885f228a6941c4f77985e113725e90f4edabdae25a06fbd2c36",
-    "1fb93a816ba7a494cf5ca2245a7e09a30cf0a7433c69ccdd2f9e9b3c3a6076bf",
-    "f5941a55bf3dd40e6ec91b4360b41e4c79b3912b4eac745d1c2c793ff9577f41",
-    "22877229a7382dbcea1da539e0ee7c3158152e6b5775829f5597fd9ff07901be",
+    "789a501b45ba489ca5e3d60ff77ad2d7035c320e7561d055ef571f01d46fee2f",
+    "f607477db9990d9c4aa876c2823304327575d967404632c69dba893bb8fdc355",
+    "e8d1b3dde4de4d83d7c4775fa87ca2fa9c14e49aa4754101e599b9879974b061",
+    "cae8741ec6194df699d39700b727f75a0bea666c47d5e08e2593f4b22c11bb2e",
+    "562602c6e51287e56a91e6f63a929c1d1147b919eb8a0b01724cb3d608b640a1",
     "182b1b73dd4f944c60487a72ba42baede96e6b1e6f57a549e41c039493f517e6",
     "0351435b13450439727a9261ca1f3ecf8b9e5d5d223cb491e498cb12adf08cc4",
-    "1895a207970abb0ea5d9e4b4b6729187fc9b196bc82c1f1b5c5c78d978dff4fe",
-    "e56eb8149c3a2bc357bace44b5f096230324ae9f2938e0ea6f5d79b8c8e26980",
-    "6836c13d70b519c2b143b7b64230de4293c5ba9e1be4606aa8c6d3b76bf911a7",
-    "b6156005936e0aecbc18155d9ec7fd5e886a80ace854a7a7aae1c8d96793accc",
+    "16f7d8eab591b57f8161d73764e2b1c2dd8a0dcd71d698cbe1a1ec47ea086c11",
+    "9df5a8a6a36b2aa67d1a7f3191006ab4455e0f753fec2158f3733ddccda9ff14",
+    "58713afac937061a375e5984b8c7e3a1b90244ad68aa78a8a95e323d9b869dc1",
+    "7e293cacdce150a30772d28fc485fe0165d6714210af3be0d1a481af0daf45bf",
 ]
 
 

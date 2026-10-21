@@ -96,3 +96,33 @@ def test_api_search_sort_paging_exports_and_invalid_selectors_preserve_settings(
         assert client.post(url, json={**base, 'drilldown': selector}).status_code == 400
     assert client.post(url, json={**base, 'drilldown': {'question': ''}}).status_code == 422
     assert store.get(pid) == before
+
+
+@pytest.mark.parametrize('rule', [
+    {'field': 'group/gender', 'kind': 'category', 'values': ['m']},
+    {'field': 'group/age', 'kind': 'number', 'values': [], 'minimum': 10},
+    {'field': 'group/day', 'kind': 'date', 'values': [], 'minimum': '2026-02-01'},
+])
+def test_matching_response_filters_refine_selection_and_download_without_saving(preview_client, rule):
+    client, store, pid = preview_client
+    before = store.get(pid)
+    settings = {**before['settings'], 'language': 'en', 'filters': []}
+    request = {'settings': settings, 'columns': ['group/gender', 'group/needs', 'group/age'],
+               'drilldown': {'question': 'group/needs', 'answer': 'water', 'baseFilters': []}}
+    url = f'/api/kobo/projects/{pid}/data'
+    assert client.post(url, json=request).json()['matched'] == 1
+    filtered = {**request, 'settings': {**settings, 'filters': [rule]}}
+    assert client.post(url, json=filtered).json()['matched'] == 0
+    assert len(list(read_export(client.post(url+'/export', json=filtered)).active.values)) == 1
+    assert client.post(url, json=request).json()['matched'] == 1
+    assert store.get(pid) == before
+
+
+def test_matching_filters_keep_original_numeric_bin_membership(sample):
+    project = sample[0]
+    settings = KoboSettings(questions={'group/age': QuestionSettings(numericMode='bins', bins=2)})
+    selection = {'question': 'group/age', 'answer': 'bin:1', 'baseFilters': []}
+    settings = KoboSettings.model_validate({**settings.model_dump(), 'filters': [{'field': 'group/age', 'kind': 'number', 'values': [], 'minimum': 15}]})
+    result = data_page(project, settings, '', ['group/age'], drilldown=selection)
+    assert result['matched'] == 1
+    assert float(result['rows'][0]['values']['group/age']) == 20

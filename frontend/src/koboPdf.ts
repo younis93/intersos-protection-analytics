@@ -2,7 +2,7 @@ import type {KoboAnalysis} from './koboTypes';
 import {downloadBlob} from './koboApi';
 import {koboPdfChartKey,koboPdfChartPanels} from './koboChartDensity';
 
-export function buildKoboPdf(name:string,snapshot:KoboAnalysis,signal:AbortSignal,onProgress:(progress:number,message:string)=>void):Promise<Blob>{
+export function buildKoboPdf(name:string,snapshot:KoboAnalysis,signal:AbortSignal,onProgress:(progress:number,message:string)=>void,includeIntroduction=true):Promise<Blob>{
  return new Promise((resolve,reject)=>{
   if(signal.aborted){reject(new DOMException('Export cancelled','AbortError'));return}
   const worker=new Worker(new URL('./koboPdf.worker.ts',import.meta.url),{type:'module'});
@@ -41,7 +41,7 @@ export function buildKoboPdf(name:string,snapshot:KoboAnalysis,signal:AbortSigna
     }catch(error){if(!signal.aborted)fail(error)}
    }
   };
-  worker.postMessage({type:'start',name,snapshot});
+  worker.postMessage({type:'start',name,snapshot,includeIntroduction});
  });
 }
 export async function exportKoboPdf(name:string,snapshot:KoboAnalysis){

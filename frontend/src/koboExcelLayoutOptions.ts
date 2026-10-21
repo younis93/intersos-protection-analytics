@@ -18,13 +18,16 @@ export function excelSheetName(label:string,used:Set<string>){
 }
 export function excelSheetPreview(snapshot:KoboAnalysis,selected:string[]){
  const sections=new Map<string,{id:string;label:string;path:string;kind:'group'|'combined'|'general';questions:KoboResult[]}>(),ids=new Set(selected),order=new Map(snapshot.groups.map((group,index)=>[group.id,index]));
+ const grouped=snapshot.questions.some(question=>!!question.group);
  for(const question of snapshot.questions){
   const chain=excelGroupChain(snapshot,question.group),group=[...chain].reverse().find(group=>ids.has(group.id));
+  if(!group&&(question.group||grouped))continue;
   const kind=group?'group':question.group?'combined':'general',id=group?.id||(kind==='combined'?'@combined':'@general'),label=group?.label||group?.name||(kind==='combined'?'Analysis':'General');
   let section=sections.get(id);if(!section){section={id,label,path:group?excelGroupChain(snapshot,group.id).map(group=>group.label||group.name).join(' / '):label,kind,questions:[]};sections.set(id,section)}section.questions.push(question);
  }
- const used=new Set(['data','workbook guide','_kobo choices','_kobo chart pivots','_kobo chart labels','_kobo slicer totals']);
+ const used=new Set(['data','_kobo choices','_kobo chart pivots','_kobo chart labels','_kobo slicer totals','_kobo chart values','_kobo trend pivots']);
  for(const group of snapshot.groups.filter(group=>group.repeat))excelSheetName(`Data - ${group.label||group.name}`,used);
- snapshot.questions.forEach((question,index)=>{if(question.kind==='multiple')excelSheetName(`_Kobo multi ${String(index+1).padStart(3,'0')}`,used)});
+ const included=new Set([...sections.values()].flatMap(section=>section.questions.map(question=>question.id)));
+ snapshot.questions.filter(question=>included.has(question.id)).forEach((question,index)=>{if(question.kind==='multiple')excelSheetName(`_Kobo multi ${String(index+1).padStart(3,'0')}`,used)});
  return [...sections.values()].sort((a,b)=>(order.get(a.id)??order.size+(a.kind==='general'?1:0))-(order.get(b.id)??order.size+(b.kind==='general'?1:0))).map(section=>({...section,sheetName:excelSheetName(section.label,used)}));
 }

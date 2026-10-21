@@ -64,11 +64,10 @@ def test_selected_groups_use_nearest_selected_ancestor_without_duplicating_quest
     questions = [{'id':'nested','group':'a/n'},{'id':'parent','group':'a'},{'id':'other','group':'b'},{'id':'ungrouped','group':''}]
     snapshot = {'groups':groups,'questions':questions}
     sections = group_sections(snapshot,['a','a/n'])
-    assert [section['label'] for section in sections] == ['First','Nested','Analysis','General']
-    assert [[item['result']['id'] for item in section['questions']] for section in sections] == [['parent'],['nested'],['other'],['ungrouped']]
-    assert sections[2]['questions'][0]['nested'] == 'Second'
-    assert sorted(item['position'] for section in sections for item in section['questions']) == [1,2,3,4]
-    assert [section['label'] for section in group_sections(snapshot,[])] == ['Analysis','General']
+    assert [section['label'] for section in sections] == ['First','Nested']
+    assert [[item['result']['id'] for item in section['questions']] for section in sections] == [['parent'],['nested']]
+    assert sorted(item['position'] for section in sections for item in section['questions']) == [1,2]
+    assert group_sections(snapshot,[]) == []
     assert [item['result']['id'] for item in group_sections(snapshot,['a'])[0]['questions']] == ['nested','parent']
     with pytest.raises(ValueError,match='no longer exists'): group_sections(snapshot,['missing'])
 
@@ -103,6 +102,16 @@ def test_question_filter_does_not_enumerate_answers_from_other_questions():
     pivot.PivotFields.assert_not_called()
 
 
+def test_native_missing_answer_counts_are_not_formatted_as_dashes():
+    from unittest.mock import Mock
+    from backend.kobo_excel import _style_pivot
+    pivot = Mock()
+    pivot.DataBodyRange.Columns.Count = 1
+    pivot.DataBodyRange.Cells.return_value.PivotCell.DataField.Name = '#'
+    _style_pivot(pivot, Mock(), {'breakdownFields': [{'id': 'gender'}]})
+    pivot.DataBodyRange.Cells.return_value.FormatConditions.Add.assert_not_called()
+
+
 def test_metric_pivot_orders_only_this_questions_items_without_enumerating_the_cache(monkeypatch):
     from unittest.mock import Mock, call
     import backend.kobo_excel as native
@@ -116,3 +125,8 @@ def test_metric_pivot_orders_only_this_questions_items_without_enumerating_the_c
     assert metrics == ['count'] and pivot.ManualUpdate is False
     assert visible.PivotFields('Answer').PivotItems.call_args_list == [call('Same [a]'), call('Same [b]'), call('Shared [one]')]
     assert all(args.args for args in visible.PivotFields.return_value.PivotItems.call_args_list)
+
+
+def test_ungrouped_only_export_retains_general_sheet():
+    snapshot = {'groups': [], 'questions': [{'id': 'q', 'group': ''}]}
+    assert [section['label'] for section in group_sections(snapshot, [])] == ['General']

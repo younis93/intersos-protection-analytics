@@ -1,5 +1,5 @@
 """Read-only, paged Kobo response grids. Repeat scopes remain separate tables."""
-from .kobo import filtered_records, label, missing, question_result, question_categories, QuestionSettings, breakdown_fields, breakdown_values
+from .kobo import KoboFilter, filtered_records, label, missing, question_result, question_categories, QuestionSettings, breakdown_fields, breakdown_values
 
 
 def pivot_records(project, settings, scope, records, selection):
@@ -50,7 +50,14 @@ def data_rows(project, settings, scope, columns, search='', sort_column='', dire
 
     records = [record for record in filtered_records(project, settings) if record['scope'] == scope]
     if drilldown is not None:
-        records = pivot_records(project, settings, scope, records, drilldown)
+        if drilldown.get('baseFilters') is not None:
+            # Keep the clicked pivot cohort and numeric bin boundaries stable.
+            base_settings = settings.model_copy(update={'filters': [KoboFilter.model_validate(rule) for rule in drilldown['baseFilters']]})
+            base_records = [record for record in filtered_records(project, base_settings) if record['scope'] == scope]
+            selected_ids = {record['id'] for record in pivot_records(project, base_settings, scope, base_records, drilldown)}
+            records = [record for record in records if record['id'] in selected_ids]
+        else:
+            records = pivot_records(project, settings, scope, records, drilldown)
     query = search.strip().casefold()
     rows = []
     for record in records:

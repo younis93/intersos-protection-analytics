@@ -15,7 +15,7 @@ scope.onmessage=async event=>{
  if(message.type!=='start')return;
  try{
   const snapshot=message.snapshot as KoboAnalysis;
-  const data=await createKoboPdfDocument(message.name,snapshot,await loadFonts(),result=>new Promise(resolve=>{deliver=resolve;scope.postMessage({type:'chart',key:koboPdfChartKey(result)})}),(done,total)=>scope.postMessage({type:'progress',progress:Math.round(done/total*95),message:`Creating PDF: ${done+1}/${total}`}));
+  const data=await createKoboPdfDocument(message.name,snapshot,await loadFonts(),result=>new Promise(resolve=>{deliver=resolve;scope.postMessage({type:'chart',key:koboPdfChartKey(result)})}),(done,total)=>scope.postMessage({type:'progress',progress:Math.round(done/total*95),message:`Creating PDF: ${done+1}/${total}`}),message.includeIntroduction!==false);
   scope.postMessage({type:'complete',data},[data]);
  }catch(error){scope.postMessage({type:'error',message:error instanceof Error?error.message:String(error)})}
 };

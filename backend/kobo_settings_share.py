@@ -5,7 +5,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .kobo import KoboSettings, QuestionSettings, breakdown_fields
+from .kobo import AnalysisViewSettings, SavedAnalysisView, KoboSettings, QuestionSettings, breakdown_fields, new_project_settings
+from .kobo_saved_views import saved_view_issues
+from .kobo_trends import trend_date_field
+from .kobo_indicators import IndicatorDefinition, indicator_issues
 
 
 class QuestionDescriptor(BaseModel):
@@ -97,7 +100,7 @@ def preview_settings(project, current, package):
 
     incoming = package.settings.model_dump()
     result = deepcopy(current.model_dump())
-    for key in ('language', 'metadata', 'hideBlanks', 'hideZero', 'hideEmpty', 'questionSort', 'percentageDecimals'):
+    for key in ('language', 'metadata', 'hideBlanks', 'hideZero', 'hideEmpty', 'questionSort', 'percentageDecimals', 'viewMode'):
         result[key] = incoming[key]
     result['hidden'] = [qid for qid in result['hidden'] if qid not in used] + remap(incoming['hidden'], 'Question visibility')
     result['filterFields'] = remap(incoming['filterFields'], 'Filter fields')
@@ -133,6 +136,19 @@ def preview_settings(project, current, package):
                 breakdown_fields(QuestionSettings(breakdowns=[field]), destination, target)
                 valid.append(field)
             except ValueError: warnings.append(f'Incompatible breakdown skipped: {field}.')
+        if config.get('trendDateField'):
+            original = config['trendDateField']
+            config['trendDateField'] = mapping.get(original, '')
+            try:
+                if not config['trendDateField']: raise ValueError('Missing date field')
+                trend_date_field(target, QuestionSettings.model_validate(config), destination)
+            except ValueError:
+                config['trendDateField'] = ''
+                if config['chart'] == 'line' and target['kind'] in {'category', 'multiple'}: config['chart'] = 'bar'
+                warnings.append(f'Incompatible trend date field skipped: {original}.')
+        if config['chart'] == 'heatmap' and not valid:
+            config['chart'] = 'bar'
+            warnings.append(f'Heatmap changed to Bar because no breakdowns matched: {qid}.')
         legacy = mapping.get(config['breakdown'], '')
         config['breakdowns'], config['breakdown'] = valid, legacy if legacy in valid else ''
         if target['choices']:
@@ -172,6 +188,45 @@ def preview_settings(project, current, package):
             warnings.append(f'Incompatible individual chart colors skipped: {qid}.')
         config['pointColors'] = retained_points
         result['questions'][target['id']] = config
+    indicator_ids = {item['id'] for item in incoming.get('indicators', [])}
+    result['indicators'] = [item for item in result.get('indicators', []) if item['id'] not in indicator_ids]
+    for definition in incoming.get('indicators', []):
+        review = []
+        definition['reviewIssues'] = []
+        if definition['scope']:
+            if definition['scope'] not in group_map: review.append('Scoring repeat table could not be matched.')
+            else: definition['scope'] = group_map[definition['scope']]
+        for rule in definition['questions']:
+            original = rule['question']
+            if original in mapping: rule['question'] = mapping[original]
+            else: review.append(f'Scoring question could not be matched: {original}.')
+        item = IndicatorDefinition.model_validate(definition)
+        definition['reviewIssues'] = list(dict.fromkeys([*review, *indicator_issues(project, item)]))
+        if definition['reviewIssues']: warnings.append(f'Indicator requires review before calculation: {definition["name"]}.')
+        result['indicators'].append(definition)
+    view_ids = {v['id'] for v in incoming.get('savedViews', [])}
+    result['savedViews'] = [v for v in result.get('savedViews', []) if v['id'] not in view_ids]
+    used_names = {v['name'].casefold() for v in result['savedViews']}
+    for view in incoming.get('savedViews', []):
+        nested = SettingsFile(format='kobo-settings', version=1, settings=KoboSettings.model_validate(view['snapshot']), questions=package.questions, groups=package.groups)
+        remapped = preview_settings(project, new_project_settings(project['form']), nested)
+        snapshot = AnalysisViewSettings.model_validate(remapped['settings'])
+        view['snapshot'] = snapshot.model_dump()
+        missing_refs = [f'Question could not be matched: {qid}.' for qid in view.get('questionKinds', {}) if qid not in mapping]
+        view['questionKinds'] = {mapping.get(qid, qid): kind for qid, kind in view.get('questionKinds', {}).items()}
+        if view['questionKinds']:
+            added = destination.keys() - used
+            view['snapshot']['hidden'] = list(dict.fromkeys([*view['snapshot']['hidden'], *sorted(added)]))
+            view['questionKinds'].update({qid: destination[qid]['kind'] for qid in added if qid not in view['questionKinds']})
+        view['reviewIssues'] = list(dict.fromkeys([*view['reviewIssues'], *missing_refs, *remapped['warnings'], *saved_view_issues(project, SavedAnalysisView.model_validate(view))]))
+        original, suffix = view['name'], 1
+        while view['name'].casefold() in used_names:
+            suffix += 1; view['name'] = original[:140] + f' (imported {suffix})'
+        if view['name'] != original: warnings.append(f'Saved view renamed to avoid a duplicate name: {view["name"]}.')
+        used_names.add(view['name'].casefold())
+        if view['reviewIssues']: warnings.append(f'Saved view requires review before opening: {view["name"]}.')
+        result['savedViews'].append(view)
+    result['activeViewId'] = ''
     if incoming['excelGroups'] is None: result['excelGroups'] = None
     else:
         result['excelGroups'] = []

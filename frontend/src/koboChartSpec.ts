@@ -1,3 +1,4 @@
+import {advancedChartSpec} from './koboAdvancedChartSpec';
 import {displayPercent,formatPercent,percentageDecimals} from './koboPercentages';
 import {markColor} from './koboMarkColors';
 import type {Data,Layout} from 'plotly.js';
@@ -17,6 +18,7 @@ export function chartSpec(result:KoboChartPanel,language:string,exporting=false,
  const value=(count:number,percent:number|null|undefined)=>percentage?percent??0:count;
  const theme=themeOverride||(typeof document!=='undefined'?document.documentElement.dataset.theme||'glass-light':'glass-light') as Theme;
  const ink=exporting?'#263746':chartInk(theme),grid=exporting?'#e4ebf0':chartGrid(theme),scale=exporting?2.3:1;
+ const advanced=advancedChartSpec(result,language,exporting,ink,grid);if(advanced)return advanced;
  const legendPosition=appearance.legend,legendRight=legendPosition==='right',legendLeft=legendPosition==='left',legendTop=legendPosition==='top';
  const showlegend=legendPosition==='hidden'?false:legendPosition==='auto'?result.breakdowns.length>0||pie:true;
  const axis={fixedrange:true,automargin:true,gridcolor:grid,rangemode:'tozero' as const,...(appearance.grid!=='auto'?{showgrid:appearance.grid==='show'}:{})};
@@ -79,5 +81,7 @@ export function chartSpec(result:KoboChartPanel,language:string,exporting=false,
   hovermode:'closest',hoverlabel:{bgcolor:'#17324d',bordercolor:'#577997',font:{family:'Segoe UI, Arial, sans-serif',size:13,color:'#ffffff'},align:'left',namelength:0},
   paper_bgcolor:exporting?'#ffffff':'transparent',plot_bgcolor:exporting?'#ffffff':'transparent',font:{family:language==='ar'?'Noto Naskh Arabic, Segoe UI, sans-serif':'DM Sans, Segoe UI, sans-serif',color:ink,size:font},
   margin:{l:left,r:right,t:top,b:bottom},
-  xaxis:{...axis,...(horizontal?{...metricAxis,...(visibleLabels&&maximum>0?{range:[0,maximum*1.14]}:{})}:categoryAxis)},yaxis:{...axis,autorange:horizontal?'reversed':visibleLabels&&type!=='line'&&maximum>0?false:true,...(!horizontal?{...metricAxis,...(visibleLabels&&type!=='line'&&maximum>0?{range:[0,maximum*1.14]}:{})}:categoryAxis)},barmode:appearance.bars,bargap:.2,bargroupgap:.04,showlegend,legend}};
+  xaxis:{...axis,...(horizontal?{...metricAxis,...(visibleLabels&&maximum>0?{range:[0,maximum*1.14]}:{})}:categoryAxis)},yaxis:{...axis,autorange:horizontal?'reversed':visibleLabels&&type!=='line'&&maximum>0?false:true,...(!horizontal?{...metricAxis,...(visibleLabels&&type!=='line'&&maximum>0?{range:[0,maximum*1.14]}:{})}:categoryAxis)},barmode:appearance.bars,bargap:type==='histogram'?0:.2,bargroupgap:type==='histogram'?0:.04,showlegend,legend}};
 }
+
+export function withoutKoboChartGrid(spec:{data:Data[];layout:Partial<Layout>}){return {...spec,layout:{...spec.layout,...Object.fromEntries((['xaxis','yaxis'] as const).map(key=>[key,{...spec.layout[key],showgrid:false,zeroline:false,minor:{showgrid:false}}]))}}}

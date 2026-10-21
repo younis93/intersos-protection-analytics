@@ -71,7 +71,7 @@ def direct_helpers(config, layouts):
             helpers[scope][spec['header']] = '=' + caption(scope, spec['id'], 'Blank / unanswered', spec['captions'])
 
     for index, q in enumerate(config['questions'], 1):
-        if q['kind'] == 'multiple': continue
+        if q['kind'] == 'multiple' and config.get('excelMode') != 'binary': continue
         scope = q['scope']; prefix = f'[Calc] Q{index:03d} '
         value = raw(scope, q['id'])
         answer = caption(scope, q['id'], q['blankLabel'])
@@ -86,13 +86,26 @@ def direct_helpers(config, layouts):
             # Keep initial human-readable period labels, and show new periods by their key.
             answer = f'IF({value}="",{excel_literal(q["blankLabel"])},IFERROR(VLOOKUP({excel_literal("period:"+q["id"]+"|")}&TEXT({value},{excel_literal(fmt)}),KoboChoices,2,FALSE),TEXT({value},{excel_literal(fmt)})))'
         fields = {'Respondent': 'Response ID', 'Selected': '[Calc] Response', 'Answer': prefix+'answer', 'Answered': prefix+'answered', 'IncludeInPivot': prefix+'included'}
-        helpers[scope][fields['Answer']] = '=' + answer
+        if q['kind'] != 'multiple': helpers[scope][fields['Answer']] = '=' + answer
         helpers[scope][fields['Answered']] = f'=IF({value}="",0,1)'
         helpers[scope][fields['IncludeInPivot']] = f'=IF({value}="","Excluded","Included")' if not q['blank'] else '="Included"'
         for level, qid in enumerate(q['dimensions'], 1):
             fields[f'Breakdown{level}'] = prefix+f'breakdown {level}'
             helpers[scope][fields[f'Breakdown{level}']] = '=' + caption(scope, qid)
+        if q.get('trendDateField'):
+            fields['TrendPeriod'] = prefix+'trend period'
+            raw_date = raw(scope, q['trendDateField'])
+            fmt = {'day': 'yyyy-mm-dd', 'month': 'yyyy-mm', 'year': 'yyyy'}[q['trendUnit']]
+            helpers[scope][fields['TrendPeriod']] = f'=IFERROR(IF({raw_date}="","",TEXT({raw_date},"{fmt}")),"")'
         sources[q['id']] = {'direct': True, 'table': tables[scope]['table'], 'fields': fields, 'scope': scope}
+        if q['kind'] == 'multiple':
+            from .kobo_excel_binary import binary_columns
+            sources[q['id']].update(binary=True, options=binary_columns(q, value, prefix, helpers[scope], tables[scope]['headers']))
+            options = sources[q['id']]['options']
+            if len(options) == 1:
+                options[0]['metric'] = '#'
+                sources[q['id']]['single'] = True
+                helpers[scope][fields['Answer']] = '='+excel_literal(options[0]['caption'])
     return helpers, sources
 
 

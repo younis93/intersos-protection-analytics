@@ -94,3 +94,6 @@
  .kobo-customize>footer button{flex:1}
  .kobo-preview-heading{flex-direction:column}
 }
+
+.kobo-chart-types button small{display:block;font-size:10px;line-height:1.35;font-weight:400;max-width:150px}
+.kobo-chart-types button:disabled{opacity:.55;cursor:not-allowed}

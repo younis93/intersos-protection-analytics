@@ -3,7 +3,7 @@ import {jsPDF} from 'jspdf';
 import {koboPdfChartPanels} from './koboChartDensity';
 import type {KoboAnalysis,KoboResult,KoboRow} from './koboTypes';
 
-export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,loaded:string[],imageFor:(result:KoboResult)=>Promise<string>,progress:(done:number,total:number)=>void){
+export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,loaded:string[],imageFor:(result:KoboResult)=>Promise<string>,progress:(done:number,total:number)=>void,includeIntroduction=true){
  if(!snapshot.questions.length)throw new Error('There are no visible questions to export.');
  const pdf=new jsPDF({orientation:'landscape',unit:'pt',format:'a4',compress:true,putOnlyUsedFonts:true});
  for(const[i,style]of ['normal','bold'].entries()){pdf.addFileToVFS(`KoboArabic-${style}.ttf`,loaded[i]);pdf.addFont(`KoboArabic-${style}.ttf`,'KoboArabic',style)}
@@ -23,11 +23,12 @@ export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,lo
  function draw(value:string,x:number,y:number,size=9,bold=false,right=false,color='#243746'){const parts=prepare(value,size,bold);if(right)x-=parts.reduce((s,r)=>s+r.width,0);pdf.setTextColor(color);const write=(pdf.internal as typeof pdf.internal&{write:(s:string)=>void}).write;const actual='FEFF'+Array.from({length:value.length},(_,i)=>value.charCodeAt(i).toString(16).padStart(4,'0')).join('');write(`/Span << /ActualText <${actual}> >> BDC`);for(const part of parts){pdf.setFont(part.font,bold?'bold':'normal');pdf.setFontSize(size);pdf.text(part.text,x,y,{isInputVisual:true,isOutputVisual:true,isInputRtl:false,isOutputRtl:false} as Parameters<jsPDF['text']>[3]);x+=part.width}write('EMC')}
  function wrap(value:string,maxWidth:number,size=9,bold=false){const out:string[]=[];for(const para of value.replace(/\r\n?/g,'\n').split('\n')){let line='';for(const word of para.split(/\s+/).filter(Boolean)){if(measure(line?line+' '+word:word,size,bold)<=maxWidth){line=line?line+' '+word:word;continue}if(line)out.push(line);line='';for(const c of Array.from(word)){if(measure(line+c,size,bold)>maxWidth&&line){out.push(line);line=''}line+=c}}out.push(line)}return out}
  const navy='#234c70',blue='#2587b9',muted='#63788a',line='#d8e2ea';
- let y=0;
+ let y=0,pageStarted=false;
  const date=new Date().toLocaleDateString('en-GB',{timeZone:'Asia/Baghdad'});
  const textX=rtl?width-margin:margin;
  function page(first=false){
-  if(!first)pdf.addPage();
+  if(!first&&pageStarted)pdf.addPage();
+  pageStarted=true;
   draw('INTERSOS',margin,27,10,true,false,navy);
   draw(rtl?'تحليل الاستبيان':'SURVEY ANALYSIS',margin+70,27,8,false,false,muted);
   draw(date,width-margin,27,8,false,true,muted);
@@ -51,6 +52,7 @@ export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,lo
   if(lines.length>limit){lines.length=limit;lines[limit-1]=shorten(lines[limit-1]+'...',maxWidth,size,bold)}
   return lines;
  }
+ if(includeIntroduction){
  page(true);y=77;
  paragraph(rtl?'تقرير تحليل الاستبيان':'Survey analysis report',11,true,blue);
  paragraph(name,25,true,navy);
@@ -71,6 +73,7 @@ export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,lo
  y+=10;
  paragraph(rtl?'قراءة هذا التقرير':'Reading this report',12,true,navy);
  paragraph(rtl?'تعتمد النسب على المستجيبين الذين أجابوا عن كل سؤال ضمن عوامل التصفية المحددة. قد يتجاوز مجموع نسب أسئلة الاختيار المتعدد 100٪. تُعرض الإجابات الفارغة بشكل منفصل عند تضمينها. تستخدم الأقسام المتكررة عدد إدخالاتها كأساس للحساب.':'Percentages use respondents who answered each question within the selected filters. Multi-select percentages may total more than 100%. Blank answers are shown separately when included. Repeat sections use repeat-entry denominators.',10,false,muted);
+ }
  const groups=new Map(snapshot.groups.map(g=>[g.id,g]));
  const statisticLabels:Record<string,[string,string]>={mean:['Mean','المتوسط'],median:['Median','الوسيط'],min:['Minimum','الحد الأدنى'],max:['Maximum','الحد الأقصى'],standardDeviation:['Standard deviation','الانحراف المعياري']};
  let completed=0;
@@ -99,7 +102,7 @@ export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,lo
    for(let index=0;index<chartPanels.length;index++){
     if(index||bottom-y<200)questionPage(true);
     const chart=chartPanels[index];
-    paragraph(rtl?`الرسم ${index+1} من ${chartPanels.length} - الفئات ${offset+1} إلى ${offset+chart.rows.length}`:`Chart ${index+1} of ${chartPanels.length} - Categories ${offset+1}-${offset+chart.rows.length}`,9,false,muted);
+    paragraph(result.chart==='heatmap'?(rtl?`خريطة حرارية ${index+1} / ${chartPanels.length}`:`Heatmap panel ${index+1} of ${chartPanels.length}`):rtl?`الرسم ${index+1} من ${chartPanels.length} - الفئات ${offset+1} إلى ${offset+chart.rows.length}`:`Chart ${index+1} of ${chartPanels.length} - Categories ${offset+1}-${offset+chart.rows.length}`,9,false,muted);
     const image=await imageFor(chart),properties=pdf.getImageProperties(image);
     const placement=fitKoboPdfImage(properties.width,properties.height,available,bottom-y);
     pdf.addImage(image,'PNG',margin+placement.x,y,placement.width,placement.height,undefined,'FAST');

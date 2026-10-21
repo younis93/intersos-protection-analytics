@@ -1,5 +1,5 @@
 .kobo-dialog.kobo-confirm-dialog{width:min(460px,calc(100vw - 32px));box-sizing:border-box;padding:26px;border-radius:18px}
-.kobo-confirm-dialog>header{align-items:center;margin-bottom:16px}
+.kobo-confirm-dialog>header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
 .kobo-confirm-icon{display:grid;place-items:center;width:46px;height:46px;border-radius:13px;color:var(--blue);background:color-mix(in srgb,var(--blue) 10%,transparent)}
 .kobo-confirm-icon svg{width:23px;height:23px}
 .kobo-confirm-dialog>header button{display:grid;place-items:center;width:34px;height:34px;padding:8px}

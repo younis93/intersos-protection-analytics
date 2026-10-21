@@ -22,7 +22,7 @@ import {lazy,memo,Suspense,useCallback,useEffect,useId,useLayoutEffect,useMemo,u
 import {Copy,Columns2,ChartNoAxesCombined,Download,Eye,FolderOpen,FileSearch,LoaderCircle,FileJson,FileText,Plus,Search,Sparkles,X} from 'lucide-react';
 import {ExcelDownloadButton} from './SelectionControls';
 import {ChartLoading} from './ChartPrimitives';
-import {koboApi} from './koboApi';
+import {koboApi,koboRequest} from './koboApi';
 import {koboLabel,questionDefaults,type KoboAnalysis as Analysis,type KoboMapping,type KoboPreview,type KoboProject,type KoboQuestion,type KoboQuestionSettings,type KoboResult,type KoboSettingsReview,type KoboSettings} from './koboTypes';
 import './kobo.css';
 import KoboMappingReview from './KoboMappingReview';
@@ -31,6 +31,12 @@ import KoboProjects from './KoboProjects';
 import KoboQuestionGroups from './KoboQuestionGroups';
 import KoboImportReview from './KoboImportReview';
 import KoboProjectHeader from './KoboProjectHeader';
+import KoboIndicators from './KoboIndicators';
+import KoboReview from './KoboReview';
+import KoboSavedViews from './KoboSavedViews';
+import {verifySavedViews,viewSignature} from './koboSavedViewState';
+import KoboPopulationCompare from './KoboPopulationCompare';
+import {verifySavedIndicators} from './koboIndicatorPersistence';
 import KoboResponseFilters from './KoboResponseFilters';
 import KoboRenameProject from './KoboRenameProject';
 import KoboSettingsImport from './KoboSettingsImport';
@@ -130,8 +136,10 @@ export default function KoboAnalysis(){
  const[projectFailure,setProjectFailure]=useState<{id:string;message:string}|null>(null),[analysisError,setAnalysisError]=useState('');
  const[projectAttempt,setProjectAttempt]=useState(0),[analysisAttempt,setAnalysisAttempt]=useState(0);
  const loading=projectLoading||analysisLoading;
- const[tableOnly,setTableOnly]=useState(false);
+ const tableOnly=settings?.viewMode==='table';
+ const[viewsOpen,setViewsOpen]=useState(false),[viewResetting,setViewResetting]=useState(false);
  const[reportOpen,setReportOpen]=useState(false);
+ const[indicatorsOpen,setIndicatorsOpen]=useState(false),[qualityOpen,setQualityOpen]=useState(false),[populationOpen,setPopulationOpen]=useState(false),[indicatorSelection,setIndicatorSelection]=useState<string|undefined>();
  const[analysisSettingsKey,setAnalysisSettingsKey]=useState('');
  const[settingsImport,setSettingsImport]=useState(false);
  const saveTimer=useRef<ReturnType<typeof setTimeout>|null>(null),importingSettings=useRef(false);
@@ -141,23 +149,44 @@ export default function KoboAnalysis(){
  const[reviewImport,setReviewImport]=useState(false),[replaceFiles,setReplaceFiles]=useState(false);
  const[deleteProject,setDeleteProject]=useState<ProjectList[number]|null>(null),[deleting,setDeleting]=useState(false),[deleteError,setDeleteError]=useState('');
  const removeProject=async()=>{if(!deleteProject||deleting)return;setDeleting(true);setDeleteError('');try{await koboApi.remove(deleteProject.id);setDeleteProject(null);await refreshList()}catch(e){setDeleteError(errorMessage(e))}finally{setDeleting(false)}};
- const saveChain=useRef<Promise<unknown>>(Promise.resolve()),lastSaved=useRef('');
+ const saveChain=useRef<Promise<unknown>>(Promise.resolve()),lastSaved=useRef(''),pendingSaves=useRef(0);
  const latest=useRef<{id:string;settings:KoboSettings}|null>(null);
  latest.current=project&&settings?{id:project.id,settings}:null;
  const pid=route.split('/')[2]||'';
  const[drilldown,setDrilldown]=useState<(KoboPivotRecordInput&{projectId:string})|null>(null);
  const openPivotRecords=useCurrentCallback((result:KoboResult,selection:KoboPivotSelection)=>{if(project&&settings)setDrilldown({projectId:pid,project,settings:structuredClone(analysis?.settings||settings),result,selection})});
  const openCompare=useCurrentCallback((q:KoboResult)=>setCompare({projectId:pid,questionId:q.id}));
- useEffect(()=>{setReportOpen(false);setSettingsImport(false);setRenameProject(null);setFiltersOpen(true);setCompare(null);setDrilldown(null);setManager(null);setTableOnly(false)},[pid]);
+ useEffect(()=>{setViewsOpen(false);setPopulationOpen(false);setQualityOpen(false);setIndicatorsOpen(false);setReportOpen(false);setSettingsImport(false);setRenameProject(null);setFiltersOpen(true);setCompare(null);setDrilldown(null);setManager(null)},[pid]);
  useEffect(()=>{if(pid&&route.endsWith('/report')){const canonical=`#/kobo/${pid}`;window.history.replaceState(null,'',canonical);setRoute(canonical)}},[pid,route]);
  const refreshList=()=>koboApi.list().then(setList).catch(e=>setError(errorMessage(e)));
  useEffect(()=>{if(!pid)void refreshList()},[pid]);
- useEffect(()=>{const flush=()=>{if(importingSettings.current)return;const p=latest.current;if(p&&JSON.stringify(p.settings)!==lastSaved.current)void koboApi.save(p.id,p.settings).catch(()=>{})};const sync=()=>{flush();setRoute(window.location.hash)};window.addEventListener('hashchange',sync);window.addEventListener('pagehide',flush);const theme=localStorage.getItem('app-theme')||'glass-light';document.documentElement.dataset.theme=theme;return()=>{flush();window.removeEventListener('hashchange',sync);window.removeEventListener('pagehide',flush)}},[]);
+ const flushLatest=useCurrentCallback(async()=>{
+  const current=latest.current;if(!current||importingSettings.current)return;
+  if(saveTimer.current)clearTimeout(saveTimer.current);
+  const serialized=JSON.stringify(current.settings);if(serialized===lastSaved.current&&!pendingSaves.current)return;
+  pendingSaves.current++;setSaveStatus('Saving...');
+  const pending=saveChain.current.catch(()=>{}).then(async()=>{
+   if(serialized===lastSaved.current)return;
+   await koboApi.save(current.id,current.settings);
+   if(latest.current?.id===current.id){lastSaved.current=serialized;if(JSON.stringify(latest.current.settings)===serialized)setSaveStatus('Saved locally')}
+  }).catch(issue=>{if(latest.current?.id===current.id)setSaveStatus('Save failed');throw issue}).finally(()=>{pendingSaves.current--});
+  saveChain.current=pending;await pending;
+ });
+ useEffect(()=>{
+  const flush=()=>void flushLatest().catch(issue=>setError(errorMessage(issue)));
+  const sync=()=>{flush();setRoute(window.location.hash)};
+  const hidden=()=>{if(document.visibilityState==='hidden')flush()};
+  const closing=()=>{const current=latest.current;if(!importingSettings.current&&!pendingSaves.current&&current&&JSON.stringify(current.settings)!==lastSaved.current)koboApi.saveOnPageHide(current.id,current.settings)};
+  window.addEventListener('hashchange',sync);window.addEventListener('pagehide',closing);document.addEventListener('visibilitychange',hidden);
+  document.documentElement.dataset.theme=localStorage.getItem('app-theme')||'glass-light';
+  return()=>{flush();window.removeEventListener('hashchange',sync);window.removeEventListener('pagehide',closing);document.removeEventListener('visibilitychange',hidden)};
+ },[]);
  useEffect(()=>{let active=true;setAnalysis(null);setProject(null);setSettings(null);setProjectFailure(null);setAnalysisError('');setAnalysisLoading(false);setProjectLoading(!!pid);if(!pid)return; koboApi.get(pid).then(p=>{if(active){setProject(p);setSettings(p.settings);lastSaved.current=JSON.stringify(p.settings);setSaveStatus('Saved locally')}}).catch(e=>{if(active)setProjectFailure({id:pid,message:errorMessage(e)})}).finally(()=>{if(active)setProjectLoading(false)});return()=>{active=false}},[pid,projectAttempt]);
- useEffect(()=>{if(!project||!settings||importingSettings.current)return;const serialized=JSON.stringify(settings);if(serialized===lastSaved.current)return;setSaveStatus('Saving…');let active=true;const timer=saveTimer.current=setTimeout(()=>{saveChain.current=saveChain.current.catch(()=>{}).then(()=>koboApi.save(project.id,settings)).then(()=>{lastSaved.current=serialized;if(active)setSaveStatus('Saved locally')}).catch(e=>{if(active){setSaveStatus('Save failed');setError(errorMessage(e))}})},500);return()=>{active=false;clearTimeout(timer)}},[project?.id,settings]);
+ useEffect(()=>{if(!project||!settings||importingSettings.current||JSON.stringify(settings)===lastSaved.current&&!pendingSaves.current)return;setSaveStatus('Saving...');const timer=saveTimer.current=setTimeout(()=>void flushLatest().catch(issue=>setError(errorMessage(issue))),500);return()=>clearTimeout(timer)},[project?.id,settings]);
  useEffect(()=>{if(!project||project.id!==pid||!settings)return;const controller=new AbortController();setAnalysisLoading(true);setAnalysisError('');const timer=setTimeout(()=>koboApi.analyze(project.id,settings,controller.signal).then(a=>{if(!controller.signal.aborted){setAnalysis(a);setAnalysisSettingsKey(JSON.stringify(settings))}}).catch(e=>{if(!controller.signal.aborted)setAnalysisError(errorMessage(e))}).finally(()=>{if(!controller.signal.aborted)setAnalysisLoading(false)}),220);return()=>{clearTimeout(timer);controller.abort()}},[pid,project?.id,settings,analysisAttempt]);
  const change=(next:KoboSettings)=>{setSettings(next);setSaveStatus('Saving…')};
- const saveNow=async()=>{if(!project||!settings)return;await saveChain.current.catch(()=>{});await koboApi.save(project.id,settings);lastSaved.current=JSON.stringify(settings);setSaveStatus('Saved locally')};
+ const setTableOnly=(value:boolean)=>{if(settings)change({...settings,viewMode:value?'table':'charts'})};
+ const saveNow=async()=>{await flushLatest();await saveChain.current.catch(()=>{})};
  const applySharedSettings=async(next:KoboSettings)=>{
   if(!project)return;
   importingSettings.current=true;
@@ -165,24 +194,40 @@ export default function KoboAnalysis(){
   try{
    await saveChain.current.catch(()=>{});
    const saving=koboApi.save(project.id,next);saveChain.current=saving;await saving;
+   {
+    const persisted=await koboApi.get(project.id);
+    verifySavedIndicators(next.indicators||[],persisted.settings.indicators);
+    verifySavedViews(next.savedViews||[],persisted.settings.savedViews);
+    if(viewSignature(next)!==viewSignature(persisted.settings))throw new Error('The analysis setup was not retained. Your current setup is still open. Retry the action.');
+    if((next.activeViewId||'')!==(persisted.settings.activeViewId||''))throw new Error('The active saved view was not retained. Restart the backend with the latest version and retry.');
+   }
    lastSaved.current=JSON.stringify(next);latest.current={id:project.id,settings:next};setSettings(next);setSaveStatus('Saved locally');
-  }catch(issue){setSaveStatus('Save failed');throw issue}finally{importingSettings.current=false}
+  }catch(issue){setSaveStatus('Save failed');throw issue instanceof TypeError?new Error('Could not confirm the settings save. Your changes are still open. Check the backend connection and retry.'):issue}finally{importingSettings.current=false}
+ };
+ const resetCurrentView=async()=>{
+  const current=latest.current;if(!current?.settings.activeViewId||viewResetting)return;
+  setViewResetting(true);
+  try{const next=await koboRequest<KoboSettings>(`/projects/${current.id}/views/apply`,{settings:current.settings,viewId:current.settings.activeViewId});await applySharedSettings(next)}finally{setViewResetting(false)}
  };
  const navigate=async(hash:string)=>{try{await saveNow();window.location.hash=hash}catch(e){setError(errorMessage(e));setSaveStatus('Save failed')}};
- const exportExcel=useCurrentCallback(async(question='')=>{if(!project||!settings||!analysis)return;setExcelOptions({projectId:project.id,projectName:project.name,settings:structuredClone(settings),analysis,question})});
+ const exportExcel=useCurrentCallback(async(question='',excelMode:'native'|'binary'='native')=>{if(!project||!settings||!analysis)return;setExcelOptions({projectId:project.id,projectName:project.name,settings:structuredClone(settings),analysis,question,excelMode})});
  const exportPdf=useCurrentCallback(async(question?:string)=>{if(!project||!settings)return;startKoboExport({projectId:project.id,projectName:project.name,settings,format:'pdf',question,snapshot:analysis||undefined})});
  const changeChartColor=useCurrentCallback((result:KoboResult,target:KoboMarkTarget,color:string|null)=>{if(settings)change({...settings,questions:{...settings.questions,[result.id]:editMarkColor(result,{...questionDefaults,...settings.questions[result.id]},target,color)}})});
  const changeBreakdownDisplay=useCurrentCallback((id:string,display:NonNullable<KoboQuestionSettings['breakdownDisplay']>)=>change({...settings!,questions:{...settings!.questions,[id]:withValueDisplay({...questionDefaults,...settings!.questions[id]},display)}}));
  const reportBusy=loading||!!analysisError||!analysis||analysisSettingsKey!==JSON.stringify(settings);
  const currentProject=project?.id===pid&&settings?{...project,settings}:null;
 
- const renderFilters=(pinned:boolean)=>currentProject&&settings?<KoboResponseFilters project={currentProject} settings={settings} pinned={pinned} open={filtersOpen} onOpenChange={setFiltersOpen} onChange={change} onChooseFields={()=>setManager('filters')} onError={setError}/>:null;
+ const renderFilters=(pinned:boolean)=>currentProject&&settings?<KoboResponseFilters project={currentProject} settings={settings} pinned={pinned} open={filtersOpen} onOpenChange={setFiltersOpen} onChange={change} onChooseFields={()=>setManager('filters')} onSavedViews={()=>setViewsOpen(true)} resettingView={viewResetting} onResetView={()=>void resetCurrentView().catch(issue=>setError(errorMessage(issue)))} onError={setError}/>:null;
 
  return <KoboWorkspaceShell projectId={pid} language={settings?.language||'en'} onNavigate={route=>void navigate(route)} onImport={()=>setImportOpen(true)} dialogs={<>
+  {viewsOpen&&currentProject&&settings&&<KoboSavedViews key={pid} project={currentProject} settings={settings} analysis={analysis||undefined} resetting={viewResetting} onResetView={resetCurrentView} onSave={applySharedSettings} onClose={()=>setViewsOpen(false)}/>}
+  {populationOpen&&currentProject&&settings&&<KoboPopulationCompare project={currentProject} settings={settings} onClose={()=>setPopulationOpen(false)}/>}
+  {qualityOpen&&currentProject&&settings&&<KoboReview project={currentProject} settings={settings} onClose={()=>setQualityOpen(false)} onImport={()=>{setQualityOpen(false);setReviewImport(true)}} onIndicators={id=>{setQualityOpen(false);setIndicatorSelection(id);setIndicatorsOpen(true)}}/>}
+  {indicatorsOpen&&currentProject&&settings&&<KoboIndicators initialSelection={indicatorSelection} key={pid} project={currentProject} settings={settings} onSave={applySharedSettings} onClose={()=>setIndicatorsOpen(false)}/>}
   {reportOpen&&currentProject&&analysis&&<KoboReportPrompt key={pid} project={currentProject} analysis={analysis} busy={reportBusy} onClose={()=>setReportOpen(false)}/>}
   {settingsImport&&currentProject&&settings&&<KoboSettingsImport key={pid} project={currentProject} settings={settings} onClose={()=>setSettingsImport(false)} onApply={applySharedSettings}/>}
   {renameProject&&<KoboRenameProject key={renameProject.id} getProject={async()=>currentProject?.id===renameProject.id?structuredClone(currentProject):koboApi.get(renameProject.id)} onApplySettings={async next=>{if(currentProject?.id===renameProject.id)await applySharedSettings(next);else await koboApi.save(renameProject.id,next);await refreshList()}} project={renameProject} onClose={()=>setRenameProject(null)} onSaved={saved=>{setList(current=>current.map(item=>item.id===saved.id?{...item,...saved}:item).sort((a,b)=>b.updated.localeCompare(a.updated)));setProject(current=>current?.id===saved.id?{...current,name:saved.name}:current);setRenameProject(null)}}/>}
-  {excelOptions&&<KoboExcelOptions input={excelOptions} onClose={()=>setExcelOptions(null)} onExport={(separateGroups,chartMetric)=>{if(!excelOptions.question&&settings)change({...settings,excelGroups:separateGroups});startKoboExport({projectId:excelOptions.projectId,projectName:excelOptions.projectName,settings:excelOptions.settings,question:excelOptions.question,format:'excel',separateGroups,chartMetric});setExcelOptions(null)}}/>}
+  {excelOptions&&<KoboExcelOptions input={excelOptions} onClose={()=>setExcelOptions(null)} onExport={(separateGroups,chartMetric)=>{if(!excelOptions.question&&settings)change({...settings,excelGroups:separateGroups});startKoboExport({projectId:excelOptions.projectId,projectName:excelOptions.projectName,settings:excelOptions.settings,question:excelOptions.question,format:'excel',separateGroups,chartMetric,excelMode:excelOptions.excelMode});setExcelOptions(null)}}/>}
   {reviewImport&&currentProject&&<KoboImportReview project={currentProject} replaceFiles={replaceFiles} onBeforeSave={saveNow} onClose={()=>{setReviewImport(false);setReplaceFiles(false)}} onSaved={p=>{lastSaved.current=JSON.stringify(p.settings);setProject(p);setSettings(p.settings);setSaveStatus('Saved locally');setReviewImport(false);setReplaceFiles(false);void refreshList()}}/>}
   {deleteProject&&<KoboConfirmDialog title="Delete project?" confirmLabel="Delete project" variant="danger" busy={deleting} busyLabel="Deleting…" error={deleteError} onCancel={()=>{setDeleteProject(null);setDeleteError('')}} onConfirm={()=>void removeProject()}><p>Delete <strong>{deleteProject.name}</strong> and its locally saved data?</p><p className="kobo-confirm-note">This action cannot be undone. Your original source files will stay on this computer.</p></KoboConfirmDialog>}
   {importOpen&&<ImportProject onClose={()=>setImportOpen(false)} onError={setError} onImported={p=>{setImportOpen(false);void refreshList();window.location.hash=`#/kobo/${p.id}`}}/>}
@@ -195,7 +240,7 @@ export default function KoboAnalysis(){
  </>}>
 {error&&<div className="kobo-error glass" role="alert"><span>{error}</span><button className="soft" aria-label="Dismiss error" onClick={()=>setError('')}><X/></button></div>}
   {!pid?<KoboProjects projects={list} onCreate={()=>setImportOpen(true)} onRename={setRenameProject} onDelete={project=>{setDeleteError('');setDeleteProject(project)}}/>:!currentProject||!settings?projectFailure?.id===pid?<KoboLoadError stage="project" message={projectFailure.message} onRetry={()=>{setProjectFailure(null);setProjectAttempt(value=>value+1)}}/>:<KoboProjectSkeleton stage="project"/>:<>
-   <KoboProjectHeader project={currentProject} onRename={()=>setRenameProject(currentProject)} counts={analysis} exportDisabled={loading||!analysis?.questions.length} onReupload={()=>{setReplaceFiles(true);setReviewImport(true)}} onReview={()=>setReviewImport(true)} onPdf={()=>void exportPdf()} onExcel={()=>exportExcel()}/>
+   <KoboProjectHeader onPopulation={()=>setPopulationOpen(true)} onQuality={()=>setQualityOpen(true)} onIndicators={()=>{setIndicatorSelection(undefined);setIndicatorsOpen(true)}} project={currentProject} onRename={()=>setRenameProject(currentProject)} counts={analysis} exportDisabled={loading||!analysis?.questions.length} onReupload={()=>{setReplaceFiles(true);setReviewImport(true)}} onReview={()=>setReviewImport(true)} onPdf={()=>void exportPdf()} onExcel={()=>exportExcel()} onBinaryExcel={()=>exportExcel('','binary')}/>
    {saveStatus!=='Saved locally'&&<span className="sr-only" role="status">{saveStatus}</span>}
    {analysisError&&<KoboLoadError stage="analysis" message={analysisError} onRetry={()=>{setAnalysisError('');setAnalysisAttempt(value=>value+1)}}/>}
    {!analysis&&!analysisError&&<KoboProjectSkeleton stage="analysis" showHeader={false}/>}

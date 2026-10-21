@@ -33,6 +33,8 @@ def normalized_header(value):
 def field_for(header, fields):
     """Match only explicit English field prefixes, never arbitrary substrings."""
     header = normalized_header(header)
+    if "DoB" in fields and (header == "date of birth" or header.startswith("date of birth /")):
+        return "DoB"
     for field in sorted(fields, key=len, reverse=True):
         key = normalized_header(field)
         if header == key or header.startswith(key + " /") or header.startswith(key + " "):

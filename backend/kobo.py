@@ -20,6 +20,7 @@ from typing import Any, Literal
 import openpyxl
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .kobo_indicators import IndicatorDefinition
 from .file_security import validate_xlsx_archive
 from .kobo_percentages import apply_display_percentages
 
@@ -59,12 +60,14 @@ class ChartAppearance(BaseModel):
 class QuestionSettings(BaseModel):
     appearance: ChartAppearance = Field(default_factory=ChartAppearance)
     palette: Literal['Balanced', 'Blue', 'Teal', 'Warm', 'Solid blue', 'Ocean', 'Botanical', 'Jewel', 'Contrast'] | None = None
-    chart: Literal['bar', 'column', 'pie', 'donut', 'line'] | None = None
+    chart: Literal['bar', 'column', 'pie', 'donut', 'line', 'histogram', 'heatmap'] | None = None
     colors: dict[str, str] = Field(default_factory=dict)
     pointColors: dict[str, str] = Field(default_factory=dict)
     bins: int = Field(10, ge=1, le=100)
     numericMode: Literal['auto', 'bins', 'values'] = 'auto'
     dateUnit: Literal['day', 'month', 'year'] = 'month'
+    trendDateField: str = ''
+    trendUnit: Literal['day', 'month', 'year'] = 'month'
     breakdown: str = ''
     breakdowns: list[str] = Field(default_factory=list, max_length=3)
     breakdownDisplay: Literal['count', 'percent', 'both'] = 'both'
@@ -90,8 +93,7 @@ class QuestionSettings(BaseModel):
         return value
 
 
-class KoboSettings(BaseModel):
-    version: int = 1
+class AnalysisViewSettings(BaseModel):
     language: Literal['en', 'ar'] = 'en'
     filters: list[KoboFilter] = Field(default_factory=list)
     filterFields: list[str] = Field(default_factory=list)
@@ -103,7 +105,44 @@ class KoboSettings(BaseModel):
     percentageDecimals: Literal[0, 1, 2] = 0
     questionSort: Literal['form', 'name-asc', 'name-desc', 'answered-desc', 'answered-asc'] = 'form'
     questions: dict[str, QuestionSettings] = Field(default_factory=dict)
+    viewMode: Literal['charts', 'table'] = 'charts'
+
+
+class SavedAnalysisView(BaseModel):
+    id: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=160)
+    description: str = Field('', max_length=2000)
+    snapshot: AnalysisViewSettings
+    updatedAt: str = Field('', max_length=60)
+    reviewIssues: list[str] = Field(default_factory=list)
+    questionKinds: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator('name')
+    @classmethod
+    def meaningful_name(cls, value):
+        if not value.strip(): raise ValueError('Enter a saved view name.')
+        return value.strip()
+
+
+class KoboSettings(AnalysisViewSettings):
+    version: int = 1
     excelGroups: list[str] | None = None
+    indicators: list[IndicatorDefinition] = Field(default_factory=list, max_length=100)
+    savedViews: list[SavedAnalysisView] = Field(default_factory=list, max_length=100)
+    activeViewId: str = ''
+
+    @model_validator(mode='after')
+    def unique_saved_views(self):
+        if len({v.id for v in self.savedViews}) != len(self.savedViews): raise ValueError('Saved view identifiers must be unique.')
+        if len({v.name.casefold() for v in self.savedViews}) != len(self.savedViews): raise ValueError('Each saved view must have a different name.')
+        if self.activeViewId and not any(v.id == self.activeViewId for v in self.savedViews): raise ValueError('Active saved view no longer exists.')
+        return self
+
+    @field_validator('indicators')
+    @classmethod
+    def unique_indicator_ids(cls, value):
+        if len({item.id for item in value}) != len(value): raise ValueError('Indicator identifiers must be unique.')
+        return value
 
 
 def new_project_settings(form: dict) -> KoboSettings:
@@ -462,6 +501,18 @@ class ProjectStore:
             settings['filterFields'] = [qid for qid in settings.get('filterFields', []) if qid in known]
             settings['filters'] = [f for f in settings.get('filters', []) if f['field'] in known]
             settings['questions'] = {qid: {**cfg, 'breakdown': cfg.get('breakdown', '') if cfg.get('breakdown', '') in known else '', 'breakdowns': [field for field in cfg.get('breakdowns', []) if field in known]} for qid, cfg in settings.get('questions', {}).items() if qid in known}
+            from .kobo_indicators import indicator_issues
+            for definition in settings.get('indicators', []):
+                item = IndicatorDefinition.model_validate({**definition, 'reviewIssues': []})
+                definition['reviewIssues'] = indicator_issues(payload, item)
+            from .kobo_saved_views import saved_view_issues
+            for view in settings.get('savedViews', []):
+                if view.get('questionKinds'):
+                    added = known - view['questionKinds'].keys()
+                    view['snapshot']['hidden'] = list(dict.fromkeys([*view['snapshot'].get('hidden', []), *sorted(added)]))
+                    view['questionKinds'].update({q['id']: q['kind'] for q in payload['form']['questions'] if q['id'] in added})
+                view['reviewIssues'] = saved_view_issues(payload, SavedAnalysisView.model_validate(view))
+            if any(view['id'] == settings.get('activeViewId') and view['reviewIssues'] for view in settings.get('savedViews', [])): settings['activeViewId'] = ''
             db.execute('UPDATE projects SET payload=?,form=?,data=?,settings=?,updated=? WHERE id=?', (json.dumps(payload, ensure_ascii=False), form_raw, data_raw, json.dumps(settings), datetime.now().isoformat(), pid))
         return self.get(pid)
 
@@ -484,6 +535,8 @@ def matches(value, rule: KoboFilter):
 
 
 def filtered_records(project: dict, settings: KoboSettings):
+    from .kobo_trends import validate_chart_settings
+    validate_chart_settings({q['id']: q for q in project['form']['questions']}, settings)
     records = project['records']; lookup = {r['id']: r for r in records}
     questions = {q['id']: q for q in project['form']['questions']}
     for rule in settings.filters:
@@ -565,7 +618,7 @@ def question_categories(q: dict, answered: list[dict], cfg):
     if q['kind'] == 'number' and values:
         stats = {'count': denominator, 'mean': statistics.mean(values), 'median': statistics.median(values), 'min': min(values), 'max': max(values), 'standardDeviation': statistics.pstdev(values)}
         unique = sorted(set(values))
-        if (cfg.numericMode == 'bins' or (cfg.numericMode == 'auto' and len(unique) > 12)) and min(values) != max(values):
+        if (cfg.chart == 'histogram' or cfg.numericMode == 'bins' or (cfg.numericMode == 'auto' and len(unique) > 12)) and min(values) != max(values):
             low, high = min(values), max(values); step = (high - low) / cfg.bins
             bins = [{'id': f'bin:{i}', 'label': f'{low + i * step:g} - {low + (i + 1) * step:g}' + (' (inclusive)' if i == cfg.bins - 1 else ' (upper excluded)'), 'min': low + i * step, 'max': low + (i + 1) * step} for i in range(cfg.bins)]
     def categories(value):
@@ -607,14 +660,16 @@ def question_result(q: dict, records: list[dict], settings: KoboSettings, questi
                 n = sum(row['id'] in categories(r['values'][q['id']]) for r in members)
                 row['series'].append({'id': b['id'], 'count': n, 'percent': n / b['denominator'] * 100 if b['denominator'] else None})
     apply_display_percentages(rows, breakdowns, denominator, q['kind'], settings.percentageDecimals)
-    if settings.hideZero: rows = [r for r in rows if r['count']]
-    if cfg.answerSort != 'form':
+    if settings.hideZero and cfg.chart != 'histogram': rows = [r for r in rows if r['count']]
+    if cfg.answerSort != 'form' and cfg.chart != 'histogram':
         by_count = cfg.answerSort.startswith('count')
         rows.sort(key=lambda r: (r['count'], r['label']) if by_count else r['label'].casefold(), reverse=cfg.answerSort.endswith('desc'))
     if not settings.hideBlanks and len(cohort) > denominator: rows.append({'id': '__blank__', 'label': 'Blank / unanswered' if settings.language == 'en' else 'فارغ / دون إجابة', 'count': len(cohort) - denominator, 'percent': None, 'displayPercent': None})
     colors = {key: palette_color(cfg.palette, key) for key in [*[row['id'] for row in rows], *[column['id'] for column in breakdowns], 'series']} if cfg.palette else {}
     colors.update(cfg.colors)
-    return {'id': q['id'], 'name': q['name'], 'label': label(q, settings.language), 'group': q['group'], 'kind': q['kind'], 'repeat': q['repeat'], 'denominator': denominator, 'missing': len(cohort) - denominator, 'total': len(cohort), 'rows': rows, 'statistics': stats, 'bins': bins, 'breakdowns': breakdowns, 'breakdownDisplay': cfg.breakdownDisplay, 'breakdownFields': [{'id': dim['id'], 'label': label(dim, settings.language)} for dim in dimensions], 'percentageBasis': 'Answered respondents within each breakdown category' if breakdowns else 'Respondents who answered this question', 'percentageDecimals': settings.percentageDecimals, 'chart': cfg.chart or ('line' if q['kind'] == 'date' else 'column'), 'colors': colors, 'pointColors': cfg.pointColors, 'appearance': cfg.appearance.model_dump()}
+    from .kobo_trends import answer_trend
+    trend = answer_trend(q, cfg, questions, answered, lookup, categories, rows)
+    return {'trend': trend, 'id': q['id'], 'name': q['name'], 'label': label(q, settings.language), 'group': q['group'], 'kind': q['kind'], 'repeat': q['repeat'], 'denominator': denominator, 'missing': len(cohort) - denominator, 'total': len(cohort), 'rows': rows, 'statistics': stats, 'bins': bins, 'breakdowns': breakdowns, 'breakdownDisplay': cfg.breakdownDisplay, 'breakdownFields': [{'id': dim['id'], 'label': label(dim, settings.language)} for dim in dimensions], 'percentageBasis': 'Answered respondents within each breakdown category' if breakdowns else 'Respondents who answered this question', 'percentageDecimals': settings.percentageDecimals, 'chart': cfg.chart or ('line' if q['kind'] == 'date' else 'column'), 'colors': colors, 'pointColors': cfg.pointColors, 'appearance': cfg.appearance.model_dump()}
 
 
 def analyze(project: dict, settings: KoboSettings, question: str = ''):

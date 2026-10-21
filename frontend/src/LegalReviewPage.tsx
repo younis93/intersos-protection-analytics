@@ -69,6 +69,7 @@ export const displayReviewRule = (rule: string) => rule === "Possible duplicate 
 export const announceLegalCopy = (value: string) => window.dispatchEvent(new CustomEvent<string>("legal-copy", { detail: value }));
 
 export const REVIEW_CHECK_METHODS: Record<string, { columns: string[]; logic: string }> = {
+  "Beneficiary below 18 with legal counselling": { columns: ["Date of Birth", "Type of Service Provided"], logic: "Flags each legal service that includes counselling for a beneficiary whose current age, calculated from a valid date of birth, is below 18. Includes services with other selected types and all service dates and statuses. Missing, invalid, and future birth dates are excluded; recorded Age is not used." },
   "Duplicate detained-person name and caller match": { columns: ["Name of the detained person", "Name of the caller"], logic: "Compares both complete normalized names across separate hotline records. Both columns must match the same other record and neither may be blank. It does not compare the detained-person name against the caller name within a record. Each record appears once across the name-check tables: combined, exact duplicate, caller match, then similar name." },
   "Duplicate detained-person name": { columns: ["Name of the detained person"], logic: "Compares complete normalized nonblank detained-person names across all hotline records. Records with both names duplicated in the same other record are listed in the combined table." },
   "Similar detained-person name": { columns: ["Name of the detained person"], logic: "Compares the configured leading normalized characters, allowing 90% similarity when spelling variations are enabled. Records already listed in the combined, exact-duplicate, or caller-match table are omitted." },
@@ -251,6 +252,7 @@ export function FindingTable({
     {rule === "Spouse below 18" && <><th>Spouse name</th><th>Spouse date of birth</th><th>Spouse current age</th></>}
     <th>Phone number</th>
     {dataset === "beneficiaries" && <th>Date of birth</th>}
+    {rule === "Beneficiary below 18 with legal counselling" && <><th>Date of birth</th><th>Current age</th><th>Type of Service Provided</th></>}
     {dataset === "legalhotlines" ? (
       <><th>Contact date</th><th>Caller name</th><th>Detained</th><th>Helpline referral</th><th>Priority</th>{hotlineSourceColumns.map((column) => <th key={column}>{column}</th>)}</>
     ) : dataset === "awareness" ? (
@@ -289,6 +291,7 @@ export function FindingTable({
       {rule === "Spouse below 18" && <><td><strong>{r.spouseName || "Not provided"}</strong></td><td>{r.spouseDateOfBirth || "-"}</td><td>{r.spouseAge ?? "-"}</td></>}
       <td>{r.phone || "-"}</td>
       {dataset === "beneficiaries" && <td>{r.dateOfBirth || "-"}{rule === "Marital status below 18" && r.beneficiaryAge !== null && r.beneficiaryAge !== undefined ? ` (${r.beneficiaryAge})` : ""}</td>}
+      {rule === "Beneficiary below 18 with legal counselling" && <><td>{r.dateOfBirth || "-"}</td><td>{r.beneficiaryAge ?? "-"}</td><td>{r.serviceTypeProvided || "-"}</td></>}
       {dataset === "legalhotlines" ? (
         <><td>{r.contactDate}</td><td>{r.callerName}</td><td>{r.beneficiaryDetained}</td><td>{r.helplineReferral}</td><td>{r.priority || "-"}</td>{hotlineSourceColumns.map((column) => <td key={column}>{r.sourceFields?.[column] || "-"}</td>)}</>
       ) : dataset === "awareness" ? (

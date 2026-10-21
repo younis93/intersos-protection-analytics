@@ -1,5 +1,6 @@
 import {displayPercent,formatPercent,percentageDecimals} from './koboPercentages';
 import {Copy} from 'lucide-react';
+import KoboSegmentedControl from './KoboSegmentedControl';
 import {useImperativeHandle,useMemo,useState,type Ref} from 'react';
 import {koboCopyCell,useKoboCopy} from './koboClipboard';
 import {koboTableHtml,koboTableText,type BreakdownDisplay} from './koboTableData';
@@ -9,7 +10,7 @@ import './koboPivotTable.css';
 
 export type KoboPivotSelection={answer?:string;breakdown?:string;count:number};
 export type KoboPivotTableHandle={copyText:()=>string;copyHtml:()=>string};
-export default function KoboPivotTable({result,language,limit,display='both',onDisplayChange,copyable=false,showCopyButton=true,onDrilldown,ref}:{result:KoboResult;language:'en'|'ar';limit:number;display?:BreakdownDisplay;copyable?:boolean;showCopyButton?:boolean;ref?:Ref<KoboPivotTableHandle>;onDrilldown?:(selection:KoboPivotSelection)=>void;onDisplayChange?:(display:BreakdownDisplay)=>void}){
+export default function KoboPivotTable({result,language,limit,display='both',onDisplayChange,showDisplaySelector=false,copyable=false,showCopyButton=true,onDrilldown,ref}:{result:KoboResult;language:'en'|'ar';limit:number;display?:BreakdownDisplay;copyable?:boolean;showCopyButton?:boolean;ref?:Ref<KoboPivotTableHandle>;onDrilldown?:(selection:KoboPivotSelection)=>void;onDisplayChange?:(display:BreakdownDisplay)=>void;showDisplaySelector?:boolean}){
  const clipboard=useKoboCopy();
  const metrics:('count'|'percent')[]=display==='both'?['count','percent']:[display];
  const[sort,setSort]=useState<PivotSort|null>(null);
@@ -17,6 +18,7 @@ export default function KoboPivotTable({result,language,limit,display='both',onD
  const sortedRows=useMemo(()=>sortPivotRows(result,activeSort,language),[result,activeSort,language]);
  useImperativeHandle(ref,()=>({copyText:()=>koboTableText(result,display,sortedRows),copyHtml:()=>koboTableHtml(result,display,sortedRows)}),[result,display,sortedRows]);
  const columns=result.breakdowns,fields=result.breakdownFields||[];
+ const hasDisplaySelector=!!onDisplayChange&&(columns.length>0||showDisplaySelector),displayLabel=columns.length?'Breakdown values':'Values';
  const depth=columns.length?Math.max(1,fields.length):0;
  const formatter=useMemo(()=>new Intl.NumberFormat(language,{maximumFractionDigits:2}),[language]);
  const number=(value:number)=>formatter.format(value);
@@ -39,10 +41,10 @@ export default function KoboPivotTable({result,language,limit,display='both',onD
  };
  const ariaSort=(id:string)=>activeSort?.id===id?(activeSort.direction==='asc'?'ascending':'descending'):'none';
  return <>
-  {(showCopyButton||fields.length>0||columns.length>0&&onDisplayChange)&&<div className="kobo-pivot-toolbar">
-   {showCopyButton&&<button type="button" className="soft kobo-copy-table" aria-label={`Copy table for ${result.name}`} onClick={event=>void clipboard.copy(koboTableText(result,display,sortedRows),event.currentTarget,'Formatted table copied',koboTableHtml(result,display,sortedRows))}><Copy aria-hidden="true"/>Copy</button>}
+  {(showCopyButton||fields.length>0||hasDisplaySelector)&&<div className="kobo-pivot-toolbar">
    {fields.length>0&&<p className="kobo-pivot-field-labels" dir="auto">{fields.map(field=>field.label).join(' / ')}</p>}
-   {columns.length>0&&onDisplayChange&&<div className="kobo-pivot-display"><span>Breakdown values</span><div role="group" aria-label="Breakdown values">{([['count','# only'],['percent','% only'],['both','# and %']] as const).map(([value,label])=><button key={value} type="button" className="soft" aria-label={label} aria-pressed={display===value} onClick={()=>onDisplayChange(value)}>{value==='count'?'#':value==='percent'?'%':'# + %'}</button>)}</div></div>}
+   {showCopyButton&&<button type="button" className="soft kobo-copy-table" aria-label={`Copy table for ${result.name}`} onClick={event=>void clipboard.copy(koboTableText(result,display,sortedRows),event.currentTarget,'Formatted table copied',koboTableHtml(result,display,sortedRows))}><Copy aria-hidden="true"/>Copy</button>}
+   {hasDisplaySelector&&<div className="kobo-pivot-display"><KoboSegmentedControl label={displayLabel} value={display} options={[["count","#","Counts"],["percent","%","Percentages"],["both","Both","Counts and percentages"]]} onChange={value=>onDisplayChange?.(value)}/></div>}
   </div>}
   {result.kind==='multiple'&&<small>Multiple selections allowed. Percentages use answered respondents and may total more than 100%.</small>}
   <div className="legal-table-wrap kobo-table-wrap kobo-pivot-wrap" role="region" aria-label="Pivot table" tabIndex={0}>

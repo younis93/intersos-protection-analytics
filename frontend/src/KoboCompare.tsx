@@ -13,7 +13,7 @@ function ComparisonTable({result,analysis,group,onDrilldown}:{onDrilldown:(resul
    <div className="kobo-compare-counts"><span>{'Answered'} <strong>{result.denominator.toLocaleString(analysis.settings.language)}</strong></span><span>{'Missing'} <strong>{result.missing.toLocaleString(analysis.settings.language)}</strong></span><span>{'Total'} <strong>{result.total.toLocaleString(analysis.settings.language)}</strong></span></div>
   </div>
   {!result.denominator&&<p className="kobo-compare-message" role="status">{'No answered responses under the current filters.'}</p>}
-  <KoboPivotTable onDrilldown={selection=>onDrilldown(result,selection)} result={result} language={analysis.settings.language} limit={count} display={display} onDisplayChange={setDisplay}/>
+  <KoboPivotTable onDrilldown={selection=>onDrilldown(result,selection)} result={result} language={analysis.settings.language} limit={count} display={display} onDisplayChange={setDisplay} showDisplaySelector/>
   {result.rows.length>count&&<button type="button" className="soft kobo-compare-more" onClick={()=>setCount(value=>value+100)}>{'Show more answers'} ({result.rows.length-count})</button>}
   {result.kind==='multiple'&&<p className="kobo-basis">Percentages can total more than 100%; each respondent is counted once per selected option.</p>}
  </>;

@@ -660,6 +660,32 @@ class NativeFullscreenController:
             return False
 
 
+def guard_export_close(window: Any) -> bool:
+    """Let the frontend offer Keep exporting before the native window closes."""
+    if getattr(window, '_export_close_allowed', False):
+        return True
+    if getattr(window, '_export_close_checking', False):
+        return False
+    window._export_close_checking = True
+
+    def check():
+        # WebView2 script evaluation needs the UI thread. Never wait for it in
+        # the synchronous Windows FormClosing callback.
+        try:
+            allowed = window.evaluate_js('window.intersosRequestExportClose ? window.intersosRequestExportClose() : true') is not False
+        except Exception:
+            allowed = True  # The renderer can be absent at startup or after a crash.
+        try:
+            if allowed:
+                window._export_close_allowed = True
+                window.destroy()
+        finally:
+            window._export_close_checking = False
+
+    threading.Thread(target=check, daemon=True).start()
+    return False
+
+
 class DesktopApi:
     def __init__(self, fullscreen: Any) -> None:
         # pywebview recursively exposes public attributes to JavaScript. Keeping
@@ -671,6 +697,13 @@ class DesktopApi:
     def get_legal_import_progress(self) -> int:
         from backend.import_progress import legal_import_tracker
         return legal_import_tracker.status()["percent"] or 0
+
+    def close_after_exports(self) -> bool:
+        from backend.kobo_excel import jobs
+        jobs.close()
+        self._fullscreen.window._export_close_allowed = True
+        self._fullscreen.window.destroy()
+        return True
 
     def toggle_fullscreen(self) -> bool:
         return bool(self._fullscreen.toggle())
@@ -895,6 +928,7 @@ def main() -> None:
             js_api=desktop_api,
         )
         window.events.shown += lambda: metrics.mark("first-window-shown")
+        window.events.closing += guard_export_close
         fullscreen_controller.attach_window(window, startup_theme)
         single_instance.watch()
         webview.start(

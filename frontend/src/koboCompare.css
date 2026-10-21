@@ -22,6 +22,9 @@
 .kobo-compare .app-select-menu button{white-space:normal;overflow-wrap:anywhere;text-align:start;line-height:1.6}
 .kobo-compare .kobo-pivot-wrap{overflow:auto;max-height:440px;overscroll-behavior:contain}
 .kobo-compare .kobo-pivot-display{justify-content:space-between;flex-wrap:wrap}
+.kobo-compare .kobo-pivot-toolbar{justify-content:flex-end}
+.kobo-compare .kobo-pivot-toolbar>.kobo-copy-table{order:1;margin-inline-start:0}
+.kobo-compare .kobo-pivot-toolbar>.kobo-pivot-display{margin-inline-start:auto}
 .kobo-shell .kobo-compare .kobo-basis{font-size:11px;line-height:1.7;overflow-wrap:anywhere;margin:14px 0 0}
 .kobo-compare-more{margin-top:12px}
 .kobo-compare-placeholder{display:grid;justify-items:center;align-content:center;min-height:240px;padding:22px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:12px;background:var(--panel)}

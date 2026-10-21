@@ -3,6 +3,7 @@ import math
 from collections import Counter
 
 from .kobo import label, matches, missing
+from .kobo_excel_ranges import excel_cell, excel_range
 from .kobo_excel_layout import excel_literal
 from .kobo_excel_direct import field_name
 
@@ -86,9 +87,20 @@ def pivot_value(pivot, metric, answer, parts=(), result=None):
     """GETPIVOTDATA reads filtered aggregates without counting answer-option rows twice."""
     address = pivot if isinstance(pivot, str) else pivot_reference(pivot)
     direct = result is not None and result.get('_source', {}).get('direct')
+    sparse = result is not None and result.get('_source', {}).get('sparse')
+    binary = result is not None and result.get('_source', {}).get('binary')
+    binary_count = binary and metric == 'Responses'
+    if binary and metric == 'Responses':
+        option = next(option for option in result['_source']['options'] if option['id'] == answer)
+        address = result['_countPivot']; metric = option.get('metric', option['caption'])
+    if sparse and metric == 'Responses':
+        address = result['_countPivot']
+        metric = '#'
     args = [excel_literal(metric), address]
-    if not direct: args.extend([excel_literal('AnswerCode'), excel_literal(answer)])
-    elif metric == 'Responses':
+    if binary_count and result['_source'].get('single'):
+        args.extend([excel_literal(field_name(result, 'Answer')), excel_literal(option['caption'])])
+    if not direct and not sparse: args.extend([excel_literal('AnswerCode'), excel_literal(answer)])
+    elif not binary and (metric == 'Responses' or sparse and metric == '#'):
         row = next((row for row in result['rows'] if row['id'] == answer), {'label': answer})
         caption = row['label']
         if sum(other['label'] == caption for other in result['rows']) > 1: caption += f' [{answer}]'
@@ -103,15 +115,21 @@ def totals_pivot(book, cache, result, position):
         sheet = book.Worksheets.Add(After=book.Worksheets(book.Worksheets.Count))
         sheet.Name = '_Kobo slicer totals'; sheet.Visible = 2
     row = sheet.UsedRange.Row + sheet.UsedRange.Rows.Count + 6
-    pivot = cache.CreatePivotTable(sheet.Cells(row, 1), f'KoboTotals{position:03d}')
+    pivot = cache.CreatePivotTable(excel_cell(sheet, row, 1), f'KoboTotals{position:03d}')
     pivot.ManualUpdate = True
     direct = result.get('_source', {}).get('direct')
+    sparse = result.get('_source', {}).get('sparse')
     if not direct:
         field = pivot.PivotFields('QuestionId'); field.Orientation = 3; field.CurrentPage = result['id']
-    field = pivot.PivotFields(field_name(result, 'Answer') if direct else 'AnswerCode'); field.Orientation = 1; field.Subtotals = (False,)*12
+    if sparse:
+        field = pivot.PivotFields('IncludeInPivot'); field.Orientation = 3; field.CurrentPage = 'Denominator'
+    elif not result.get('_source', {}).get('binary'):
+        field = pivot.PivotFields(field_name(result, 'Answer') if direct else 'AnswerCode'); field.Orientation = 1; field.Subtotals = (False,)*12
     for level in range(len(result.get('breakdownFields', []))):
         field = pivot.PivotFields(field_name(result, f'Breakdown{level+1}')); field.Orientation = 2; field.Position = level+1; field.Subtotals = (False,)*12
-    for source, caption, aggregation in [('Selected', 'Responses', -4157), ('Answered', 'Answered total', -4157), ('Respondent', 'Cohort size', -4112)]:
+    metrics = [('Answered', 'Answered total', -4157), ('Respondent', 'Cohort size', -4112)]
+    if not sparse and not result.get('_source', {}).get('binary'): metrics.insert(0, ('Selected', 'Responses', -4157))
+    for source, caption, aggregation in metrics:
         pivot.AddDataField(pivot.PivotFields(field_name(result, source)), caption, aggregation)
     pivot.RowGrand = True; pivot.ColumnGrand = True; pivot.RowAxisLayout(1)
     pivot.ManualUpdate = False
@@ -147,9 +165,12 @@ def _connect_sheet_slicers(book, report, pivots, specs, sheet_number, caches, no
             if notify and (connection % 5 == 0 or connection == len(pivots)):
                 notify(index*len(pivots)+connection, total)
         # Positional arguments avoid locale-dependent Excel generated dispatch metadata.
-        top = report.Cells(top_row, 1).Top + (index // 4)*156
-        left = report.Cells(1, 1).Left + (index % 4)*230
+        top = excel_cell(report, top_row, 1).Top + (index // 4)*156
+        left = excel_cell(report, 1, 1).Left + (index % 4)*230
         slicer = cache.Slicers.Add(report, pythoncom.Missing, f'KoboSlicer{sheet_number}_{index}', spec['caption'][:255], top, left, 218, 144)
+        # Some Excel COM builds ignore optional Add arguments. Set the visible
+        # caption explicitly so users see their chosen question, not Filter001.
+        slicer.Caption = spec['caption'][:255]
         slicer.Style = 'SlicerStyleLight2'; slicer.NumberOfColumns = 1
         slicer.Shape.Placement = 3
         # Set final geometry explicitly: Add and style assignment can apply display scaling.

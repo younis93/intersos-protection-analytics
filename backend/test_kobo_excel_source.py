@@ -5,7 +5,7 @@ import json
 import pytest
 
 from backend.kobo import KoboSettings, QuestionSettings, analyze
-from backend.kobo_excel_source import response_layout, response_values, query_config, query_formula, validate_export_fields
+from backend.kobo_excel_source import response_layout, response_values, query_config, query_formula, validate_export_fields, multi_config, multi_row_count
 from backend.kobo_excel_slicers import slicer_specs
 from backend.test_kobo import sample
 
@@ -69,3 +69,40 @@ def test_response_sheet_limits_fail_without_truncating(sample, monkeypatch):
     monkeypatch.setattr(source, 'EXCEL_DATA_ROWS', 1048575)
     monkeypatch.setattr(source, 'EXCEL_COLUMNS', 3)
     with pytest.raises(ValueError, match='column limit'): response_layout(sample[0], settings())
+
+
+def test_sparse_query_keeps_hidden_response_fields_and_unique_detail_headers(sample):
+    project = copy.deepcopy(sample[0]); config = settings()
+    project['form']['questions'][0]['labels']['en'] = 'Response ID'
+    metadata = query_config(project, analyze(project, config), config, [], response_layout(project, config))
+    question = next(q for q in metadata['questions'] if q['kind'] == 'multiple')
+    own = multi_config(metadata, question)
+    assert 'group/age' in {field['id'] for field in own['details']}
+    assert 'group/respondent_name' not in own['fields']
+    assert len(set(header.casefold() for header in own['headers'])) == len(own['headers'])
+    assert {'Response ID', 'Parent ID', 'Source row'} <= set(own['headers'])
+
+
+def test_multi_row_preflight_counts_selections_once_and_keeps_missing_bases(sample):
+    project = copy.deepcopy(sample[0])
+    result = next(q for q in analyze(project, settings())['questions'] if q['kind'] == 'multiple')
+    project['records'][0]['values'][result['id']] = ['food', 'food', 'water']
+    selected = sum(len(set(r['values'].get(result['id']) or [])) for r in project['records'])
+    assert multi_row_count(project, result, True) == len(project['records']) + selected + len(result['rows'])
+
+
+def test_repeat_multi_details_include_ancestors_but_not_sibling_repeat_fields(sample):
+    project = copy.deepcopy(sample[0]); cfg = settings()
+    project['form']['groups'].extend([
+        {'id': 'visits', 'repeat': True, 'parent': '', 'labels': {'en': 'Visits'}},
+        {'id': 'sibling', 'repeat': True, 'parent': '', 'labels': {'en': 'Sibling'}}])
+    multi = next(q for q in project['form']['questions'] if q['kind'] == 'multiple')
+    project['form']['questions'].extend([
+        {**multi, 'id': 'visits/needs', 'repeat': 'visits', 'group': 'visits'},
+        {**multi, 'id': 'sibling/needs', 'repeat': 'sibling', 'group': 'sibling'}])
+    metadata = query_config(project, analyze(project, cfg), cfg, [], response_layout(project, cfg))
+    question = next(q for q in metadata['questions'] if q['id'] == 'visits/needs')
+    own = multi_config(metadata, question)
+    assert {table['scope'] for table in own['tables']} == {'', 'visits'}
+    assert 'group/age' in own['fields'] and 'visits/needs' in own['fields']
+    assert 'sibling/needs' not in own['fields']

@@ -7,6 +7,11 @@ const questions=[q('gender'),q('needs','multiple'),q('age','number'),q('day','da
 const settings:KoboSettings={version:1,language:'en',filters:[{field:'gender',kind:'category',values:['f']}],filterFields:['gender'],hidden:['hidden'],metadata:false,hideBlanks:true,hideZero:false,hideEmpty:true,questionSort:'form',questions:{gender:{...questionDefaults,chart:'donut',colors:{f:'#112233'}},needs:{...questionDefaults,bins:7,answerSort:'label-desc'}}};
 const project={form:{questions}} as KoboProject;
 describe('shared question settings',()=>{
+ it('applies new chart types only where compatible and supports dated answer trends',()=>{
+  const hist=bulkQuestionChanges(project,settings,{chart:'histogram'});expect(hist.age.chart).toBe('histogram');expect(hist.age.numericMode).toBe('bins');expect(hist.needs.chart).toBe('bar');
+  const matrix=bulkQuestionChanges(project,settings,{chart:'heatmap',breakdowns:['gender']});expect(matrix.age.chart).toBe('heatmap');expect(matrix.gender.chart).toBe('bar');
+  const trend=bulkQuestionChanges(project,settings,{chart:'line',trendDateField:'day',trendUnit:'year'});expect(trend.needs.chart).toBe('line');expect(trend.needs.trendDateField).toBe('day');expect(trend.needs.trendUnit).toBe('year');expect(trend.visit.chart).toBe('bar');
+ });
  it('clears mark overrides when palettes or breakdown definitions change, and preserves them for unrelated edits',()=>{
   const configured=structuredClone(settings);configured.questions.needs.pointColors={example:'#123456'};
   expect(bulkQuestionChanges(project,configured,{palette:'Blue'}).needs.pointColors).toEqual({});

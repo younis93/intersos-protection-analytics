@@ -38,6 +38,11 @@ def test_excel_route_queues_without_analyzing_or_counting(sample, tmp_path, monk
         assert start.call_args.args[1] is None
         assert start.call_args.args[3] == 'group/needs'
         assert start.call_args.kwargs['chart_metric'] == 'count'
+        assert start.call_args.kwargs['excel_mode'] == 'native'
+        response = client.post(f'/api/kobo/projects/{saved["id"]}/exports',json={'settings':saved['settings'],'excelMode':'binary'})
+        assert response.status_code == 200
+        assert start.call_args.kwargs['excel_mode'] == 'binary'
+        assert client.post(f'/api/kobo/projects/{saved["id"]}/exports',json={'settings':saved['settings'],'excelMode':'bad'}).status_code == 422
 
         for metric in ['count', 'percent', 'both']:
             response = client.post(f'/api/kobo/projects/{saved["id"]}/exports',json={'settings':saved['settings'],'chartMetric':metric})

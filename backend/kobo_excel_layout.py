@@ -28,17 +28,19 @@ def group_sections(snapshot, separate_groups=None):
     if selected is not None and selected - groups.keys():
         raise ValueError('A selected export group no longer exists. Reopen Excel export options.')
     sections = {}
+    grouped = any(question['group'] for question in snapshot['questions'])
     for position, question in enumerate(snapshot['questions'], 1):
         current = question['group']; chain = []; seen = set()
         while current and current not in seen:
             seen.add(current); group = groups.get(current, {'id': current, 'label': current, 'parent': ''})
             chain.insert(0, group); current = group.get('parent', '')
         if not chain:
+            if selected is not None and grouped: continue
             owner, title, nested, kind = '', 'General', '', 'general'
         else:
             owner_group = chain[0] if selected is None else next((group for group in reversed(chain) if group['id'] in selected), None)
             if owner_group is None:
-                owner, title, nested, kind = None, 'Analysis', ' / '.join(group.get('label') or group.get('name', group['id']) for group in chain), 'combined'
+                continue
             else:
                 owner, title, kind = owner_group['id'], owner_group.get('label') or owner_group.get('name', owner_group['id']), 'group'
                 nested = ' / '.join(group.get('label') or group.get('name', group['id']) for group in chain[chain.index(owner_group)+1:])

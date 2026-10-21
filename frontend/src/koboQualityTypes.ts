@@ -1,0 +1,2 @@
+export type KoboQualityCheck={id:string;title:string;severity:'check'|'correction';question:string;label:string;count:number;total:number;explanation:string;suggestion:string};
+export type KoboQualityResult={total:number;main:number;repeats:number;affected:number;checks:KoboQualityCheck[];filterSummary:string[];notes:string[];rows:{id:string;row:number;scope:string;question:string;answer:string;reason:string}[];matched:number;page:number;pageSize:number};

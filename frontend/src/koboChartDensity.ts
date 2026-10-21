@@ -10,7 +10,7 @@ export function koboChartRows(result:KoboResult){
 /** Change crowded categorical comparisons to bars before dropping any value labels. */
 export function readableKoboChartType(result:KoboResult,exporting=false,containerWidth=900):KoboResult['chart']{
  const rows=koboChartRows(result),series=Math.max(1,result.breakdowns.length),appearance=resolveAppearance(result.appearance);
- if(result.chart==='bar'||result.chart==='line')return result.chart;
+ if(['bar','line','histogram','heatmap'].includes(result.chart))return result.chart;
  if(result.chart==='pie'||result.chart==='donut')return result.breakdowns.length||rows.length>8?'bar':result.chart;
  const width=exporting?1300:Math.max(240,containerWidth),font=(appearance.fontSize||14)*(exporting?2.3:1);
  const metric=appearance.labels==='auto'?(appearance.metric==='percent'?'percent':'count'):appearance.labels;
@@ -22,7 +22,7 @@ export function readableKoboChartType(result:KoboResult,exporting=false,containe
 
 /** Dense screen views do not change saved answer order or export row selection. */
 export function isDenseKoboChart(result:KoboResult){
- if(result.chart==='line'||result.kind==='date')return false;
+ if(['line','histogram','heatmap'].includes(result.chart)||result.kind==='date')return false;
  const count=result.rows.filter(row=>row.id!=='__blank__').length;
  if(count>12)return true;
  const appearance=resolveAppearance(result.appearance),series=appearance.bars==='stack'?1:result.breakdowns.length;
@@ -36,14 +36,16 @@ export function koboScreenChartRows(result:KoboResult){
 
 /** Bound printed panels so labels stay legible after proportional page placement. */
 export function koboPdfChartPanels(result:KoboResult){
+ if(result.chart==='line'&&result.trend)return [result as KoboChartPanel];
  const rows=koboChartRows(result),chart=readableKoboChartType(result,true);
- const limit=chart==='bar'?Math.max(1,Math.min(8,Math.floor(20/Math.max(1,result.breakdowns.length)))):Math.max(1,rows.length);
+ const limit=chart==='heatmap'?8:chart==='bar'?Math.max(1,Math.min(8,Math.floor(20/Math.max(1,result.breakdowns.length)))):Math.max(1,rows.length);
  const appearance=resolveAppearance(result.appearance),metric=(entry:{count:number;percent:number|null})=>appearance.metric==='percent'?entry.percent??0:entry.count;
- const chartMaximum=Math.max(0,...rows.map(row=>result.breakdowns.length?(appearance.bars==='stack'?(row.series||[]).reduce((sum,entry)=>sum+metric(entry),0):Math.max(0,...(row.series||[]).map(metric))):metric(row)));
+ const chartMaximum=Math.max(0,...rows.map(row=>result.breakdowns.length?(appearance.bars==='stack'&&chart!=='heatmap'?(row.series||[]).reduce((sum,entry)=>sum+metric(entry),0):Math.max(0,...(row.series||[]).map(metric))):metric(row)));
  const panels:KoboChartPanel[]=[];
  const count=Math.ceil(rows.length/limit),base=Math.floor(rows.length/Math.max(1,count)),extra=rows.length%Math.max(1,count);
  let start=0;
  for(let index=0;index<count;index++){const size=base+(index<extra?1:0);panels.push({...result,chart,chartMaximum,rows:rows.slice(start,start+size)});start+=size}
+ if(chart==='heatmap'){const matrix:KoboChartPanel[]=[];for(const panel of panels)for(let column=0;column<result.breakdowns.length;column+=5)matrix.push({...panel,breakdowns:result.breakdowns.slice(column,column+5)});return matrix.length?matrix:panels}
  return panels;
 }
-export const koboPdfChartKey=(result:KoboResult)=>JSON.stringify([result.id,result.chart,result.rows.map(row=>row.id)]);
+export const koboPdfChartKey=(result:KoboResult)=>JSON.stringify([result.id,result.chart,result.rows.map(row=>row.id),result.breakdowns.map(column=>column.id)]);

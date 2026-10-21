@@ -23,13 +23,13 @@ export function customizeDraft(result:KoboResult,settings:KoboSettings):KoboQues
  return {...cfg,chart:cfg.chart||result.chart,breakdown:'',breakdowns:[...(cfg.breakdowns?.length?cfg.breakdowns:cfg.breakdown?[cfg.breakdown]:[])],colors:{...cfg.colors}};
 }
 export function calculationKey(cfg:KoboQuestionSettings){
- return JSON.stringify([cfg.numericMode,cfg.bins,cfg.dateUnit,cfg.answerSort,cfg.breakdowns?.length?cfg.breakdowns:cfg.breakdown?[cfg.breakdown]:[]]);
+ return JSON.stringify([cfg.numericMode,cfg.bins,cfg.dateUnit,cfg.chart==='histogram',cfg.chart==='line'?cfg.trendDateField||'':'',cfg.trendUnit||'month',cfg.answerSort,cfg.breakdowns?.length?cfg.breakdowns:cfg.breakdown?[cfg.breakdown]:[]]);
 }
 export function colorEntries(result:KoboResult){
- return result.breakdowns.length?result.breakdowns:result.chart==='line'?[{id:'series',label:'Line series'}]:result.rows.filter(row=>row.id!=='__blank__');
+ return result.chart==='heatmap'?[{id:'series',label:'Heatmap high value'}]:result.chart==='line'&&result.trend?result.trend.series:result.breakdowns.length?result.breakdowns:result.chart==='line'?[{id:'series',label:'Line series'}]:result.rows.filter(row=>row.id!=='__blank__');
 }
 export function defaultKoboColor(result:KoboResult,id:string){
- return result.breakdowns.length||['pie','donut'].includes(result.chart)?chartCategoryColor(id):chartPrimary;
+ return result.chart==='heatmap'?chartPrimary:result.trend||result.breakdowns.length||['pie','donut'].includes(result.chart)?chartCategoryColor(id):chartPrimary;
 }
 export function paletteColors(ids:string[],palette:string[],existing:Record<string,string>={}){
  const colors={...existing};[...new Set(ids)].sort().forEach((id,index)=>{colors[id]=palette[index%palette.length]});return colors;

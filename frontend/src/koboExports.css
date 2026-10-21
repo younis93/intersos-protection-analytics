@@ -23,6 +23,7 @@
 .kobo-export-filename strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
 .kobo-export-state{font-size:9px;text-transform:capitalize;flex:none;color:var(--muted);padding:3px 6px;border-radius:6px;background:color-mix(in srgb,var(--muted) 9%,transparent)}
 .kobo-export-state.is-complete{color:#23846d;background:color-mix(in srgb,#23846d 12%,transparent)}
+.kobo-export-state.is-interrupted{color:#a86612;background:color-mix(in srgb,#a86612 12%,transparent)}
 .kobo-export-file p{font-size:11px;margin:10px 0;color:var(--muted);overflow-wrap:anywhere}
 .kobo-export-progress{display:flex;align-items:center;gap:10px}
 .kobo-export-progress progress{width:100%;flex:1;min-width:0;height:5px;accent-color:var(--blue)}

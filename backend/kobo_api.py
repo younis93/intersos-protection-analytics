@@ -11,9 +11,15 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .kobo import ChartAppearance, new_project_settings, KoboSettings, ProjectStore, analyze, filtered_records, label, normalize, parse_data, parse_form, propose_mapping, question_result
+from .kobo import ChartAppearance, new_project_settings, KoboFilter, KoboSettings, ProjectStore, analyze, filtered_records, label, normalize, parse_data, parse_form, propose_mapping, question_result
 from .kobo_import_links import review_details, reuse_links, form_changes, suggest_links, question_matches
+from .kobo_indicators import IndicatorDefinition, IndicatorResult, indicator_issues, calculate_indicator, filter_descriptions
 from .kobo_settings_share import SettingsFile, export_settings, preview_settings
+from .kobo_quality import QualityResult, quality_review
+from .kobo_population import PopulationRequest, PopulationResult, compare_population
+from .kobo_saved_views import saved_view_issues, apply_saved_view, apply_default_view
+from .export_recovery import ExportRecoveryStore, RecoveryTask
+from .export_temp import cleanup_export_folders
 
 
 class ColumnMapping(BaseModel):
@@ -97,7 +103,28 @@ class PivotRow(BaseModel):
     series: list[BreakdownCount] = Field(default_factory=list)
 
 
+class TrendPoint(BaseModel):
+    count: int
+    percent: float | None
+
+
+class TrendSeries(BaseModel):
+    id: str
+    label: str
+    points: list[TrendPoint]
+
+
+class AnswerTrend(BaseModel):
+    dateField: str
+    unit: Literal['day', 'month', 'year']
+    excluded: int
+    periods: list[str]
+    denominators: list[int]
+    series: list[TrendSeries]
+
+
 class QuestionResult(BaseModel):
+    trend: AnswerTrend | None = None
     appearance: ChartAppearance = Field(default_factory=ChartAppearance)
     id: str
     name: str
@@ -116,7 +143,7 @@ class QuestionResult(BaseModel):
     breakdownDisplay: Literal['count', 'percent', 'both'] = 'both'
     percentageDecimals: Literal[0, 1, 2] = 0
     percentageBasis: str
-    chart: Literal['bar', 'column', 'pie', 'donut', 'line']
+    chart: Literal['bar', 'column', 'pie', 'donut', 'line', 'histogram', 'heatmap']
     colors: dict[str, str]
     pointColors: dict[str, str] = Field(default_factory=dict)
 
@@ -151,6 +178,29 @@ class AnalysisRequest(BaseModel):
     question: str = ''
 
 
+class IndicatorRequest(BaseModel):
+    settings: KoboSettings
+    indicator: IndicatorDefinition
+
+
+class QualityRequest(BaseModel):
+    settings: KoboSettings
+    check: str = ''
+    page: int = Field(1, ge=1)
+    pageSize: int = Field(25, ge=1, le=100)
+
+
+class SavedViewApplyRequest(BaseModel):
+    settings: KoboSettings
+    viewId: str
+
+
+class IndicatorRecordsRequest(IndicatorRequest):
+    status: Literal['all', 'complete', 'incomplete'] = 'all'
+    page: int = Field(1, ge=1)
+    pageSize: int = Field(25, ge=1, le=100)
+
+
 class QuestionPreviewRequest(AnalysisRequest):
     question: str = Field(min_length=1)
 
@@ -175,6 +225,7 @@ class ExportRequest(AnalysisRequest):
     question: str = ''
     separateGroups: list[str] | None = None
     chartMetric: Literal['count', 'percent', 'both'] = 'count'
+    excelMode: Literal['native', 'binary'] = 'native'
 
 
 class RenameProjectRequest(BaseModel):
@@ -187,6 +238,7 @@ class SettingsImportRequest(BaseModel):
 
 
 class PivotDrilldown(BaseModel):
+    baseFilters: list[KoboFilter] | None = None
     question: str = Field(min_length=1)
     answer: str | None = None
     breakdown: str | None = None
@@ -230,6 +282,22 @@ def answer_examples(sheets, mappings, issues):
 def make_router(store: ProjectStore | None = None):
     router = APIRouter(prefix='/api/kobo', tags=['Kobo Analysis'])
     store = store or ProjectStore()
+    recovery = ExportRecoveryStore(store.path.parent / 'export-tasks.sqlite3')
+    cleanup_export_folders()
+
+    @router.get('/export-recovery')
+    def export_recovery():
+        return recovery.list()
+
+    @router.put('/export-recovery/{task_id}')
+    def save_export_recovery(task_id: uuid.UUID, task: RecoveryTask):
+        recovery.save(str(task_id), task)
+        return {'saved': True}
+
+    @router.delete('/export-recovery/{task_id}')
+    def remove_export_recovery(task_id: uuid.UUID):
+        recovery.remove(str(task_id))
+        return {'removed': True}
     staged: dict[str, dict] = {}
     lock = threading.Lock()
 
@@ -264,6 +332,12 @@ def make_router(store: ProjectStore | None = None):
         p = get(pid)
         try:
             filtered_records(p, settings)
+            for definition in settings.indicators:
+                issues = indicator_issues(p, definition)
+                if issues and not definition.reviewIssues: raise ValueError(f'{definition.name}: ' + '\n'.join(issues))
+            for view in settings.savedViews:
+                issues = saved_view_issues(p, view)
+                if issues and not view.reviewIssues: raise ValueError(f'{view.name}: '+'\n'.join(issues))
             store.save(pid, settings)
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
         return {'saved': True}
@@ -422,6 +496,49 @@ def make_router(store: ProjectStore | None = None):
         with lock: staged.pop(body.token, None)
         return {k: v for k, v in p.items() if k != 'records'}
 
+    @router.post('/projects/{pid}/views/apply', response_model=KoboSettings)
+    def open_saved_view(pid: str, body: SavedViewApplyRequest):
+        try: return apply_saved_view(get(pid), body.settings, body.viewId)
+        except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
+    @router.post('/projects/{pid}/views/default', response_model=KoboSettings)
+    def open_default_view(pid: str, body: AnalysisRequest):
+        return apply_default_view(get(pid), body.settings)
+
+    @router.post('/projects/{pid}/population-comparison', response_model=PopulationResult)
+    def population_comparison(pid: str, body: PopulationRequest):
+        try: return compare_population(get(pid), body.settings, group_field=body.groupField, groups=body.groups, question_id=body.question, indicator=body.indicator)
+        except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
+    @router.post('/projects/{pid}/quality-review', response_model=QualityResult)
+    def review_quality(pid: str, body: QualityRequest):
+        try: return quality_review(get(pid), body.settings, check_id=body.check, page=body.page, page_size=body.pageSize)
+        except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
+    @router.post('/projects/{pid}/indicators/results', response_model=list[IndicatorResult])
+    def indicator_results(pid: str, body: AnalysisRequest):
+        project = get(pid)
+        try: records = filtered_records(project, body.settings)
+        except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+        results = []
+        for definition in body.settings.indicators:
+            issues = indicator_issues(project, definition)
+            if issues:
+                results.append(IndicatorResult(id=definition.id, name=definition.name, issues=issues, filterSummary=filter_descriptions(project, body.settings)))
+            else:
+                results.append(calculate_indicator(project, body.settings, definition, page_size=0, records=records))
+        return results
+
+    @router.post('/projects/{pid}/indicators/preview', response_model=IndicatorResult)
+    def indicator_preview(pid: str, body: IndicatorRequest):
+        try: return calculate_indicator(get(pid), body.settings, body.indicator, page_size=5)
+        except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
+    @router.post('/projects/{pid}/indicators/records', response_model=IndicatorResult)
+    def indicator_records(pid: str, body: IndicatorRecordsRequest):
+        try: return calculate_indicator(get(pid), body.settings, body.indicator, status=body.status, page=body.page, page_size=body.pageSize)
+        except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
     @router.post('/projects/{pid}/analysis', response_model=AnalysisResponse)
     def analysis(pid: str, body: AnalysisRequest):
         try: return analyze(get(pid), body.settings, body.question)
@@ -492,7 +609,7 @@ def make_router(store: ProjectStore | None = None):
             selected_groups = body.separateGroups if body.separateGroups is not None else body.settings.excelGroups
             if selected_groups is not None and set(selected_groups) - {group['id'] for group in p['form']['groups']}:
                 raise ValueError('A selected export group no longer exists. Reopen Excel export options.')
-            return jobs.start(p, None, body.settings, body.question, separate_groups=selected_groups, chart_metric=body.chartMetric)
+            return jobs.start(p, None, body.settings, body.question, separate_groups=selected_groups, chart_metric=body.chartMetric, excel_mode=body.excelMode)
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
     @router.get('/exports/{job}', response_model=ExportStatus)

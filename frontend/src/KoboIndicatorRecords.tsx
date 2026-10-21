@@ -1,0 +1,25 @@
+import {useEffect,useRef,useState} from 'react';
+import {X} from 'lucide-react';
+import {useQueryPage} from './useQueryPage';
+import {koboIndicatorApi} from './koboIndicatorApi';
+import type {KoboProject,KoboSettings} from './koboTypes';
+import type {KoboIndicatorDefinition,KoboIndicatorResult} from './koboIndicatorTypes';
+
+export default function KoboIndicatorRecords({project,settings,indicator,initialStatus,onClose}:{project:KoboProject;settings:KoboSettings;indicator:KoboIndicatorDefinition;initialStatus:'complete'|'incomplete';onClose:()=>void}){
+ const dialog=useRef<HTMLDialogElement>(null),[status,setStatus]=useState<'all'|'complete'|'incomplete'>(initialStatus);
+ const[page,setPage]=useQueryPage(JSON.stringify([project.id,settings.filters,settings.language,indicator,status]));
+ const[result,setResult]=useState<KoboIndicatorResult|null>(null),[busy,setBusy]=useState(true),[error,setError]=useState(''),[retry,setRetry]=useState(0);
+ const key=JSON.stringify([project.id,settings.filters,settings.language,indicator,status,page,retry]);
+ useEffect(()=>{const node=dialog.current,opener=document.activeElement;node?.showModal();return()=>{node?.close();if(opener instanceof HTMLElement&&opener.isConnected)opener.focus()}},[]);
+ useEffect(()=>{const controller=new AbortController();setBusy(true);setError('');setResult(null);koboIndicatorApi.records(project.id,settings,indicator,status,page,controller.signal).then(value=>{if(!controller.signal.aborted)setResult(value)}).catch(reason=>{if(!controller.signal.aborted)setError(reason instanceof Error?reason.message:String(reason))}).finally(()=>{if(!controller.signal.aborted)setBusy(false)});return()=>controller.abort()},[key]);
+ const mode=indicator.mode||'score';
+ const n=(value:number|null)=>value===null?'-':value.toLocaleString(settings.language,{minimumFractionDigits:1,maximumFractionDigits:1});
+ return <dialog ref={dialog} className="kobo-dialog glass kobo-indicator-records" dir="ltr" aria-label="Indicator response review" onCancel={event=>{event.preventDefault();event.stopPropagation();onClose()}}>
+  <header><div><h2>{settings.language==='ar'?'مراجعة درجات الاستجابات':'Response score review'}</h2><p dir="auto">{indicator.name}</p></div><button type="button" className="soft" aria-label="Close indicator response review" onClick={onClose}><X/></button></header>
+  <div className="kobo-indicator-record-tools"><div role="group" aria-label="Scoring status">{(['all','complete','incomplete'] as const).map(value=><button className="soft" type="button" key={value} aria-pressed={status===value} onClick={()=>setStatus(value)}>{value==='all'?'All':value==='complete'?'Complete':'Incomplete'}</button>)}</div><span role="status">{busy?'Calculating responses...':`${result?.matched??0} matching responses`}</span></div>
+  {error&&<div className="error" role="alert"><p>{error}</p><button type="button" className="soft" onClick={()=>setRetry(value=>value+1)}>Try again</button></div>}
+  <p className="kobo-indicator-scope">Current filters: {result?.filterSummary.join('; ')||'All responses'}. Each {indicator.scope?'repeat entry':'main submission'} is scored once.</p>
+  <div className="legal-table-wrap" aria-busy={busy}><table><thead><tr><th>Source row</th><th>{mode==='score'?'Score / 100':mode==='percentage'?'Meets conditions':'Response value'}</th><th>Status</th><th>Calculation</th></tr></thead><tbody>{result?.rows.map(record=><tr key={record.id}><td>{record.row}</td><td>{record.score===null?'Incomplete':mode==='percentage'?(record.score===100?'Yes':'No'):n(record.score)}</td><td>{record.status==='complete'?'Complete':'Incomplete'}</td><td><details><summary>View calculation - row {record.row}</summary><div className="kobo-indicator-contributions">{record.contributions.map(item=><section key={item.question}><strong dir="auto">{item.label}</strong><p dir="auto">Answer: {item.answer||'Missing'}</p>{item.reason?<p className="error">{item.reason}</p>:mode==='percentage'?<p>Condition: {item.points===1?'Matched':'Not matched'}</p>:mode.startsWith('numeric_')?<p>Original value: {n(item.points)} · Contribution to response value: {n(item.contribution)}</p>:<p>{n(item.points)} / {n(item.maximum)} points · Normalized: {n(item.normalized)}% · Weight share: {n(item.share)}% · Final contribution: {n(item.contribution)} / 100</p>}</section>)}</div></details></td></tr>)}{!busy&&!error&&!result?.rows.length&&<tr><td colSpan={4}>No responses in this selection.</td></tr>}</tbody></table></div>
+  <footer className="kobo-dialog-actions"><div className="kobo-toolbar"><button className="soft" disabled={busy||page===1} onClick={()=>setPage(value=>value-1)}>Previous</button><span>Page {page}{result?.matched?` of ${Math.ceil(result.matched/25)}`:''}</span><button className="soft" disabled={busy||page*25>=(result?.matched||0)} onClick={()=>setPage(value=>value+1)}>Next</button></div><button type="button" className="primary" onClick={onClose}>Close</button></footer>
+ </dialog>;
+}

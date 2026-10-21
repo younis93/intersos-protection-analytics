@@ -3,7 +3,7 @@ import {createPortal} from 'react-dom';
 import {AlertTriangle,LoaderCircle,Trash2,X} from 'lucide-react';
 import './koboConfirmDialog.css';
 
-export default function KoboConfirmDialog({title,children,confirmLabel,onConfirm,onCancel,variant='warning',busy=false,busyLabel='Working…',error=''}:{title:string;children:ReactNode;confirmLabel:string;onConfirm:()=>void;onCancel:()=>void;variant?:'warning'|'danger';busy?:boolean;busyLabel?:string;error?:string}){
+export default function KoboConfirmDialog({title,children,confirmLabel,onConfirm,onCancel,variant='warning',busy=false,busyLabel='Working…',error='',cancelLabel='Cancel'}:{title:string;cancelLabel?:string;children:ReactNode;confirmLabel:string;onConfirm:()=>void;onCancel:()=>void;variant?:'warning'|'danger';busy?:boolean;busyLabel?:string;error?:string}){
  const ref=useRef<HTMLDialogElement>(null);
  const openerRef=useRef(document.activeElement);
  const direction=useRef((openerRef.current instanceof HTMLElement?openerRef.current.closest('[dir]')?.getAttribute('dir'):null)||document.documentElement.dir||'ltr');
@@ -16,6 +16,6 @@ export default function KoboConfirmDialog({title,children,confirmLabel,onConfirm
   <h2 id={`${id}-title`}>{title}</h2>
   <div id={`${id}-message`} className="kobo-confirm-message">{children}</div>
   {error&&<p className="kobo-confirm-error" role="alert">{error}</p>}
-  <footer className="kobo-dialog-actions"><div className="kobo-dialog-action-buttons"><button className="soft" ref={cancelRef} type="button" autoFocus disabled={busy} onClick={onCancel}>Cancel</button><button className={`primary${variant==='danger'?' kobo-confirm-danger':''}`} type="button" disabled={busy} onClick={onConfirm}>{busy&&<LoaderCircle className="kobo-confirm-spinner" aria-hidden="true"/>}{busy?busyLabel:confirmLabel}</button></div></footer>
+  <footer className="kobo-dialog-actions"><div className="kobo-dialog-action-buttons"><button className="soft" ref={cancelRef} type="button" autoFocus disabled={busy} onClick={onCancel}>{cancelLabel}</button><button className={`primary${variant==='danger'?' kobo-confirm-danger':''}`} type="button" disabled={busy} onClick={onConfirm}>{busy&&<LoaderCircle className="kobo-confirm-spinner" aria-hidden="true"/>}{busy?busyLabel:confirmLabel}</button></div></footer>
  </dialog>,document.body);
 }

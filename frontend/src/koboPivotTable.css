@@ -26,9 +26,6 @@
 .kobo-shell .kobo-pivot-table th[aria-sort=ascending] .kobo-pivot-sort,.kobo-shell .kobo-pivot-table th[aria-sort=descending] .kobo-pivot-sort{color:var(--blue)}
 
 .kobo-pivot-display{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin:0 0 12px;font-size:11px;color:var(--muted)}
-.kobo-pivot-display>div{display:inline-flex;gap:3px;border:1px solid var(--line);border-radius:10px;padding:3px;background:var(--panel)}
-.kobo-shell .kobo-pivot-display button{border:0;border-radius:7px;min-width:38px;min-height:32px;padding:6px 10px;box-shadow:none;background:transparent;color:var(--muted);font-size:12px}
-.kobo-shell .kobo-pivot-display button[aria-pressed=true]{background:color-mix(in srgb,var(--blue) 12%,var(--panel-strong));color:var(--blue);font-weight:700}
 
 .kobo-shell .kobo-pivot-table thead th{height:auto;padding:5px 12px;font-size:11px;line-height:1.35}
 .kobo-shell .kobo-pivot-table .kobo-pivot-sort{min-height:22px;padding:2px 0;gap:0}

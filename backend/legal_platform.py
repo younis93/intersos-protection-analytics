@@ -183,6 +183,7 @@ ACTIONS = {
     "Duplicate service": "Compare the service records and correct or remove the duplicate in the source platform.",
     "Duplicate service without Assessment ID": "Compare the service records across assessments and correct or remove the duplicate in the source platform.",
     "Missing Type of Document": "Check the service record and complete Type of Document before reporting.",
+    "Beneficiary below 18 with legal counselling": "Verify the beneficiary date of birth and counselling record, then document the review outcome.",
     "Orphaned assessment relationship": "Correct the Assessment ID or link the service to an existing assessment.",
     "Possible duplicate participant name": "Check whether the matching name belongs to the same person before making any correction.",
     "Duplicate participant in session": "Verify the participant and session topic, then remove or correct the confirmed duplicate record.",
@@ -217,6 +218,7 @@ REVIEW_FINDING_ARABIC = {
     "Current and previous month duplicate": "تكرار الخدمة بين الشهر الحالي وشهر سابق",
     "Orphaned assessment relationship": "خدمة مرتبطة بتقييم غير موجود",
     "Missing Type of Document": "نوع الوثيقة غير محدد",
+    "Beneficiary below 18 with legal counselling": "مستفيد دون سن 18 عاماً تلقى استشارة قانونية",
     "Legal service date after today": "تاريخ الخدمة القانونية لاحق لتاريخ اليوم",
     "Duplicate participant in session": "مشارك مكرر في الجلسة",
     "Possible duplicate participant name": "اشتباه في تكرار اسم المشارك",
@@ -224,7 +226,7 @@ REVIEW_FINDING_ARABIC = {
 REGISTERED_RULES = {
     "beneficiaries": ("Possible duplicate name","Possible duplicate contact and name","Invalid contact number","Case without assessment","Invalid age","Marital status below 18","Spouse below 18","Check Community Type vs Nationality"),
     "assessments": ("Beneficiary has multiple assessments","Selected month with previous assessment","Assessment without services","Pending assessment","Open counselling-only assessment","Open assessment with all services closed","Blank legal service need","Detained beneficiary has counselling only","Adult representation without counselling","Type of Legal Service in Assessment vs Services","Detention/immigration inconsistency","Representation while not detained","Type of document in Assessments vs Services","Detained beneficiary below 10 years","Detention Governorate mismatch","Assessment date after today"),
-    "legalservices": ("Duplicate service","Duplicate service without Assessment ID","Current and previous month duplicate","Orphaned assessment relationship","Missing Type of Document","Legal service date after today"),
+    "legalservices": ("Duplicate service","Duplicate service without Assessment ID","Current and previous month duplicate","Orphaned assessment relationship","Missing Type of Document","Legal service date after today","Beneficiary below 18 with legal counselling"),
     "awareness": ("Duplicate participant in session","Invalid contact number","Possible duplicate participant name"),
 }
 from .hotline_review import RULES as HOTLINE_REVIEW_RULES, COMBINED_NAME_RULE as HOTLINE_COMBINED_NAME_RULE
@@ -1826,6 +1828,13 @@ class LegalStore:
         df=self.frames["legalservices"]; out=[]; sid=_find(list(df.columns),"Service ID")
         out += self._future_date_flags("legalservices","Legal service date after today",("Date of Service Provision","Date Service Completed","Date of Issuance"))
         beneficiary=_find(list(df.columns),"Beneficiary ID"); aid=_find(list(df.columns),"Assessment ID"); provided=_find(list(df.columns),"Type of Service Provided"); document_type=_find(list(df.columns),"Type of Document")
+        dob=_find(list(df.columns),"Date of Birth","DoB")
+        if dob and provided:
+            for i,row in source_records(df):
+                age=age_from_date(row.get(dob,""))
+                counselling=any(normalize_legal_service_type(value)=="legal counselling" for value in split_multi_value(row.get(provided,"")))
+                if age is not None and 0 <= age < 18 and counselling:
+                    self._flag(out,"legalservices","Beneficiary below 18 with legal counselling","Warning",i,row,f"Current age is {age} based on date of birth; Type of Service Provided includes legal counselling")
         if beneficiary and provided and document_type:
             keys={}; keys_without_assessment={}
             for i,row in source_records(df):
@@ -2088,6 +2097,7 @@ class LegalStore:
                 if rule=="Detention/immigration inconsistency": page_columns.extend([("Is the beneficiary detained","beneficiaryDetained",("Is the beneficiary detained",)),("Is it an immigration related charge?","immigrationRelatedCharge",("Is it an immigration related charge",))])
                 if rule=="Detained beneficiary below 10 years": page_columns.extend([("Is the beneficiary detained","beneficiaryDetained",("Is the beneficiary detained",)),("Date of birth","dateOfBirth",("Date of Birth","DoB")),("Current age","beneficiaryAge",())])
                 if rule=="Selected month with previous assessment": page_columns.append(("Created On","createdOn",("Created On",)))
+                if rule=="Beneficiary below 18 with legal counselling": page_columns.extend([("Date of birth","dateOfBirth",("Date of Birth","DoB")),("Current age","beneficiaryAge",()),("Type of Service Provided","serviceTypeProvided",("Type of Service Provided",))])
                 if rule=="Representation while not detained": page_columns.append(("Type of documents to be issued","typeOfDocument",("Type of documents to be issued","Type of Document")))
                 if rule=="Type of document in Assessments vs Services": page_columns.extend([("Finding","comparisonFinding",()),("Assessment documents","assessmentDocuments",()),("Service documents","serviceDocuments",())])
                 if rule=="Type of Legal Service in Assessment vs Services": page_columns.extend([("Assessment service needed","requestedServiceTypes",()),("Service type provided","providedServiceTypes",())])

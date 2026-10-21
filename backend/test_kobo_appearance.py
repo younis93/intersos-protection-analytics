@@ -49,19 +49,20 @@ def test_native_automatic_labels_follow_series_metric_and_keep_formulas(monkeypa
         item.Points.side_effect = lambda index=None, points=points: NS(Count=len(points)) if index is None else points[index-1]
         series.append(item); points_by_series.append(points)
     chart = Mock()
-    chart.SeriesCollection.side_effect = lambda index=None: NS(Count=2) if index is None else series[index-1]
+    collection = Mock(Count=2, side_effect=lambda index: series[index-1])
+    chart.SeriesCollection.side_effect = lambda index=None: collection if index is None else series[index-1]
     result = {'id':'q', 'chart':'bar', 'rows':[{'id':'a'}, {'id':'b'}], 'breakdowns':[], 'colors': {'a': '#174A7E'}, 'appearance':{}}
     native._chart_labels(Mock(), chart, result, ['count','percent'], {}, KoboSettings())
     written = sheet.Range.return_value.Formula
     assert 'TEXT(SUMIFS' in written[0][0]
     assert '0%' in written[0][1]
     assert ' / ' not in written[0][0]
-    assert sheet.Range.call_count == 1
+    assert sheet.Range.call_args.args == ('A6:B7',)
     assert points_by_series[0][0].DataLabel.Formula.startswith("='_Kobo chart labels'!")
     assert points_by_series[0][0].DataLabel.Position == 3
     assert points_by_series[0][0].DataLabel.Font.Color == 0xFFFFFF
-    assert points_by_series[0][0].DataLabel.Font.Size == 11
-    assert points_by_series[0][0].DataLabel.Font.Bold is True
+    assert series[0].DataLabels().Font.Size == 11
+    assert series[0].DataLabels().Font.Bold is True
     assert points_by_series[0][1].HasDataLabel is False
 
 
@@ -84,9 +85,10 @@ def test_deferred_native_labels_reacquire_series_after_slicer_refresh():
     fresh = Mock()
     fresh.Points.side_effect = lambda index=None: NS(Count=1) if index is None else point
     chart = Mock()
-    chart.SeriesCollection.side_effect = lambda index=None: NS(Count=1) if index is None else fresh
+    collection = Mock(Count=1, side_effect=lambda index: fresh)
+    chart.SeriesCollection.side_effect = lambda index=None: collection if index is None else fresh
     _apply_label_style((chart, 1, 1, True, 11, 3, '#ffffff', "='_Kobo chart labels'!$A$5"))
-    assert point.HasDataLabel and point.DataLabel.Font.Bold
+    assert point.HasDataLabel
     assert point.DataLabel.Formula == "='_Kobo chart labels'!$A$5"
     assert fresh.DataLabels().Font.Bold
     # An initially empty slicer intersection can remove the former points.

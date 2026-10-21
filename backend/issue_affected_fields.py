@@ -2,6 +2,7 @@
 from .hotline_review import FIELDS as HOTLINE_FIELDS, REQUIRED as HOTLINE_REQUIRED
 
 RULE_FIELDS = {
+    "Beneficiary below 18 with legal counselling": ["Date of Birth", "Type of Service Provided"],
     "Possible duplicate name": ["Name (Filter Color Red)"],
     "Possible duplicate contact and name": ["Name (Filter Color Red)", "Contact Number"],
     "Invalid contact number": ["Contact Number"],
