@@ -1,5 +1,6 @@
 import {describe,it,expect} from 'vitest';
-import {canLink,linkColumn,mergedQuestions,setMergeRule} from './koboImportLinks';
+import {canLink,linkColumn,mergedQuestions,setMergeRule,replaceSource} from './koboImportLinks';
+import {reviewForm} from './koboReviewConfig';
 import type {KoboMapping,KoboQuestion} from './koboTypes';
 const question={id:'sex',name:'sex',kind:'category',repeat:'',type:'select_one',labels:{en:'Sex'},group:'',metadata:false,identifying:false,choices:[]} as KoboQuestion;
 const old={sheet:0,column:0,header:'old_sex',question:'',option:'',status:'unmatched'} as KoboMapping;
@@ -9,4 +10,16 @@ describe('historical form links',()=>{
  it('keeps split option columns distinct from historical merges',()=>{expect(mergedQuestions([current,{...old,question:'sex',option:'a',status:'matched'}]).size).toBe(0)});
  it('sets explicit conflict decisions and stable source order',()=>{const links=linkColumn([old,current],old,'sex');const result=setMergeRule(links,'sex','priority',['0:1','0:0']);expect(result.map(m=>m.priority)).toEqual([1,0]);expect(result.every(m=>m.mergeMode==='priority')).toBe(true);expect(links[0].mergeMode).toBe('')});
  it('blocks incompatible types and repeat contexts',()=>{expect(canLink(old,question,'')).toBe(true);expect(canLink({...old,sourceKind:'number'},question,'')).toBe(false);expect(canLink({...old,sheet:1},question,'members')).toBe(false);expect(canLink({...old,sourceRepeat:'members'},question,'')).toBe(false);expect(canLink(old,{...question,repeat:'members'},'members')).toBe(true)});
+ it('replaces every previous source and returns them to an explicit decision',()=>{
+  const sources=[old,{...current,answerMap:{old:'f'},mergeMode:'priority' as const},{...current,column:2,option:'f'}];
+  const result=replaceSource(sources,old,'sex');
+  expect(result[0].question).toBe('sex');expect(result[0].status).toBe('matched');
+  expect(result.slice(1).every(m=>m.status==='unmatched'&&!m.question&&!m.option&&!m.mergeMode)).toBe(true);
+  expect(result[1].answerMap).toEqual({});expect(sources[1].question).toBe('sex');
+ });
+ it('builds an effective form without changing uploaded question definitions',()=>{
+  const form={questions:[question],groups:[],language:'en' as const,warnings:[]};
+  const config={addedQuestions:[{id:'added_age',label:'Age',kind:'number' as const,sheet:0,column:3,repeat:'',choices:[],separator:''}],choiceOverrides:{sex:{mode:'custom' as const,choices:[{name:'f',labels:{en:'Woman',ar:'امرأة'}}],separator:''}}};
+  const effective=reviewForm(form,config);expect(effective.questions).toHaveLength(2);expect(effective.questions[0].choices[0].name).toBe('f');expect(effective.questions[1].type).toBe('decimal');expect(form.questions[0].choices).toEqual([]);
+ });
 });

@@ -135,6 +135,15 @@ def decoded_value(raw, question, mapping):
             target = direct[norm(raw_text)]
             if target and target not in {c['name'] for c in question['choices']}: return None, 'answer is outside the current choice filter'
             return ([target] if target else None) if kind == 'multiple' else (target or None), None
+        separator = question.get('dataSeparator', '')
+        if kind == 'multiple' and separator and separator in raw_text:
+            result = []
+            for atom in raw_text.split(separator):
+                if not atom.strip(): continue
+                value, error = decoded_value(atom, {**question, 'kind': 'category'}, mapping)
+                if error: return None, error
+                if value: result.append(value)
+            return sorted(set(result)) or None, None
         if not answer_map:
             values, error = decode_choice(raw_text, question, kind == 'multiple')
             return (sorted(set(values)) or None) if kind == 'multiple' else (values[0] if values else None), error

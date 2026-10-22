@@ -15,8 +15,9 @@
 :where(.kobo-shell,.kobo-dialog,.kobo-export-tray) svg.lucide-copy{--kobo-icon-motion:kobo-icon-copy}
 :where(.kobo-shell,.kobo-dialog,.kobo-export-tray) svg:is(.lucide-eye,.lucide-eye-off){--kobo-icon-motion:kobo-icon-eye}
 :where(.kobo-shell,.kobo-dialog,.kobo-export-tray) svg.lucide-search{--kobo-icon-motion:kobo-icon-search}
-/* This arrow communicates sidebar state through an existing rotation. */
-.kobo-shell .legal-menu-slide-toggle:is(:hover,:focus-visible)>svg.lucide{animation:none}
+/* Sidebar motion takes precedence over the generic button icon feedback. */
+.kobo-shell button.legal-menu-slide-toggle:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):is(:hover,:focus-visible)>svg.lucide{animation:none}
+.kobo-shell.sidebar-collapsed button.legal-menu-slide-toggle:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):is(:hover,:focus-visible)>svg.lucide{animation:sidebar-expand-right .55s ease-in-out}
 @keyframes kobo-icon-pulse{0%,100%{transform:scale(1)}45%{transform:scale(1.12)}}
 @keyframes kobo-icon-down{0%,100%{transform:translateY(0)}45%{transform:translateY(2px)}}
 @keyframes kobo-icon-up{0%,100%{transform:translateY(0)}45%{transform:translateY(-2px)}}
@@ -29,3 +30,4 @@
 @keyframes kobo-icon-eye{0%,100%{transform:scaleY(1)}40%{transform:scaleY(.4)}70%{transform:scaleY(1.1)}}
 @keyframes kobo-icon-search{0%,100%{transform:translate(0,0) rotate(0)}40%{transform:translate(1px,-1px) rotate(-8deg)}}
 @media(prefers-reduced-motion:reduce){:where(.kobo-shell,.kobo-dialog,.kobo-export-tray){--kobo-icon-duration:0s}}
+@media(prefers-reduced-motion:reduce){.kobo-shell.sidebar-collapsed button.legal-menu-slide-toggle:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):is(:hover,:focus-visible)>svg.lucide{animation:none}}

@@ -1,4 +1,4 @@
-import type {KoboAnalysis,KoboJob,KoboPreview,KoboProject,KoboSettings,KoboMapping,KoboResult,KoboSettingsReview} from './koboTypes';
+import type {KoboAnalysis,KoboJob,KoboPreview,KoboProject,KoboSettings,KoboMapping,KoboResult,KoboSettingsReview,KoboReviewConfig,KoboChoiceComparison,KoboChoiceImpact} from './koboTypes';
 const base = (import.meta.env.DEV?'http://127.0.0.1:8000':'')+'/api/kobo';
 export const keepaliveLimit=64*1024;
 export const keepaliveBodyAllowed=(body:string)=>new TextEncoder().encode(body).byteLength<=keepaliveLimit;
@@ -22,7 +22,7 @@ export const koboApi={
  },
  list:()=>koboRequest<{id:string;name:string;updated:string}[]>('/projects'),
  review:(id:string,form?:File,data?:File)=>{const body=new FormData();if(form)body.append('form',form);if(data)body.append('data',data);return koboRequest<KoboPreview>(`/projects/${id}/review`,body)},
- check:(token:string,mappings:KoboMapping[],policies:Record<string,string>,signal?:AbortSignal)=>koboRequest<{issues:KoboPreview['issues'];examples:KoboPreview['examples'];linkReview:KoboPreview['linkReview']}>(`/imports/${token}/check`,{mappings,policies},'POST',signal),
+ check:(token:string,mappings:KoboMapping[],policies:Record<string,string>,signal?:AbortSignal,reviewConfig?:KoboReviewConfig)=>koboRequest<{questionImpacts?:{name:string;issues:string[]}[];choiceImpacts?:KoboChoiceImpact[];issues:KoboPreview['issues'];examples:KoboPreview['examples'];linkReview:KoboPreview['linkReview']}>(`/imports/${token}/check`,{mappings,policies,reviewConfig},'POST',signal),
  get:(id:string)=>koboRequest<KoboProject>(`/projects/${id}`),
  remove:(id:string)=>koboRequest(`/projects/${id}`,undefined,'DELETE'),
  save:(id:string,settings:KoboSettings)=>koboRequest(`/projects/${id}/settings`,settings,'PUT'),
@@ -32,9 +32,11 @@ export const koboApi={
   void koboRequest(`/projects/${id}/settings`,settings,'PUT',undefined,{keepalive:true}).catch(()=>{}).finally(()=>{pageHideSavePending=false});
   return true;
  },
- preview:(form:File,data:File)=>{const body=new FormData();body.append('form',form);body.append('data',data);return koboRequest<KoboPreview>('/imports/preview',body)},
- confirm:(token:string,name:string,mappings:KoboMapping[],policies:Record<string,string>,acceptInvalid:boolean,settingsPackage?:unknown)=>koboRequest<KoboProject>('/imports/confirm',{token,name,mappings,policies,acceptInvalid,settingsPackage}),
- previewImportSettings:(token:string,mappings:KoboMapping[],policies:Record<string,string>,pack:unknown)=>koboRequest<KoboSettingsReview>(`/imports/${token}/settings-preview`,{mappings,policies,package:pack}),
+ worksheets:(data:File,signal?:AbortSignal)=>{const body=new FormData();body.append('data',data);return koboRequest<{worksheets:string[]}>('/imports/worksheets',body,'POST',signal)},
+ preview:(form:File,data:File,worksheet='')=>{const body=new FormData();body.append('form',form);body.append('data',data);if(worksheet)body.append('worksheet',worksheet);return koboRequest<KoboPreview>('/imports/preview',body)},
+ confirm:(token:string,name:string,mappings:KoboMapping[],policies:Record<string,string>,acceptInvalid:boolean,settingsPackage?:unknown,reviewConfig?:KoboReviewConfig)=>koboRequest<KoboProject>('/imports/confirm',{token,name,mappings,policies,acceptInvalid,settingsPackage,reviewConfig}),
+ previewImportSettings:(token:string,mappings:KoboMapping[],policies:Record<string,string>,pack:unknown,reviewConfig?:KoboReviewConfig)=>koboRequest<KoboSettingsReview>(`/imports/${token}/settings-preview`,{mappings,policies,package:pack,reviewConfig}),
+ reviewChoices:(token:string,mappings:KoboMapping[],reviewConfig:KoboReviewConfig,question:string,separator:string,signal?:AbortSignal)=>koboRequest<KoboChoiceComparison>(`/imports/${token}/choices`,{mappings,reviewConfig,question,separator},'POST',signal),
  cancelImport:(token:string)=>koboRequest(`/imports/${token}`,undefined,'DELETE'),
  analyze:(id:string,settings:KoboSettings,signal?:AbortSignal,question='')=>koboRequest<KoboAnalysis>(`/projects/${id}/analysis`,{settings,question},'POST',signal),
  previewQuestion:(id:string,settings:KoboSettings,question:string,signal?:AbortSignal)=>koboRequest<KoboResult>(`/projects/${id}/analysis/preview`,{settings,question},'POST',signal),

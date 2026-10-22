@@ -96,7 +96,9 @@ def test_codes_labels_conflicts_and_unknowns(sample):
     assert decode_choice('المياه النظيفة الغذاء', q, True)[1] is None
     sheets[0]['rows'][0][1] = 'none'
     records, issues = normalize(project['form'], sheets, mappings)
-    assert any('disagree' in i['message'] for i in issues)
+    assert not issues and records[0]['values']['group/needs'] == ['food', 'water']
+    combined, combined_issues = normalize(project['form'], sheets, mappings, {'group/needs': 'combined'})
+    assert not combined_issues and combined[0]['values']['group/needs'] == ['none']
     records, issues = normalize(project['form'], sheets, mappings, {'group/needs': 'split'})
     assert not issues and records[0]['values']['group/needs'] == ['food', 'water']
     sheets[0]['rows'][0][0] = 'unknown'

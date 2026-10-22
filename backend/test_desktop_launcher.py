@@ -98,7 +98,8 @@ class DesktopLauncherTests(unittest.TestCase):
                     controller.attach_window(window, theme)
                     apply.assert_not_called()
                     # Unsupported caption colors must not cancel window creation.
-                    self.assertIsNone(event.handlers[0]())
+                    for handler in event.handlers:
+                        self.assertIsNone(handler())
                     apply.assert_called_once_with(theme, persist=False)
 
     def test_native_title_bar_uses_attached_64_bit_handle_and_app_palette(self):
@@ -231,7 +232,7 @@ class DesktopLauncherTests(unittest.TestCase):
                 self.assertIn("Starting the secure local application.", html)
                 self.assertIn('class="startup"', html)
                 self.assertIn('role="img" aria-label="INTERSOS"', html)
-                self.assertNotIn("data:image/png;base64,", html)
+                self.assertNotIn('class="logo"><img', html)  # Startup mark remains inline SVG.
                 self.assertIn("@keyframes orbit", html)
         self.assertIn("Unable to start Iraq Data Analysis", launcher.startup_html("glass-light", failed=True))
 

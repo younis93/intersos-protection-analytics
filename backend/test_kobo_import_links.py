@@ -72,6 +72,13 @@ def test_answer_links_respect_choice_filters_and_split_policy():
     mappings, _ = propose_mapping(form, sheets)
     records, issues = normalize(form, sheets, mappings, {'needs': 'split'})
     assert not issues and records[0]['values']['needs'] == ['food']
+    default_records, default_issues = normalize(form, sheets, mappings)
+    assert not default_issues and default_records == records
+    sheets[0]['rows'][0][1] = ''
+    blank_records, blank_issues = normalize(form, sheets, mappings)
+    assert not blank_issues and blank_records[0]['values']['needs'] is None
+    only_combined = [m for m in mappings if not m.get('option')]
+    assert any('unknown' in i['message'] for i in normalize(form, sheets, only_combined)[1])
 
 
 def test_repeat_and_type_boundaries():
@@ -131,7 +138,7 @@ def test_create_check_confirm_conflict_cannot_be_bypassed_and_reopen(client_stor
     preview = response.json(); mappings = preview['mappings']
     mappings[0].update(question='gender', status='matched', answerMap={})
     mappings[-1].update(question='', status='excluded')
-    body = {'token':preview['token'],'name':'Updated form','mappings':mappings,'acceptInvalid':True}
+    body = {'token':preview['token'],'name':'Updated form','mappings':mappings,'acceptInvalid':True,'reviewConfig':{'excludedQuestionIds':['needs','new_field']}}
     checked = client.post(f"/api/kobo/imports/{preview['token']}/check", json=body).json()
     assert checked['linkReview']['conflicts']['gender']['examples'][0]['row'] == 3
     assert client.post('/api/kobo/imports/confirm',json=body).status_code == 422
@@ -155,13 +162,13 @@ def test_reupload_changed_options_review_and_atomic_apply(client_store):
     client, store = client_store
     data = b'gender,age\nf,1\n'
     preview = client.post('/api/kobo/imports/preview',files={'form':('form.xlsx',form_bytes('1')),'data':('data.csv',data)}).json()
-    saved = client.post('/api/kobo/imports/confirm',json={'token':preview['token'],'name':'Version 1','mappings':preview['mappings']}).json()
+    saved = client.post('/api/kobo/imports/confirm',json={'token':preview['token'],'name':'Version 1','mappings':preview['mappings'],'reviewConfig':{'excludedQuestionIds':['needs','new_field']}}).json()
     pid = saved['id']; before = store.get(pid)
     preview = client.post(f'/api/kobo/projects/{pid}/review',files={'form':('form.xlsx',form_bytes('2','female'))}).json()
     assert preview['formChanges']['items']
     assert any('unknown choice' in issue['message'] for issue in preview['issues'])
     mappings=preview['mappings'];mappings[0]['answerMap']={'f':'female'}
-    body={'token':preview['token'],'name':'Version 1','mappings':mappings}
+    body={'token':preview['token'],'name':'Version 1','mappings':mappings,'reviewConfig':preview['reviewConfig']}
     assert not client.post(f"/api/kobo/imports/{preview['token']}/check",json=body).json()['issues']
     assert store.get(pid)==before
     response=client.post('/api/kobo/imports/confirm',json=body)

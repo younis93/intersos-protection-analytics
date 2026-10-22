@@ -1,0 +1,40 @@
+html[data-desktop="true"]{--desktop-bar-height:32px;--desktop-content-height:calc(100dvh - var(--desktop-bar-height))}
+html[data-desktop="true"][data-desktop-fullscreen="true"]{--desktop-bar-height:0px}
+html[data-desktop="true"] body{overflow:hidden;min-height:0}
+html[data-desktop="true"] #root{position:fixed;inset:var(--desktop-bar-height) 0 0;height:var(--desktop-content-height);overflow:auto;transform:translateZ(0);isolation:isolate}
+html[data-desktop="true"] #root .app-shell,html[data-desktop="true"] #root .app-shell>main{height:var(--desktop-content-height);min-height:var(--desktop-content-height)}
+html[data-desktop="true"] #root .app-shell .sidebar{height:calc(var(--desktop-content-height) - 32px);max-height:calc(var(--desktop-content-height) - 32px)}
+html[data-desktop="true"] #root .app-startup-loading{min-height:100%;height:100%}
+.desktop-titlebar{position:fixed;inset:0 0 auto;height:var(--desktop-bar-height,32px);z-index:2147483646;display:flex;align-items:center;justify-content:space-between;color:var(--ink,#122334);background:var(--bg,#eef5fb);border:0;font:600 13px/1 'Segoe UI',sans-serif;user-select:none}
+/* Preparation and full-screen processing backgrounds continue behind the bar.
+   Minimized processing and in-page skeletons keep the normal workspace header. */
+html[data-desktop="true"]:not(:has(#root .app-shell)) .desktop-titlebar,
+html[data-desktop="true"]:has(#root :is(.welcome-page,.app-startup-loading,.legal-upload-overlay:not(.is-minimized))) .desktop-titlebar{background:transparent}
+html[data-desktop="true"] #root:has(:is(.welcome-page,.startup,.app-startup-loading,.kobo-module-loading,.legal-upload-overlay:not(.is-minimized))){inset:0;height:100dvh}
+html[data-desktop="true"] .welcome-page{padding-top:calc(42px + var(--desktop-bar-height))}
+html[data-desktop="true"] .welcome-home-actions{top:calc(18px + var(--desktop-bar-height))}
+@media(max-width:760px){html[data-desktop="true"] .welcome-page{padding-top:calc(28px + var(--desktop-bar-height))}html[data-desktop="true"] .welcome-home-actions{top:calc(10px + var(--desktop-bar-height))}}
+.desktop-titlebar-brand{align-self:stretch;display:flex;align-items:center;gap:8px;flex:1;min-width:0;padding:0 12px}
+html[data-desktop-native-drag="true"] .desktop-titlebar-brand{-webkit-app-region:drag;app-region:drag}
+.desktop-titlebar-controls{-webkit-app-region:no-drag;app-region:no-drag}
+.desktop-titlebar-brand img{width:20px;height:20px;object-fit:contain;pointer-events:none}
+.desktop-titlebar-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em}
+.desktop-titlebar-version{padding:3px 6px;border:1px solid color-mix(in srgb,var(--ink,#122334) 12%,transparent);border-radius:5px;font-size:10px;font-weight:500;color:var(--muted,#637586);font-variant-numeric:tabular-nums}
+.desktop-titlebar-controls{height:100%;display:flex;flex:none}
+.desktop-titlebar-controls button{display:grid;place-items:center;width:46px;height:100%;padding:0;border:0;border-radius:0;background:transparent;color:inherit;cursor:default;box-shadow:none;transition:background .12s,color .12s}
+.desktop-titlebar-controls button:hover{background:color-mix(in srgb,var(--ink,#122334) 9%,transparent)}
+.desktop-titlebar-controls button:active{background:color-mix(in srgb,var(--ink,#122334) 15%,transparent)}
+.desktop-titlebar-controls button:focus-visible{outline:2px solid var(--blue,#1683d8);outline-offset:-5px}
+.desktop-titlebar-controls .desktop-titlebar-close:hover,.desktop-titlebar-controls .desktop-titlebar-close:active{background:#c42b1c;color:#fff}
+.desktop-titlebar-controls svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.4;pointer-events:none}
+.desktop-titlebar-controls button:disabled{opacity:.4}
+html[data-desktop-fullscreen="true"] .desktop-titlebar,html[data-desktop-fullscreen="true"] .desktop-resize,html[data-desktop-maximized="true"] .desktop-resize{display:none}
+.desktop-resize{position:fixed;z-index:2147483647;touch-action:none}
+.desktop-resize[data-edge="left"],.desktop-resize[data-edge="right"]{top:6px;bottom:6px;width:5px;cursor:ew-resize}
+.desktop-resize[data-edge="left"]{left:0}.desktop-resize[data-edge="right"]{right:0}
+.desktop-resize[data-edge="top"],.desktop-resize[data-edge="bottom"]{left:6px;right:6px;height:5px;cursor:ns-resize}
+.desktop-resize[data-edge="top"]{top:0}.desktop-resize[data-edge="bottom"]{bottom:0}
+.desktop-resize[data-edge="top-left"],.desktop-resize[data-edge="bottom-right"]{width:7px;height:7px;cursor:nwse-resize}
+.desktop-resize[data-edge="top-right"],.desktop-resize[data-edge="bottom-left"]{width:7px;height:7px;cursor:nesw-resize}
+.desktop-resize[data-edge="top-left"]{top:0;left:0}.desktop-resize[data-edge="top-right"]{top:0;right:0}.desktop-resize[data-edge="bottom-left"]{bottom:0;left:0}.desktop-resize[data-edge="bottom-right"]{bottom:0;right:0}
+@media(prefers-reduced-motion:reduce){.desktop-titlebar-controls button{transition:none}}

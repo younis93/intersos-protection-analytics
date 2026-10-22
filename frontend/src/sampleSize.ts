@@ -5,7 +5,7 @@ export type SampleRow={location:string;gender:string;population:number;assumed:b
 export type SampleResult={population:number|null;completed:number;approach:number;rows:SampleRow[];warnings:string[]};
 export const SAMPLE_STORAGE_KEY='kobo-sample-size-v1';
 export const newLocation=():LocationDraft=>({name:'',population:'',gender:false,genderMode:'counts',groups:[{name:'Female',value:''},{name:'Male',value:''}]});
-export const defaultSampleDraft=():SampleDraft=>({confidence:'95',error:'10',population:'',unknown:false,proportion:'50',designEffect:'1',nonresponse:'0',breakdown:false,mode:'overall',locations:[newLocation()]});
+export const defaultSampleDraft=():SampleDraft=>({confidence:'95',error:'7',population:'',unknown:false,proportion:'50',designEffect:'1',nonresponse:'0',breakdown:false,mode:'overall',locations:[newLocation()]});
 const zValues={'90':1.6448536269514722,'95':1.959963984540054,'99':2.5758293035489004};
 function number(value:string,label:string,min:number,max:number,integer=false){
  const n=value.trim()===''?NaN:Number(value);

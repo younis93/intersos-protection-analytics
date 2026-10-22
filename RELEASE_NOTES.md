@@ -1,1 +1,1 @@
-- Added **Import/Export project** in Kobo.
+- Improving the app.

@@ -1,7 +1,7 @@
 import {describe,expect,it} from 'vitest';
 import {allocateSample,calculateSample,defaultSampleDraft,newLocation,readSampleDraft,SAMPLE_STORAGE_KEY,sampleCsv,saveSampleDraft,type SampleDraft} from './sampleSize';
 
-const draft=(patch:Partial<SampleDraft>={}):SampleDraft=>({...defaultSampleDraft(),unknown:true,...patch});
+const draft=(patch:Partial<SampleDraft>={}):SampleDraft=>({...defaultSampleDraft(),error:'10',unknown:true,...patch});
 const location=(name:string,population:string)=>({...newLocation(),name,population});
 describe('sample size calculations',()=>{
  it('matches reference values and confidence levels',()=>{
@@ -51,6 +51,10 @@ describe('sample size calculations',()=>{
  });
 });
 describe('sampling draft and export',()=>{
+ it('defaults to a 7% margin of error',()=>{
+  const d=defaultSampleDraft();expect(d.error).toBe('7');
+  expect(calculateSample({...d,unknown:true}).completed).toBe(196);
+ });
  it('round-trips a versioned draft and resets to defaults',()=>{
   let stored='';const storage={getItem:()=>stored,setItem:(_key:string,v:string)=>{stored=v;}};
   const d=draft({population:'1000'});expect(saveSampleDraft(storage,d)).toBe(true);expect(readSampleDraft(storage)).toEqual(d);

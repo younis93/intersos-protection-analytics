@@ -322,9 +322,21 @@ def startup_html(theme: str, failed: bool = False, startup_epoch_ms: int | None 
         if field_source else ""
     )
     orbit = "" if failed else '<span class="orbit"></span>'
+    from backend.version import APP_VERSION
+    import base64
+    def shell_asset(name: str) -> str:
+        path = resource_path("frontend", "dist", name)
+        if not path.is_file(): path = resource_path("frontend", "public", name)
+        return path.read_text(encoding="utf-8")
+    icon_path = resource_path("frontend", "dist", "intersos-symbol-transparent.png")
+    if not icon_path.is_file(): icon_path = resource_path("frontend", "public", "intersos-symbol-transparent.png")
+    icon_uri = "data:image/png;base64," + base64.b64encode(icon_path.read_bytes()).decode("ascii")
+    shell_style = shell_asset("desktop-titlebar.css")
+    shell_script = shell_asset("desktop-titlebar.js")
+    shell = f'<style>{shell_style}</style><script>window.__desktopShell=true;window.__desktopIcon={json.dumps(icon_uri)};window.__desktopState={json.dumps({"maximized": True, "fullscreen": False, "version": APP_VERSION})};</script>'
     return f"""<!doctype html><html data-theme="{theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>:root{{--blue:{blue};--bg:{background};--ink:{ink};--muted:{muted};--panel:{panel};--panel-strong:{panel_strong};--line:{line};--startup-offset:-{animation_offset}ms}}*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;color:var(--ink);background:var(--bg);font-family:'Segoe UI',sans-serif}}.startup{{position:fixed;inset:0;display:grid;place-items:center;overflow:hidden;background:color-mix(in srgb,var(--blue) 6%,var(--bg));isolation:isolate}}.processing-ring-field{{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;background:radial-gradient(ellipse at 20% 25%,color-mix(in srgb,var(--blue) 10%,transparent),transparent 65%),radial-gradient(ellipse at 85% 80%,color-mix(in srgb,#52b6d8 12%,transparent),transparent 65%)}}.card{{position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,1fr);justify-items:center;width:min(440px,calc(100vw - 48px));padding:44px 42px 34px;border:1px solid color-mix(in srgb,var(--blue) 14%,var(--panel-strong));border-radius:28px;background:var(--panel-strong);box-shadow:0 24px 80px color-mix(in srgb,var(--blue) 12%,transparent);text-align:center;animation:card-enter .58s cubic-bezier(.22,1,.36,1) both}}.mark{{position:relative;isolation:isolate;display:grid;place-items:center;width:76px;height:76px;min-width:76px;min-height:76px;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);margin-bottom:32px;border:1px solid color-mix(in srgb,var(--blue) 24%,var(--line));border-radius:24px;background:color-mix(in srgb,var(--blue) 8%,var(--panel-strong));animation:none}}.mark:before{{content:"";position:absolute;z-index:-1;inset:-9px;border:1px solid color-mix(in srgb,var(--blue) 25%,transparent);border-radius:31px;opacity:.55}}.logo{{position:relative;z-index:2;display:grid;place-items:center;width:54px;height:54px;overflow:hidden;border-radius:8px;}}.mark img{{position:relative;z-index:2;display:block;width:54px;height:54px;object-fit:contain}}.mark b{{position:relative;z-index:2;color:var(--blue);font-size:34px}}.orbit{{position:absolute;z-index:1;inset:-14px;border:1px solid color-mix(in srgb,var(--blue) 28%,transparent);border-radius:34px;animation:orbit 3.8s linear infinite;animation-delay:var(--startup-offset)}}.orbit:after{{content:"";position:absolute;width:7px;height:7px;top:5px;right:6px;border-radius:50%;background:var(--blue);box-shadow:0 0 14px color-mix(in srgb,var(--blue) 72%,transparent)}}.eyebrow{{color:var(--blue);font-size:9px;font-weight:700;letter-spacing:.15em}}h1{{margin:7px 0 8px;font-size:28px;letter-spacing:-.035em}}p{{margin:0;color:var(--muted);font-size:13px}}.progress{{position:relative;width:100%;height:7px;margin:30px 0 25px;overflow:hidden;border-radius:99px;background:color-mix(in srgb,var(--muted) 13%,transparent)}}.progress:after{{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 1px 2px color-mix(in srgb,var(--ink) 8%,transparent)}}.progress i{{display:block;width:38%;height:100%;border-radius:inherit;background:linear-gradient(90deg,color-mix(in srgb,var(--blue) 55%,#fff),var(--blue),color-mix(in srgb,var(--blue) 55%,#fff));animation:progress 1.2s ease-in-out infinite;animation-delay:var(--startup-offset)}}footer{{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px}}footer svg{{width:15px;color:var(--blue)}}@keyframes card-enter{{from{{opacity:0;transform:translateY(14px) scale(.985)}}to{{opacity:1;transform:none}}}}@keyframes breathe{{0%,100%{{transform:scale(1);box-shadow:0 14px 34px color-mix(in srgb,var(--blue) 16%,transparent)}}50%{{transform:scale(1.035);box-shadow:0 18px 42px color-mix(in srgb,var(--blue) 25%,transparent)}}}}@keyframes orbit{{to{{transform:rotate(360deg)}}}}@keyframes progress{{0%{{transform:translateX(-110%)}}100%{{transform:translateX(290%)}}}}@media(max-width:560px){{.card{{width:min(420px,calc(100vw - 32px));padding:37px 25px 29px;border-radius:24px}}h1{{font-size:25px}}}}@media(prefers-reduced-motion:reduce){{.card,.mark,.orbit{{animation:none!important}}.progress i{{animation-duration:2s}}}}</style></head>
-<body><section class="startup" role="status" aria-live="polite" aria-label="Starting Iraq Data Analysis" aria-busy="true"><canvas class="processing-ring-field" aria-hidden="true"></canvas><div class="card"><div class="mark">{orbit}{logo}</div><span class="eyebrow">IRAQ DATA ANALYSIS</span><h1>{heading if failed else 'Preparing your workspace'}</h1><p>{detail}</p>{progress}<footer><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><path d="m9 12 2 2 4-4"/></svg><span>Local and private data workspace</span></footer></div></section>{field_script}</body></html>"""
+<body>{shell}<div id="root"><section class="startup" role="status" aria-live="polite" aria-label="Starting Iraq Data Analysis" aria-busy="true"><canvas class="processing-ring-field" aria-hidden="true"></canvas><div class="card"><div class="mark">{orbit}{logo}</div><span class="eyebrow">IRAQ DATA ANALYSIS</span><h1>{heading if failed else 'Preparing your workspace'}</h1><p>{detail}</p>{progress}<footer><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><path d="m9 12 2 2 4-4"/></svg><span>Local and private data workspace</span></footer></div></section></div><script>{shell_script}</script>{field_script}</body></html>"""
 
 
 def saved_legal_files() -> list[Path]:
@@ -555,9 +567,32 @@ class NativeFullscreenController:
         self.style = 0
         self.placement: WindowPlacement | None = None
         self.window: Any | None = None
+        self._maximized = False
+        self._fullscreen_restore = None
+        self._frame = None
+        self._state_lock = threading.Lock()
+        self._state_timer = None
+        self._last_published_state = None
+        self._state_force = False
+        self._state_pending = False
+        self._closed = False
 
     def attach_window(self, window: Any, startup_theme: str | None = None) -> None:
         self.window = window
+        self._maximized = bool(getattr(window, "maximized", False))
+        for event_name, maximized in (("maximized", True), ("restored", False)):
+            event = getattr(getattr(window, "events", None), event_name, None)
+            if event is not None:
+                def changed(*_args, value=maximized):
+                    self._maximized = value
+                    self.publish_state()
+                event += changed
+        before_show = getattr(getattr(window, "events", None), "before_show", None)
+        if before_show is not None:
+            before_show += self.configure_work_area
+        closed = getattr(getattr(window, "events", None), "closed", None)
+        if closed is not None:
+            closed += self.cancel_state_updates
         if startup_theme is not None:
             # WinForms has created its HWND here, but has not shown the window.
             # Apply the app palette before Windows paints an OS-themed caption.
@@ -567,8 +602,33 @@ class NativeFullscreenController:
 
     def toggle(self) -> bool:
         if self.window is not None:
-            self.window.toggle_fullscreen()
-            self.fullscreen = not self.fullscreen
+            # Native resize events can run while pywebview changes bounds. Keep
+            # work-area handling suspended throughout that fullscreen transition.
+            was_fullscreen = self.fullscreen
+            if not was_fullscreen and getattr(self.window, "native", None) is not None:
+                self._fullscreen_restore = self.on_native_ui(lambda native: (str(native.WindowState) == "Maximized", native.RestoreBounds if str(native.WindowState) == "Maximized" else native.Bounds))
+            self.fullscreen = True
+            try:
+                self.window.toggle_fullscreen()
+            except Exception:
+                self.fullscreen = was_fullscreen
+                raise
+            self.fullscreen = not was_fullscreen
+            if not self.fullscreen:
+                if self._frame is not None:
+                    self.on_native_ui(lambda _native: self._frame.apply_style())
+                self.refresh_work_area()
+                if self._fullscreen_restore is not None:
+                    def restore(native):
+                        from System.Windows.Forms import FormWindowState
+                        maximized, bounds = self._fullscreen_restore
+                        native.WindowState = FormWindowState.Normal
+                        native.Bounds = bounds
+                        if maximized: native.WindowState = FormWindowState.Maximized
+                    self.on_native_ui(restore)
+                    self.refresh_work_area()
+                    self._fullscreen_restore = None
+            self.publish_state()
             return self.fullscreen
 
         user32 = ctypes.windll.user32
@@ -617,6 +677,128 @@ class NativeFullscreenController:
             )
         self.fullscreen = not self.fullscreen
         return self.fullscreen
+
+    def on_native_ui(self, callback):
+        native = getattr(self.window, "native", None)
+        if native is None:
+            return callback(None)
+        if not native.InvokeRequired:
+            return callback(native)
+        from System import Action
+        result = []
+        def run(): result.append(callback(native))
+        native.Invoke(Action(run))
+        return result[0]
+
+    def is_maximized(self) -> bool:
+        def read(native):
+            if native is None: return self._maximized
+            state = str(native.WindowState)
+            if state != "Minimized":
+                self._maximized = state == "Maximized"
+            return self._maximized
+        return self.on_native_ui(read)
+
+    def configure_work_area(self, *_args) -> None:
+        if sys.platform != "win32" or getattr(self.window, "native", None) is None:
+            return
+        def configure(native):
+            if self._frame is None:
+                from windows_window_frame import WindowsWindowFrame
+                self._frame = WindowsWindowFrame(native, self)
+        self.on_native_ui(configure)
+
+    def refresh_work_area(self) -> None:
+        if self.fullscreen or getattr(self.window, "native", None) is None: return
+        if self._frame is not None:
+            self.on_native_ui(lambda _native: self._frame.refresh_work_area())
+            return
+        def refresh(native):
+            from System.Drawing import Rectangle
+            from System.Windows.Forms import Screen, FormWindowState
+            screen = Screen.FromHandle(native.Handle)
+            work, monitor = screen.WorkingArea, screen.Bounds
+            # WM_GETMINMAXINFO uses monitor-relative coordinates, including
+            # monitors to the left/above the primary screen and offset taskbars.
+            bounds = Rectangle(work.X - monitor.X, work.Y - monitor.Y, work.Width, work.Height)
+            if native.MaximizedBounds == bounds: return
+            maximized = native.WindowState == FormWindowState.Maximized
+            native.MaximizedBounds = bounds
+            if maximized:
+                # Reapply maximization so an already-maximized startup window
+                # uses the work area too. Native restore bounds remain intact.
+                native.WindowState = FormWindowState.Normal
+                native.WindowState = FormWindowState.Maximized
+        self.on_native_ui(refresh)
+
+    def toggle_maximize(self) -> dict:
+        if self.fullscreen: return self.window_state()
+        def toggle(native):
+            if native is None:
+                target = not self._maximized
+                if target: self.window.maximize()
+                else: self.window.restore()
+                self._maximized = target
+            else:
+                from System.Windows.Forms import FormWindowState
+                self.refresh_work_area()
+                native.WindowState = (FormWindowState.Normal if native.WindowState == FormWindowState.Maximized else FormWindowState.Maximized)
+        self.on_native_ui(toggle)
+        self.publish_state()
+        return self.window_state()
+
+    def window_state(self) -> dict:
+        from backend.version import APP_VERSION
+        return {"maximized": self.is_maximized(), "fullscreen": self.fullscreen, "version": APP_VERSION, "nativeDrag": bool(self._frame and self._frame.native_drag)}
+
+    def publish_state(self, force: bool = False) -> None:
+        if self.window is None or self._closed: return
+        with self._state_lock:
+            self._state_force = self._state_force or force
+            self._state_pending = True
+            if self._state_timer is not None: return
+            self._state_timer = threading.Timer(.035, self._flush_state)
+            self._state_timer.daemon = True
+            self._state_timer.start()
+
+    def _flush_state(self) -> None:
+        try:
+            with self._state_lock:
+                self._state_pending = False
+            state = self.window_state()
+            with self._state_lock:
+                force = self._state_force
+                self._state_force = False
+                if self._closed or (state == self._last_published_state and not force): return
+                self._last_published_state = state
+            self.window.evaluate_js('window.dispatchEvent(new CustomEvent("desktopwindowstate", {detail:' + json.dumps(state) + '}))')
+        except Exception:
+            self._last_published_state = None  # A navigation may not have a renderer yet.
+        finally:
+            with self._state_lock:
+                self._state_timer = None
+                again = (self._state_force or self._state_pending) and not self._closed
+            if again: self.publish_state()
+
+    def cancel_state_updates(self, *_args) -> None:
+        with self._state_lock:
+            self._closed = True
+            if self._state_timer is not None: self._state_timer.cancel()
+
+    def begin_native_move(self, hit: int) -> bool:
+        if self.window is None or self.fullscreen or sys.platform != "win32": return False
+        # Queue on WinForms' UI thread so capture belongs to the correct thread.
+        from System import Action
+        native = self.window.native
+        def move():
+            user32 = ctypes.windll.user32
+            user32.ReleaseCapture()
+            send = user32.SendMessageW
+            send.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+            send.restype = ctypes.c_ssize_t
+            send(native.Handle.ToInt64(), 0x00A1, hit, 0)  # WM_NCLBUTTONDOWN
+        native.BeginInvoke(Action(move))
+        return True
 
     def set_title_bar_theme(self, theme: str, *, persist: bool = True) -> bool:
         """Synchronize the native Windows caption with the active app theme.
@@ -707,6 +889,27 @@ class DesktopApi:
 
     def toggle_fullscreen(self) -> bool:
         return bool(self._fullscreen.toggle())
+
+    def get_window_state(self) -> dict:
+        return self._fullscreen.window_state()
+
+    def minimize_window(self) -> None:
+        self._fullscreen.window.minimize()
+
+    def toggle_maximize_window(self) -> dict:
+        return self._fullscreen.toggle_maximize()
+
+    def close_window(self) -> None:
+        # destroy triggers the same closing event as Alt+F4, including export guards.
+        self._fullscreen.window.destroy()
+
+    def begin_window_drag(self) -> bool:
+        return self._fullscreen.begin_native_move(2)  # HTCAPTION
+
+    def begin_window_resize(self, edge: str) -> bool:
+        hits = {"left": 10, "right": 11, "top": 12, "top-left": 13, "top-right": 14, "bottom": 15, "bottom-left": 16, "bottom-right": 17}
+        if edge not in hits or self._fullscreen.is_maximized(): return False
+        return self._fullscreen.begin_native_move(hits[edge])
 
     def set_title_bar_theme(self, theme: str) -> bool:
         return bool(self._fullscreen.set_title_bar_theme(theme))
@@ -921,8 +1124,10 @@ def main() -> None:
             html=startup_html(startup_theme, startup_epoch_ms=startup_epoch_ms),
             width=1440,
             height=900,
-            min_size=(1100, 700),
+            min_size=(720, 700),
             resizable=True,
+            frameless=True,
+            easy_drag=False,
             maximized=True,
             background_color=theme_background(startup_theme),
             js_api=desktop_api,

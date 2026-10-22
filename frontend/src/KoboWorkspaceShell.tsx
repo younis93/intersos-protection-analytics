@@ -1,6 +1,6 @@
 import {koboWorkspaceSections,type KoboWorkspaceSection} from './KoboWorkspaceNavigation';
 import {useEffect,useState,type ReactNode} from 'react';
-import {ArrowLeft,ChevronDown,Database,FolderOpen,Home,Maximize2,Minimize2} from 'lucide-react';
+import {ArrowLeft,ArrowRight,ChevronDown,Database,FolderOpen,Home,Maximize2,Minimize2} from 'lucide-react';
 import {KoboGroupNavigationHost} from './KoboGroupNavigation';
 import './workspace.css';
 import './koboWorkspace.css';
@@ -36,7 +36,7 @@ export default function KoboWorkspaceShell({projectId,activeWorkspace,onWorkspac
     <button className="soft sidebar-fullscreen" onClick={()=>void toggleFullscreen()} title={fullscreen?'Exit full screen':'Enter full screen'} aria-label={fullscreen?'Exit full screen':'Enter full screen'}>{fullscreen?<Minimize2/>:<Maximize2/>}<span>Full screen</span></button>
     <div className="data-source-control app-select app-select-theme"><Database className="app-select-icon"/><span className="app-select-label">Data source</span><button className="app-select-trigger" aria-label="Import Kobo files" onClick={onImport}><span>Choose source</span><ChevronDown/></button></div>
    </div>
-   <div className="legal-sidebar-utilities"><button aria-label="Home" title="Home" onClick={()=>onNavigate('#/')}><Home/><span>Home</span></button><button className="legal-menu-slide-toggle" aria-label={collapsed?'Expand menu':'Slide menu left'} aria-expanded={!collapsed} title={collapsed?'Expand menu':'Slide menu left'} onClick={()=>setCollapsed(previous=>{localStorage.setItem('kobo-sidebar-collapsed',String(!previous));return !previous})}><ArrowLeft/><span>{collapsed?'Expand':'Slide left'}</span></button></div>
+   <div className="legal-sidebar-utilities"><button aria-label="Home" title="Home" onClick={()=>onNavigate('#/')}><Home/><span>Home</span></button><button className="legal-menu-slide-toggle" aria-label={collapsed?'Expand menu':'Slide menu left'} aria-expanded={!collapsed} title={collapsed?'Expand menu':'Slide menu left'} onClick={()=>setCollapsed(previous=>{localStorage.setItem('kobo-sidebar-collapsed',String(!previous));return !previous})}><>{collapsed?<ArrowRight/>:<ArrowLeft/>}</><span>{collapsed?'Expand':'Slide left'}</span></button></div>
    <nav aria-label="Kobo navigation">
     <button className={!projectId?'active':''} aria-current={!projectId?'page':undefined} onClick={()=>onNavigate('#/kobo')} title="Projects"><FolderOpen aria-hidden="true"/><span>Projects</span></button>
     {projectId&&koboWorkspaceSections.map(({id,label,Icon})=><button key={id} type="button" className={`kobo-project-section${activeWorkspace===id?' active':''}`} aria-current={activeWorkspace===id?'page':undefined} onClick={()=>onWorkspaceChange(id)} title={label}><Icon aria-hidden="true"/><span>{label}</span></button>)}

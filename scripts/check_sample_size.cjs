@@ -22,9 +22,26 @@ const path=require('node:path');
   await opener.hover();assert(await opener.locator('svg').evaluate(e=>e.getAnimations().length>0));
   await opener.click();const dialog=page.getByRole('dialog',{name:'Sample size calculator'});await dialog.waitFor();
   assert(await dialog.getByRole('heading',{name:'Sample size calculator'}).evaluate(e=>e===document.activeElement));
+  assert.equal(await dialog.getByLabel('Margin of error (%)',{exact:true}).inputValue(),'7');
+  const population=dialog.getByLabel('Population size',{exact:true});
+  const unknown=dialog.getByRole('checkbox',{name:/^Unknown population/});
+  for(let i=0;i<3;i++){
+   await unknown.check();assert(await population.isDisabled());
+   await unknown.uncheck();assert(await population.isEnabled());
+  }
+  await unknown.check();
+  await dialog.getByText('Advanced settings',{exact:true}).click();
+  const populationBreakdown=dialog.getByLabel('Breakdown by location and gender',{exact:true});
+  await populationBreakdown.check();assert(await population.isDisabled());assert.equal(await unknown.isChecked(),false);
+  await populationBreakdown.uncheck();assert(await population.isEnabled(),'Population must be editable after leaving the breakdown');assert.equal(await unknown.isChecked(),false);
+  await dialog.getByText('Advanced settings',{exact:true}).click();
   await dialog.getByLabel('Unknown population',{exact:true}).check();
+  assert.equal(await dialog.locator('.sample-metrics strong').first().textContent(),'196');
+  await dialog.getByLabel('Margin of error (%)',{exact:true}).fill('10');
   assert.equal(await dialog.locator('.sample-metrics strong').first().textContent(),'97');
   await dialog.getByLabel('Unknown population',{exact:true}).uncheck();await dialog.getByLabel('Population size',{exact:true}).fill('1000');
+  await unknown.check();assert(await population.isDisabled());
+  await unknown.uncheck();assert(await population.isEnabled());assert.equal(await population.inputValue(),'1000');
   assert.equal(await dialog.locator('.sample-metrics strong').first().textContent(),'88');
   assert.equal(await dialog.getByText('Required completed interviews',{exact:true}).count(),0);
   const breakdown=dialog.getByLabel('Breakdown by location and gender',{exact:true});
@@ -56,12 +73,12 @@ const path=require('node:path');
    await page.screenshot({path:path.join(output,`${width}-${theme}.png`)});
    if(theme==='glass-light'){await dialog.locator('.sample-results').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(output,`${width}-results.png`)});}
   }
-  await dialog.getByRole('button',{name:'Reset',exact:true}).click();assert.equal(await dialog.getByLabel('Population size',{exact:true}).inputValue(),'');assert.equal(await dialog.getByLabel('Margin of error (%)',{exact:true}).inputValue(),'10');
+  await dialog.getByRole('button',{name:'Reset',exact:true}).click();assert.equal(await dialog.getByLabel('Population size',{exact:true}).inputValue(),'');assert.equal(await dialog.getByLabel('Margin of error (%)',{exact:true}).inputValue(),'7');
   await page.keyboard.press('Escape');await page.emulateMedia({reducedMotion:'reduce'});await opener.focus();await page.waitForFunction(()=>document.querySelector('.sample-calculator-button svg').getAnimations().length===0);assert.equal(await opener.locator('svg').evaluate(e=>e.getAnimations().length),0);
   await page.reload({waitUntil:'domcontentloaded'});await opener.click();assert.equal(await dialog.getByLabel('Population size',{exact:true}).inputValue(),'');
   // Verify blocked storage remains usable without changing the application's other storage consumers.
   await page.evaluate(()=>{const proto=Storage.prototype;const get=proto.getItem,set=proto.setItem;proto.getItem=function(key){if(key==='kobo-sample-size-v1')throw Error('blocked');return get.call(this,key);};proto.setItem=function(key,value){if(key==='kobo-sample-size-v1')throw Error('blocked');return set.call(this,key,value);};});
-  await page.keyboard.press('Escape');await opener.click();await dialog.getByLabel('Unknown population',{exact:true}).check();assert.equal(await dialog.locator('.sample-metrics strong').first().textContent(),'97');assert(await dialog.getByText('Local storage is unavailable.',{exact:false}).isVisible());
+  await page.keyboard.press('Escape');await opener.click();await dialog.getByLabel('Unknown population',{exact:true}).check();assert.equal(await dialog.locator('.sample-metrics strong').first().textContent(),'196');assert(await dialog.getByText('Local storage is unavailable.',{exact:false}).isVisible());
   assert.deepEqual(errors,[]);console.log(JSON.stringify({passed:true,referenceValues:true,breakdown:true,clipboard:true,csv:true,reset:true,restore:true,storageFailure:true,focus:true,reducedMotion:true,themes:5,viewports:2,errors}));
  }finally{await browser.close();server?.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

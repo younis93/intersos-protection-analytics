@@ -6,12 +6,13 @@ import time
 import uuid
 from typing import Any, Literal
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .kobo import ChartAppearance, new_project_settings, KoboFilter, KoboSettings, ProjectStore, analyze, filtered_records, label, normalize, parse_data, parse_form, propose_mapping, question_result
+from .kobo import ChartAppearance, new_project_settings, KoboFilter, KoboSettings, ProjectStore, analyze, filtered_records, label, normalize, parse_data, parse_form, propose_mapping, question_result, data_worksheets
+from .kobo_review_schema import ReviewConfig, effective_form, choice_comparison, choice_setting_impacts, validate_removed_answers
 from .kobo_import_links import review_details, reuse_links, form_changes, suggest_links, question_matches
 from .kobo_indicators import IndicatorDefinition, IndicatorResult, indicator_issues, calculate_indicator, filter_descriptions
 from .kobo_settings_share import SettingsFile, export_settings, preview_settings
@@ -85,6 +86,7 @@ class ProjectResponse(BaseModel):
     settings: KoboSettings
     warnings: list[str] = Field(default_factory=list)
     issues: list[ImportIssue] = Field(default_factory=list)
+    source: dict[str, str] = Field(default_factory=dict)
 
 
 class BreakdownCount(BaseModel):
@@ -171,6 +173,7 @@ class ConfirmImport(BaseModel):
     policies: dict[str, str] = Field(default_factory=dict)
     acceptInvalid: bool = False
     settingsPackage: SettingsFile | None = None
+    reviewConfig: ReviewConfig = Field(default_factory=ReviewConfig)
 
 
 class AnalysisRequest(BaseModel):
@@ -206,8 +209,14 @@ class QuestionPreviewRequest(AnalysisRequest):
 
 
 class CheckImport(BaseModel):
+    reviewConfig: ReviewConfig = Field(default_factory=ReviewConfig)
     mappings: list[ColumnMapping]
     policies: dict[str, str] = Field(default_factory=dict)
+
+
+class ChoiceReviewRequest(CheckImport):
+    question: str
+    separator: str = ''
 
 
 class PreviewImportSettings(CheckImport):
@@ -305,7 +314,17 @@ def make_router(store: ProjectStore | None = None):
         try: return store.get(pid)
         except KeyError as exc: raise HTTPException(404, str(exc)) from exc
 
-    def mapping_payload(item, links):
+    def mapping_payload(item, links, config=None):
+        retained = {q['id'] for q in item.get('reviewConfig', {}).get('addedQuestions', [])}
+        for question in (config or {}).get('addedQuestions', []):
+            if question['id'] in retained: continue
+            si, ci = question['sheet'], question['column']
+            if not 0 <= si < len(item['sheets']) or not 0 <= ci < len(item['sheets'][si]['headers']):
+                raise ValueError('Add a question from an existing source column.')
+            from .kobo import aliases, norm
+            group = next((g for g in item['form']['groups'] if g['id'] == question.get('repeat') and g['repeat']), None)
+            if si == 0 and question.get('repeat') or si > 0 and (not group or not any(norm(item['sheets'][si]['name']) == a or norm(item['sheets'][si]['name']).endswith('/' + a) for a in aliases(group))):
+                raise ValueError('The added question must use its source worksheet repeat context.')
         original = {(m['sheet'], m['column']): m for m in item['mappings']}
         result = []
         for link in links:
@@ -316,7 +335,13 @@ def make_router(store: ProjectStore | None = None):
             # Source type/context come from the staged files, never the client.
             for field in ['sourceKind', 'sourceRepeat']:
                 if field in source: m[field] = source[field]
+            added = next((q for q in (config or {}).get('addedQuestions', []) if q['id'] == m['question']), None)
+            if added:
+                m['sourceKind'] = ''
+                m['sourceRepeat'] = added.get('repeat', '')
             result.append(m)
+        if any(m.get('question') in (config or {}).get('excludedQuestionIds', []) for m in result):
+            raise ValueError('Ignored questions must not have active source mappings.')
         return result
 
     @router.get('/projects')
@@ -394,14 +419,26 @@ def make_router(store: ProjectStore | None = None):
         get(pid); store.delete(pid)
         return {'deleted': True}
 
+    @router.post('/imports/worksheets')
+    async def worksheets(data: UploadFile = File(...)):
+        from .main import read_upload_limited
+        try:
+            raw = await read_upload_limited(data)
+            names = await run_in_threadpool(data_worksheets, raw, data.filename or '')
+            return {'worksheets': names}
+        except HTTPException: raise
+        except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+        except Exception as exc: raise HTTPException(400, 'Unable to read this workbook. Choose a valid XLSX response workbook.') from exc
+        finally: await data.close()
+
     @router.post('/imports/preview')
-    async def preview(form: UploadFile = File(...), data: UploadFile = File(...)):
+    async def preview(form: UploadFile = File(...), data: UploadFile = File(...), worksheet: str = Form('')):
         from .main import read_upload_limited
         try:
             if not (form.filename or '').lower().endswith('.xlsx'): raise ValueError('Form must be an XLSForm .xlsx file.')
             form_raw = await read_upload_limited(form); data_raw = await read_upload_limited(data)
             parsed_form = await run_in_threadpool(parse_form, form_raw)
-            sheets = await run_in_threadpool(parse_data, data_raw, data.filename or '')
+            sheets = await run_in_threadpool(parse_data, data_raw, data.filename or '', worksheet)
             # Export metadata is available only through the metadata visibility toggle.
             for si, sheet in enumerate(sheets):
                 if si: continue
@@ -416,7 +453,7 @@ def make_router(store: ProjectStore | None = None):
                 for key in list(staged):
                     if time.monotonic() - staged[key]['created'] > 1800: del staged[key]
                 if len(staged) >= 3: raise HTTPException(409, 'Finish or cancel an existing import before starting another.')
-                staged[token] = {'created': time.monotonic(), 'form': parsed_form, 'sheets': sheets, 'formRaw': form_raw, 'dataRaw': data_raw, 'mappings': mappings, 'warnings': warnings}
+                staged[token] = {'created': time.monotonic(), 'form': parsed_form, 'sheets': sheets, 'formRaw': form_raw, 'dataRaw': data_raw, 'mappings': mappings, 'warnings': warnings, 'source': {'worksheet': worksheet}}
             return {'token': token, 'form': parsed_form, 'sheets': [{'name': s['name'], 'rows': len(s['rows']), 'columns': len(s['headers'])} for s in sheets], 'mappings': mappings, 'issues': issues, 'linkReview': link_review, 'expectedVersion': str(parsed_form.get('settings', {}).get('version') or ''), 'warnings': parsed_form['warnings'] + warnings}
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
         except (OSError, KeyError, TypeError) as exc: raise HTTPException(400, 'Unable to read this workbook. Check that it is a valid Kobo XLSX export.') from exc
@@ -438,8 +475,10 @@ def make_router(store: ProjectStore | None = None):
                 from .main import read_upload_limited
                 filename = data.filename or ''
                 data_raw = await read_upload_limited(data)
-            sheets = await run_in_threadpool(parse_data, data_raw, filename)
-            parsed_form = p['form']
+            worksheet = p.get('source', {}).get('worksheet', '') if not filename.lower().endswith('.csv') else ''
+            sheets = await run_in_threadpool(parse_data, data_raw, filename, worksheet)
+            parsed_form = p.get('baseForm', p['form'])
+            review_config = ReviewConfig.model_validate(p.get('reviewConfig', {})).model_dump()
             if form:
                 from .main import read_upload_limited
                 if not (form.filename or '').lower().endswith('.xlsx'): raise ValueError('Form must be an XLSForm .xlsx file.')
@@ -448,8 +487,24 @@ def make_router(store: ProjectStore | None = None):
                 for header in sheets[0]['headers']:
                     if header.startswith('_') or header.startswith('meta/'):
                         parsed_form['questions'].append({'id': header, 'name': header, 'labels': {'en': header}, 'type': 'text', 'kind': 'date' if header == '_submission_time' else 'text', 'group': '', 'repeat': '', 'metadata': True, 'identifying': False, 'choices': [], 'order': len(parsed_form['questions'])})
+            base_form = parsed_form
+            retained_groups = {g['id']: g for g in p['form']['groups']}
+            present_groups = {g['id'] for g in base_form['groups']}
+            def retain_group(gid):
+                if gid and gid not in present_groups and gid in retained_groups:
+                    group = retained_groups[gid]
+                    retain_group(group.get('parent', ''))
+                    base_form['groups'].append({**group, 'analysisOnly': True})
+                    present_groups.add(gid)
+            for added in review_config['addedQuestions']: retain_group(added.get('repeat', ''))
+            matches = question_matches(p.get('baseForm', p['form']), base_form)
+            review_config['choiceOverrides'] = {matches.get(k, k): v for k, v in review_config['choiceOverrides'].items() if k in matches or any(q['id'] == k for q in review_config['addedQuestions'])}
+            known = {q['id'] for q in base_form['questions']} | {q['id'] for q in review_config['addedQuestions']}
+            review_config['choiceOverrides'] = {k: v for k, v in review_config['choiceOverrides'].items() if k in known}
+            review_config['excludedQuestionIds'] = list(dict.fromkeys(matches.get(qid, qid) for qid in review_config.get('excludedQuestionIds', []) if (qid in matches or any(q['id'] == qid for q in review_config['addedQuestions'])) and matches.get(qid, qid) in known))
+            parsed_form = effective_form(base_form, review_config, sheets)
             proposed, warnings = await run_in_threadpool(propose_mapping, parsed_form, sheets)
-            old_sheets = await run_in_threadpool(parse_data, original_data_raw, 'data.xlsx' if original_data_raw.startswith(b'PK') else 'data.csv') if data else sheets
+            old_sheets = await run_in_threadpool(parse_data, original_data_raw, 'data.xlsx' if original_data_raw.startswith(b'PK') else 'data.csv', p.get('source', {}).get('worksheet', '')) if data else sheets
             mappings, reuse_warnings = await run_in_threadpool(reuse_links, p, parsed_form, sheets, old_sheets, proposed)
             warnings += reuse_warnings
             mappings = await run_in_threadpool(suggest_links, parsed_form, sheets, mappings)
@@ -462,7 +517,7 @@ def make_router(store: ProjectStore | None = None):
                 for key in list(staged):
                     if time.monotonic() - staged[key]['created'] > 1800: del staged[key]
                 if len(staged) >= 3: raise HTTPException(409, 'Finish or cancel an existing import before starting another.')
-                staged[token] = {'created': time.monotonic(), 'projectId': pid, 'form': parsed_form, 'sheets': sheets, 'formRaw': form_raw, 'dataRaw': data_raw, 'mappings': mappings, 'warnings': warnings}
+                staged[token] = {'created': time.monotonic(), 'projectId': pid, 'form': base_form, 'reviewConfig': review_config, 'settings': p['settings'], 'sheets': sheets, 'formRaw': form_raw, 'dataRaw': data_raw, 'mappings': mappings, 'warnings': warnings, 'source': {'worksheet': worksheet}}
             version_counts = {}
             for sheet in sheets:
                 for index, header in enumerate(sheet['headers']):
@@ -470,7 +525,7 @@ def make_router(store: ProjectStore | None = None):
                         for row in sheet['rows']:
                             value = str(row[index]) if index < len(row) and row[index] is not None else ''
                             if value: version_counts[value] = version_counts.get(value, 0) + 1
-            return {'token': token, 'form': parsed_form, 'sheets': [{'name': s['name'], 'rows': len(s['rows']), 'columns': len(s['headers'])} for s in sheets], 'mappings': mappings, 'policies': policies, 'issues': issues, 'examples': examples, 'warnings': parsed_form['warnings'] + warnings, 'linkReview': link_review, 'formChanges': form_changes(p['form'], parsed_form), 'sourceVersions': version_counts, 'expectedVersion': str(parsed_form.get('settings', {}).get('version', ''))}
+            return {'token': token, 'form': base_form, 'reviewConfig': review_config, 'sheets': [{'name': s['name'], 'rows': len(s['rows']), 'columns': len(s['headers'])} for s in sheets], 'mappings': mappings, 'policies': policies, 'issues': issues, 'examples': examples, 'warnings': parsed_form['warnings'] + warnings, 'linkReview': link_review, 'formChanges': form_changes(p['form'], parsed_form), 'sourceVersions': version_counts, 'expectedVersion': str(parsed_form.get('settings', {}).get('version', ''))}
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
         finally:
             if form: await form.close()
@@ -481,10 +536,37 @@ def make_router(store: ProjectStore | None = None):
         with lock: item = staged.get(token)
         if not item or time.monotonic() - item['created'] > 1800: raise HTTPException(410, 'Import preview expired. Open the review again.')
         try:
-            mappings = mapping_payload(item, body.mappings)
-            issues, link_review = review_details(item['form'], item['sheets'], mappings, body.policies)
+            mappings = mapping_payload(item, body.mappings, body.reviewConfig.model_dump())
+            form = effective_form(item['form'], body.reviewConfig.model_dump(), item['sheets'])
+            issues, link_review = review_details(form, item['sheets'], mappings, body.policies)
             examples = answer_examples(item['sheets'], mappings, issues)
-            return {'issues': issues, 'examples': examples, 'linkReview': link_review}
+            impacts = []
+            settings = item.get('settings') or {}
+            context = {'form': form, 'records': []}
+            for definition in settings.get('indicators', []):
+                problems = indicator_issues(context, IndicatorDefinition.model_validate(definition))
+                if problems: impacts.append({'name': definition['name'], 'issues': problems})
+            from .kobo import SavedAnalysisView, AnalysisViewSettings
+            from .kobo_saved_views import snapshot_issues
+            problems = snapshot_issues(context, AnalysisViewSettings.model_validate(settings))
+            if problems: impacts.append({'name': 'Current analysis settings', 'issues': problems})
+            for view in settings.get('savedViews', []):
+                problems = saved_view_issues(context, SavedAnalysisView.model_validate(view))
+                if problems: impacts.append({'name': view['name'], 'issues': problems})
+            return {'issues': issues, 'examples': examples, 'linkReview': link_review, 'questionImpacts': impacts, 'choiceImpacts': choice_setting_impacts(item.get('settings'), item['form'], form)}
+        except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
+    @router.post('/imports/{token}/choices')
+    def review_choices(token: str, body: ChoiceReviewRequest):
+        with lock: item = staged.get(token)
+        if not item or time.monotonic() - item['created'] > 1800: raise HTTPException(410, 'Import preview expired. Open the review again.')
+        try:
+            config = body.reviewConfig.model_dump()
+            form = effective_form(item['form'], config, item['sheets'], allow_empty=True)
+            mappings = mapping_payload(item, body.mappings, body.reviewConfig.model_dump())
+            from .kobo_import_links import validate_links
+            validate_links(form, item['sheets'], [{**m, 'answerMap': {}} for m in mappings])
+            return choice_comparison(form, item['sheets'], mappings, body.question, body.separator, item.get('settings'))
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
     @router.post('/imports/{token}/settings-preview')
@@ -492,16 +574,17 @@ def make_router(store: ProjectStore | None = None):
         with lock: item = staged.get(token)
         if not item or time.monotonic() - item['created'] > 1800: raise HTTPException(410, 'Import preview expired. Upload both files again.')
         try:
-            records, _ = normalize(item['form'], item['sheets'], mapping_payload(item, body.mappings), body.policies)
-            defaults = new_project_settings(item['form'])
-            return preview_settings({'form': item['form'], 'records': records}, defaults, body.package)
+            form = effective_form(item['form'], body.reviewConfig.model_dump(), item['sheets'])
+            records, _ = normalize(form, item['sheets'], mapping_payload(item, body.mappings, body.reviewConfig.model_dump()), body.policies)
+            defaults = new_project_settings(form)
+            return preview_settings({'form': form, 'records': records}, defaults, body.package)
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
     @router.post('/imports/confirm', response_model=ProjectResponse)
     def confirm(body: ConfirmImport):
         with lock: item = staged.get(body.token)
         if not item or time.monotonic() - item['created'] > 1800: raise HTTPException(410, 'Import preview expired. Upload both files again.')
-        try: mappings = mapping_payload(item, body.mappings)
+        try: mappings = mapping_payload(item, body.mappings, body.reviewConfig.model_dump())
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
         if len({(m['sheet'], m['column']) for m in mappings}) != len(mappings): raise HTTPException(400, 'Each source column must appear only once.')
         expected = {(si, ci) for si, sheet in enumerate(item['sheets']) for ci in range(len(sheet['headers']))}
@@ -510,16 +593,21 @@ def make_router(store: ProjectStore | None = None):
         if any((m['status'] == 'matched') != bool(m['question']) for m in mappings): raise HTTPException(400, 'Matched columns require a question; excluded columns must not have one.')
         for m in mappings:
             m['header'] = item['sheets'][m['sheet']]['headers'][m['column']]
-        try: records, issues = normalize(item['form'], item['sheets'], mappings, body.policies)
+        try:
+            form = effective_form(item['form'], body.reviewConfig.model_dump(), item['sheets'])
+            missing_questions = [q['id'] for q in form['questions'] if not q.get('metadata') and not any(m['question'] == q['id'] and m['status'] == 'matched' for m in mappings)]
+            if missing_questions: raise ValueError('Link a data column or explicitly ignore every question without data: ' + ', '.join(missing_questions))
+            records, issues = normalize(form, item['sheets'], mappings, body.policies)
+            validate_removed_answers(item['form'], form, item['sheets'], mappings)
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
         if any('conflicting mapped columns' in issue['message'] for issue in issues):
             raise HTTPException(422, {'message': 'Choose a source priority or explicitly leave conflicting merged answers blank before applying.', 'issues': issues})
         if issues and not body.acceptInvalid: raise HTTPException(422, {'message': 'Review normalization issues. Choose an encoding or explicitly accept invalid answers as blank.', 'issues': issues})
-        payload = {'form': item['form'], 'records': records, 'mappings': mappings, 'policies': body.policies, 'warnings': item['warnings'] + item['form']['warnings'], 'issues': issues}
+        payload = {'form': form, 'baseForm': item['form'], 'reviewConfig': body.reviewConfig.model_dump(), 'records': records, 'mappings': mappings, 'policies': body.policies, 'warnings': item['warnings'] + item['form']['warnings'], 'issues': issues, 'source': item.get('source', {})}
         initial_settings = None
         if body.settingsPackage is not None:
             if item.get('projectId'): raise HTTPException(400, 'Import shared settings from the project Settings menu after reviewing your data.')
-            defaults = new_project_settings(item['form'])
+            defaults = new_project_settings(form)
             try: initial_settings = KoboSettings.model_validate(preview_settings(payload, defaults, body.settingsPackage)['settings'])
             except ValueError as exc: raise HTTPException(400, str(exc)) from exc
         try:

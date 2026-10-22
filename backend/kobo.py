@@ -250,8 +250,18 @@ def parse_form(raw: bytes) -> dict:
     finally: book.close()
 
 
-def parse_data(raw: bytes, filename: str) -> list[dict]:
+def data_worksheets(raw: bytes, filename: str) -> list[str]:
+    if not filename.lower().endswith('.xlsx'): raise ValueError('Choose an .xlsx response workbook.')
+    validate_xlsx_archive(raw)
+    book = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    try:
+        return [sheet.title for sheet in book.worksheets]
+    finally: book.close()
+
+
+def parse_data(raw: bytes, filename: str, worksheet: str = '') -> list[dict]:
     if filename.lower().endswith('.csv'):
+        if worksheet: raise ValueError('Worksheet selection is only available for Excel workbooks.')
         try: text = raw.decode('utf-8-sig')
         except UnicodeDecodeError:
             try: text = raw.decode('utf-16')
@@ -267,11 +277,15 @@ def parse_data(raw: bytes, filename: str) -> list[dict]:
     book = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
     try:
         sheets = []
-        for sheet in book:
+        if worksheet and worksheet not in [sheet.title for sheet in book.worksheets]:
+            raise ValueError(f'The worksheet "{worksheet}" is not available in this workbook.')
+        for sheet in ([book[worksheet]] if worksheet else book.worksheets):
             rows = sheet.iter_rows(values_only=True)
             header = next(rows, ())
-            if not header: continue
+            if not header or (worksheet and not any(not missing(v) for v in header)): continue
             sheets.append({'name': sheet.title, 'headers': [str(v) if v is not None else '' for v in header], 'rows': [[scalar(v) for v in row] for row in rows if any(not missing(v) for v in row)]})
+        if worksheet and (not sheets or not sheets[0]['rows']):
+            raise ValueError(f'The worksheet "{worksheet}" is empty. Choose a sheet with headers and response rows.')
         if not sheets: raise ValueError('Data workbook contains no header rows.')
         return sheets
     finally: book.close()
@@ -425,7 +439,8 @@ def normalize(form: dict, sheets: list[dict], mappings: list[dict], policies: di
             for qid, ms in by_sheet[si].items():
                 q = questions[qid]; scope = q['repeat'] or scope
                 effective_question = filtered_choices(q, values, questions)
-                value = None if q['kind'] == 'multiple' and policies.get(qid) == 'split' else reconcile_values(effective_question, ms, row, issues, review, sheet['name'], ri + 2)
+                policy = policies.get(qid) or ('split' if q['kind'] == 'multiple' and any(m.get('option') for m in ms) else 'combined')
+                value = None if q['kind'] == 'multiple' and policy == 'split' else reconcile_values(effective_question, ms, row, issues, review, sheet['name'], ri + 2)
                 if q['kind'] == 'multiple':
                     combined = value or []
                     split = set(); split_seen = False
@@ -436,11 +451,7 @@ def normalize(form: dict, sheets: list[dict], mappings: list[dict], policies: di
                         split_seen = True
                         if norm(str(v)) in {'1', '1.0', 'true', 'yes', 'selected'}: split.add(m['option'])
                         elif norm(str(v)) not in {'0', '0.0', 'false', 'no'}: issues[(qid, 'invalid split-option flag')] += 1
-                    policy = policies.get(qid, '')
-                    conflict = not missing(value) and split_seen and set(combined) != split and policy not in {'combined', 'split'}
-                    if conflict: issues[(qid, 'combined/split selections disagree')] += 1
                     selected = split if policy == 'split' or (missing(value) and split_seen) else set(combined)
-                    if conflict: selected = set()
                     values[qid] = sorted(selected) or None
                 else: values[qid] = value
             records.append({'id': rid, 'parent': parent, 'scope': scope, 'sheet': si, 'row': ri + 2, 'values': values})

@@ -42,7 +42,7 @@ export default function SampleSizeCalculator({onClose}:{onClose:()=>void}){
    {field('Non-response allowance (%)',draft.nonresponse,v=>update('nonresponse',v),{max:99,hint:'Inflates people to approach, not completed interviews.'})}
   </div>
   <section className="sample-section" aria-label="Population breakdown">
-   <label className="sample-check"><input type="checkbox" checked={draft.breakdown} onChange={e=>update('breakdown',e.target.checked)}/><strong>Breakdown by location and gender</strong></label>
+   <label className="sample-check"><input type="checkbox" checked={draft.breakdown} onChange={e=>{const breakdown=e.target.checked;setDraft(current=>({...current,breakdown,unknown:false}));}}/><strong>Breakdown by location and gender</strong></label>
    {draft.breakdown&&<>
     <label className="sample-field"><span>Allocation mode</span><select aria-label="Allocation mode" value={draft.mode} onChange={e=>update('mode',e.target.value as SampleDraft['mode'])}><option value="overall">Distribute overall sample</option><option value="groups">Precision for each group</option></select></label>
     <p>{draft.mode==='overall'?'The selected margin of error applies to the overall estimate, not to each group. Interviews are distributed proportionally.':'Each location, or each location/gender group, gets its own sample size. This increases the total and does not establish statistical power for comparisons. Known group population counts are required.'}</p>
