@@ -154,3 +154,9 @@
  .kobo-shell .kobo-note-action{font-size:0;gap:0}
 }
 @media print{.kobo-shell .kobo-controls{display:none}}
+
+/* Project sections follow the shared sidebar navigation; mobile uses one selector. */
+.kobo-mobile-workspace{display:none}.kobo-shell .sidebar nav .kobo-project-section>svg{width:18px;height:18px;flex-shrink:0}.kobo-shell .kobo-group-navigation-host[hidden]{display:none}
+@media(max-width:900px){.kobo-shell .sidebar nav .kobo-project-section{display:none!important}.kobo-mobile-workspace{display:block;margin:4px 0 18px}.kobo-mobile-workspace>.app-select{width:100%;min-width:0;box-sizing:border-box}.kobo-mobile-workspace .app-select-trigger{min-height:44px}.kobo-mobile-workspace .app-select-label{font-size:10px}}
+@media print{.kobo-mobile-workspace{display:none}}
+@media(max-width:900px){.kobo-shell .kobo-mobile-workspace>.app-select{display:grid;grid-template-columns:20px minmax(0,1fr);grid-template-rows:12px 24px;column-gap:10px;row-gap:2px;align-content:center;height:58px;padding:10px 14px;border-radius:14px}.kobo-mobile-workspace .app-select-icon{grid-column:1;grid-row:1/3;width:18px;height:18px;align-self:center}.kobo-mobile-workspace .app-select-label{grid-column:2;grid-row:1;margin:0}.kobo-mobile-workspace .app-select-trigger{grid-column:2;grid-row:2;min-height:24px;height:24px;padding:0;padding-inline-end:22px;justify-content:space-between;font-size:13px;text-align:start}.kobo-mobile-workspace .app-select-trigger>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}

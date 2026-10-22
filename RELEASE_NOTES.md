@@ -1,2 +1,1 @@
-- Added **Kobo Analysis**, accessible directly from the Home page.
-- Choose which page opens at launch: **Home**, **Legal Platform**, or **Kobo Analysis**.
+- Added **Import/Export project** in Kobo.

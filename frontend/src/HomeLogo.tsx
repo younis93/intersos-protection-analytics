@@ -8,6 +8,7 @@ export function HomeLogo({children}:{children?:ReactNode}){
   const [spinning,setSpinning]=useState(false),[highlighted,setHighlighted]=useState(false),[ready,setReady]=useState(false);
   const canvas=useRef<HTMLCanvasElement>(null),renderer=useRef<ReturnType<typeof createGlobeRenderer>|undefined>(undefined);
   const initialization=useRef<Promise<void>|undefined>(undefined);
+  const autoPlayed=useRef(false);
   const busy=useRef(false),frame=useRef<number|undefined>(undefined),timer=useRef<number|undefined>(undefined),generation=useRef(0);
   const cancel=(updateState=true)=>{
     generation.current++;
@@ -32,7 +33,7 @@ export function HomeLogo({children}:{children?:ReactNode}){
       setReady(true);
     }).catch(()=>{});
     const onPreference=()=>{if(preference.matches&&busy.current){cancel();highlight()}};
-    const onVisibility=()=>{if(document.hidden)cancel()};
+    const onVisibility=()=>{if(document.hidden){autoPlayed.current=true;cancel()}};
     const themeObserver=new MutationObserver(()=>renderer.current?.(0));
     themeObserver.observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
     preference.addEventListener('change',onPreference);
@@ -64,6 +65,11 @@ export function HomeLogo({children}:{children?:ReactNode}){
       if(current===generation.current){cancel();highlight()}
     }
   };
+  useEffect(()=>{
+    if(!ready||autoPlayed.current)return;
+    autoPlayed.current=true;
+    if(!document.hidden)void spin();
+  },[ready]);
   return <button type="button" className="welcome-logo-secret" onClick={()=>void spin()} aria-label="Animate INTERSOS home logo" aria-busy={spinning}>
     <span className={`home-logo-motion${ready?' is-globe-ready':''}${spinning?' is-spinning':''}${highlighted?' is-highlighted':''}`}>
       <span className="welcome-logo-mark"><span className="home-logo-emblem">

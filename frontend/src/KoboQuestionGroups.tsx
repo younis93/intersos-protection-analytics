@@ -98,7 +98,7 @@ export default function KoboQuestionGroups({analysis,renderQuestion,tools,tableO
  return <div ref={host} className="kobo-analysis-sections">
   <KoboSidebarGroups groups={tree.list} active={tableOnly?tableGroup:active} onNavigate={id=>{const group=tree.nodes.get(id);if(group)navigate(group)}} language={analysis.settings.language}/>
   <span ref={sentinel} className="kobo-controls-sentinel" aria-hidden="true"/>
-  <div ref={toolbar} className={`kobo-sticky-controls${pinned?' is-pinned':''}`} aria-label="Analysis controls">
+  <div ref={toolbar} className={`kobo-filter-surface kobo-sticky-controls${pinned?' is-pinned':''}`} aria-label="Analysis controls">
    {renderFilters&&<div className="kobo-sticky-filter-slot">{renderFilters(pinned)}</div>}
    <div className="kobo-analysis-toolbar" aria-label="Analysis navigation">
    <div className="kobo-analysis-toolbar-header">

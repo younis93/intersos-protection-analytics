@@ -1,13 +1,13 @@
 import {displayPercent,formatPercent} from './koboPercentages';
 import {jsPDF} from 'jspdf';
 import {koboPdfChartPanels} from './koboChartDensity';
-import type {KoboAnalysis,KoboResult,KoboRow} from './koboTypes';
+import type {KoboAnalysis,KoboReport,KoboResult,KoboRow} from './koboTypes';
 
-export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,loaded:string[],imageFor:(result:KoboResult)=>Promise<string>,progress:(done:number,total:number)=>void,includeIntroduction=true){
- if(!snapshot.questions.length)throw new Error('There are no visible questions to export.');
- const pdf=new jsPDF({orientation:'landscape',unit:'pt',format:'a4',compress:true,putOnlyUsedFonts:true});
+export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,loaded:string[],imageFor:(result:KoboResult)=>Promise<string>,progress:(done:number,total:number)=>void,includeIntroduction=true,report?:KoboReport){
+ if(!snapshot.questions.length&&!report)throw new Error('There are no visible questions to export.');
+ const pdf=new jsPDF({orientation:report?'portrait':'landscape',unit:'pt',format:'a4',compress:true,putOnlyUsedFonts:true});
  for(const[i,style]of ['normal','bold'].entries()){pdf.addFileToVFS(`KoboArabic-${style}.ttf`,loaded[i]);pdf.addFont(`KoboArabic-${style}.ttf`,'KoboArabic',style)}
- pdf.setProperties({title:name,author:'INTERSOS',creator:'INTERSOS Protection Analysis',subject:'Kobo Analysis report'});
+ pdf.setProperties({title:report?.title.trim()||name,author:'INTERSOS',creator:'INTERSOS Protection Analysis',subject:'Kobo Analysis report'});
  const Engine=(jsPDF as unknown as {__bidiEngine__:new(options:object)=>{doBidiReorder:(s:string)=>string}}).__bidiEngine__;
  const bidi=new Engine({isInputVisual:false,isOutputVisual:true,isOutputRtl:false});
  const arabic=/[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff\ufb50-\ufdff\ufe70-\ufeff]/;
@@ -52,7 +52,20 @@ export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,lo
   if(lines.length>limit){lines.length=limit;lines[limit-1]=shorten(lines[limit-1]+'...',maxWidth,size,bold)}
   return lines;
  }
- if(includeIntroduction){
+ if(report){
+  page(true);
+  paragraph(report.title.trim()||name,22,true,navy);
+  paragraph(name,11,false,muted);
+  paragraph(`${rtl?'الاستجابات':'Submissions'}: ${number(snapshot.filtered)} / ${number(snapshot.total)}`,10);
+  paragraph(rtl?'عوامل التصفية النشطة':'Active filters',12,true,navy);
+  for(const summary of snapshot.filterSummary.length?snapshot.filterSummary:[rtl?'جميع الاستجابات':'All responses'])paragraph(summary,10);
+  for(const [key,en,ar] of [['findings','Findings','النتائج'],['methodology','Methodology and limitations','المنهجية والقيود'],['recommendations','Recommendations','التوصيات']] as const){
+   if(!report[key].trim())continue;
+   if(y+50>bottom)page();
+   paragraph(rtl?ar:en,13,true,navy);paragraph(report[key],10);
+  }
+  paragraph(rtl?'تعتمد النسب على الإجابات ضمن عوامل التصفية المحددة. قد يتجاوز مجموع نسب الاختيار المتعدد 100٪.':'Percentages use answered responses under the selected filters. Multiple-selection totals may exceed 100%.',9,false,muted);
+ }else if(includeIntroduction){
  page(true);y=77;
  paragraph(rtl?'تقرير تحليل الاستبيان':'Survey analysis report',11,true,blue);
  paragraph(name,25,true,navy);

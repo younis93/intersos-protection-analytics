@@ -322,6 +322,38 @@ def make_router(store: ProjectStore | None = None):
     @router.get('/projects')
     def projects(): return store.list()
 
+    @router.post('/backups/restore', response_model=ProjectResponse)
+    async def restore_backup(file: UploadFile = File(...)):
+        from .kobo_workspace import MAX_BACKUP, read_backup
+        raw = await file.read(MAX_BACKUP + 1)
+        try:
+            name, payload, settings, form_raw, data_raw = await run_in_threadpool(read_backup, raw)
+            FormSchema.model_validate(payload['form'])
+            question_ids = [q['id'] for q in payload['form']['questions']]
+            if len(set(question_ids)) != len(question_ids):
+                raise ValueError('Duplicate question identifiers in backup.')
+            filtered_records(payload, settings)
+            return await run_in_threadpool(store.create, name, payload, form_raw, data_raw, settings)
+        except (ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.get('/projects/{pid}/backup')
+    def download_backup(pid: str):
+        from .kobo_workspace import backup_project
+        get(pid)
+        try:
+            return Response(backup_project(store, pid), media_type='application/zip', headers={'Content-Disposition': 'attachment; filename="project.kobo-backup.zip"'})
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @router.post('/projects/{pid}/geography')
+    def geographic_analysis(pid: str, body: dict):
+        from .kobo_workspace import geography
+        try:
+            return geography(get(pid), KoboSettings.model_validate(body.get('settings', {})), body.get('field', ''))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     @router.get('/projects/{pid}', response_model=ProjectResponse)
     def project(pid: str):
         p = get(pid)

@@ -7,7 +7,7 @@
 .kobo-project-card-copy{flex:1;min-width:0;padding-top:1px}
 .kobo-shell .kobo-project-card .kobo-project-card-title{margin:0 0 4px;font-size:17px;font-weight:700;line-height:1.4;letter-spacing:-.015em;overflow-wrap:anywhere;text-align:start}
 .kobo-shell .kobo-project-card .kobo-project-description{margin:0;font-size:11px;line-height:1.5;color:var(--muted)}
-.kobo-shell .kobo-project-card .kobo-project-card-edit{display:grid;place-items:center;flex-shrink:0;width:30px;min-width:30px;height:30px;min-height:30px;padding:0;margin:0;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);box-shadow:none}
+.kobo-shell .kobo-project-card .kobo-project-card-edit{display:grid;place-items:center;box-sizing:border-box;flex:0 0 40px;width:40px;min-width:40px;height:40px;min-height:40px;padding:0;margin:0;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--muted);box-shadow:none}
 .kobo-shell .kobo-project-card .kobo-project-card-edit:hover{border-color:var(--line);background:var(--panel-strong);color:var(--blue)}
 .kobo-project-card-edit svg{width:15px;height:15px}
 .kobo-project-updated{display:flex;align-items:center;gap:5px;min-width:0;margin-top:7px;color:var(--muted);font-size:10px;line-height:1.4;flex-wrap:wrap}
@@ -19,7 +19,7 @@
 .kobo-shell .kobo-project-card-actions>a{display:flex;align-items:center;justify-content:center;gap:8px;flex:1;min-width:0;min-height:40px;padding:10px 12px;border-radius:10px;font-size:12px;box-shadow:none}
 .kobo-project-card-actions>a>svg{width:17px;height:17px;flex-shrink:0}
 .kobo-project-card-actions>a>svg:last-child{margin-inline-start:auto;width:15px;height:15px;opacity:.8}
-.kobo-shell .kobo-project-card-actions>.kobo-project-delete{display:grid;place-items:center;width:40px;height:40px;min-height:40px;padding:0;flex-shrink:0;border:1px solid var(--line);border-radius:10px;color:var(--muted);background:transparent;box-shadow:none}
+.kobo-shell .kobo-project-card-actions>.kobo-project-delete{display:grid;place-items:center;box-sizing:border-box;flex:0 0 40px;width:40px;min-width:40px;height:40px;min-height:40px;padding:0;border:1px solid var(--line);border-radius:10px;color:var(--muted);background:transparent;box-shadow:none}
 .kobo-shell .kobo-project-card-actions>.kobo-project-delete:hover{color:#b91c1c;border-color:color-mix(in srgb,#dc2626 30%,var(--line));background:color-mix(in srgb,#dc2626 7%,transparent)}
 @media(max-width:480px){.kobo-shell .kobo-project.kobo-project-card{padding:18px}.kobo-project-card-header{gap:10px}}
 @media(prefers-reduced-motion:reduce){.kobo-shell .kobo-project.kobo-project-card{transition:none;transform:none}}

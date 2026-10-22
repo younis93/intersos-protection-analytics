@@ -1,6 +1,6 @@
+import {koboWorkspaceSections,type KoboWorkspaceSection} from './KoboWorkspaceNavigation';
 import {useEffect,useState,type ReactNode} from 'react';
-import {ArrowLeft,ChartColumnIncreasing,ChevronDown,Database,FolderOpen,Home,Maximize2,Minimize2} from 'lucide-react';
-import {AnimatedSectionIcon} from './AnimatedNavigationIcon';
+import {ArrowLeft,ChevronDown,Database,FolderOpen,Home,Maximize2,Minimize2} from 'lucide-react';
 import {KoboGroupNavigationHost} from './KoboGroupNavigation';
 import './workspace.css';
 import './koboWorkspace.css';
@@ -8,6 +8,8 @@ import './koboIconMotion.css';
 
 type Props={
  projectId:string;
+ activeWorkspace:KoboWorkspaceSection;
+ onWorkspaceChange:(workspace:KoboWorkspaceSection)=>void;
  language:'en'|'ar';
  onNavigate:(route:string)=>void;
  onImport:()=>void;
@@ -16,7 +18,7 @@ type Props={
 };
 
 /** Uses the same workspace chrome, navigation and layout classes as Legal Platform. */
-export default function KoboWorkspaceShell({projectId,language,onNavigate,onImport,children,dialogs}:Props){
+export default function KoboWorkspaceShell({projectId,activeWorkspace,onWorkspaceChange,language,onNavigate,onImport,children,dialogs}:Props){
  const[collapsed,setCollapsed]=useState(()=>localStorage.getItem('kobo-sidebar-collapsed')==='true');
  const[groupHost,setGroupHost]=useState<HTMLDivElement|null>(null);
  const[fullscreen,setFullscreen]=useState(Boolean(document.fullscreenElement));
@@ -36,11 +38,11 @@ export default function KoboWorkspaceShell({projectId,language,onNavigate,onImpo
    </div>
    <div className="legal-sidebar-utilities"><button aria-label="Home" title="Home" onClick={()=>onNavigate('#/')}><Home/><span>Home</span></button><button className="legal-menu-slide-toggle" aria-label={collapsed?'Expand menu':'Slide menu left'} aria-expanded={!collapsed} title={collapsed?'Expand menu':'Slide menu left'} onClick={()=>setCollapsed(previous=>{localStorage.setItem('kobo-sidebar-collapsed',String(!previous));return !previous})}><ArrowLeft/><span>{collapsed?'Expand':'Slide left'}</span></button></div>
    <nav aria-label="Kobo navigation">
-    <button className={!projectId?'active':''} aria-current={!projectId?'page':undefined} onClick={()=>onNavigate('#/kobo')} title="Projects"><AnimatedSectionIcon Icon={FolderOpen} iconStyle="briefcase-business" active={!projectId}/><span>Projects</span></button>
-    <button className={projectId?'active':''} aria-current={projectId?'page':undefined} disabled={!projectId} onClick={()=>onNavigate(`#/kobo/${projectId}`)} title="Analysis"><AnimatedSectionIcon Icon={ChartColumnIncreasing} iconStyle="chart-column-increasing" active={!!projectId}/><span>Analysis</span></button>
+    <button className={!projectId?'active':''} aria-current={!projectId?'page':undefined} onClick={()=>onNavigate('#/kobo')} title="Projects"><FolderOpen aria-hidden="true"/><span>Projects</span></button>
+    {projectId&&koboWorkspaceSections.map(({id,label,Icon})=><button key={id} type="button" className={`kobo-project-section${activeWorkspace===id?' active':''}`} aria-current={activeWorkspace===id?'page':undefined} onClick={()=>onWorkspaceChange(id)} title={label}><Icon aria-hidden="true"/><span>{label}</span></button>)}
     <button className="kobo-mobile-home" aria-label="Home" onClick={()=>onNavigate('#/')} title="Home"><Home/><span>Home</span></button>
    </nav>
-   <div className="kobo-group-navigation-host" ref={setGroupHost}/>
+   <div className="kobo-group-navigation-host" hidden={!projectId||activeWorkspace!=='analysis'} ref={setGroupHost}/>
   </aside>
   <main>
    <header className="topbar"><div className="mobile-brand">Kobo Analysis</div><div className="header-actions"><div id="legal-header-scroll-controls" className="legal-header-scroll-slot"/></div></header>

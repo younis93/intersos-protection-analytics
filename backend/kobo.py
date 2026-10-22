@@ -20,6 +20,7 @@ from typing import Any, Literal
 import openpyxl
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .kobo_geography import GeographyConfig
 from .kobo_indicators import IndicatorDefinition
 from .file_security import validate_xlsx_archive
 from .kobo_percentages import apply_display_percentages
@@ -124,12 +125,24 @@ class SavedAnalysisView(BaseModel):
         return value.strip()
 
 
+class WorkspaceReport(BaseModel):
+    title: str = Field('', max_length=300)
+    findings: str = Field('', max_length=30000)
+    methodology: str = Field('', max_length=30000)
+    recommendations: str = Field('', max_length=30000)
+    questions: list[str] = Field(default_factory=list, max_length=500)
+
+
 class KoboSettings(AnalysisViewSettings):
     version: int = 1
     excelGroups: list[str] | None = None
     indicators: list[IndicatorDefinition] = Field(default_factory=list, max_length=100)
     savedViews: list[SavedAnalysisView] = Field(default_factory=list, max_length=100)
     activeViewId: str = ''
+    dashboardQuestions: list[str] = Field(default_factory=list, max_length=500)
+    geographyField: str = ''
+    geographyConfigs: dict[str, GeographyConfig] = Field(default_factory=dict)
+    report: WorkspaceReport = Field(default_factory=WorkspaceReport)
 
     @model_validator(mode='after')
     def unique_saved_views(self):

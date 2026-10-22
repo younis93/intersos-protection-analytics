@@ -978,7 +978,9 @@ path.detention-map-region{stroke:color-mix(in srgb,var(--muted) 32%,var(--line))
   .legal-menu-slide-toggle svg{transition:transform .34s cubic-bezier(.22,1,.36,1)}
   .legal-shell.sidebar-collapsed .legal-menu-slide-toggle svg{transform:rotate(180deg)}
 }
-@media(prefers-reduced-motion:reduce){.legal-shell,.legal-shell .sidebar,.legal-menu-slide-toggle svg{transition:none!important}}
+.legal-shell.sidebar-collapsed .legal-menu-slide-toggle:is(:hover,:focus-visible)>svg.lucide{animation:sidebar-expand-right .55s ease-in-out}
+@keyframes sidebar-expand-right{0%,100%{transform:translateX(0) rotate(180deg)}50%{transform:translateX(4px) rotate(180deg)}}
+@media(prefers-reduced-motion:reduce){.legal-shell,.legal-shell .sidebar,.legal-menu-slide-toggle svg{transition:none!important}.legal-shell.sidebar-collapsed .legal-menu-slide-toggle:is(:hover,:focus-visible)>svg.lucide{animation:none}}
 /* Expanded maps resize to the available window, including short laptop screens. */
 .expanded-map-modal{padding:12px}
 .expanded-map-modal .indicator-modal-panel{width:min(1540px,100%);height:calc(100dvh - 24px);max-height:calc(100dvh - 24px);min-height:0}
@@ -1305,23 +1307,8 @@ table th[data-value-align]>button>span{text-align:inherit!important}
 :root[data-theme='glass-dark'] .welcome-page .workspace-card{--card-color:color-mix(in srgb,var(--blue) 78%,white)}
 .welcome-page .welcome-logo-secret,.welcome-page .welcome-logo-word,.welcome-page .welcome-header>span{color:var(--blue)}
 .home-logo-frame{display:block;width:100%;height:100%;background:currentColor;mask-image:url('/intersos-symbol-transparent.png');mask-size:100% 100%;mask-repeat:no-repeat}
-/* Startup preference lives beside Update in the home toolbar. */
-.welcome-home-actions .startup-settings-button{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:44px;padding:11px 16px;border:1px solid var(--line);border-radius:14px;background:color-mix(in srgb,var(--panel-strong) 92%,transparent);color:var(--ink);font-size:13px;font-weight:600;white-space:nowrap;box-shadow:0 4px 16px color-mix(in srgb,var(--ink) 5%,transparent)}
-.startup-settings-button svg{width:18px;height:18px;color:var(--blue)}
-.welcome-home-actions .startup-settings-button:hover{background:var(--panel-strong);border-color:color-mix(in srgb,var(--blue) 45%,var(--line));color:var(--blue)}
-.startup-settings-dialog{width:min(420px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;padding:26px;border:1px solid var(--line);border-radius:24px;background:var(--panel-strong);color:var(--ink);box-shadow:0 24px 80px color-mix(in srgb,var(--ink) 20%,transparent)}
-.startup-settings-dialog::backdrop{background:rgba(13,31,49,.3);backdrop-filter:blur(6px)}
-.startup-settings-dialog header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
-.startup-settings-icon{display:grid;place-items:center;width:46px;height:46px;border-radius:14px;background:color-mix(in srgb,var(--blue) 10%,var(--panel-strong));color:var(--blue);border:1px solid color-mix(in srgb,var(--blue) 18%,var(--line))}
-.startup-settings-icon svg{width:23px;height:23px}
-.startup-settings-dialog .startup-settings-close{display:grid;place-items:center;width:34px;height:34px;min-height:34px;padding:8px;border-radius:10px;color:var(--muted)}
-.startup-settings-close svg{width:18px;height:18px}
-.startup-settings-dialog h2{margin:0 0 8px;font-size:22px;letter-spacing:-.03em}
-.startup-settings-dialog p{font-size:13px;line-height:1.65;color:var(--muted);margin:0 0 22px}
-.startup-settings-dialog .app-select{width:100%;min-width:0}
-.startup-settings-dialog .startup-settings-notice{margin:14px 0 0;color:var(--blue)}
-.startup-settings-dialog .startup-settings-error{margin:14px 0 0;color:var(--danger,#c84444)}
-.startup-settings-dialog footer{display:flex;justify-content:flex-end;gap:10px;margin-top:24px;padding-top:18px;border-top:1px solid var(--line)}
-.startup-settings-dialog footer button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px}
-.startup-settings-dialog footer svg{width:16px;height:16px}
-@media(max-width:600px){.welcome-home-actions .startup-settings-button{width:44px;min-width:44px;padding:12px}.startup-settings-button>span{display:none}.startup-settings-dialog{padding:22px}}
+/* Startup preference saves directly from the home toolbar dropdown. */
+.startup-launch-select{position:relative;flex:none}.welcome-home-actions .startup-launch-select>.app-select{display:grid;grid-template-columns:18px minmax(0,1fr);grid-template-rows:12px 22px;column-gap:9px;align-content:center;box-sizing:border-box;width:178px;min-width:0;height:48px;padding:7px 12px;border:1px solid var(--line);border-radius:14px;background:color-mix(in srgb,var(--panel-strong) 92%,transparent);box-shadow:0 4px 16px color-mix(in srgb,var(--ink) 5%,transparent)}
+.startup-launch-select .app-select-icon{grid-column:1;grid-row:1/3;width:18px;height:18px;align-self:center;color:var(--blue)}.startup-launch-select .app-select-label{grid-column:2;grid-row:1;margin:0;font-size:9px;white-space:nowrap}.startup-launch-select .app-select-trigger{grid-column:2;grid-row:2;min-height:22px;height:22px;padding:0;padding-inline-end:20px;font-size:12px;text-align:start}.startup-launch-select .app-select-trigger>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.startup-launch-feedback{position:absolute;inset-block-start:calc(100% + 8px);inset-inline-start:0;z-index:30;box-sizing:border-box;width:260px;max-width:calc(100vw - 24px);margin:0;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--blue);box-shadow:0 8px 24px #0002;font-size:12px;line-height:1.6}.startup-launch-feedback.is-error{color:var(--danger,#c84444)}
+@media(max-width:760px){.welcome-home-actions .startup-launch-select>.app-select{width:128px;padding-inline:9px;column-gap:6px}.startup-launch-select .app-select-label{font-size:8px}}

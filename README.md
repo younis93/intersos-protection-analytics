@@ -104,3 +104,23 @@ Verification: `node scripts/check_kobo_organization.cjs` checks grouped navigati
 
 
 Run `python scripts/check_kobo_excel_optimized.py` for synthetic desktop Excel checks of full-record drill-through, sparse references, independent named slicers, respondent percentages, edits/appends, one Refresh All, and saved-cache reopening.
+
+### Kobo project workspaces and backups
+
+Open projects offer Analysis, Overview, Geography, and Reporting in the desktop sidebar. Analysis opens by default; question-group navigation appears only there. At widths of 900px or less, a compact Workspace selector below the project header switches sections, and the bottom navigation retains Projects and Home. Overview saves selected non-identifying question summaries and shows submission totals. Geography compares visible main-submission category/text location fields, maps recognized Iraqi governorate labels using the bundled offline boundaries, lists unmatched names, and aggregates geopoints into 0.1-degree cells on a latitude/longitude plot. Tables distinguish missing locations and invalid coordinates. Current response filters apply to every workspace.
+
+Reporting saves a title, findings, methodology/limitations, recommendations, and selected questions with the project settings. Download PDF report saves pending edits and generates a portrait A4 PDF locally through the existing PDF worker, with narrative, selected charts/tables, respondent bases, active filter notes, and embedded Arabic fonts. Long narratives paginate automatically; narrative-only reports are supported. Analysis PDF exports keep their existing landscape layout. Reporting inputs are constrained to their container, with inset focus rings.
+
+Export > Back up project remains available even without visible analysis results and downloads a versioned ZIP containing the original uploads, normalized data, mappings, and complete settings including dashboard and report selections. Backups include original response data, including identifying fields in the source uploads. Import project in the Projects header or beside Create your first project validates checksums and contents before creating a separate project; it never replaces an existing project. Portable backups have a 200 MB compressed and expanded size limit. They are not encrypted.
+
+Verification: `python -m pytest backend/test_kobo_workspace.py`; `npm --prefix frontend test`; `npm --prefix frontend run build`. For isolated browser checks, run `python scripts/serve_kobo_customize_fixture.py 5207` and then `node scripts/check_kobo_workspace_features.cjs`. Outputs use synthetic records under `output/kobo-workspace-features`.
+
+Workspace navigation verification: `node scripts/check_kobo_sidebar_workspaces.cjs` uses the isolated fixture server on port 5207 to check desktop/mobile navigation, collapsed labels, themes/RTL, preserved settings, and empty-analysis backup loading/failure/download states.
+
+### Governorate review and Geography exports
+
+Geography reuses the Legal detention map component with submission-specific titles, counts, percentages, hover/focus tooltips, selected regions, expanded view, PNG/PDF export, and an Excel-exportable pivot. Selecting map regions focuses only the geographic detail table. Shared response filters continue to apply, and map percentages use mapped submissions as their denominator.
+
+Review location values previews project-wide distinct raw values with total/filtered counts, automatic matches, and Matched/Unmatched/Missing/Excluded statuses. A searchable correction dropdown overrides a value to one of the map governorates, excludes it, or restores automatic matching. Optional fallback fields are consulted only for blank primary answers. Corrections are saved separately per primary field and source/raw answer code in geographyConfigs, apply only to Geography, and are included in project backup/import. Original answers elsewhere remain unchanged. Re-upload retains mappings and surfaces unavailable fields, stale raw values, and unmatched values for review. Geopoint fields retain their separate aggregated coordinate view.
+
+Verification: `python -m pytest backend/test_kobo_workspace.py backend/test_kobo_geography.py`; `npm --prefix frontend test`; `npm --prefix frontend run build`. Run `python scripts/serve_kobo_geography_report_fixture.py 5208` and `node scripts/check_kobo_geography_report.cjs` for synthetic review, fallback, map interactions/exports, Reporting containment, and English/Arabic/narrative-only PDF checks. `node scripts/check_shared_governorate_map.cjs` verifies all three shared map modes without using user data. Outputs are under output/kobo-geography-report and output/shared-governorate-map.

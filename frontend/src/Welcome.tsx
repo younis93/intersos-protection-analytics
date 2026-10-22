@@ -1,13 +1,15 @@
 import {formatUpdateSize,UpdateReleaseNotes} from "./UpdateReleaseNotes";
 import {UpdateFallbackNotice} from "./UpdateFallbackNotice";
 import {useCallback,useEffect,useRef,useState} from 'react';
-import {ArrowRight,BriefcaseBusiness,ChartNoAxesCombined,Maximize2,Minimize2,Palette,Power,RefreshCw,Save,X} from 'lucide-react';
+import {ArrowRight,BriefcaseBusiness,ChartColumnIncreasing,Maximize2,Minimize2,Palette,Power,RefreshCw} from 'lucide-react';
 import {checkForUpdates,getUpdateStatus,installUpdate} from './api';
 import {AppSelect} from './SelectionControls';
 import type {Theme,UpdateCheck,UpdateStatus} from './types';
 import {GuardianFox} from './GuardianFox';
 import {AVATAR_ENABLED,RIVE_HOME_AVATAR_ENABLED} from './features';
 import {HomeLogo} from './HomeLogo';
+import './workspaceCardMotion.css';
+import {AnimatedSectionIcon} from './AnimatedNavigationIcon';
 import {HomeRiveAvatar} from './HomeRiveAvatar';
 import ProcessingBackground from './ProcessingBackground';
 import {readStartupPage,saveStartupPage,STARTUP_PAGE_LABELS,type StartupPage} from './startupPage';
@@ -17,7 +19,7 @@ const UPDATE_CHECK_INTERVAL_MS=6*60*60*1000;
 export interface WorkspaceDefinition {id:string;label:string;description:string;route:string;icon:any;accent:string;badge?:string;enabled:boolean}
 export const workspaces:WorkspaceDefinition[]=[
   {id:'legal',label:'Legal Platform',description:'Review legal-platform data, investigate findings, explore beneficiary cases and analyze lawyer activity.',route:'/legal/overview',icon:BriefcaseBusiness,accent:'violet',badge:'Review & case analysis',enabled:true},
-  {id:'kobo',label:'Kobo Analysis',description:'Turn Kobo forms and responses into clear analysis, bilingual reports and editable Excel pivots.',route:'/kobo',icon:ChartNoAxesCombined,accent:'blue',badge:'Survey analysis & reports',enabled:true},
+  {id:'kobo',label:'Kobo Analysis',description:'Turn Kobo forms and responses into clear analysis, bilingual reports and editable Excel pivots.',route:'/kobo',icon:ChartColumnIncreasing,accent:'blue',badge:'Survey analysis & reports',enabled:true},
 ];
 
 export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:()=>void}){
@@ -26,19 +28,18 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
     return (localStorage.getItem('app-theme') as Theme)||startupTheme||'glass-light';
   });
   const [fullscreen,setFullscreen]=useState(false);
+  const [koboIconMotion,setKoboIconMotion]=useState(0);
   const [startupPage,setStartupPage]=useState<StartupPage>(readStartupPage);
-  const [startupOpen,setStartupOpen]=useState(false);
-  const startupDialog=useRef<HTMLDialogElement>(null),startupTrigger=useRef<HTMLButtonElement>(null);
-  useEffect(()=>{if(!startupOpen)return;const dialog=startupDialog.current;dialog?.showModal();return()=>{dialog?.close();startupTrigger.current?.focus({preventScroll:true})}},[startupOpen]);
-  const openStartup=()=>{setStartupPage(readStartupPage());setStartupNotice('');setStartupError('');setStartupOpen(true)};
   const [startupSaving,setStartupSaving]=useState(false);
   const [startupNotice,setStartupNotice]=useState(''),[startupError,setStartupError]=useState('');
-  const saveStartup=async()=>{
+  const saveStartup=async(next:StartupPage)=>{
+    if(startupSaving||next===startupPage)return;
     setStartupSaving(true);setStartupNotice('');setStartupError('');
-    try{await saveStartupPage(startupPage);setStartupNotice(`Saved. ${STARTUP_PAGE_LABELS[startupPage]} will open next time you launch the app.`)}
+    try{await saveStartupPage(next);setStartupPage(next);setStartupNotice(`Saved. ${STARTUP_PAGE_LABELS[next]} will open next time you launch the app.`)}
     catch(reason:unknown){setStartupError(reason instanceof Error?reason.message:'Unable to save the startup page. Please try again.')}
     finally{setStartupSaving(false)}
   };
+  useEffect(()=>{if(!startupNotice)return;const timer=window.setTimeout(()=>setStartupNotice(''),4000);return()=>window.clearTimeout(timer)},[startupNotice]);
   const [avatarRevealed,setAvatarRevealed]=useState(false);
   const [updateInfo,setUpdateInfo]=useState<UpdateCheck|null>(null);
   const [updateStatus,setUpdateStatus]=useState<UpdateStatus|null>(null);
@@ -79,7 +80,7 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
   const toggleAvatar=()=>setAvatarRevealed(current=>!current);
   return <main className="welcome-page">
     <ProcessingBackground speed={3}/>
-    <div className="welcome-home-actions"><button type="button" ref={startupTrigger} className="soft startup-settings-button" onClick={openStartup} title="Choose what opens when the app starts" aria-label="Open on launch" aria-haspopup="dialog" aria-expanded={startupOpen}><Power aria-hidden="true"/><span>Open on launch</span></button><button className={`soft fullscreen-button update-button ${updateInfo?.available?'update-available':''}`} onClick={checkUpdates} title={updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:'Check for updates'} aria-label="Check for updates"><RefreshCw/>{updateInfo?.available&&<b aria-label="New update available">New</b>}</button><AppSelect label="Theme" value={theme} onChange={value=>setTheme(value as Theme)} variant="theme" icon={Palette} ariaLabel="Application theme" options={[["glass-light","Liquid Glass Light"],["glass-dark","Liquid Glass Dark"],["unhcr","INTERSOS"],["multicolor","Chromatic Executive"],["executive","Executive Minimal"]]}/><button className="soft fullscreen-button" onClick={toggleFullscreen} title={fullscreen?'Exit full screen':'Enter full screen'} aria-label={fullscreen?'Exit full screen':'Enter full screen'}>{fullscreen?<Minimize2/>:<Maximize2/>}</button></div>
+    <div className="welcome-home-actions"><button className={`soft fullscreen-button update-button ${updateInfo?.available?'update-available':''}`} onClick={checkUpdates} title={updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:'Check for updates'} aria-label="Check for updates"><RefreshCw/>{updateInfo?.available&&<b aria-label="New update available">New</b>}</button><div className="startup-launch-select" aria-busy={startupSaving}><AppSelect label="Open on launch" ariaLabel="Open on launch" icon={Power} value={startupPage} disabled={startupSaving} onChange={value=>void saveStartup(value as StartupPage)} options={Object.entries(STARTUP_PAGE_LABELS) as [string,string][]}/>{startupSaving&&<span role="status" className="sr-only">Saving startup page...</span>}{startupNotice&&<p className="startup-launch-feedback" role="status">{startupNotice}</p>}{startupError&&<p className="startup-launch-feedback is-error" role="alert">{startupError}</p>}</div><AppSelect label="Theme" value={theme} onChange={value=>setTheme(value as Theme)} variant="theme" icon={Palette} ariaLabel="Application theme" options={[["glass-light","Liquid Glass Light"],["glass-dark","Liquid Glass Dark"],["unhcr","INTERSOS"],["multicolor","Chromatic Executive"],["executive","Executive Minimal"]]}/><button className="soft fullscreen-button" onClick={toggleFullscreen} title={fullscreen?'Exit full screen':'Enter full screen'} aria-label={fullscreen?'Exit full screen':'Enter full screen'}>{fullscreen?<Minimize2/>:<Maximize2/>}</button></div>
     <section className="welcome-content">
       <header className="welcome-header welcome-header-compact">
         <div className="welcome-brand-stage">
@@ -87,19 +88,10 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
         </div>
         <span>Iraq Data Analysis</span>
       </header>
-      <div className="workspace-cards">{workspaces.filter(x=>x.enabled).map((workspace,index)=>{const Icon=workspace.icon;return <a key={workspace.id} href={`#${workspace.route}`} className={`workspace-card workspace-${workspace.accent}`} style={{'--card-index':index} as React.CSSProperties}><span className="workspace-card-glow"/><span className="workspace-icon"><Icon/></span><span className="workspace-badge">{workspace.badge}</span><strong>{workspace.label}</strong><p>{workspace.description}</p><span className="workspace-enter">Enter workspace <ArrowRight/></span></a>})}</div>
+      <div className="workspace-cards">{workspaces.filter(x=>x.enabled).map((workspace,index)=>{const Icon=workspace.icon;return <a key={workspace.id} href={`#${workspace.route}`} className={`workspace-card workspace-${workspace.accent}`} onPointerEnter={()=>{if(workspace.id==='kobo')setKoboIconMotion(value=>value+1)}} onFocus={()=>{if(workspace.id==='kobo')setKoboIconMotion(value=>value+1)}} style={{'--card-index':index} as React.CSSProperties}><span className="workspace-card-glow"/><span className="workspace-icon">{workspace.id==='kobo'?<AnimatedSectionIcon key={koboIconMotion} Icon={ChartColumnIncreasing} iconStyle="chart-column-increasing" size={28}/>:<Icon/>}</span><span className="workspace-badge">{workspace.badge}</span><strong>{workspace.label}</strong><p>{workspace.description}</p><span className="workspace-enter">Enter workspace <ArrowRight/></span></a>})}</div>
       <footer><span>Designed for clear, local and decision-ready legal data review.</span><button type="button" className="designer-unlock" onClick={toggleAvatar} aria-pressed={avatarRevealed} aria-label={`${avatarRevealed?'Hide':'Reveal'} the cartoon boy`}>Designed by <strong>Younis Jamal</strong></button></footer>
     </section>
     {RIVE_HOME_AVATAR_ENABLED&&avatarRevealed&&<HomeRiveAvatar disabled={false} phase="normal"/>}
-    {startupOpen&&<dialog ref={startupDialog} className="startup-settings-dialog glass" aria-labelledby="startup-settings-title" aria-describedby="startup-settings-description" aria-busy={startupSaving} onCancel={event=>{event.preventDefault();if(!startupSaving)setStartupOpen(false)}}>
-      <form onSubmit={event=>{event.preventDefault();if(!startupSaving)void saveStartup()}}>
-        <header><span className="startup-settings-icon"><Power aria-hidden="true"/></span><button type="button" className="soft startup-settings-close" aria-label="Close startup settings" disabled={startupSaving} onClick={()=>setStartupOpen(false)}><X aria-hidden="true"/></button></header>
-        <h2 id="startup-settings-title">Open on launch</h2><p id="startup-settings-description">Choose the page you want to see when you start the app.</p>
-        <AppSelect label="Startup page" ariaLabel="Startup page" value={startupPage} disabled={startupSaving} onChange={value=>{setStartupPage(value as StartupPage);setStartupNotice('');setStartupError('')}} options={Object.entries(STARTUP_PAGE_LABELS) as [string,string][]}/>
-        {startupNotice&&<p className="startup-settings-notice" role="status">{startupNotice}</p>}{startupError&&<p className="startup-settings-error" role="alert">{startupError}</p>}
-        <footer><button type="button" className="soft" disabled={startupSaving} onClick={()=>setStartupOpen(false)}>Close</button><button type="submit" className="primary" disabled={startupSaving}><Save aria-hidden="true"/>{startupSaving?'Saving…':'Save'}</button></footer>
-      </form>
-    </dialog>}
     {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon" data-updating={updateChecking||Boolean(updateStatus&&['downloading','verifying','installing','restarting'].includes(updateStatus.phase))} aria-hidden="true"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{!updateInfo&&updateChecking?'Checking for updates…':!updateInfo&&updateCheckError?'Unable to check for updates':updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?'Updates need configuration':updateInfo?.message?.startsWith('Unable')?'Unable to check for updates':'You’re up to date'}</h2>{updateInfo?.available?<UpdateReleaseNotes notes={updateInfo.notes} sizeBytes={updateInfo.sizeBytes}/>:<p>{!updateInfo&&updateChecking?'Looking for the latest version of Iraq Data Analysis.':!updateInfo&&updateCheckError?'Please try checking again.':updateInfo?.message||`You are using version ${updateInfo?.currentVersion||'1.0.0'}.`}</p>}{updateChecking&&updateInfo&&<p role="status" className="update-check-status">Checking for the latest version…</p>}{updateCheckError&&<p role="alert" className="update-check-error">{updateCheckError}</p>}{updateStatus&&updateStatus.phase!=='idle'&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.phase==='downloading'&&<small>Downloaded {formatUpdateSize(updateStatus.downloadedBytes)} of {formatUpdateSize(updateStatus.totalBytes||updateInfo?.sizeBytes)}</small>}{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}{updateInfo?.available&&<UpdateFallbackNotice failed={updateStatus?.phase === "error"}/>}<div className="update-actions">{updateCheckError&&<button className="primary" onClick={checkUpdates}>Check again</button>}{updateInfo?.available&&(!updateStatus||['idle','error'].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>{updateStatus?.phase === "error" ? "Try again" : "Update now"}</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&['installing','restarting'].includes(updateStatus.phase))}>{updateInfo?.available?'Later':'Close'}</button></div></section></div>}
   </main>;
 }

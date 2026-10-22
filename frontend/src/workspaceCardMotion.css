@@ -1,0 +1,4 @@
+/* Animate once per hover or keyboard focus, returning to the resting icon. */
+.workspace-violet:is(:hover,:focus-visible) .workspace-icon>svg{animation:workspace-case-swing .7s ease-in-out;transform-origin:50% 25%}
+@keyframes workspace-case-swing{0%,100%{transform:rotate(0)}25%{transform:rotate(-12deg)}55%{transform:rotate(9deg)}80%{transform:rotate(-4deg)}}
+@media(prefers-reduced-motion:reduce){.workspace-card:is(:hover,:focus-visible) .workspace-icon>svg{animation:none}}
