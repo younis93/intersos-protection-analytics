@@ -26,6 +26,7 @@ from openpyxl.utils import get_column_letter
 
 from .file_security import safe_spreadsheet_value, validate_xlsx_archive
 from .import_progress import ImportOperation, import_plan
+from . import legal_processing_cache
 
 _active_import = ContextVar("legal_active_import", default=None)
 
@@ -506,6 +507,8 @@ class LegalStore:
     revision: str = field(default_factory=lambda: uuid4().hex, init=False)
     data_revision: str = field(default_factory=lambda: uuid4().hex, init=False)
     import_timings: dict[str, float] = field(default_factory=dict, init=False, repr=False)
+    source_files: dict[str, bytes] = field(default_factory=dict, init=False, repr=False)
+    _persistent_cache_identity: str | None = field(default=None, init=False, repr=False)
     _overview_prepared: OrderedDict = field(default_factory=OrderedDict, init=False, repr=False)
     _metadata_cache: dict[str, Any] | None = field(default=None, init=False, repr=False)
     _deportation_dashboard_cache: dict[str, Any] | None = field(default=None, init=False, repr=False)
@@ -545,7 +548,8 @@ class LegalStore:
         self._processing_lock = RLock()
 
     @classmethod
-    def from_folder(cls, path: Path, progress: Callable[[int], None] | None = None, *, exclusions: Any = (), operation: ImportOperation | None = None, reconcile_exclusions: Callable | None = None) -> "LegalStore":
+    def from_folder(cls, path: Path, progress: Callable[[int], None] | None = None, *, exclusions: Any = (), operation: ImportOperation | None = None, reconcile_exclusions: Callable | None = None, use_cache: bool = True) -> "LegalStore":
+        standalone = operation is None
         selected: dict[str, tuple[int, Path]] = {}
         for file in path.iterdir():
             if not file.is_file() or file.suffix.lower() != ".csv": continue
@@ -564,13 +568,19 @@ class LegalStore:
             payload[name] = file.read_bytes()
             operation.finish(f"Reading:{name}")
             if progress: progress(operation.snapshot()["percent"])
-        return cls.from_files(payload, path.name, progress, exclusions=exclusions, operation=operation, reconcile_exclusions=reconcile_exclusions)
+        result = cls.from_files(payload, str(path.resolve()), progress, exclusions=exclusions, operation=operation, reconcile_exclusions=reconcile_exclusions, use_cache=use_cache)
+        if standalone:
+            callbacks, operation.completion_callbacks = operation.completion_callbacks, []
+            for callback in callbacks: callback()
+        return result
 
     @classmethod
     @cancellable_import
-    def from_files(cls, payload: dict[str, bytes], source: str, progress: Callable[[int], None] | None = None, *, exclusions: Any = (), operation: ImportOperation | None = None, reconcile_exclusions: Callable | None = None) -> "LegalStore":
+    def from_files(cls, payload: dict[str, bytes], source: str, progress: Callable[[int], None] | None = None, *, exclusions: Any = (), operation: ImportOperation | None = None, reconcile_exclusions: Callable | None = None, use_cache: bool = True) -> "LegalStore":
         started = perf_counter()
-        timings = {"csv_read": 0.0, "cleaning": 0.0}
+        timings = {"csv_read": 0.0, "cleaning": 0.0, "cache_hit": 0, "cache_miss": 1, "cache_restore": 0.0}
+        standalone = operation is None
+        exclusions = list(exclusions)
         missing = [name for name in MANDATORY if name not in payload]
         if missing and not any(name in payload for name in INDEPENDENT):
             raise ValueError("Missing mandatory files: " + ", ".join(f"{x}.csv" for x in missing))
@@ -581,6 +591,60 @@ class LegalStore:
         operation = operation or ImportOperation(source=source)
         operation.plan(import_plan(name for name, _ in supported))
         for name, _ in supported: operation.finish(f"Reading:{name}")
+        operation.start("Checking saved processing")
+        cache_started = perf_counter()
+        cache_identity = legal_processing_cache.cache_key(dict(supported), exclusions)
+        restore_started = None
+        def begin_cached_restore():
+            nonlocal restore_started
+            operation.finish("Checking saved processing")
+            operation.replan(import_plan((name for name, _ in supported), cached=True))
+            operation.start("Restoring saved processing")
+            restore_started = perf_counter()
+        cached = legal_processing_cache.load(cache_identity, before_restore=begin_cached_restore) if use_cache else None
+        timings["cache_check"] = (restore_started or perf_counter()) - cache_started
+        if cached is None and restore_started is not None:
+            # Authenticated state from an incompatible runtime is still a miss.
+            operation.replan(import_plan(name for name, _ in supported))
+        operation.finish("Checking saved processing")
+        operation.check_cancelled()
+        if cached is not None:
+            frames = {name: cached["frames"][name] for name, _ in supported}
+            result = cls(frames, source, cached["warnings"], cached["dates"], cached["flags"], cached["review_exclusions"])
+            result.source_files = dict(supported)
+            result._persistent_cache_identity = cache_identity
+            result._review_cache = cached["_review_cache"]
+            if cached["_metadata_cache"] is not None:
+                result._metadata_cache = {**cached["_metadata_cache"], "source": source, "revision": result.revision,
+                    "sheets": sorted(cached["_metadata_cache"]["sheets"], key=lambda sheet: list(frames).index(sheet["id"]))}
+            timings.update(cache_hit=1, cache_miss=0, cache_restore=perf_counter() - restore_started)
+            operation.finish("Restoring saved processing")
+            result._import_operation = operation
+            operation.start("Applying exclusions")
+            result.set_review_exclusions(exclusions)
+            operation.finish("Applying exclusions")
+            if reconcile_exclusions is not None:
+                operation.start("Reconciling exclusions")
+                reconcile_exclusions(result)
+                operation.finish("Reconciling exclusions")
+            for dataset in frames:
+                task = f"Preparing review:{dataset}"
+                if task not in operation.tasks: continue
+                operation.start(task)
+                if (dataset, "", 15, False) not in result._review_cache:
+                    result.review(dataset, _prepare_only=True)
+                operation.finish(task)
+            operation.start("Preparing metadata")
+            result.metadata()
+            operation.finish("Preparing metadata")
+            result._import_operation = None
+            timings["total"] = perf_counter() - started
+            result.import_timings = timings
+            if progress: progress(operation.snapshot()["percent"])
+            operation.check_cancelled()
+            # This exact input already owns the latest snapshot. Avoid rewriting
+            # it on every reopen; reconciliation is always rerun above.
+            return result
         for index, (name, raw) in enumerate(supported, start=1):
             operation.start(f"Parsing:{name}")
             stage = perf_counter()
@@ -642,6 +706,8 @@ class LegalStore:
         timings["linked_enrichment"] = perf_counter() - stage
         operation.finish("Restoring linked fields")
         result = cls(frames, source, warnings, dates)
+        result.source_files = {name: raw for name, raw in supported}
+        result._persistent_cache_identity = cache_identity
         result._import_operation = operation
         stage = perf_counter()
         result.flags = result._build_flags()
@@ -674,6 +740,14 @@ class LegalStore:
         result.import_timings = timings
         result._import_operation = None
         if progress: progress(operation.snapshot()["percent"])
+        operation.check_cancelled()
+        def save_successful_processing():
+            legal_processing_cache.save(cache_identity, result)
+            if not use_cache:
+                from .legal_page_cache import clear
+                clear()
+        if standalone: save_successful_processing()
+        else: operation.completion_callbacks.append(save_successful_processing)
         return result
 
     def metadata(self) -> dict[str, Any]:
@@ -3267,19 +3341,31 @@ class LegalStore:
         if not assessment_date: raise ValueError("The platform Assessments data has no Date of Assessment column.")
         platform_month=pd.to_datetime(frame[assessment_date],errors="coerce",dayfirst=True).dt.to_period("M").astype(str)
         detained=_find(list(frame.columns),"Is the beneficiary detained")
-        platform=frame[selection_mask(platform_month, months)].copy()
+        project_scope=frame
         if projects:
             if not platform_project: raise ValueError("The platform Assessments data has no Project column.")
-            platform=platform[selection_mask(platform[platform_project].fillna("").astype(str).str.strip(), projects)]
-        not_detained_case_ids=set()
+            project_scope=frame[selection_mask(frame[platform_project].fillna("").astype(str).str.strip(), projects)]
+        platform=project_scope[selection_mask(platform_month.loc[project_scope.index], months)].copy()
+        selected_assessments=platform.copy()
+        not_detained_values={}
+        other_detained_months={}
+        selected_assessment_case_ids=set(platform[platform_columns["Beneficiary ID"]].map(clean_id)) if platform_columns["Beneficiary ID"] else set()
         if detained:
             detention_status=platform[detained].fillna("").astype(str).str.strip()
             detained_mask=detention_status.str.contains(r"\byes\b|نعم",case=False,regex=True)
             not_detained_mask=detention_status.str.contains(r"\bno\b|(?<!\w)لا(?!\w)",case=False,regex=True)
             if platform_columns["Beneficiary ID"]:
                 scoped_case_ids=platform[platform_columns["Beneficiary ID"]].map(clean_id)
-                not_detained_case_ids=set(scoped_case_ids[not_detained_mask])-set(scoped_case_ids[detained_mask])
-                not_detained_case_ids.discard("")
+                detained_case_ids=set(scoped_case_ids[detained_mask])
+                for case_id,status in zip(scoped_case_ids[not_detained_mask],detention_status[not_detained_mask]):
+                    if case_id and case_id not in detained_case_ids:
+                        values=not_detained_values.setdefault(case_id,[])
+                        if status not in values:values.append(status)
+                scope_months=platform_month.loc[project_scope.index]
+                scope_detained=project_scope[detained].fillna("").astype(str).str.contains(r"\byes\b|نعم",case=False,regex=True)
+                outside=project_scope[scope_detained & ~selection_mask(scope_months,months) & scope_months.ne("NaT")]
+                for case_id,assessment_month in zip(outside[platform_columns["Beneficiary ID"]].map(clean_id),platform_month.loc[outside.index]):
+                    if case_id:other_detained_months.setdefault(case_id,set()).add(assessment_month)
             platform=platform[detained_mask].copy()
         external_month=pd.to_datetime(external[identification_date],errors="coerce",dayfirst=True).dt.to_period("M").astype(str)
         external=external[selection_mask(external_month, months)].copy()
@@ -3317,6 +3403,15 @@ class LegalStore:
             return str(assessment_lawyer or excel_lawyer or "")
         beneficiaries=self.frames["beneficiaries"];beneficiary_case=_find(list(beneficiaries.columns),"Case ID");beneficiary_name=_find(list(beneficiaries.columns),"Name (Filter Color Red)")
         beneficiary_names=dict(zip(beneficiaries[beneficiary_case].map(clean_id),beneficiaries[beneficiary_name].fillna("").astype(str))) if beneficiary_case and beneficiary_name else {}
+        name_candidates={}
+        if id_platform:
+            for _,assessment in selected_assessments.iterrows():
+                candidate_id=clean_id(assessment.get(id_platform,""))
+                candidate_name=display_value(assessment.get(name_platform,"")) if name_platform else ""
+                if not candidate_name:candidate_name=beneficiary_names.get(candidate_id,"")
+                normalized_name=normalize_name(candidate_name)
+                if not candidate_id or not normalized_name:continue
+                name_candidates.setdefault(normalized_name,set()).add(candidate_id)
         assessment_case_ids=set(frame[id_platform].map(clean_id)) if id_platform else set()
         beneficiary_case_ids=set(beneficiaries[beneficiary_case].map(clean_id)) if beneficiary_case else set()
         def case_available(case_id:str)->bool:
@@ -3357,12 +3452,45 @@ class LegalStore:
         for case_id,target_group in external_by_id.items():
             if case_id in platform_by_id:continue
             target=target_group.iloc[-1]
-            note="Case is not detained in the platform" if case_id in not_detained_case_ids else "Case ID available in Excel but missing from Platform"
-            results.append({"beneficiaryId":case_id,"caseAvailable":case_available(case_id),"name":display_value(target.get(name_external,"")) if name_external else "","lawyer":preferred_lawyer(None,target),"note":note,"differences":[{"field":"Case ID","assessment":"Missing","excel":"Present"}]})
+            note="Case ID available in Excel but missing from Platform"
+            differences=[{"field":"Case ID","assessment":"Missing","excel":"Present"}]
+            if case_id in not_detained_values:
+                note="Case ID found in Assessments but beneficiary is not marked as detained"
+                differences=[{"field":"Is the beneficiary detained","assessment":"; ".join(not_detained_values[case_id]),"excel":"Listed in detention workbook"}]
+            elif case_id in other_detained_months and case_id not in selected_assessment_case_ids:
+                note="Detained assessment found in another month"
+                differences=[{"field":"Assessment month (outside selected months)","assessment":", ".join(sorted(other_detained_months[case_id])),"excel":"Selected comparison months: "+", ".join(months)}]
+            elif case_id not in selected_assessment_case_ids:
+                excel_name=display_value(target.get(name_external,"")) if name_external else ""
+                candidates=sorted(name_candidates.get(normalize_name(excel_name),set())-{case_id})
+                if candidates:
+                    note="Same name found with a different Case ID - verify identity"
+                    differences=[{"field":"Case ID","assessment":candidate_id,"excel":case_id} for candidate_id in candidates]
+            results.append({"beneficiaryId":case_id,"caseAvailable":case_available(case_id),"name":display_value(target.get(name_external,"")) if name_external else "","lawyer":preferred_lawyer(None,target),"note":note,"differences":differences})
         for _,source in platform_missing_id.iterrows():
             results.append({"beneficiaryId":"","caseAvailable":False,"name":display_value(source.get(name_platform,"")) if name_platform else "","lawyer":preferred_lawyer(source),"note":"Case ID missing in Assessments","differences":[{"field":"Case ID","assessment":"Missing","excel":"Not comparable"}]})
         for _,target in external_missing_id.iterrows():
-            results.append({"beneficiaryId":"","caseAvailable":False,"name":display_value(target.get(name_external,"")) if name_external else "","lawyer":preferred_lawyer(None,target),"note":"Case ID missing in Excel","differences":[{"field":"Case ID","assessment":"Not comparable","excel":"Missing"}]})
+            excel_name=display_value(target.get(name_external,"")) if name_external else ""
+            candidates=sorted(name_candidates.get(normalize_name(excel_name),set()))
+            note="Name found in Assessments but Case ID missing in Excel - verify identity" if candidates else "Case ID missing in Excel"
+            differences=[{"field":"Case ID","assessment":candidate_id,"excel":"Missing"} for candidate_id in candidates] if candidates else [{"field":"Case ID","assessment":"Not comparable","excel":"Missing"}]
+            results.append({"beneficiaryId":"","caseAvailable":False,"name":excel_name,"lawyer":preferred_lawyer(None,target),"note":note,"differences":differences})
+        covered_platform_ids=set()
+        for issue in results:
+            unique_differences=[];seen_differences=set()
+            for difference in issue["differences"]:
+                key=(difference["field"],display_value(difference["assessment"]),display_value(difference["excel"]))
+                if key not in seen_differences:
+                    seen_differences.add(key);unique_differences.append(difference)
+            issue["differences"]=unique_differences
+            if issue["note"] in {"Same name found with a different Case ID - verify identity","Name found in Assessments but Case ID missing in Excel - verify identity"}:
+                candidate_ids=sorted({clean_id(difference["assessment"]) for difference in unique_differences if difference["field"]=="Case ID"})
+                issue["relatedCases"]=[{"caseId":candidate_id,"caseAvailable":case_available(candidate_id)} for candidate_id in candidate_ids]
+                covered_platform_ids.update(candidate_ids)
+        results=[issue for issue in results if not (
+            issue["note"]=="Case ID available in platform but missing from Excel"
+            and issue["beneficiaryId"] in covered_platform_ids
+        )]
         compared_fields=[label for label in platform_fields if label!="Beneficiary ID" and platform_columns.get(label) and external_columns.get(label)]
         warnings=[f"Column not compared because it is missing: {name}" for name in missing]
         for label in ("Date of birth","Detention governorate"):

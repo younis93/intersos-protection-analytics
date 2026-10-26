@@ -1,4 +1,6 @@
 import {legalFetch as fetch, setLegalRevision} from "./legalQueryCache";
+import {defaultIndicatorReport,indicatorReportGeneration,retainDefaultIndicatorReport} from './indicatorReportCache';
+import {legalExportMonth,legalProjectFilename} from './legalProjectBackup';
 import type {OverviewFilters, LegalOverviewResult} from "./types";
 
 const overviewBody=(selection:OverviewFilters)=>JSON.stringify({...selection,filters:Object.fromEntries(Object.entries(selection.filters).filter(([,values])=>values.length))});
@@ -161,8 +163,18 @@ export const getLegalMetadata = (signal?: AbortSignal) =>
     parse<LegalMetadata>,
   );
 export const getLegalDeportationDashboard = (filters:Filters={},signal?:AbortSignal,search="") => fetch(`${API}/legal/deportation-dashboard`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dataset:"deportationrecords",filters,search}),signal}).then(parse<Dashboard>);
-export const getLegalIndicators = (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[],communityTypes:string[]=[],signal?:AbortSignal) =>
-  fetch(`${API}/legal/indicators`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.fromEntries(Object.entries({projects,projectLocations,years,quarters,months,communityTypes}).map(([key, values])=>[key,[...new Set(values)].sort()]))),signal}).then(parse<IndicatorReport>);
+export const getLegalIndicators = (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[],communityTypes:string[]=[],signal?:AbortSignal) => {
+  if(signal?.aborted)return Promise.reject(new DOMException('Request superseded','AbortError'));
+  const unfiltered=[projects,projectLocations,years,quarters,months,communityTypes].every(values=>!values.length);
+  const ready=unfiltered?defaultIndicatorReport():null;
+  if(ready)return Promise.resolve(ready);
+  const generation=indicatorReportGeneration();
+  return fetch(`${API}/legal/indicators`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.fromEntries(Object.entries({projects,projectLocations,years,quarters,months,communityTypes}).map(([key, values])=>[key,[...new Set(values)].sort()]))),signal}).then(parse<IndicatorReport>).then(next=>{
+    if(signal?.aborted)throw new DOMException('Request superseded','AbortError');
+    if(unfiltered)retainDefaultIndicatorReport(next,generation);
+    return next;
+  });
+};
 export const exportIndicatorSourceRecords = async (revision:string,records:import('./types').IndicatorSourceRecord[]) => {
   const response=await fetch(`${API}/legal/indicators/records-export`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({revision,records})});
   if(!response.ok){const issue=await response.json().catch(()=>({detail:response.statusText}));throw new Error(typeof issue.detail==="string"?issue.detail:"Unable to export source records. Refresh Indicator Reporting and try again.")}
@@ -193,7 +205,7 @@ export const uploadIndicatorMasterWorkbook=(file:File)=>{const body=new FormData
 export const selectIndicatorMasterSheet=(sheet:string)=>fetch(`${API}/legal/indicators/reconciliation/sheet?sheet=${encodeURIComponent(sheet)}`,{method:"POST"}).then(parse<IndicatorReconciliationMetadata>);
 export const reconcileLegalIndicators=(projects:string[],projectLocations:string[],quarters:string[],months:string[],communityTypes:string[]=[],signal?:AbortSignal)=>fetch(`${API}/legal/indicators/reconciliation`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(indicatorReconciliationBody(projects,projectLocations,quarters,months,communityTypes)),signal}).then(parse<IndicatorReconciliation>);
 export const exportIndicatorReconciliation=async(projects:string[],projectLocations:string[],quarters:string[],months:string[],communityTypes:string[]=[])=>{const response=await fetch(`${API}/legal/indicators/reconciliation/export`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(indicatorReconciliationBody(projects,projectLocations,quarters,months,communityTypes))});if(!response.ok){const issue=await response.json().catch(()=>({detail:response.statusText}));throw new Error(issue.detail||"Unable to export the reporting check")};const url=URL.createObjectURL(await response.blob()),link=document.createElement("a");link.href=url;link.download="indicator-reporting-check.xlsx";link.click();window.setTimeout(()=>URL.revokeObjectURL(url),1500)};
-export const uploadLegalFolder = async (
+const uploadLegalSource = async (
   files: File[],
   onProgress?: (status: {
     phase: "uploading" | "processing";
@@ -201,9 +213,10 @@ export const uploadLegalFolder = async (
   }) => void,
   operationId?:string,
   signal?:AbortSignal,
+  project=false,
 ) => {
   const body = new FormData();
-  files.forEach((file) => body.append("files", file));
+  files.forEach((file) => body.append(project?"file":"files", file));
   return new Promise<LegalMetadata>((resolve, reject) => {
     const request = new XMLHttpRequest();
     const abort=()=>request.abort();
@@ -211,7 +224,7 @@ export const uploadLegalFolder = async (
     request.onloadend=cleanup;
     request.onabort=()=>reject(new DOMException('Import cancelled','AbortError'));
     if(signal?.aborted){reject(new DOMException('Import cancelled','AbortError'));return;}
-    request.open("POST", `${API}/legal/upload${operationId?"?operationId="+encodeURIComponent(operationId):""}`);
+    request.open("POST", `${API}/legal/${project?'backups/restore':'upload'}${operationId?"?operationId="+encodeURIComponent(operationId):""}`);
     onProgress?.({ phase: "uploading", percent: 0 });
     request.upload.onprogress = (event) => {
       if (!event.lengthComputable) return;
@@ -223,7 +236,7 @@ export const uploadLegalFolder = async (
     request.upload.onload = () =>
       onProgress?.({ phase: "processing", percent: null });
     request.onerror = () =>
-      reject(new Error("Unable to upload the selected folder."));
+      reject(new Error(project?"Unable to upload the project ZIP.":"Unable to upload the selected folder."));
     request.onload = () => {
       if(signal?.aborted){reject(new DOMException('Import cancelled','AbortError'));return;}
       let payload: any;
@@ -246,6 +259,15 @@ export const uploadLegalFolder = async (
     signal?.addEventListener('abort',abort,{once:true});
     request.send(body);
   });
+};
+export const uploadLegalFolder=(files:File[],onProgress?:Parameters<typeof uploadLegalSource>[1],operationId?:string,signal?:AbortSignal)=>uploadLegalSource(files,onProgress,operationId,signal);
+export const importLegalProject=(file:File,onProgress?:Parameters<typeof uploadLegalSource>[1],operationId?:string,signal?:AbortSignal)=>uploadLegalSource([file],onProgress,operationId,signal,true);
+export const exportLegalProject=async()=>{
+  const date=new Date();
+  const response=await fetch(`${API}/legal/backup?exportMonth=${encodeURIComponent(legalExportMonth(date))}`,{cache:'no-store'});
+  if(!response.ok){const issue=await response.json().catch(()=>({detail:'Unable to export project.'}));throw new Error(issue.detail||'Unable to export project.');}
+  const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');
+  link.href=url;link.download=legalProjectFilename(date);document.body.appendChild(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1500);
 };
 export const getLegalReview = (
   dataset: string,
@@ -514,7 +536,7 @@ export interface DetentionReconciliation {
   matched: number;
   unmatched: number;
   comparedFields: string[];
-  rows: { beneficiaryId: string; caseAvailable: boolean; name: unknown; lawyer: string; note: string; differences: {field:string; assessment:unknown; excel:unknown}[] }[];
+  rows: { beneficiaryId: string; caseAvailable: boolean; name: unknown; lawyer: string; note: string; relatedCases?: {caseId:string;caseAvailable:boolean}[]; differences: {field:string; assessment:unknown; excel:unknown}[] }[];
   warnings: string[];
 }
 export const getDetentionWorkbookSheets = (file: File) => {

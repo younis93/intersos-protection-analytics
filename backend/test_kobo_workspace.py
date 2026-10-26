@@ -47,6 +47,33 @@ def test_backup_tampering_and_extra_files(tmp_path, sample):
         with pytest.raises(ValueError): read_backup(out.getvalue())
 
 
+def test_backup_keeps_hidden_identity_contacts_and_filtered_out_records(tmp_path, sample):
+    payload = copy.deepcopy(sample[0])
+    name_id = 'group/respondent_name'
+    name_question = next(question for question in payload['form']['questions'] if question['id'] == name_id)
+    for index, field in enumerate(['primary_phone', 'secondary_phone']):
+        payload['form']['questions'].append({**copy.deepcopy(name_question), 'id': 'group/' + field,
+            'name': field, 'labels': {'en': field}, 'order': 100 + index})
+    for index, record in enumerate(payload['records']):
+        record['values'].update({name_id: 'اسم تجريبي ' + str(index),
+            'group/primary_phone': '07501234567', 'group/secondary_phone': '07701234567'})
+    hidden = [name_id, 'group/primary_phone', 'group/secondary_phone']
+    settings = KoboSettings(hidden=hidden, filters=[{'field': 'group/gender', 'values': ['f']}])
+    store = ProjectStore(tmp_path / 'projects.sqlite3')
+    original = store.create('Identity preservation fixture', payload, b'original-form', b'original-contact-data', settings)
+    app = FastAPI(); app.include_router(make_router(store))
+    with TestClient(app) as client:
+        backup = client.get(f'/api/kobo/projects/{original["id"]}/backup')
+        restored = client.post('/api/kobo/backups/restore', files={'file': ('project.zip', backup.content)})
+    assert restored.status_code == 200, restored.text
+    imported = store.get(restored.json()['id'])
+    assert imported['records'] == payload['records']
+    assert imported['settings']['hidden'] == hidden
+    assert store.sources(imported['id']) == (b'original-form', b'original-contact-data')
+    assert store.get(original['id']) == original
+    assert len(store.list()) == 2
+
+
 def test_geography_filters_and_privacy(sample):
     project = copy.deepcopy(sample[0])
     field = 'group/gender'

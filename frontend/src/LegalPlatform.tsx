@@ -7,6 +7,7 @@ import { legalPageRank } from './legalPageOrder';
 import { LegalSkeleton } from './LegalSkeleton';
 import NotificationToast from './NotificationToast';
 import ImportSourceGuide from './ImportSourceGuide';
+import LegalProjectTransfer from './LegalProjectTransfer';
 import ProcessingRecords from './ProcessingRecords';
 import { UpdateFallbackNotice } from "./UpdateFallbackNotice";
 
@@ -19,6 +20,7 @@ ChartColumnIncreasing,
 CheckCircle2,
 ChevronDown,
 Database,
+FolderInput,
 FileText,
 FolderOpen,
 Gavel,
@@ -43,10 +45,13 @@ checkForUpdates,
 getLegalMetadata,
 getUpdateStatus,
 installUpdate,
-uploadLegalFolder
+uploadLegalFolder,
+importLegalProject,
+exportLegalProject
 } from "./api";
 import { hasLegalCore,isLegalPageAvailable,resolveLegalPage } from './legalAvailability';
 import { legalLoadScheduler,type LoadStatus } from "./legalLoadScheduler";
+import {pollLegalMetadata} from './legalMetadataPolling';
 import { LegalPage,labels } from './legalPageMetadata';
 import { setLegalRevision } from "./legalQueryCache";
 import type { LegalMetadata,Theme,UpdateCheck,UpdateStatus } from "./types";
@@ -177,6 +182,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
     [dataMenuOpen, setDataMenuOpen] = useState(false),
     [error, setError] = useState(""),
     [uploading, setUploading] = useState(false),
+    [exportingProject, setExportingProject] = useState(false),
     [dataRevision, setDataRevision] = useState(0),
     [loadStatuses,setLoadStatuses] = useState<Record<string,LoadStatus>>({}),
     [uploadProgress, setUploadProgress] = useState(0),
@@ -244,6 +250,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [updateOpen, setUpdateOpen] = useState(false);
   const folderInput = useRef<HTMLInputElement>(null);
+  const projectInput = useRef<HTMLInputElement>(null);
   const filesInput = useRef<HTMLInputElement>(null);
   const legalShell = useRef<HTMLDivElement>(null);
   const copiedTimer = useRef<number | null>(null);
@@ -363,10 +370,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
   }, [onStartupReady]);
   useEffect(()=>{
     if(metadataLoading||metadata?.ready||!metadata?.loading)return;
-    let cancelled=false;
-    const poll=()=>getLegalMetadata().then((next)=>{if(!cancelled)setMetadata(next)}).catch(()=>{});
-    const timer=window.setInterval(poll,1000);
-    return()=>{cancelled=true;window.clearInterval(timer)};
+    return pollLegalMetadata(setMetadata);
   },[metadataLoading,metadata?.ready,metadata?.loading]);
   useEffect(() => {
     const sync = () => {
@@ -401,6 +405,22 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
     } finally {
       await finishImport();
     }
+  };
+  const restoreProject = async (file:File) => {
+    if(uploading||restoringData||exportingProject)return;
+    if(file.size>200*1024*1024){setError('Choose a project ZIP of 200 MB or smaller.');return;}
+    const operationId=beginImportProgress();
+    setUploading(true);setUploadProgress(0);setUploadPhase('uploading');setError('');
+    const controller=new AbortController();uploadController.current=controller;
+    try{
+      const next=await importLegalProject(file,status=>{setUploadPhase(status.phase);if(status.percent!==null)setUploadProgress(status.percent)},operationId,controller.signal);
+      setMetadata(next);setDataRevision(value=>value+1);setReviewCaseId('');setCaseQuery('');setPage('overview');
+    }catch(reason){importFailure(reason)}finally{await finishImport()}
+  };
+  const backupProject = async () => {
+    if(uploading||restoringData||exportingProject||!metadata?.ready)return;
+    setExportingProject(true);setError('');
+    try{await exportLegalProject()}catch(reason:any){setError(reason.message||'Unable to export project.')}finally{setExportingProject(false)}
   };
   const selectFolder = async () => {
     if(uploading||restoringData)return;
@@ -482,7 +502,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
             <small>Review & analytics</small>
           </div>
         </div>
-        <div className="sidebar-workspace-controls"><button className="soft sidebar-fullscreen" onClick={toggleFullscreen} title={fullscreen ? "Exit full screen" : "Enter full screen"} aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}>{fullscreen ? <Minimize2/> : <Maximize2/>}<span>Full screen</span></button><div className={`data-source-control app-select app-select-theme ${dataMenuOpen?"open":""}`}><Database className="app-select-icon"/><span className="app-select-label">Data source</span><button className="app-select-trigger" disabled={uploading||restoringData} aria-busy={uploading} aria-haspopup="menu" aria-expanded={dataMenuOpen} onClick={() => setDataMenuOpen((current)=>!current)}><span>{uploading ? uploadPhase === "uploading" ? `Uploading ${uploadProgress}%` : "Processing records…" : "Choose source"}</span><ChevronDown/></button>{dataMenuOpen&&<><button className="data-source-backdrop" aria-label="Close data source menu" onClick={()=>setDataMenuOpen(false)}/><div className="app-select-menu data-source-menu" role="menu"><ImportSourceGuide compact/><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFolder()}}><FolderOpen/><span><strong>Select folder</strong><small>Load all supported CSV files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_folder&&<button className="data-source-refresh" aria-label="Refresh selected folder" title="Refresh selected folder" onClick={()=>{setDataMenuOpen(false);refreshSelectedFolder()}}><RefreshCw/></button>}</div><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFiles()}}><Database/><span><strong>Select multiple CSV files</strong><small>Choose individual source files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_files&&<button className="data-source-refresh" aria-label="Refresh selected CSV files" title="Refresh selected CSV files" onClick={()=>{setDataMenuOpen(false);refreshSelectedFiles()}}><RefreshCw/></button>}</div><footer><span>Current source</span><strong>{metadata?.source||"No folder loaded"}</strong></footer></div></>}</div></div>
+        <div className="sidebar-workspace-controls"><button className="soft sidebar-fullscreen" onClick={toggleFullscreen} title={fullscreen ? "Exit full screen" : "Enter full screen"} aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}>{fullscreen ? <Minimize2/> : <Maximize2/>}<span>Full screen</span></button><div className={`data-source-control app-select app-select-theme ${dataMenuOpen?"open":""}`}><Database className="app-select-icon"/><span className="app-select-label">Data source</span><button className="app-select-trigger" disabled={uploading||restoringData||exportingProject} aria-busy={uploading||exportingProject} aria-haspopup="menu" aria-expanded={dataMenuOpen} onClick={() => setDataMenuOpen((current)=>!current)}><span>{exportingProject ? "Exporting project..." : uploading ? uploadPhase === "uploading" ? `Uploading ${uploadProgress}%` : "Processing records…" : "Choose source"}</span><ChevronDown/></button>{dataMenuOpen&&<><button className="data-source-backdrop" aria-label="Close data source menu" onClick={()=>setDataMenuOpen(false)}/><div className="app-select-menu data-source-menu" role="menu"><ImportSourceGuide compact/><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFolder()}}><FolderOpen/><span><strong>Select folder</strong><small>Load all supported CSV files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_folder&&<button className="data-source-refresh" aria-label="Refresh selected folder" title="Refresh selected folder" onClick={()=>{setDataMenuOpen(false);refreshSelectedFolder()}}><RefreshCw/></button>}</div><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFiles()}}><Database/><span><strong>Select multiple CSV files</strong><small>Choose individual source files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_files&&<button className="data-source-refresh" aria-label="Refresh selected CSV files" title="Refresh selected CSV files" onClick={()=>{setDataMenuOpen(false);refreshSelectedFiles()}}><RefreshCw/></button>}</div><LegalProjectTransfer canExport={Boolean(metadata?.ready)} exporting={exportingProject} onImport={()=>{setDataMenuOpen(false);projectInput.current?.click()}} onExport={()=>{setDataMenuOpen(false);void backupProject()}}/><footer><span>Current source</span><strong>{metadata?.source||"No folder loaded"}</strong></footer></div></>}</div></div>
         <div className="legal-sidebar-utilities"><button aria-label="Home" title="Home" onClick={() => {window.location.hash="/"}}><Home/><span>Home</span></button><button className="legal-menu-slide-toggle" aria-label={sidebarCollapsed ? "Expand menu" : "Slide menu left"} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? "Expand menu" : "Slide menu left"} onClick={() => {setDataMenuOpen(false);setSidebarCollapsed((current) => {const next=!current;localStorage.setItem("legal-sidebar-collapsed",String(next));return next})}}><>{sidebarCollapsed?<ArrowRight/>:<ArrowLeft/>}</><span>{sidebarCollapsed ? "Expand" : "Slide left"}</span></button></div>
         <LegalPageNavigation items={availableNav} page={page} onNavigate={setPage} loadStatuses={loadStatuses} sendIssuesStatus={sendIssuesStatus}/>
       </aside>
@@ -491,6 +511,8 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
           <div className="mobile-brand">Legal Platform</div>
           <div className="header-actions">
             <div id="legal-header-scroll-controls" className="legal-header-scroll-slot"/>
+            <input ref={projectInput} hidden type="file" accept=".zip,application/zip" aria-label="Import Legal Platform project ZIP" onChange={event=>{const file=event.target.files?.[0];event.currentTarget.value='';if(file)void restoreProject(file)}}/>
+            {exportingProject&&<span role="status">Exporting project...</span>}
             <input
               ref={folderInput}
               hidden
@@ -550,6 +572,9 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
                   <FileText/>
                   <span><strong>Select CSV files</strong><small>Choose individual source files from different locations.</small></span>
                   <ArrowRight/>
+                </button>
+                <button type="button" className="legal-import-source-option" onClick={()=>projectInput.current?.click()} disabled={uploading||restoringData||exportingProject}>
+                  <FolderInput/><span><strong>Import project</strong><small>Restore a saved project ZIP with its data and review decisions.</small></span><ArrowRight/>
                 </button>
               </div>
             </section>

@@ -1,0 +1,42 @@
+const assert=require('node:assert/strict'),fs=require('node:fs');
+const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+(async()=>{
+ const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});fs.mkdirSync('output/custom-analysis',{recursive:true});
+ try{for(const theme of ['glass-light','glass-dark'])for(const width of [1440,390]){
+  console.log('Preparation workflow',theme,width);
+  const page=await browser.newPage({viewport:{width,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(String(e)));
+  await page.addInitScript(t=>localStorage.setItem('app-theme',t),theme);await page.route('**/api/app/**',r=>r.fulfill({json:{available:false}}));
+  const choose=async(scope,label,option)=>{await scope.getByRole('button',{name:label,exact:true}).click();await page.getByRole('listbox',{name:label+' options',exact:true}).getByRole('option',{name:option,exact:true}).click()};
+  await page.goto('http://127.0.0.1:5399/#/custom');await page.getByRole('button',{name:'New project',exact:true}).click();
+  await page.getByLabel('Choose analysis data',{exact:true}).setInputFiles({name:`Preparation-${theme}-${width}.csv`,mimeType:'text/csv',buffer:Buffer.from('City,Amount,Count,Start,End\n"  mosul   city ","EUR 1.250,50",2,2026-10-25,2026-10-27\n" N/A ","EUR 2.000,00",0,2026-10-26,2026-10-25\n')});
+  await page.getByRole('button',{name:'Read file',exact:true}).click();await page.getByRole('button',{name:'Prepare data',exact:true}).click();await page.getByRole('heading',{name:'Prepare your data',exact:true}).waitFor();
+  await page.getByLabel('Trim leading and trailing spaces',{exact:true}).check();await page.getByLabel('Collapse repeated spaces (keep line breaks)',{exact:true}).check();
+  await choose(page,'Letter case','UPPERCASE');await page.getByLabel('Missing value tokens',{exact:true}).fill('N/A');
+  await page.getByRole('cell',{name:'MOSUL CITY',exact:true}).first().waitFor();
+  await page.locator('.custom-column-list button').nth(1).click();await choose(page,'Column type','Number');await choose(page,'Number format','Dot thousands, comma decimal - 1.234,56');await page.getByLabel('Currency token',{exact:true}).fill('EUR');
+  await page.getByRole('cell',{name:'1250.5',exact:true}).waitFor();await page.screenshot({path:`output/custom-analysis/prepare-cleaning-${theme}-${width}.png`});
+  await page.getByRole('button',{name:'Calculated columns',exact:true}).click();await page.getByRole('button',{name:'Add calculation',exact:true}).click();
+  const calculation=page.locator('[data-calculation-id]').first();await calculation.getByLabel('Calculated column label',{exact:true}).fill('Total');await choose(calculation,'Calculation','Multiply');await choose(calculation,'First operand','Amount · Number');await choose(calculation,'Second operand','Count · Number');
+  await calculation.getByRole('cell',{name:'2501',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Validation rules',exact:true}).click();await page.getByRole('button',{name:'Add rule',exact:true}).click();
+  let rule=page.locator('.custom-recipe-card').nth(0);await rule.getByLabel('Rule name',{exact:true}).fill('City required');await choose(rule,'Rule column','City · Category');await choose(rule,'Finding severity','Warning - review and acknowledge');
+  await page.getByRole('button',{name:'Add rule',exact:true}).click();rule=page.locator('.custom-recipe-card').nth(1);await rule.getByLabel('Rule name',{exact:true}).fill('Date order');await choose(rule,'Rule type','Date order (first on or before second)');await choose(rule,'First / start date','Start · Date');await choose(rule,'Second / end date','End · Date');
+  await page.getByRole('button',{name:'Choose filters',exact:true}).click();
+  assert.equal(await page.locator('.custom-filter-list input:checked').count(),0);await page.getByRole('checkbox',{name:'Use Total as a filter',exact:true}).check();
+  await page.getByRole('button',{name:'Review',exact:true}).click();assert(await page.getByRole('button',{name:'Create project',exact:true}).isDisabled());
+  await page.getByRole('checkbox',{name:'Acknowledge warning: City required',exact:true}).check();
+  await page.getByRole('button',{name:'Edit rules',exact:true}).click();rule=page.locator('.custom-recipe-card').nth(1);await choose(rule,'Finding severity','Warning - review and acknowledge');await page.getByRole('button',{name:'Return to review',exact:true}).click();
+  assert(await page.getByRole('checkbox',{name:'Acknowledge warning: City required',exact:true}).isChecked());
+  await page.getByRole('checkbox',{name:'Acknowledge warning: Date order',exact:true}).check();await page.getByText('All included columns are ready to save.',{exact:true}).waitFor();
+  await page.screenshot({path:`output/custom-analysis/prepare-review-${theme}-${width}.png`});assert(await page.getByRole('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+  await page.getByRole('button',{name:'Create project',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});
+  const pid=page.url().split('#/custom/')[1],saved=await (await page.request.get(`http://127.0.0.1:5399/api/custom/projects/${pid}`)).json();
+  assert.equal(saved.customConfig.calculatedColumns[0].label,'Total');assert.equal(saved.settings.filterFields[0],saved.customConfig.calculatedColumns[0].id);assert.equal(saved.customConfig.validationRules.length,2);
+  const columns=[saved.customConfig.columns[0].id,saved.customConfig.columns[1].id,saved.customConfig.calculatedColumns[0].id];
+  const grid=await (await page.request.post(`http://127.0.0.1:5399/api/custom/projects/${pid}/data`,{data:{settings:saved.settings,columns}})).json();
+  assert.equal(grid.rows[0].values[columns[0]],'MOSUL CITY');assert.equal(grid.rows[0].values[columns[1]],'1250.5');assert.equal(grid.rows[0].values[columns[2]],'2501.0');
+  await page.getByRole('button',{name:'Manage data',exact:true}).click();await page.getByRole('button',{name:'Prepare data',exact:true}).click();assert(await page.getByLabel('Trim leading and trailing spaces',{exact:true}).isChecked());
+  await page.getByRole('button',{name:'Calculated columns',exact:true}).click();assert.equal(await page.getByLabel('Calculated column label',{exact:true}).inputValue(),'Total');
+  await page.getByRole('button',{name:'Close prepare data',exact:true}).click();assert.deepEqual(errors,[]);await page.close();
+ }console.log('PASS: preparation stage, cleaning and EU currency, calculation, validation errors/warning acknowledgment, filter integration, original values and persistence on desktop/mobile light/dark.');}finally{await browser.close()}
+})().catch(e=>{console.error(e);process.exitCode=1});

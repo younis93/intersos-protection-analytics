@@ -16,7 +16,7 @@ export function viewQuestionSetup(project:KoboProject,snapshot:KoboViewSnapshot)
 }
 export function previewFilters(project:KoboProject,snapshot:KoboViewSnapshot){return snapshot.filters.map(rule=>{
  const q=project.form.questions.find(q=>q.id===rule.field),label=q?koboLabel(q,snapshot.language):'Unavailable question';
- const values=rule.kind==='category'?rule.values.map(code=>{const choice=q?.choices.find(c=>c.name===code);return code==='__blank__'?'Blank / unanswered':choice?koboLabel(choice,snapshot.language):code}):[`From ${rule.minimum??'any value'} to ${rule.maximum??'any value'}`];
+ const values=rule.kind==='category'?rule.values.map(code=>{const choice=q?.choices.find(c=>c.name===code);return code==='__blank__'?'Blank / unanswered':choice?koboLabel(choice,snapshot.language):code}):[...(rule.months?.length?['Months: '+rule.months.join(', ')]:[]),...(rule.minimum!=null||rule.maximum!=null||!rule.months?.length?[`From ${rule.minimum??'any value'} to ${rule.maximum??'any value'}`]:[])];
  return {label,values};
 })}
 export function matchingViewAnalysis(analysis:KoboAnalysis|undefined,snapshot:KoboViewSnapshot){return analysis&&viewSignature(analysis.settings)===viewSignature(snapshot)?analysis:undefined}

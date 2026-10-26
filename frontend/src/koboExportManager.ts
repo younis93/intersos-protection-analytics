@@ -1,8 +1,8 @@
 import {useSyncExternalStore} from 'react';
-import {downloadBlob,koboApi} from './koboApi';
+import {downloadBlob,createKoboApi,analysisWorkspace,type AnalysisWorkspace} from './koboApi';
 import type {KoboAnalysis,KoboSettings} from './koboTypes';
 
-type ExportInput={projectId:string;projectName:string;settings:KoboSettings;format:'excel'|'pdf';excelMode?:'native'|'binary';question?:string;separateGroups?:string[];chartMetric?:'count'|'percent'|'both';snapshot?:KoboAnalysis};
+type ExportInput={workspace?:AnalysisWorkspace;projectId:string;projectName:string;settings:KoboSettings;format:'excel'|'pdf';excelMode?:'native'|'binary';question?:string;separateGroups?:string[];chartMetric?:'count'|'percent'|'both';snapshot?:KoboAnalysis};
 export type ExportRecovery={id:string;filename:string;input:Omit<ExportInput,'snapshot'>;job?:string};
 export type ExportTask={id:string;filename:string;project:string;format:'excel'|'pdf';state:'queued'|'running'|'complete'|'cancelled'|'error'|'expired'|'interrupted';progress:number;message:string;downloadError?:string;downloading?:boolean;retrying?:boolean;cancelPending?:boolean;cancelError?:boolean;stage?:string;elapsedSeconds?:number;lastProgressSecondsAgo?:number;completedQuestions?:number;totalQuestions?:number};
 type Resource={input:ExportInput;controller:AbortController;job?:string;blob?:Blob;cancelled:boolean;completed?:number;expiry?:number;ready?:boolean;persistence?:Promise<unknown>};
@@ -14,7 +14,8 @@ function patch(id:string,change:Partial<ExportTask>){tasks=tasks.map(task=>task.
 const active=(task:ExportTask)=>task.state==='queued'||task.state==='running';
 let initialization:Promise<void>|undefined;
 export function initializeKoboExports(){
- return initialization??=koboApi.exportRecovery().then(records=>{
+ return initialization??=Promise.all(['kobo','custom'].map(workspace=>createKoboApi(workspace as AnalysisWorkspace).exportRecovery())).then(groups=>{
+  const records=groups.flat();
   for(const record of records){
    if(resources.has(record.id))continue;
    resources.set(record.id,{input:record.input,job:record.job,controller:new AbortController(),cancelled:false});
@@ -28,7 +29,7 @@ function persistRecovery(id:string,remove=false){
  if(!resource||!task)return Promise.resolve();
  const {snapshot:_,...input}=resource.input;
  const value={filename:task.filename,input,job:resource.job};
- const pending=(resource.persistence??Promise.resolve()).catch(()=>{}).then(()=>remove?koboApi.removeExportRecovery(id):koboApi.saveExportRecovery(id,value));
+ const pending=(resource.persistence??Promise.resolve()).catch(()=>{}).then(()=>remove?createKoboApi(resource.input.workspace).removeExportRecovery(id):createKoboApi(resource.input.workspace).saveExportRecovery(id,value));
  resource.persistence=pending;
  return pending;
 }
@@ -67,7 +68,7 @@ export function startKoboExport(input:ExportInput){
  if(closingExports)throw new Error('Exports are being cancelled before closing. Keep the app open to start another export.');
  const settings=structuredClone(input.settings);
  const snapshot=input.snapshot&&JSON.stringify(input.snapshot.settings)===JSON.stringify(settings)?{...input.snapshot,settings,questions:input.question?input.snapshot.questions.filter(question=>question.id===input.question):input.snapshot.questions}:undefined;
- const captured={...input,settings,snapshot,separateGroups:input.separateGroups?[...input.separateGroups]:undefined};
+ const captured={...input,workspace:input.workspace||analysisWorkspace(),settings,snapshot,separateGroups:input.separateGroups?[...input.separateGroups]:undefined};
  const id=crypto.randomUUID(),suffix=input.question?`-${input.question.split('/').pop()}`:'';
  const filename=(input.projectName+suffix).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')+(input.format==='pdf'?'.pdf':input.excelMode==='binary'?'-01-pivots.xlsx':'.xlsx');
  resources.set(id,{input:captured,controller:new AbortController(),cancelled:false});
@@ -82,6 +83,7 @@ export function startKoboExport(input:ExportInput){
 async function runExcel(id:string){
  const resource=resources.get(id);if(!resource)return;
  const {input,controller}=resource;
+ const koboApi=createKoboApi(input.workspace);
  try{
   // Do not abort submission: retain the returned job ID so cancellation can stop it.
   let job=await koboApi.export(input.projectId,input.settings,input.question,undefined,input.separateGroups,input.chartMetric,input.excelMode);
@@ -114,6 +116,7 @@ function pumpPdf(){
 async function runPdf(id:string){
  const resource=resources.get(id);if(!resource||resource.cancelled)return;
  const {input,controller}=resource;
+ const koboApi=createKoboApi(input.workspace);
  patch(id,{state:'running',message:'Preparing PDF results'});
  try{
   const snapshot=input.snapshot||await koboApi.analyze(input.projectId,input.settings,controller.signal,input.question);
@@ -124,7 +127,7 @@ async function runPdf(id:string){
  }catch(error){if(!resource.cancelled)finish(id,'error',error instanceof Error?error.message:String(error))}
 }
 async function stopExcel(id:string,resource:Resource){
- try{await koboApi.cancel(resource.job!);patch(id,{cancelPending:false,cancelError:false});finish(id,'cancelled','Export cancelled')}
+ try{await createKoboApi(resource.input.workspace).cancel(resource.job!);patch(id,{cancelPending:false,cancelError:false});finish(id,'cancelled','Export cancelled')}
  catch(error){patch(id,{cancelPending:false,cancelError:true});finish(id,'error',`Could not cancel: ${error instanceof Error?error.message:String(error)}`)}
 }
 export async function cancelKoboExport(id:string){
@@ -152,7 +155,7 @@ export async function retryKoboExport(id:string){
  const resource=resources.get(id),task=tasks.find(task=>task.id===id);if(!resource||!task||task.retrying||task.cancelError||task.cancelPending||active(task))return;
  patch(id,{retrying:true});
  if(tasks.find(task=>task.id===id)?.state==='interrupted'&&resource.job){
-  try{await koboApi.cancel(resource.job)}catch(error){patch(id,{retrying:false,message:`Could not stop the previous export: ${error instanceof Error?error.message:String(error)}`});return}
+  try{await createKoboApi(resource.input.workspace).cancel(resource.job)}catch(error){patch(id,{retrying:false,message:`Could not stop the previous export: ${error instanceof Error?error.message:String(error)}`});return}
  }
  if(closingExports){patch(id,{retrying:false});finish(id,'cancelled','Export cancelled');return}
  const input={...resource.input};patch(id,{retrying:false});dismissKoboExport(id);startKoboExport(input);

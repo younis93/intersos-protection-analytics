@@ -22,8 +22,8 @@ export default function ProcessingRecords({progress,uploadPercent,restoring=fals
   const uploading=uploadPercent!==undefined&&!terminal;
   const active=!terminal&&!cancelling;
   const percent=uploading?uploadPercent:progress?.state==='idle'?null:progress?.percent??null;
-  const detail=progress?.state==='error'?progress.error:progress?.state==='cancelled'?'Your previous data and saved source are unchanged.':cancelling?'Stopping safely. Your current data will be preserved.':uploading?'Sending selected CSV files to the local service...':progress?.state==='complete'?'Records are ready.':progress?.state==='processing'?`${progress.stage}${progress.dataset?' - '+(datasets[progress.dataset]||progress.dataset):''}`:'Preparing the processing work plan...';
-  const title=progress?.state==='cancelled'?'Import cancelled':progress?.state==='error'?'Import failed':cancelling?'Cancelling...':uploading?'Uploading folder':'Processing records';
+  const detail=progress?.state==='error'?progress.error:progress?.state==='cancelled'?'Your previous data and saved source are unchanged.':cancelling?'Stopping safely. Your current data will be preserved.':uploading?'Sending selected files to the local service...':progress?.state==='complete'?'Records are ready.':progress?.state==='processing'?`${progress.stage}${progress.dataset?' - '+(datasets[progress.dataset]||progress.dataset):''}`:'Preparing the processing work plan...';
+  const title=progress?.state==='cancelled'?'Import cancelled':progress?.state==='error'?'Import failed':cancelling?'Cancelling...':uploading?'Uploading data':'Processing records';
   return <div className={`legal-upload-overlay${minimized?' is-minimized':''}${active?' is-active':''}`}>
     {!minimized&&<ProcessingBackground active={active}/>}
     <section ref={cardRef} className="glass legal-upload-progress" aria-label="File processing" aria-busy={!terminal}>

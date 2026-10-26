@@ -57,7 +57,7 @@ def test_import_guard_and_operation_isolation():
     assert tracker.status()["operationId"]==second.operation_id
 
 
-def test_native_folder_and_files_use_same_progress_plan(tmp_path,monkeypatch):
+def test_native_folder_and_files_share_cache_and_report_actual_work(tmp_path,monkeypatch):
     from backend import main
     import desktop_launcher
     tracker=ImportTracker()
@@ -74,7 +74,8 @@ def test_native_folder_and_files_use_same_progress_plan(tmp_path,monkeypatch):
     second=tracker.status(second_id)
     assert first["state"]==second["state"]=="complete"
     assert first["percent"]==second["percent"]==100
-    assert first["totalWork"]==second["totalWork"]
+    assert first["totalWork"]>second["totalWork"]
+    assert main.legal_store.import_timings["cache_hit"] == 1
     assert api.get_legal_import_progress()==100
 
 
@@ -125,7 +126,8 @@ def test_browser_upload_reconciles_before_preparation_and_publishes_once(monkeyp
     observed=[]
     def reconcile(candidate):
         assert main.legal_store is previous
-        assert candidate._review_cache=={}
+        # A cached candidate may already have contexts. Reconciliation still
+        # precedes any rebuilding required by changed saved decisions.
         assert tracker.status()["percent"]!=100
         candidate.set_review_exclusions([("Invalid age","B2")])
         observed.append(candidate)

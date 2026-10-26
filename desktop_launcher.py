@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+from backend.app_settings import read_settings, update_settings
+
 
 APP_TITLE = "Iraq Data Analysis"
 APP_USER_MODEL_ID = "INTERSOS.IraqDataAnalysis"
@@ -190,7 +192,9 @@ def settings_path() -> Path:
 
 def saved_legal_folder() -> Path | None:
     try:
-        value = json.loads(settings_path().read_text(encoding="utf-8")).get("legalFolder", "")
+        value = read_settings(settings_path()).get("legalFolder", "")
+        if not isinstance(value, str) or not value.strip():
+            return None
         path = Path(value)
         return path if path.is_dir() else None
     except (OSError, ValueError, TypeError):
@@ -198,12 +202,7 @@ def saved_legal_folder() -> Path | None:
 
 
 def save_legal_folder(path: Path) -> None:
-    target = settings_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    settings = load_settings()
-    settings["legalFolder"] = str(path)
-    settings["legalSource"] = "folder"
-    target.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    update_settings(settings_path(), {"legalFolder": str(path), "legalSource": "folder"})
 
 
 def configured_indicator_master() -> Path | None:
@@ -220,24 +219,63 @@ def saved_indicator_master() -> Path | None:
 
 
 def save_indicator_master(path: Path) -> None:
-    target = settings_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    settings = load_settings()
-    settings["indicatorMasterWorkbook"] = str(path)
-    target.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    update_settings(settings_path(), {"indicatorMasterWorkbook": str(path)})
 
 
 def load_settings() -> dict[str, Any]:
     try:
-        data = json.loads(settings_path().read_text(encoding="utf-8"))
+        data = read_settings(settings_path())
         if isinstance(data, dict): return data
     except (OSError, ValueError, TypeError):
         pass
     return {}
 
 
-THEME_NAMES = {"glass-light", "glass-dark", "unhcr", "executive", "multicolor"}
-STARTUP_ROUTES = {"home": "#/", "legal": "#/legal/overview", "kobo": "#/kobo"}
+def configure_legal_source_environment() -> None:
+    """Pass the saved selection exactly, without inheriting a previous source."""
+    settings = load_settings()
+    source = str(settings.get("legalSource", "folder"))
+    folder = settings.get("legalFolder", "")
+    folder = folder if isinstance(folder, str) else ""
+    files = settings.get("legalFiles", [])
+    files = [path for path in files if isinstance(path, str)] if isinstance(files, list) else []
+    configured = "legalSource" in settings or bool(files if source == "files" else folder)
+    os.environ["INTERSOS_LEGAL_SOURCE_CONFIGURED"] = "1" if configured else "0"
+    os.environ["INTERSOS_LEGAL_SOURCE"] = source
+    os.environ["INTERSOS_LEGAL_FOLDER"] = folder
+    os.environ["INTERSOS_LEGAL_FILES"] = json.dumps(files)
+
+
+def saved_legal_source_selection() -> dict[str, Any]:
+    """Read preferences at restoration time, independently of backend imports."""
+    selection = {"kind": "folder", "folder": "", "files": [], "error": ""}
+    try:
+        settings = read_settings(settings_path())
+        if not isinstance(settings, dict):
+            raise ValueError("Application settings must contain an object.")
+        kind = settings.get("legalSource", "folder")
+        if kind not in ("folder", "files"):
+            raise ValueError("Invalid saved Legal source type.")
+        selection["kind"] = kind
+        if kind == "folder":
+            folder = settings.get("legalFolder", "")
+            if not isinstance(folder, str) or not folder.strip():
+                raise ValueError("Choose a Legal Platform source folder first.")
+            selection["folder"] = folder
+        else:
+            files = settings.get("legalFiles", [])
+            if not isinstance(files, list) or not files or not all(isinstance(path, str) and path.strip() for path in files):
+                raise ValueError("Choose Legal Platform source CSV files first.")
+            selection["files"] = files
+    except FileNotFoundError:
+        selection["error"] = "Choose a Legal Platform source folder or CSV files first."
+    except (OSError, ValueError, TypeError) as exc:
+        selection["error"] = f"Unable to read the saved Legal source in {settings_path()}: {exc}"
+    return selection
+
+
+THEME_NAMES = {"glass-light", "glass-dark", "unhcr", "executive", "multicolor", "forest"}
+STARTUP_ROUTES = {"home": "#/", "legal": "#/legal/overview", "kobo": "#/kobo", "custom": "#/custom"}
 
 
 def saved_startup_page() -> str:
@@ -247,12 +285,8 @@ def saved_startup_page() -> str:
 
 def save_startup_page(page: str) -> bool:
     if not isinstance(page, str) or page not in STARTUP_ROUTES:
-        raise ValueError("Choose Home, Legal, or Kobo as the startup page.")
-    target = settings_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    settings = load_settings()
-    settings["startupPage"] = page
-    target.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+        raise ValueError("Choose Home, Legal, Kobo, or Custom Analysis as the startup page.")
+    update_settings(settings_path(), {"startupPage": page})
     return True
 
 
@@ -264,9 +298,7 @@ def saved_app_theme() -> str:
 def save_app_theme(theme: str) -> None:
     if theme not in THEME_NAMES:
         return
-    target = settings_path(); target.parent.mkdir(parents=True, exist_ok=True)
-    settings = load_settings(); settings["appTheme"] = theme
-    target.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    update_settings(settings_path(), {"appTheme": theme})
 
 
 def theme_background(theme: str) -> str:
@@ -277,6 +309,7 @@ def theme_background(theme: str) -> str:
         "unhcr": "#f3f7fa",
         "executive": "#f4f2ed",
         "multicolor": "#f3f5f9",
+        "forest": "#f4f7f5",
     }.get(theme, "#eef5fb")
 
 
@@ -297,6 +330,7 @@ def startup_html(theme: str, failed: bool = False, startup_epoch_ms: int | None 
         "unhcr": ("#0072bc", "#f3f7fa", "#172b3a", "#607789", "#fff", "#fff", "#d7e3eb"),
         "executive": ("#9b722a", "#f4f2ed", "#202a30", "#6d7376", "#fff", "#fff", "#d9d5cc"),
         "multicolor": ("#315ea8", "#f3f5f9", "#182637", "#647286", "rgba(255,255,255,.84)", "#fff", "#dbe2ec"),
+        "forest": ("#15803d", "#f4f7f5", "#18251d", "#526659", "#fff", "#fff", "#d7e3db"),
     }
     blue, background, ink, muted, panel, panel_strong, line = palettes.get(theme, palettes["glass-light"])
     epoch = startup_epoch_ms if startup_epoch_ms is not None else int(time.time() * 1000)
@@ -348,9 +382,7 @@ def saved_legal_files() -> list[Path]:
 
 
 def save_legal_files(paths: list[Path]) -> None:
-    target = settings_path(); target.parent.mkdir(parents=True, exist_ok=True)
-    settings = load_settings(); settings["legalFiles"] = [str(path) for path in paths]; settings["legalSource"] = "files"
-    target.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    update_settings(settings_path(), {"legalFiles": [str(path) for path in paths], "legalSource": "files"})
 
 
 class Point(ctypes.Structure):
@@ -381,10 +413,50 @@ def resource_path(*parts: str) -> Path:
     return root.joinpath(*parts)
 
 
-def available_port() -> int:
+def available_port(preferred: int | None = None) -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        if type(preferred) is int and 1024 <= preferred <= 65535:
+            try:
+                probe.bind(("127.0.0.1", preferred))
+                return int(probe.getsockname()[1])
+            except OSError:
+                pass
         probe.bind(("127.0.0.1", 0))
         return int(probe.getsockname()[1])
+
+
+def workspace_startup_options() -> tuple[int, dict[str, Any]]:
+    """Reuse the local origin and WebView code/asset cache across launches."""
+    directory = app_data_dir() / "workspace-cache"
+    state_path = directory / "origin.json"
+    preferred = None
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        if isinstance(state, dict) and state.get("version") == 1:
+            preferred = state.get("port")
+    except (OSError, ValueError, TypeError):
+        pass
+    port = available_port(preferred)
+    temporary = directory / (secrets.token_hex(8) + ".tmp")
+    try:
+        profile = directory / "webview"
+        profile.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(json.dumps({"version": 1, "port": port}), encoding="utf-8")
+        temporary.replace(state_path)
+        return port, {"private_mode": False, "storage_path": str(profile)}
+    except OSError:
+        # An unavailable workspace cache must not prevent the app from opening.
+        return port, {"private_mode": True}
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def load_backend_module():
+    from backend import main as backend_main
+    return backend_main
 
 
 def show_error(message: str) -> None:
@@ -419,6 +491,7 @@ def apply_windows_branding(window_title: str, theme: str = "glass-light") -> Non
             "unhcr": (0x00BC7200, 0x00FFFFFF),
             "multicolor": (0x00F9F5F3, 0x00372818),
             "executive": (0x00EDF2F4, 0x00302A20),
+            "forest": (0x00537634, 0x00FFFFFF),
         }
         caption_color, text_color = colors.get(theme, colors["glass-light"])
         caption, text = ctypes.c_uint(caption_color), ctypes.c_uint(text_color)
@@ -437,8 +510,18 @@ def start_legal_restore(backend_main: Any, metrics: StartupMetrics | None = None
     """Load the remembered Legal source without delaying the desktop window."""
     backend_main.legal_store_loading = True
     def restore() -> None:
-        backend_main.load_initial_legal_store()
+        selection = saved_legal_source_selection()
         if metrics:
+            metrics.mark("legal-source-selected", json.dumps({"settings": str(settings_path()), **selection}))
+        backend_main.load_initial_legal_store(source_selection=selection)
+        if metrics:
+            store = backend_main.legal_store
+            metrics.mark("legal-source-restored", json.dumps({
+                "source": store.source if store else None,
+                "cache_hit": bool(store and store.import_timings.get("cache_hit")),
+                "cache_miss": bool(store and store.import_timings.get("cache_miss")),
+                "error": backend_main.legal_store_restore_error,
+            }))
             metrics.mark("legal-data-ready")
     thread = threading.Thread(
         target=restore,
@@ -498,13 +581,35 @@ class StartupRuntime:
         self.backend_main: Any | None = None
         self._lock = threading.Lock()
         self._stop_requested = False
+        self._backend_ready = threading.Event()
+        self._backend_thread: threading.Thread | None = None
+        self._backend_error: Exception | None = None
+
+    def preload_backend(self, metrics: StartupMetrics) -> threading.Thread:
+        """Overlap backend imports with WebView initialization, once per run."""
+        with self._lock:
+            if self._backend_thread is not None:
+                return self._backend_thread
+            def prepare():
+                try:
+                    metrics.mark("backend-import-started")
+                    self.backend_main = load_backend_module()
+                    metrics.mark("backend-imported")
+                except Exception as exc:
+                    self._backend_error = exc
+                finally:
+                    self._backend_ready.set()
+            self._backend_thread = threading.Thread(target=prepare, name="prepare-workspace-backend", daemon=True)
+            self._backend_thread.start()
+            return self._backend_thread
 
     def initialize(self, window: Any, url: str, metrics: StartupMetrics) -> None:
         try:
-            metrics.mark("backend-import-started")
-            from backend import main as backend_main
-            self.backend_main = backend_main
-            metrics.mark("backend-imported")
+            self.preload_backend(metrics)
+            self._backend_ready.wait()
+            if self._backend_error is not None:
+                raise self._backend_error
+            backend_main = self.backend_main
             port = int(url.split(":", 2)[2].split("/", 1)[0])
             server = LocalServer(backend_main.app, port)
             with self._lock:
@@ -1001,21 +1106,21 @@ class DesktopApi:
             operation.fail(exc)
             raise
 
-    def process_legal_folder(self, selected_path: str, operationId: str | None = None) -> dict[str, Any]:
+    def process_legal_folder(self, selected_path: str, operationId: str | None = None, *, use_cache: bool = True) -> dict[str, Any]:
         folder = Path(selected_path).resolve()
         if not folder.is_dir():
             raise ValueError("The selected Legal Platform folder is no longer available.")
         from backend import main as backend_main
         from backend.legal_platform import LegalStore
         return self._load_legal_candidate(
-            lambda operation: LegalStore.from_folder(folder, exclusions=backend_main.duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=backend_main.prepare_import_exclusions),
+            lambda operation: LegalStore.from_folder(folder, exclusions=backend_main.duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=backend_main.prepare_import_exclusions, use_cache=use_cache),
             lambda: save_legal_folder(folder), operationId, "folder")
 
     def refresh_legal_folder(self, operationId: str | None = None) -> dict[str, Any]:
         folder = saved_legal_folder()
         if not folder:
             raise ValueError("No previously selected Legal Platform folder is available.")
-        return self.process_legal_folder(str(folder), operationId)
+        return self.process_legal_folder(str(folder), operationId, use_cache=False)
 
     def choose_legal_files(self) -> list[str] | None:
         import webview
@@ -1024,7 +1129,7 @@ class DesktopApi:
         selection = webview.windows[0].create_file_dialog(webview.FileDialog.OPEN, str(initial_folder or ""), True, "", ("CSV files (*.csv)",))
         return [str(Path(path).resolve()) for path in selection] if selection else None
 
-    def process_legal_files(self, selected_paths: list[str], operationId: str | None = None) -> dict[str, Any]:
+    def process_legal_files(self, selected_paths: list[str], operationId: str | None = None, *, use_cache: bool = True) -> dict[str, Any]:
         paths = [Path(path).resolve() for path in selected_paths]
         if not paths or any(not path.is_file() or path.suffix.lower() != ".csv" for path in paths):
             raise ValueError("The selected CSV files are no longer available.")
@@ -1045,14 +1150,14 @@ class DesktopApi:
                 operation.start(f"Reading:{name}")
                 payload[name] = path.read_bytes()
                 operation.finish(f"Reading:{name}")
-            return LegalStore.from_files(payload, "Selected Legal Platform CSV files", exclusions=backend_main.duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=backend_main.prepare_import_exclusions)
+            return LegalStore.from_files(payload, "Selected Legal Platform CSV files", exclusions=backend_main.duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=backend_main.prepare_import_exclusions, use_cache=use_cache)
         return self._load_legal_candidate(prepare, lambda: save_legal_files(paths), operationId, "files")
 
     def refresh_legal_files(self, operationId: str | None = None) -> dict[str, Any]:
         paths = saved_legal_files()
         if not paths:
             raise ValueError("No previously selected Legal Platform CSV files are available.")
-        return self.process_legal_files([str(path) for path in paths], operationId)
+        return self.process_legal_files([str(path) for path in paths], operationId, use_cache=False)
 
 
 def main() -> None:
@@ -1071,30 +1176,18 @@ def main() -> None:
     os.environ["UNHCR_UPLOAD_ONLY"] = "1"
     os.environ["UNHCR_STATIC_DIR"] = str(resource_path("frontend", "dist"))
     os.environ["INTERSOS_LOCAL_SESSION_TOKEN"] = secrets.token_urlsafe(32)
-    legal_settings = load_settings()
-    remembered_source = str(legal_settings.get("legalSource", "folder"))
-    has_remembered_source = bool(
-        legal_settings.get("legalFiles") if remembered_source == "files" else legal_settings.get("legalFolder")
-    )
-    os.environ["INTERSOS_LEGAL_SOURCE_CONFIGURED"] = "1" if has_remembered_source else "0"
-    remembered_folder = saved_legal_folder()
-    if remembered_folder:
-        os.environ["INTERSOS_LEGAL_FOLDER"] = str(remembered_folder)
+    configure_legal_source_environment()
     indicator_master_path = configured_indicator_master()
     if indicator_master_path:
         os.environ["INTERSOS_INDICATOR_MASTER"] = str(indicator_master_path)
-    remembered_legal_files = legal_settings.get("legalFiles", [])
-    if isinstance(remembered_legal_files, list):
-        remembered_legal_files = [path for path in remembered_legal_files if isinstance(path, str)]
-    else:
-        remembered_legal_files = []
-    if remembered_legal_files:
-        os.environ["INTERSOS_LEGAL_FILES"] = json.dumps(remembered_legal_files)
-    os.environ["INTERSOS_LEGAL_SOURCE"] = remembered_source
-    # Show the native window before importing the analytics backend. Legal CSV
-    # and indicator workbook restoration continue after the local API is ready.
+    # Show the native window while the analytics backend imports in parallel.
+    # Legal CSV/workbook restoration continues after the local API is ready.
     os.environ.setdefault("INTERSOS_DEFER_LEGAL_LOAD", "1")
     from backend.version import APP_VERSION
+    startup_theme = saved_app_theme()
+    runtime = StartupRuntime(startup_theme)
+    # Import the backend while Edge WebView2 is creating the native window.
+    runtime.preload_backend(metrics)
     import webview
     if sys.platform == "win32":
         try:
@@ -1102,16 +1195,12 @@ def main() -> None:
         except Exception:
             pass
 
-    port = available_port()
-    startup_theme = saved_app_theme()
-    # Private WebView profiles intentionally do not retain localStorage. Put the
-    # native persisted theme in the initial URL so React cannot reset it to light
-    # while the bridge is still starting.
+    port, workspace_options = workspace_startup_options()
+    # Supply native preferences when the workspace profile is empty or unavailable.
     startup_epoch_ms = int(time.time() * 1000)
     startup_page = saved_startup_page()
     startup_route = "#/" if "--home" in sys.argv else STARTUP_ROUTES[startup_page]
     url = f"http://127.0.0.1:{port}/?appTheme={startup_theme}&startupPage={startup_page}&startupEpoch={startup_epoch_ms}{startup_route}"
-    runtime = StartupRuntime(startup_theme)
 
     webview.settings["ALLOW_DOWNLOADS"] = True
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
@@ -1141,7 +1230,7 @@ def main() -> None:
             args=(window, url, metrics),
             gui="edgechromium",
             debug=False,
-            private_mode=True,
+            **workspace_options,
             icon=str(resource_path("intersos-protection-analytics.ico")),
         )
     except Exception as exc:

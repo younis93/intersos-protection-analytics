@@ -7,7 +7,7 @@ X
 import { useEffect,useRef,useState } from "react";
 import { createPortal } from "react-dom";
 import { exportTableWorkbook } from "./api";
-import { ChartFrame,chartGrid,chartInk,plotConfig,categoryPalette } from './ChartPrimitives';
+import { ChartFrame,chartGrid,chartInk,chartAccent,plotConfig,categoryPalette } from './ChartPrimitives';
 import { formatNumber,formatPercent } from './formatting';
 import Plot from "./LazyPlot";
 import { ExcelDownloadButton } from './SelectionControls';
@@ -91,7 +91,7 @@ export function ChartCard({
               textposition: "auto",
               hovertemplate: "%{y}<br>%{text}<extra></extra>",
               marker: {
-                color: chart.title === "Priority" ? rows.map((row)=>priorityColors[row.label]||"#64748b") : theme === "multicolor" ? rows.map((_, index) => categoryPalette[index % categoryPalette.length]) : "#1683d8",
+                color: chart.title === "Priority" ? rows.map((row)=>priorityColors[row.label]||"#64748b") : theme === "multicolor" ? rows.map((_, index) => categoryPalette[index % categoryPalette.length]) : chartAccent(theme),
                 line: { color: "rgba(255,255,255,.55)", width: 1 },
               },
             },
@@ -182,7 +182,7 @@ export function TrendCard({
   const bars=singleMonthTraces(rows.map(row=>row.label),breakdown?hoverMetrics!.map((metric,index)=>({
     label:metric.label,color:metric.color,values:rows.map((row,rowIndex)=>display==="percent"?(row.count?hoverValues[rowIndex][index]/row.count:0):hoverValues[rowIndex][index]),
   })):[
-    {label:primaryLabel||(comparisonRows?"Started":title),values:vals,color:"#1683d8",customdata:hoverMetrics?.length?hoverValues:undefined,
+    {label:primaryLabel||(comparisonRows?"Started":title),values:vals,color:chartAccent(theme),customdata:hoverMetrics?.length?hoverValues:undefined,
       hovertemplate:hoverMetrics?.length?`<b>${primaryLabel||title}</b>&nbsp;&nbsp;%{y:${display==="percent"?".1%":",.0f"}}<br>${hoverMetricTemplate}<extra></extra>`:undefined},
     ...(comparisonRows?[{label:comparisonLabel,values:comparisonVals,color:"#2f9e68"}]:[]),
   ],selected,chartInk(theme),display==="percent");
@@ -227,16 +227,16 @@ export function TrendCard({
               selectedpoints: selected.length ? rows
                 .map((r, i) => (selected.includes(r.label) ? i : -1))
                 .filter((i) => i >= 0) : null,
-              selected: { marker: { color: "#1683d8", size: 11 } },
+              selected: { marker: { color: chartAccent(theme), size: 11 } },
               unselected: { marker: { opacity: selected.length ? 0.58 : 1 } },
-              line: { color: "#1683d8", width: 3, shape: "spline" },
+              line: { color: chartAccent(theme), width: 3, shape: "spline" },
               marker: {
                 size: 9,
                 color: "#fff",
-                line: { color: "#1683d8", width: 3 },
+                line: { color: chartAccent(theme), width: 3 },
               },
               fill: "tozeroy",
-              fillcolor: "rgba(22,131,216,.10)",
+              fillcolor: theme === "forest" ? "rgba(21,128,61,.10)" : "rgba(22,131,216,.10)",
               customdata: hoverMetrics?.length ? hoverValues : undefined,
               hovertemplate: hoverMetrics?.length
                 ? `<b>${primaryLabel || title}</b>&nbsp;&nbsp;%{y:,.0f}<br>${hoverMetricTemplate}<extra></extra>`
@@ -266,7 +266,7 @@ export function TrendCard({
               name: "Selected detained month",
               x: rows.filter((row)=>selected.includes(row.label)).map((row)=>row.label),
               y: rows.map((row,index)=>({row,value:vals[index]})).filter(({row})=>selected.includes(row.label)).map(({value})=>value),
-              marker: {size:16,color:"#1683d8",line:{color:"#fff",width:3}},
+              marker: {size:16,color:chartAccent(theme),line:{color:"#fff",width:3}},
               hovertemplate: `%{x}<br>${primaryLabel||title}: %{y:,.0f}<extra></extra>`,
               showlegend: false,
             }] : []),

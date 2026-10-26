@@ -1,4 +1,5 @@
 import type {KoboAnalysis,KoboReport} from './koboTypes';
+import {resultWithColors} from './koboMarkColors';
 import {downloadBlob} from './koboApi';
 import {koboPdfChartKey,koboPdfChartPanels} from './koboChartDensity';
 
@@ -16,7 +17,8 @@ export function buildKoboPdf(name:string,snapshot:KoboAnalysis,signal:AbortSigna
     await new Promise(resolve=>setTimeout(resolve,0));rendering.signal.throwIfAborted();
     const {koboChartImage}=await import('./KoboChart');rendering.signal.throwIfAborted();
     const index=chartIndex.get(id),result=index===undefined?undefined:charts[index];if(!result)throw new Error('Question missing from export snapshot.');
-    return koboChartImage(result,snapshot.settings.language,'png',rendering.signal);
+    const cfg=snapshot.settings.questions[result.id];
+    return koboChartImage(cfg?resultWithColors(result,cfg):result,snapshot.settings.language,'png',rendering.signal);
    })();images.set(id,image);return image;
   };
   const cleanup=()=>{signal.removeEventListener('abort',abort);rendering.abort();images.clear();worker.terminate()};

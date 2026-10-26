@@ -6,9 +6,11 @@ from .kobo_trends import validate_chart_settings
 def snapshot_issues(project, snapshot):
     questions = {q['id']: q for q in project['form']['questions']}
     issues = []
-    referenced = set(snapshot.hidden) | set(snapshot.filterFields) | set(snapshot.questions)
+    referenced = set(snapshot.hidden) | set(snapshot.filterFields) | set(snapshot.questions) | set(snapshot.dateFilterModes)
     referenced |= {f.field for f in snapshot.filters}
     for qid in sorted(referenced - questions.keys()): issues.append(f'Question no longer exists: {qid}.')
+    for qid in snapshot.dateFilterModes:
+        if qid in questions and questions[qid]['kind'] != 'date': issues.append(f'{questions[qid]["name"]}: date filter column type changed.')
     for rule in snapshot.filters:
         q = questions.get(rule.field)
         if not q: continue

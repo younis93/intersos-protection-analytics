@@ -1,0 +1,66 @@
+/* Forest Professional: scoped so existing themes retain their appearance. */
+:root[data-theme='forest'] {
+  --blue:#15803d;
+  --bg:#f4f7f5;
+  --ink:#18251d;
+  --muted:#526659;
+  --panel:#fff;
+  --panel-strong:#fff;
+  --line:#d7e3db;
+  --shadow:0 6px 22px rgba(20,53,32,.06);
+  --radius:12px;
+  --forest-nav:#347653;
+  color-scheme:light;
+  accent-color:var(--blue);
+}
+:root[data-theme='forest'] :is(.ambient,.legal-processing-background){display:none}
+:root[data-theme='forest'] .glass{backdrop-filter:none;-webkit-backdrop-filter:none}
+:root[data-theme='forest'] :is(.welcome-page,.legal-upload-overlay,.app-startup-loading){background:var(--bg)}
+:root[data-theme='forest'] :is(.topbar,.desktop-titlebar){background:var(--bg)}
+:root[data-theme='forest'] :is(.workspace-card,.chart-card,.quality-card,.kpi-card,.sidebar,.app-select,.theme-select,.pro-select,.soft,.primary){border-radius:12px}
+:root[data-theme='forest'] .workspace-card{--card-color:var(--blue);background:var(--panel-strong);box-shadow:var(--shadow)}
+:root[data-theme='forest'] .workspace-card:hover{box-shadow:0 10px 28px rgba(20,53,32,.1)}
+:root[data-theme='forest'] :is(.primary,.soft,.app-select-trigger){box-shadow:none}
+:root[data-theme='forest'] .primary:not(:disabled):hover{background:#166534}
+:root[data-theme='forest'] .primary:disabled{opacity:.45;cursor:not-allowed}
+:root[data-theme='forest'] :is(button,a,input,select,textarea,[tabindex]):focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+:root[data-theme='forest'] .sidebar{
+  background:var(--forest-nav);
+  border-color:var(--forest-nav);
+  color:#fff;
+  --muted:#d2e5d8;
+  --line:rgba(255,255,255,.24);
+}
+:root[data-theme='forest'] .sidebar :is(.brand small,.source span,.source small,.sidebar-workspace-controls .app-select-label){color:#d2e5d8}
+:root[data-theme='forest'] .sidebar nav button{color:#e3efe7;border-radius:10px}
+:root[data-theme='forest'] .sidebar nav button:is(.active,:hover,:focus-visible){background:rgba(255,255,255,.16);color:#fff;box-shadow:none}
+:root[data-theme='forest'] .sidebar :is(nav button.active svg,.source svg,.app-select-icon){color:#fff}
+:root[data-theme='forest'] .sidebar-workspace-controls :is(.soft,.data-source-control){border-color:rgba(255,255,255,.3)!important;background:rgba(255,255,255,.08)!important;color:#fff}
+:root[data-theme='forest'] .sidebar-workspace-controls .data-source-control :is(.app-select-trigger,.app-select-trigger svg){color:#fff}
+:root[data-theme='forest'] .sidebar-workspace-controls :is(.soft,.data-source-control):hover,
+:root[data-theme='forest'] .sidebar-workspace-controls .data-source-control.open{border-color:rgba(255,255,255,.65)!important;background:rgba(255,255,255,.16)!important;box-shadow:none}
+:root[data-theme='forest'] .legal-sidebar-utilities button{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.3);color:#fff}
+:root[data-theme='forest'] .legal-sidebar-utilities button:is(:hover,:focus-visible){background:rgba(255,255,255,.16);color:#fff}
+:root[data-theme='forest'] .legal-sidebar-utilities .legal-menu-slide-toggle{background:#dff1e4;border-color:#b6d8c1;color:#215b3c;font-weight:600}
+:root[data-theme='forest'] .legal-sidebar-utilities .legal-menu-slide-toggle:is(:hover,:focus-visible){background:#c9e6d2;border-color:#a3cdb1;color:#19492f}
+:root[data-theme='forest'] .legal-sidebar-utilities .legal-menu-slide-toggle:active{background:#b6d8c1;color:#19492f}
+:root[data-theme='forest'] .sidebar :is(button,a):focus-visible{outline-color:#d2e5d8;outline-offset:-3px}
+/* Menus use light surfaces even when their trigger sits in the dark sidebar. */
+:root[data-theme='forest'] .sidebar .app-select-menu{--ink:#18251d;--muted:#526659;--line:#d7e3db;color:var(--ink);background:#fff}
+:root[data-theme='forest'] .sidebar .app-select-menu :is(button,svg){color:var(--ink)}
+:root[data-theme='forest'] .sidebar .app-select-menu :is(button,a):focus-visible{outline-color:var(--blue)}
+:root[data-theme='forest'] :is(.legal-upload-progress,.app-startup-loading-card){border-radius:12px!important;box-shadow:var(--shadow)}
+:root[data-theme='forest'] :is(.legal-upload-icon,.workspace-icon){border-radius:10px}
+:root[data-theme='forest'] :is(dialog,.filter-drawer){border-radius:12px}
+:root[data-theme='forest'] :is(.table-wrap,.records-table,.filter-drawer,.app-select-menu){border-color:var(--line)}
+:root[data-theme='forest'] :is(.table-wrap,.records-table) thead th{background:#edf4ef;color:var(--ink)}
+:root[data-theme='forest'] :is(.table-wrap,.records-table) tbody tr:hover{background:#f0f7f2}
+:root[data-theme='forest'] .kobo-shell .kobo-pivot-wrap .kobo-pivot-table thead th{background:var(--forest-nav);color:#fff;border-color:#ffffff38}
+:root[data-theme='forest'] .kobo-shell .kobo-pivot-wrap .kobo-pivot-table tfoot :is(th,td){background:#e2eee6;color:var(--ink);border-top-color:var(--blue)}
+@media(max-width:760px){
+  :root[data-theme='forest'] .welcome-home-actions>.app-select-theme{position:relative;display:block;min-width:48px;width:48px;height:48px;padding:12px}
+  :root[data-theme='forest'] .welcome-home-actions>.app-select-theme .app-select-icon{display:block;width:20px;pointer-events:none}
+  :root[data-theme='forest'] .welcome-home-actions>.app-select-theme .app-select-label{display:none}
+  :root[data-theme='forest'] .welcome-home-actions>.app-select-theme .app-select-trigger{position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:auto}
+  :root[data-theme='forest'] .welcome-home-actions>.app-select-theme:focus-within{outline:2px solid var(--blue);outline-offset:3px}
+}

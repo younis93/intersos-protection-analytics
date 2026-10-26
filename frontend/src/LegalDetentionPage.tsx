@@ -28,7 +28,8 @@ import { value } from './LegalRecordCells';
 import { LegalScrollControls } from './LegalScrollControls';
 import { LegalSkeleton } from './LegalSkeleton';
 import { AppSelect,CheckboxMultiSelect,ExcelDownloadButton } from './SelectionControls';
-import { Pager,RowSelectionCheckbox } from './TableControls';
+import { Pager,RowSelectionCheckbox,SearchField } from './TableControls';
+import './legalDetentionComparison.css';
 import { TableSelectionActions } from './TableSelectionActions';
 import { useDebouncedValue } from "./useDebouncedValue";
 import { useQueryPage } from "./useQueryPage";
@@ -42,6 +43,7 @@ export function DetentionCases({
   theme: any;
 }) {
   const [recordSearch,setRecordSearch]=useState(""),
+    [issueSearch,setIssueSearch]=useState(""),
     [recordSortColumn,setRecordSortColumn]=useState(""),
     [recordSortDirection,setRecordSortDirection]=useState<"asc"|"desc">("asc"),
     [selectedRecords,setSelectedRecords]=useState<Map<string,Record<string,unknown>>>(new Map()),
@@ -66,6 +68,18 @@ export function DetentionCases({
     [error, setError] = useState("");
   const drillMenuRef=useRef<HTMLDivElement>(null);
   const debouncedRecordSearch=useDebouncedValue(recordSearch);
+  const issueQuery=issueSearch.trim().toLocaleLowerCase();
+  const visibleIssues=(comparisonResult?.rows||[]).filter(row=>!issueQuery||[
+    row.beneficiaryId,row.name,row.lawyer,row.note,row.note.startsWith("Different:")?"Different field data":"",...(row.relatedCases||[]).map(related=>related.caseId),
+    ...row.differences.flatMap(difference=>[difference.field,difference.assessment,difference.excel]),
+  ].some(value=>String(value??"").toLocaleLowerCase().includes(issueQuery)));
+  const issueGroups=new Map<string,typeof visibleIssues>();
+  visibleIssues.forEach(row=>{
+    const label=row.note.startsWith("Different:")?"Different field data":row.note;
+    const group=issueGroups.get(label);
+    if(group)group.push(row);else issueGroups.set(label,[row]);
+  });
+  useEffect(()=>setIssueSearch(""),[comparisonResult]);
   const [page,setPage]=useQueryPage(JSON.stringify([filters,tab,tab==="records"?debouncedRecordSearch:""]));
   useEffect(() => {
     let current=true;
@@ -217,7 +231,7 @@ export function DetentionCases({
       </div>
       }
       {tab==="reconcile"&&<section className="glass detention-reconciliation">
-        <header><div><span className="eyebrow">MONTHLY COMPARISON</span><h3>Compare detention records with Excel</h3><p>Records are matched by Case ID. The results show IDs available only in Assessments, only in Excel, and rows with a missing Case ID.</p></div></header>
+        <header><div><span className="eyebrow">MONTHLY COMPARISON</span><h3>Compare detention records with Excel</h3><p>Records are matched by Case ID. Separate issue groups identify cases missing from either source, assessments marked as not detained, detained assessments found in another month, matching names with different Case IDs, and rows with a missing Case ID.</p></div></header>
         <div className="reconciliation-controls">
           <div className="reconciliation-month-select"><CheckboxMultiSelect label="Assessment months" values={availableMonths} selected={comparisonMonths} onChange={(months)=>{setComparisonMonths(months);setComparisonResult(null)}}/></div>
           <div className="reconciliation-project-select"><CheckboxMultiSelect label="Projects" values={data?.filterOptions?.Project||[]} selected={comparisonProjects} onChange={(projects)=>{setComparisonProjects(projects);setComparisonResult(null)}}/></div>
@@ -225,7 +239,6 @@ export function DetentionCases({
           <div className="reconciliation-sheet-select"><AppSelect label="Worksheet" value={comparisonSheet} disabled={!comparisonSheets.length||sheetBusy} options={comparisonSheets.map((sheet)=>[sheet,sheet])} onChange={(sheet)=>{setComparisonSheet(sheet);setComparisonResult(null)}}/></div>
           <button className="primary" disabled={!comparisonMonths.length||!comparisonProjects.length||!comparisonFile||!comparisonSheet||comparisonBusy||sheetBusy} onClick={compareWorkbook}>{comparisonBusy?<><span className="button-spinner"/>Comparing…</>:<>Compare selected month{comparisonMonths.length===1?"":"s"}<ArrowRight/></>}</button>
         </div>
-        <p className="reconciliation-help">Project filtering is applied from Assessments. If the workbook has no Project column, all Excel rows for the selected month remain visible so Case IDs found only in Excel are not hidden. For matching Case IDs, Date of Birth and Detention Governorate are compared directly alongside arrest, release, authority, charges, nationality and legal-service fields.</p>
         {comparisonResult&&<>
           <div className="reconciliation-summary">
             <div><span>Platform records</span><strong>{comparisonResult.platformRecords.toLocaleString()}</strong></div>
@@ -236,23 +249,24 @@ export function DetentionCases({
             <div className="reconciliation-export"><ExcelDownloadButton className="primary" onClick={exportComparison} busy={comparisonExporting} disabled={!comparisonResult.rows.length}/></div>
           </div>
           {comparisonResult.warnings.length>0&&<details className="reconciliation-warnings"><summary>{comparisonResult.warnings.length} workbook column warning{comparisonResult.warnings.length===1?"":"s"}</summary>{comparisonResult.warnings.map((warning)=><p key={warning}>{warning}</p>)}</details>}
-          <div className="legal-table-wrap reconciliation-table"><ValueTable><thead><tr><th className="no-sort">Note group</th><th className="no-sort">Beneficiary ID</th><th className="no-sort">Name</th><th className="no-sort">Different field</th><th className="no-sort">Platform Value</th><th className="no-sort">Excel value</th><th className="no-sort">Action</th></tr></thead><tbody>{comparisonResult.rows.length?Array.from(new Set(comparisonResult.rows.map((row)=>row.note))).flatMap((note,groupIndex)=>{
-          const groupRows=comparisonResult.rows.filter((row)=>row.note===note);
-            const groupLineCount=groupRows.reduce((count,row)=>count+Math.max(1,row.differences?.length||0),0);
-            let firstGroupLine=true;
-            return groupRows.flatMap((row)=>{
+          <div className="reconciliation-issues-toolbar">
+            <SearchField label="Search comparison issues" placeholder="Search issues by Case ID, name or difference" value={issueSearch} onChange={setIssueSearch} clearable/>
+            <span role="status" aria-live="polite">{visibleIssues.length.toLocaleString()} of {comparisonResult.rows.length.toLocaleString()} issues</span>
+          </div>
+          <div className="legal-table-wrap reconciliation-table"><ValueTable><thead><tr><th className="no-sort">Issue</th><th className="no-sort">Case ID</th><th className="no-sort">Name</th><th className="no-sort">Different field</th><th className="no-sort">Platform Value</th><th className="no-sort">Excel value</th><th className="no-sort">Action</th></tr></thead><tbody>{visibleIssues.length?Array.from(issueGroups).flatMap(([label,rows],groupIndex)=>{
+            const groupLineCount=rows.reduce((sum,row)=>sum+Math.max(1,row.differences.length),0);
+            return rows.flatMap((row,rowIndex)=>{
               const differences=row.differences?.length?row.differences:[{field:"Record",assessment:"—",excel:"—"}];
               return differences.map((difference,differenceIndex)=>{
-                const showGroup=firstGroupLine;firstGroupLine=false;
-                return <tr className={`reconciliation-group reconciliation-group-${groupIndex%6}`} key={`${row.beneficiaryId}-${difference.field}-${differenceIndex}`}>
-                  {showGroup&&<td className="reconciliation-note-group" rowSpan={groupLineCount}><div className="reconciliation-note-group-content"><strong>{note}</strong><small>{groupRows.length} case{groupRows.length===1?"":"s"}</small></div></td>}
-                  {differenceIndex===0?<><td rowSpan={differences.length}>{row.beneficiaryId}</td><td rowSpan={differences.length}>{value(row.name)}</td></>:null}
+                return <tr className={`reconciliation-group reconciliation-group-${groupIndex%6}`} key={`${groupIndex}-${rowIndex}-${row.beneficiaryId}-${difference.field}-${differenceIndex}`}>
+                  {rowIndex===0&&differenceIndex===0&&<td className="reconciliation-note-group" rowSpan={groupLineCount}><div className="reconciliation-note-group-content"><strong>{label}</strong><small>{rows.length} case{rows.length===1?"":"s"}</small></div></td>}
+                  {differenceIndex===0?<><td className="reconciliation-case-id" rowSpan={differences.length}>{value(row.beneficiaryId)}</td><td rowSpan={differences.length}>{value(row.name)}</td></>:null}
                   <td><span className="reconciliation-field">{difference.field}</span></td><td className="reconciliation-assessment-value">{value(difference.assessment)}</td><td className="reconciliation-excel-value">{value(difference.excel)}</td>
-                  {differenceIndex===0?<td rowSpan={differences.length}>{row.caseAvailable&&<button className="table-action" onClick={()=>onOpenCase(row.beneficiaryId)}>Open case<ArrowRight/></button>}</td>:null}
+                  {differenceIndex===0?<td rowSpan={differences.length}><div className="reconciliation-case-actions">{row.caseAvailable&&<button className="table-action" onClick={()=>onOpenCase(row.beneficiaryId)}>Open case<ArrowRight/></button>}{row.relatedCases?.filter(related=>related.caseAvailable&&related.caseId!==row.beneficiaryId).map(related=><button key={related.caseId} className="table-action" onClick={()=>onOpenCase(related.caseId)}>Open case {related.caseId}<ArrowRight/></button>)}</div></td>:null}
                 </tr>;
               });
             });
-          }):<tr><td colSpan={7}><div className="reconciliation-empty"><CheckCircle2/><strong>All records match for {comparisonResult.month}</strong></div></td></tr>}</tbody></ValueTable></div>
+          }):<tr><td colSpan={7}>{comparisonResult.rows.length?<div className="reconciliation-search-empty" role="status">No issues match your search.</div>:<div className="reconciliation-empty"><CheckCircle2/><strong>All records match for {comparisonResult.month}</strong></div>}</td></tr>}</tbody></ValueTable></div>
         </>}
       </section>}
       {drawer&&<SharedFilterDrawer title="Filter detention cases" eyebrow="DETENTION FILTERS" onClose={()=>setDrawer(false)} onReset={()=>{setFilters({});setPage(1)}} resetDisabled={!activeCount}

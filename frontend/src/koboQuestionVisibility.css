@@ -108,3 +108,8 @@
 .kobo-shell .kobo-visibility-row .kobo-visibility-toggle:focus-visible{outline:2px solid var(--visibility-accent);outline-offset:3px}
 .kobo-visibility-row .kobo-visibility-badges>.is-pending{font-size:10px;font-weight:700;padding:4px 7px;color:var(--ink);border:1px dashed var(--visibility-accent);background:color-mix(in srgb,var(--visibility-accent) 16%,var(--panel-strong))}
 @media(max-width:540px){.kobo-shell .kobo-visibility-row .kobo-visibility-toggle{min-width:96px;min-height:40px;padding:8px;font-size:11px}.kobo-visibility-row-actions{gap:10px}}
+.custom-date-mode-selection{padding:0 14px 12px 44px;max-width:360px}
+.custom-date-mode-selection .app-select{width:100%;min-width:0}
+.kobo-date-filter{min-width:0;display:grid;gap:8px;align-content:start}
+.kobo-date-filter>.app-select{width:100%;min-width:0}
+.kobo-date-filter>small{font-size:11px;color:var(--muted)}

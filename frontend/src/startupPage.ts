@@ -1,11 +1,11 @@
-export type StartupPage = 'home' | 'legal' | 'kobo';
-export const STARTUP_PAGE_LABELS: Record<StartupPage, string> = {home: 'Home', legal: 'Legal', kobo: 'Kobo'};
+export type StartupPage = 'home' | 'legal' | 'kobo' | 'custom';
+export const STARTUP_PAGE_LABELS: Record<StartupPage, string> = {home: 'Home', legal: 'Legal', kobo: 'Kobo', custom: 'Custom Analysis'};
 const STORAGE_KEY = 'app-startup-page';
-const isStartupPage = (value: unknown): value is StartupPage => value === 'home' || value === 'legal' || value === 'kobo';
+const isStartupPage = (value: unknown): value is StartupPage => value === 'home' || value === 'legal' || value === 'kobo' || value === 'custom';
 
 export function readStartupPage(): StartupPage {
-  // Desktop profiles are private. The launcher carries the durable preference
-  // into each new window; storage keeps later visits to Home in sync after Save.
+  // The launcher supplies the preference for an empty workspace profile;
+  // storage keeps later visits to Home in sync after Save.
   try {
     const cached = localStorage.getItem(STORAGE_KEY);
     if (isStartupPage(cached)) return cached;

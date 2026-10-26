@@ -17,6 +17,7 @@ import pstats
 import statistics
 import subprocess
 import sys
+from tempfile import TemporaryDirectory
 from pathlib import Path
 from time import perf_counter
 
@@ -76,7 +77,24 @@ def main() -> None:
     parser.add_argument("--profile", action="store_true", help="Separate CPU run; no record values are saved")
     parser.add_argument("--suite", action="store_true")
     parser.add_argument("--repeats", type=int, default=5)
+    parser.add_argument("--cache-comparison", action="store_true", help="Compare cold and cached imports in fresh processes")
+    parser.add_argument("--cache-dir", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.cache_comparison:
+        if args.baseline or args.suite or args.profile:
+            parser.error('--cache-comparison cannot be combined with baseline, suite or profile')
+        with TemporaryDirectory(prefix="legal-cache-benchmark-") as directory:
+            command = [sys.executable, __file__, "--mb", str(args.mb), "--cache-dir", directory]
+            if args.duplicates: command.append("--duplicates")
+            cold, cached = [json.loads(subprocess.run(command, capture_output=True, text=True, check=True).stdout) for _ in range(2)]
+        assert cold['result_sha256'] == cached['result_sha256'], 'Cached results differ'
+        assert cold['stages_seconds']['cache_miss'] == cached['stages_seconds']['cache_hit'] == 1
+        result = {'cold': cold, 'cached': cached, 'speedup': round(cold['import_ready_seconds'] / max(cached['import_ready_seconds'], .0001), 2)}
+        print(json.dumps(result, indent=2))
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps(result, indent=2), encoding='utf-8')
+        return
     if args.suite:
         if args.output is None or args.profile or args.repeats<1:
             parser.error('--suite requires --output and positive repeats; run --profile separately')
@@ -104,6 +122,10 @@ def main() -> None:
         spec.loader.exec_module(module)
     else:
         from backend import legal_platform as module
+        # Every ordinary benchmark stays cold and cannot replace the user's cache.
+        cache_workspace = TemporaryDirectory(prefix="legal-import-benchmark-") if args.cache_dir is None else None
+        directory = args.cache_dir or Path(cache_workspace.name)
+        module.legal_processing_cache.cache_directory = lambda: directory
     payload = synthetic_payload(args.mb)
     if args.duplicates:
         frame=pd.read_csv(io.BytesIO(payload['beneficiaries']),dtype=object)
@@ -170,6 +192,8 @@ def main() -> None:
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    if not args.baseline and cache_workspace is not None:
+        cache_workspace.cleanup()
 
 
 if __name__ == "__main__":

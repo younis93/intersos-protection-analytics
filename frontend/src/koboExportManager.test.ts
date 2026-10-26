@@ -3,7 +3,7 @@ import type {KoboAnalysis,KoboSettings} from './koboTypes';
 const api=vi.hoisted(()=>({export:vi.fn(),job:vi.fn(),cancel:vi.fn(),exportBlob:vi.fn(),analyze:vi.fn(),exportRecovery:vi.fn(),saveExportRecovery:vi.fn(),removeExportRecovery:vi.fn()}));
 const download=vi.hoisted(()=>vi.fn());
 const build=vi.hoisted(()=>vi.fn());
-vi.mock('./koboApi',()=>({koboApi:api,downloadBlob:download}));
+vi.mock('./koboApi',()=>({koboApi:api,downloadBlob:download,createKoboApi:vi.fn(()=>api),analysisWorkspace:()=> 'kobo'}));
 vi.mock('./koboPdf',()=>({buildKoboPdf:build}));
 const settings={version:1,language:'en',filters:[],filterFields:[],hidden:[],metadata:false,hideBlanks:true,hideZero:false,hideEmpty:false,questionSort:'form',questions:{}} as KoboSettings;
 const input={projectId:'p',projectName:'Project',settings,format:'excel' as const};

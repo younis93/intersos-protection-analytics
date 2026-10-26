@@ -67,7 +67,12 @@ def test_selected_sheet_survives_save_reload_review_and_replacement(preview_clie
     confirm(client, review)
     assert store.get(pid)['records'][0]['values']['answer'] == 'updated'
     missing = workbook({'Other': [['answer'], ['wrong']]})
-    assert client.post(f'/api/kobo/projects/{pid}/review', files={'data': ('new.xlsx', missing)}).status_code == 400
+    before = store.get(pid)
+    changed = client.post(f'/api/kobo/projects/{pid}/review', files={'data': ('new.xlsx', missing)})
+    assert changed.status_code == 200
+    assert not changed.json()['reuse']['eligible']
+    assert store.get(pid) == before
+    client.delete('/api/kobo/imports/' + changed.json()['token'])
     csv_review = client.post(f'/api/kobo/projects/{pid}/review', files={'data': ('new.csv', b'answer\ncsv\n')}).json()
     confirm(client, csv_review)
     assert store.get(pid)['source'] == {'worksheet': ''}

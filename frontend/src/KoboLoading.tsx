@@ -1,10 +1,11 @@
+import {analysisWorkspace} from './koboApi';
 import {ChartColumnIncreasing,RotateCcw} from 'lucide-react';
 import {useLayoutEffect} from 'react';
 import './koboLoading.css';
 
 export function KoboModuleLoading(){
  useLayoutEffect(()=>{if(!document.documentElement.dataset.theme){try{document.documentElement.dataset.theme=localStorage.getItem('app-theme')||'glass-light'}catch{document.documentElement.dataset.theme='glass-light'}}},[]);
- return <main className="kobo-module-loading" aria-busy="true"><section className="kobo-loading-card" role="status"><span className="kobo-loading-icon"><ChartColumnIncreasing aria-hidden="true"/></span><h1>Opening Kobo Analysis</h1><p>Preparing your workspace</p><div className="kobo-loading-track" aria-hidden="true"><i/></div></section></main>;
+ return <main className="kobo-module-loading" aria-busy="true"><section className="kobo-loading-card" role="status"><span className="kobo-loading-icon"><ChartColumnIncreasing aria-hidden="true"/></span><h1>Opening {analysisWorkspace()==='custom'?'Custom Analysis':'Kobo Analysis'}</h1><p>Preparing your workspace</p><div className="kobo-loading-track" aria-hidden="true"><i/></div></section></main>;
 }
 
 export function KoboProjectSkeleton({stage,showHeader=true}:{stage:'project'|'analysis';showHeader?:boolean}){

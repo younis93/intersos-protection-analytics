@@ -25,6 +25,7 @@ class ImportOperation:
         self.published = None
         self.cancel_requested = False
         self.publishing = False
+        self.completion_callbacks = []
 
     def check_cancelled(self):
         with self.lock:
@@ -63,6 +64,15 @@ class ImportOperation:
             if name not in self.tasks: raise ValueError("Unplanned import task.")
             self.current = name
 
+    def replan(self, names):
+        """Replace unperformed parsing work with actual cached-restore work."""
+        with self.lock:
+            self.check_cancelled()
+            if self.publishing:
+                raise ValueError("Cannot change work during publication")
+            self.tasks = {name: self.tasks.get(name, 0.0) for name in names}
+            self.published = None
+
     def advance(self, name, completed, total):
         with self.lock:
             self.check_cancelled()
@@ -76,6 +86,11 @@ class ImportOperation:
         with self.lock:
             if not self.tasks or any(value != 1 for value in self.tasks.values()):
                 raise ValueError("Import finished with incomplete work.")
+            callbacks, self.completion_callbacks = self.completion_callbacks, []
+            # Keep the import guard busy until its successful snapshot is saved.
+            # Otherwise a newer import could save first and be overwritten.
+            for callback in callbacks:
+                callback()
             self.state = "complete"
             self.published = None
 
@@ -84,6 +99,7 @@ class ImportOperation:
             self.state = "cancelled" if isinstance(error, ImportCancelled) or self.cancel_requested and not self.publishing else "error"
             self.error = "" if self.state == "cancelled" else str(error)
             self.published = None
+            self.completion_callbacks.clear()
 
     def snapshot(self):
         with self.lock:
@@ -146,16 +162,17 @@ class ImportTracker:
 legal_import_tracker = ImportTracker()
 
 
-def import_plan(datasets):
+def import_plan(datasets, *, cached=False):
     datasets = list(datasets)
     core = all(name in datasets for name in ("beneficiaries", "assessments", "legalservices"))
     validation = [name for name in ("legalhotlines", "beneficiaries", "assessments", "legalservices", "awareness")
                   if name in datasets and (core or name in {"legalhotlines", "awareness"})]
     reviews = [name for name in ("beneficiaries", "assessments", "legalservices", "awareness") if name in datasets and (core or name == "awareness")]
-    return [*(f"Reading:{name}" for name in datasets),
+    processing = ["Restoring saved processing"] if cached else [
             *(task for name in datasets for task in (f"Parsing:{name}", f"Cleaning:{name}")),
-            "Restoring linked fields",
-            *(f"Validating:{name}" for name in validation),
-            *(["Checking relationships:assessments"] if core else []), "Applying exclusions",
+            "Restoring linked fields", *(f"Validating:{name}" for name in validation),
+            *(["Checking relationships:assessments"] if core else [])]
+    return [*(f"Reading:{name}" for name in datasets), "Checking saved processing",
+            *processing, "Applying exclusions",
             *(f"Preparing review:{name}" for name in reviews), "Preparing metadata",
             "Reconciling exclusions", "Finalizing metadata", "Publishing"]

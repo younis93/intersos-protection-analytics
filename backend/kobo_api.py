@@ -19,6 +19,7 @@ from .kobo_settings_share import SettingsFile, export_settings, preview_settings
 from .kobo_quality import QualityResult, quality_review
 from .kobo_population import PopulationRequest, PopulationResult, compare_population
 from .kobo_saved_views import saved_view_issues, apply_saved_view, apply_default_view
+from .import_reuse import source_reuse_reasons, settings_reuse_reasons, reuse_result
 from .export_recovery import ExportRecoveryStore, RecoveryTask
 from .export_temp import cleanup_export_folders
 
@@ -43,6 +44,7 @@ class FormChoice(BaseModel):
 
 
 class FormQuestion(BaseModel):
+    addedFromData: bool = False
     id: str
     name: str
     type: str
@@ -87,6 +89,7 @@ class ProjectResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     issues: list[ImportIssue] = Field(default_factory=list)
     source: dict[str, str] = Field(default_factory=dict)
+    customConfig: dict[str, Any] | None = None
 
 
 class BreakdownCount(BaseModel):
@@ -126,6 +129,7 @@ class AnswerTrend(BaseModel):
 
 
 class QuestionResult(BaseModel):
+    addedFromData: bool = False
     trend: AnswerTrend | None = None
     appearance: ChartAppearance = Field(default_factory=ChartAppearance)
     id: str
@@ -172,6 +176,7 @@ class ConfirmImport(BaseModel):
     mappings: list[ColumnMapping]
     policies: dict[str, str] = Field(default_factory=dict)
     acceptInvalid: bool = False
+    reuseOnly: bool = False
     settingsPackage: SettingsFile | None = None
     reviewConfig: ReviewConfig = Field(default_factory=ReviewConfig)
 
@@ -288,10 +293,10 @@ def answer_examples(sheets, mappings, issues):
     return examples
 
 
-def make_router(store: ProjectStore | None = None):
-    router = APIRouter(prefix='/api/kobo', tags=['Kobo Analysis'])
+def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
+    router = APIRouter(prefix=prefix, tags=['Custom Analysis' if prefix == '/api/custom' else 'Kobo Analysis'])
     store = store or ProjectStore()
-    recovery = ExportRecoveryStore(store.path.parent / 'export-tasks.sqlite3')
+    recovery = ExportRecoveryStore(store.path.parent / ('custom-export-tasks.sqlite3' if prefix == '/api/custom' else 'export-tasks.sqlite3'))
     cleanup_export_folders()
 
     @router.get('/export-recovery')
@@ -300,6 +305,7 @@ def make_router(store: ProjectStore | None = None):
 
     @router.put('/export-recovery/{task_id}')
     def save_export_recovery(task_id: uuid.UUID, task: RecoveryTask):
+        task.input.workspace = 'custom' if prefix == '/api/custom' else 'kobo'
         recovery.save(str(task_id), task)
         return {'saved': True}
 
@@ -353,6 +359,11 @@ def make_router(store: ProjectStore | None = None):
         raw = await file.read(MAX_BACKUP + 1)
         try:
             name, payload, settings, form_raw, data_raw = await run_in_threadpool(read_backup, raw)
+            if bool(payload.get('customConfig')) != (prefix == '/api/custom'):
+                raise ValueError('Choose a backup from this workspace.')
+            if prefix == '/api/custom':
+                from .custom_analysis import Configuration
+                Configuration.model_validate(payload['customConfig'])
             FormSchema.model_validate(payload['form'])
             question_ids = [q['id'] for q in payload['form']['questions']]
             if len(set(question_ids)) != len(question_ids):
@@ -476,6 +487,9 @@ def make_router(store: ProjectStore | None = None):
                 filename = data.filename or ''
                 data_raw = await read_upload_limited(data)
             worksheet = p.get('source', {}).get('worksheet', '') if not filename.lower().endswith('.csv') else ''
+            if data and worksheet:
+                available = await run_in_threadpool(data_worksheets, data_raw, filename)
+                if worksheet not in available: worksheet = available[0] if available else ''
             sheets = await run_in_threadpool(parse_data, data_raw, filename, worksheet)
             parsed_form = p.get('baseForm', p['form'])
             review_config = ReviewConfig.model_validate(p.get('reviewConfig', {})).model_dump()
@@ -496,7 +510,9 @@ def make_router(store: ProjectStore | None = None):
                     retain_group(group.get('parent', ''))
                     base_form['groups'].append({**group, 'analysisOnly': True})
                     present_groups.add(gid)
-            for added in review_config['addedQuestions']: retain_group(added.get('repeat', ''))
+            for added in review_config['addedQuestions']:
+                retain_group(added.get('repeat', ''))
+                retain_group(added.get('group') or '')
             matches = question_matches(p.get('baseForm', p['form']), base_form)
             review_config['choiceOverrides'] = {matches.get(k, k): v for k, v in review_config['choiceOverrides'].items() if k in matches or any(q['id'] == k for q in review_config['addedQuestions'])}
             known = {q['id'] for q in base_form['questions']} | {q['id'] for q in review_config['addedQuestions']}
@@ -512,12 +528,20 @@ def make_router(store: ProjectStore | None = None):
             policies = {question_links[qid]: value for qid, value in p.get('policies', {}).items() if qid in question_links and any(q['id'] == question_links[qid] and q['kind'] == 'multiple' for q in parsed_form['questions'])}
             issues, link_review = await run_in_threadpool(review_details, parsed_form, sheets, mappings, policies)
             examples = await run_in_threadpool(answer_examples, sheets, mappings, issues)
+            reuse_reasons = source_reuse_reasons(old_sheets, sheets)
+            if form: reuse_reasons.append('A replacement form needs review before applying.')
+            if reuse_warnings: reuse_reasons.extend(reuse_warnings)
+            if issues: reuse_reasons.extend(issue['message'] for issue in issues)
+            if any(m['status'] in {'unmatched', 'ambiguous'} for m in mappings): reuse_reasons.append('Some columns need a confirmed mapping.')
+            if link_review.get('noSource'): reuse_reasons.append('Some questions no longer have a data source.')
+            reuse_reasons.extend(settings_reuse_reasons(p, {'form': parsed_form, 'records': []}))
+            reuse = reuse_result(reuse_reasons)
             token = uuid.uuid4().hex
             with lock:
                 for key in list(staged):
                     if time.monotonic() - staged[key]['created'] > 1800: del staged[key]
                 if len(staged) >= 3: raise HTTPException(409, 'Finish or cancel an existing import before starting another.')
-                staged[token] = {'created': time.monotonic(), 'projectId': pid, 'form': base_form, 'reviewConfig': review_config, 'settings': p['settings'], 'sheets': sheets, 'formRaw': form_raw, 'dataRaw': data_raw, 'mappings': mappings, 'warnings': warnings, 'source': {'worksheet': worksheet}}
+                staged[token] = {'created': time.monotonic(), 'projectId': pid, 'projectUpdated': p['updated'], 'reuse': reuse, 'policies': policies, 'form': base_form, 'reviewConfig': review_config, 'settings': p['settings'], 'sheets': sheets, 'formRaw': form_raw, 'dataRaw': data_raw, 'mappings': mappings, 'warnings': warnings, 'source': {'worksheet': worksheet}}
             version_counts = {}
             for sheet in sheets:
                 for index, header in enumerate(sheet['headers']):
@@ -525,7 +549,7 @@ def make_router(store: ProjectStore | None = None):
                         for row in sheet['rows']:
                             value = str(row[index]) if index < len(row) and row[index] is not None else ''
                             if value: version_counts[value] = version_counts.get(value, 0) + 1
-            return {'token': token, 'form': base_form, 'reviewConfig': review_config, 'sheets': [{'name': s['name'], 'rows': len(s['rows']), 'columns': len(s['headers'])} for s in sheets], 'mappings': mappings, 'policies': policies, 'issues': issues, 'examples': examples, 'warnings': parsed_form['warnings'] + warnings, 'linkReview': link_review, 'formChanges': form_changes(p['form'], parsed_form), 'sourceVersions': version_counts, 'expectedVersion': str(parsed_form.get('settings', {}).get('version', ''))}
+            return {'token': token, 'reuse': reuse, 'form': base_form, 'reviewConfig': review_config, 'sheets': [{'name': s['name'], 'rows': len(s['rows']), 'columns': len(s['headers'])} for s in sheets], 'mappings': mappings, 'policies': policies, 'issues': issues, 'examples': examples, 'warnings': parsed_form['warnings'] + warnings, 'linkReview': link_review, 'formChanges': form_changes(p['form'], parsed_form), 'sourceVersions': version_counts, 'expectedVersion': str(parsed_form.get('settings', {}).get('version', ''))}
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
         finally:
             if form: await form.close()
@@ -584,6 +608,12 @@ def make_router(store: ProjectStore | None = None):
     def confirm(body: ConfirmImport):
         with lock: item = staged.get(body.token)
         if not item or time.monotonic() - item['created'] > 1800: raise HTTPException(410, 'Import preview expired. Upload both files again.')
+        if body.reuseOnly:
+            reasons = list(item.get('reuse', {}).get('reasons', []))
+            if not item.get('projectId') or not item.get('reuse', {}).get('eligible'): reasons.append('This upload requires review before settings can be reused.')
+            if [m.model_dump() for m in body.mappings] != [ColumnMapping.model_validate(m).model_dump() for m in item['mappings']] or body.policies != item.get('policies', {}) or body.reviewConfig.model_dump() != item.get('reviewConfig') or body.acceptInvalid:
+                reasons.append('The import decisions changed. Review before applying.')
+            if reasons: raise HTTPException(409, {'message': 'Review is needed before updating data.', 'issues': [{'question': '', 'message': reason, 'count': 1} for reason in reasons]})
         try: mappings = mapping_payload(item, body.mappings, body.reviewConfig.model_dump())
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
         if len({(m['sheet'], m['column']) for m in mappings}) != len(mappings): raise HTTPException(400, 'Each source column must appear only once.')
@@ -604,6 +634,9 @@ def make_router(store: ProjectStore | None = None):
             raise HTTPException(422, {'message': 'Choose a source priority or explicitly leave conflicting merged answers blank before applying.', 'issues': issues})
         if issues and not body.acceptInvalid: raise HTTPException(422, {'message': 'Review normalization issues. Choose an encoding or explicitly accept invalid answers as blank.', 'issues': issues})
         payload = {'form': form, 'baseForm': item['form'], 'reviewConfig': body.reviewConfig.model_dump(), 'records': records, 'mappings': mappings, 'policies': body.policies, 'warnings': item['warnings'] + item['form']['warnings'], 'issues': issues, 'source': item.get('source', {})}
+        if body.reuseOnly:
+            reasons = settings_reuse_reasons(get(item['projectId']), payload)
+            if reasons: raise HTTPException(409, '; '.join(reasons))
         initial_settings = None
         if body.settingsPackage is not None:
             if item.get('projectId'): raise HTTPException(400, 'Import shared settings from the project Settings menu after reviewing your data.')
@@ -611,8 +644,9 @@ def make_router(store: ProjectStore | None = None):
             try: initial_settings = KoboSettings.model_validate(preview_settings(payload, defaults, body.settingsPackage)['settings'])
             except ValueError as exc: raise HTTPException(400, str(exc)) from exc
         try:
-            p = store.repair(item['projectId'], payload, item['formRaw'], item['dataRaw']) if item.get('projectId') else store.create(body.name, payload, item['formRaw'], item['dataRaw'], settings=initial_settings)
+            p = store.repair(item['projectId'], payload, item['formRaw'], item['dataRaw'], preserve_settings=body.reuseOnly, expected_updated=item.get('projectUpdated') if body.reuseOnly else None) if item.get('projectId') else store.create(body.name, payload, item['formRaw'], item['dataRaw'], settings=initial_settings)
         except KeyError as exc: raise HTTPException(404, 'Project not found.') from exc
+        except ValueError as exc: raise HTTPException(409, str(exc)) from exc
         with lock: staged.pop(body.token, None)
         return {k: v for k, v in p.items() if k != 'records'}
 

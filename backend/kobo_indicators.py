@@ -178,14 +178,14 @@ def indicator_issues(project, definition):
 
 
 def filter_descriptions(project, settings):
-    from .kobo import label
+    from .kobo import label, filter_rule_summary
     questions = {q['id']: q for q in project['form']['questions']}
     descriptions = []
     for rule in settings.filters:
         question = questions.get(rule.field)
         if not question: continue
         captions = {c['name']: label(c, settings.language) for c in question['choices']}
-        value = ', '.join('Blank / unanswered' if v == '__blank__' else captions.get(v, v) for v in rule.values) if rule.kind == 'category' else f'{rule.minimum if rule.minimum is not None else "Any"} - {rule.maximum if rule.maximum is not None else "Any"}'
+        value = filter_rule_summary(rule, captions)
         descriptions.append(f'{label(question, settings.language)}: {value}')
     return descriptions
 

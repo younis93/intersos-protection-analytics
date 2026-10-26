@@ -38,7 +38,8 @@ def test_import_is_ready_with_metadata_and_monotonic_progress():
     assert progress == sorted(progress)
     assert store._metadata_cache is not None
     assert store.metadata()["revision"] == store.revision
-    assert {"csv_read", "cleaning", "linked_enrichment", "validation", "review_preparation", "metadata", "total"} == set(store.import_timings)
+    assert {"csv_read", "cleaning", "linked_enrichment", "validation", "review_preparation", "metadata", "total",
+            "cache_hit", "cache_miss", "cache_restore", "cache_check"} == set(store.import_timings)
     revision = store.revision
     store.set_review_exclusions([])
     assert store.revision == revision
@@ -124,6 +125,9 @@ def test_explorer_filters_include_every_column_and_bound_large_value_lists():
 
 def test_upload_prepares_metadata_in_worker_and_failure_preserves_previous_store(monkeypatch):
     from backend import main
+    from backend import legal_processing_cache
+    # This test specifically exercises cold metadata preparation in the worker.
+    monkeypatch.setattr(legal_processing_cache, "load", lambda key, **kwargs: None)
     previous = LegalStore.from_files(required_payload(), "previous")
     monkeypatch.setattr(main, "legal_store", previous)
     monkeypatch.setattr(main.duplicate_exclusions, "exclusion_rows", lambda: [])

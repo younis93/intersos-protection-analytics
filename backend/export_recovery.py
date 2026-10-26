@@ -9,6 +9,7 @@ from .kobo import KoboSettings
 
 
 class RecoveryInput(BaseModel):
+    workspace: Literal['kobo', 'custom'] = 'kobo'
     projectId: str
     projectName: str
     settings: KoboSettings

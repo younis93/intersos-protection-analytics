@@ -131,6 +131,7 @@ if ($LaunchOnly) {
     $FrontendBuildInputs = @(
         (Join-Path $FrontendRoot 'src'),
         (Join-Path $FrontendRoot 'public'),
+        (Join-Path $ProjectRoot 'backend\custom_preparation_policy.json'),
         (Join-Path $FrontendRoot 'index.html'),
         (Join-Path $FrontendRoot 'package.json'),
         $FrontendLockfile
@@ -213,6 +214,13 @@ if ($LASTEXITCODE -ne 0 -or $InstalledPyInstaller -ne '6.21.0') {
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller installation failed.' }
 }
 $PyInstallerArgs = @('--noconfirm', '--windowed', '--onedir', '--name', 'Iraq Data Analysis', '--icon', (Join-Path $ProjectRoot 'intersos-protection-analytics.ico'), '--distpath', $BuildDist, '--workpath', $BuildWork, '--specpath', $BuildSpec, '--add-data', "$PackagedFrontend;frontend\dist", '--add-data', "$ProjectRoot\intersos-protection-analytics.ico;.")
+$PyInstallerArgs += @('--add-data', "$ProjectRoot\backend\custom_preparation_policy.json;backend")
+# Some managed Python runtimes load an additional certificate policy beside ssl.py.
+# Preserve that runtime requirement in the frozen app without changing TLS checks.
+$PythonSslPolicy = & $VenvPython -c "from pathlib import Path; import ssl; p = Path(ssl.__file__).with_name('codex-rejected-cas.pem'); print(p if p.is_file() else '')"
+if ($PythonSslPolicy -and (Test-Path -LiteralPath $PythonSslPolicy)) {
+    $PyInstallerArgs += @('--add-data', "$PythonSslPolicy;.")
+}
 $PyInstallerArgs += @('--hidden-import', 'win32timezone', '--hidden-import', 'pythoncom', '--hidden-import', 'win32com.client', '--hidden-import', 'win32process', '--hidden-import', 'win32api')
 if ($Clean) { $PyInstallerArgs += '--clean' }
 $PyInstallerArgs += (Join-Path $ProjectRoot 'desktop_launcher.py')

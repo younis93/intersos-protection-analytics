@@ -20,8 +20,8 @@
 .kobo-sidebar-groups button:hover{background:color-mix(in srgb,currentColor 7%,transparent)}
 .kobo-sidebar-group-link[aria-current=location]{color:var(--blue);background:color-mix(in srgb,var(--blue) 10%,transparent);font-weight:600}
 .kobo-sidebar-groups button:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}
-:root:is([data-theme=unhcr],[data-theme=executive]) .kobo-sidebar-groups{color:rgba(255,255,255,.8)}
-:root:is([data-theme=unhcr],[data-theme=executive]) .kobo-sidebar-group-link[aria-current=location]{color:#fff;background:rgba(255,255,255,.16)}
+:root:is([data-theme=unhcr],[data-theme=executive],[data-theme=forest]) .kobo-sidebar-groups{color:rgba(255,255,255,.8)}
+:root:is([data-theme=unhcr],[data-theme=executive],[data-theme=forest]) .kobo-sidebar-group-link[aria-current=location]{color:#fff;background:rgba(255,255,255,.16)}
 .kobo-shell.sidebar-collapsed .kobo-group-navigation-host{display:none}
 @media(max-width:900px){.kobo-shell .kobo-group-navigation-host{display:none}}
 @media(prefers-reduced-motion:reduce){.kobo-sidebar-branch svg{transition:none}}

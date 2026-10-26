@@ -2,7 +2,8 @@ import type {Data,Layout} from 'plotly.js';
 import type {KoboResult} from './koboTypes';
 import {resolveAppearance,chartLabel} from './koboAppearance';
 import {chartCaption} from './koboChartLabels';
-import {chartCategoryColor} from './ChartPrimitives';
+import type {Theme} from './types';
+import {koboThemeColor,koboThemePalette,koboHeatmapScale} from './koboThemeColors';
 import {percentageDecimals,formatPercent} from './koboPercentages';
 
 export function singlePeriodTrendNotice(result:KoboResult,language:string){
@@ -12,7 +13,7 @@ export function singlePeriodTrendNotice(result:KoboResult,language:string){
  return trend.unit==='day'?'All dated responses fall on one day. A line needs at least two time periods.':`All dated responses fall in one ${trend.unit}. Choose Day grouping to see changes within this period.`;
 }
 
-export function advancedChartSpec(result:KoboResult&{chartMaximum?:number},language:string,exporting:boolean,ink:string,grid:string):{data:Data[];layout:Partial<Layout>}|null{
+export function advancedChartSpec(result:KoboResult&{chartMaximum?:number},language:string,exporting:boolean,ink:string,grid:string,theme?:Theme):{data:Data[];layout:Partial<Layout>}|null{
  const heatmap=result.chart==='heatmap',trend=result.chart==='line'?result.trend:null;
  if(!heatmap&&!trend)return null;
  const appearance=resolveAppearance(result.appearance),percentage=appearance.metric==='percent',decimals=percentageDecimals(result);
@@ -33,7 +34,7 @@ export function advancedChartSpec(result:KoboResult&{chartMaximum?:number},langu
   if(!trend.periods.length)layout.annotations.push({text:language==='ar'?'لا توجد تواريخ صالحة':'No valid dates under the current filters',x:.5,y:.5,xref:'paper',yref:'paper',showarrow:false});
   return {layout,data:trend.series.map(series=>({type:'scatter',mode:appearance.labels==='hidden'?'lines+markers':'lines+markers+text',name:series.label,
    x:trend.periods,y:series.points.map(point=>percentage?point.percent:point.count),connectgaps:false,
-   line:{color:result.colors[series.id]||chartCategoryColor(series.id)},marker:{color:result.colors[series.id]||chartCategoryColor(series.id)},
+   line:{color:result.colors[series.id]||koboThemeColor(series.id,theme)},marker:{color:result.colors[series.id]||koboThemeColor(series.id,theme)},
    text:series.points.map(point=>point.percent===null&&percentage||appearance.labels==='auto'&&!point.count?'':chartLabel(point.count,point.percent,appearance.labels==='auto'?percentage?'percent':'count':appearance.labels,language,decimals)),textposition:'top center',cliponaxis:false,
    hovertext:series.points.map((point,index)=>`${chartCaption(series.label,42,4)}<br>${trend.periods[index]}<br># ${point.count}<br>${formatPercent(point.percent,decimals,language)}`),hovertemplate:'%{hovertext}<extra></extra>'} as Data))};
  }
@@ -43,7 +44,7 @@ export function advancedChartSpec(result:KoboResult&{chartMaximum?:number},langu
  layout.yaxis={...axis,type:'category',autorange:'reversed',tickmode:'array',tickvals:rows.map(row=>row.id),ticktext:rows.map(row=>chartCaption(row.label,30,5))};
  return {layout,data:[{type:'heatmap',x:columns.map(column=>column.id),y:rows.map(row=>row.id),
   z:rows.map(row=>columns.map(column=>{const entry=row.series?.find(entry=>entry.id===column.id);return percentage?entry?.percent??null:entry?.count??0})),
-  colorscale:[[0,'#edf5fc'],[1,result.colors.series||'#1683d8']],zmin:0,...(result.chartMaximum?{zmax:result.chartMaximum}:{}),hoverongaps:false,
+  colorscale:koboHeatmapScale(theme,result.colors.series===koboThemePalette(theme)[0]?undefined:result.colors.series),zmin:0,...(result.chartMaximum?{zmax:result.chartMaximum}:{}),hoverongaps:false,
   text:rows.map(row=>columns.map(column=>{const entry=row.series?.find(entry=>entry.id===column.id);return chartLabel(entry?.count??0,entry?.percent??null,appearance.labels==='auto'?percentage?'percent':'count':appearance.labels,language,decimals)})),
   texttemplate:appearance.labels==='hidden'?'':'%{text}',textfont:{size:font},
   hovertext:rows.map(row=>columns.map(column=>{const entry=row.series?.find(entry=>entry.id===column.id);return `${chartCaption(row.label,42,4)}<br>${chartCaption(column.label,42,4)}<br># ${entry?.count??0}<br>${formatPercent(entry?.percent??null,decimals,language)}`})),hovertemplate:'%{hovertext}<extra></extra>',

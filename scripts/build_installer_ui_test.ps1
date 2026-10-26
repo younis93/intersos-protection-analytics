@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $OutputRoot = Join-Path $ProjectRoot 'output-test'
-$InstallerScript = Join-Path $ProjectRoot 'installer\INTERSOS Protection Analytics.iss'
+$InstallerScript = Join-Path $ProjectRoot 'installer\INTERSOS Legal Platform.iss'
 
 $InnoCompiler = @(
     (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source

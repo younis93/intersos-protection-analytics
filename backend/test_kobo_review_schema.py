@@ -55,6 +55,11 @@ def test_add_choices_check_save_reopen_refresh_and_original_uploads(client_store
     assert parse_form(store.sources(pid)[0]) == parse_form(form_bytes())
     project = store.get(pid)
     assert project['form']['questions'][-1]['id'] == 'added_status'
+    assert saved.json()['form']['questions'][-1]['addedFromData'] is True
+    assert 'added_status' in saved.json()['settings']['filterFields']
+    analysis = client.post(f'/api/kobo/projects/{pid}/analysis', json={'settings': saved.json()['settings']})
+    assert analysis.status_code == 200, analysis.text
+    assert any(q['id'] == 'added_status' and q['addedFromData'] and q['denominator'] == 2 for q in analysis.json()['questions'])
     assert project['records'][0]['values']['added_status'] == mappings[1]['answerMap']['Returnee']
     review = client.post(f'/api/kobo/projects/{pid}/review').json()
     assert review['reviewConfig']['addedQuestions'][0]['label'] == 'Status from data'
@@ -194,3 +199,28 @@ def test_new_question_requires_real_source_provenance(client_store):
     result = client.post(f"/api/kobo/imports/{p['token']}/check", json=body)
     assert result.status_code == 400
     assert 'existing source column' in result.text
+
+
+def test_repair_selects_only_genuinely_new_added_filters_and_preserves_removal(client_store):
+    from backend.kobo import KoboSettings
+    client, store = client_store
+    p = preview(client, b'gender,status\nf,Returnee\n')
+    maps = deepcopy(p['mappings']); maps[1].update(question='', status='excluded')
+    saved = client.post('/api/kobo/imports/confirm', json={'token':p['token'], 'name':'Before', 'mappings':maps, 'reviewConfig':{'excludedQuestionIds':['age','needs','new_field']}})
+    assert saved.status_code == 200, saved.text
+    pid = saved.json()['id']
+    settings = KoboSettings.model_validate(saved.json()['settings']);settings.filterFields=['gender']
+    store.save(pid,settings)
+    project=store.get(pid)
+    sheets=parse_data(b'gender,status\nf,Returnee\n','data.csv')
+    config={'addedQuestions':[added('text')], 'excludedQuestionIds':['age','needs','new_field']}
+    form=effective_form(parse_form(form_bytes()),config,sheets)
+    maps[1].update(question='added_status', status='matched')
+    records,issues=normalize(form,sheets,maps)
+    payload={**project,'form':form,'reviewConfig':config,'mappings':maps,'records':records,'issues':issues}
+    repaired=store.repair(pid,payload,*store.sources(pid))
+    assert repaired['settings']['filterFields']==['gender','added_status']
+    settings=KoboSettings.model_validate(repaired['settings']);settings.filterFields=['gender']
+    store.save(pid,settings)
+    repaired=store.repair(pid,payload,*store.sources(pid))
+    assert repaired['settings']['filterFields']==['gender']

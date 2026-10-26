@@ -1,0 +1,19 @@
+/* Keep overflow accessible without showing scrollbar chrome in theme menus. */
+.theme-dropdown,
+.theme-dropdown [data-virtual-rows]{scrollbar-width:none;scrollbar-gutter:auto}
+.theme-dropdown::-webkit-scrollbar,
+.theme-dropdown [data-virtual-rows]::-webkit-scrollbar{display:none;width:0;height:0}
+.theme-dropdown::-webkit-scrollbar-button,
+.theme-dropdown [data-virtual-rows]::-webkit-scrollbar-button{display:none}
+
+.theme-dropdown [data-theme-option='glass-light']{--option-accent:#1683d8}
+.theme-dropdown [data-theme-option='glass-dark']{--option-accent:#31516f}
+.theme-dropdown [data-theme-option='unhcr']{--option-accent:#0072bc}
+.theme-dropdown [data-theme-option='multicolor']{--option-accent:#8257c2}
+.theme-dropdown [data-theme-option='executive']{--option-accent:#9b722a}
+.theme-dropdown [data-theme-option='forest']{--option-accent:#347653}
+.theme-dropdown button[data-theme-option]:is(:hover,:focus-visible){
+  background:color-mix(in srgb,var(--option-accent) 16%,var(--panel-strong));
+  color:var(--ink);
+}
+.theme-dropdown button[data-theme-option]:focus-visible{outline:2px solid var(--blue);outline-offset:-2px}

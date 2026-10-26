@@ -1,5 +1,5 @@
 export type Page = 'executive'|'assessment'|'services'|'deportation'|'studio'|'explorer'|'quality';
-export type Theme = 'glass-light'|'glass-dark'|'unhcr'|'executive'|'multicolor';
+export type Theme = 'glass-light'|'glass-dark'|'unhcr'|'executive'|'multicolor'|'forest';
 export type Measure = 'records'|'beneficiaries';
 export type Display = 'both'|'count'|'percent';
 export type Filters = Record<string,string[]>;

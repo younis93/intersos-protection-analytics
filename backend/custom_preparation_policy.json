@@ -1,0 +1,7 @@
+{
+  "text": ["trim", "collapseSpaces", "letterCase", "missingTokens"],
+  "number": ["numberFormat", "currency", "percent", "missingTokens"],
+  "date": ["missingTokens"],
+  "category": ["trim", "collapseSpaces", "letterCase", "missingTokens"],
+  "multiple": ["trim", "collapseSpaces", "letterCase", "missingTokens"]
+}

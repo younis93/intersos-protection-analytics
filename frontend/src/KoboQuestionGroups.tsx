@@ -1,3 +1,4 @@
+import {analysisLabel} from './koboApi';
 import {useEffect,useLayoutEffect,useMemo,useRef,useState,type ReactNode} from 'react';
 import {ChartNoAxesCombined,ChevronDown,Layers,Search,Table2,X} from 'lucide-react';
 import type {KoboAnalysis,KoboResult} from './koboTypes';
@@ -33,9 +34,12 @@ export default function KoboQuestionGroups({analysis,renderQuestion,tools,tableO
   const order=new Map(analysis.groups.map((group,index)=>[group.id,index]));roots.sort((a,b)=>(order.get(a.id)??Infinity)-(order.get(b.id)??Infinity));
   const list:GroupNode[]=[];const visit=(node:GroupNode)=>{list.push(node);const children=node.children.filter(isGroup).sort((a,b)=>(order.get(a.id)??Infinity)-(order.get(b.id)??Infinity));let index=0;node.children=node.children.map(child=>isGroup(child)?children[index++]:child);children.forEach(visit)};roots.forEach(visit);
   const defaults=new Set<string>();let first:GroupNode|undefined=roots[0];while(first){defaults.add(first.id);const child:GroupNode|KoboResult|undefined=first.children[0];first=child&&isGroup(child)?child:undefined}
+  for(const q of analysis.questions.filter(q=>q.addedFromData)){const node=nodes.get(q.group||GENERAL);if(node){defaults.add(node.id);node.ancestors.forEach(id=>defaults.add(id))}}
   return{roots,nodes,list,defaults};
  },[analysis]);
  const[expanded,setExpanded]=useState(()=>tree.defaults),[search,setSearch]=useState(''),[active,setActive]=useState(tree.roots[0]?.id||''),[jump,setJump]=useState<{kind:'group'|'question';id:string;serial:number}|null>(null);
+ const seenAdded=useRef(new Set(analysis.questions.filter(q=>q.addedFromData).map(q=>q.id)));
+ useEffect(()=>{const added=analysis.questions.filter(q=>q.addedFromData&&!seenAdded.current.has(q.id));if(!added.length)return;added.forEach(q=>seenAdded.current.add(q.id));setExpanded(current=>{const next=new Set(current);for(const q of added){const node=tree.nodes.get(q.group||GENERAL);if(node){next.add(node.id);node.ancestors.forEach(id=>next.add(id))}}return next})},[analysis,tree]);
  const[tableGroup,setTableGroup]=useState('@all');
  const[questionSearch,setQuestionSearch]=useState(''),[searchCollapsed,setSearchCollapsed]=useState<{query:string;ids:Set<string>}>({query:'',ids:new Set()});
  useEffect(()=>{if(!tree.nodes.has(active))setActive(tree.roots[0]?.id||'')},[tree,active]);
@@ -102,12 +106,12 @@ export default function KoboQuestionGroups({analysis,renderQuestion,tools,tableO
    {renderFilters&&<div className="kobo-sticky-filter-slot">{renderFilters(pinned)}</div>}
    <div className="kobo-analysis-toolbar" aria-label="Analysis navigation">
    <div className="kobo-analysis-toolbar-header">
-   <div className="kobo-analysis-heading"><span className="kobo-section-icon"><ChartNoAxesCombined aria-hidden="true"/></span><div><h2>Questions & charts</h2><small>{questionQuery?`${filtered.count} of ${analysis.questions.length} questions`:`${analysis.questions.length} questions shown`}</small></div></div>
+   <div className="kobo-analysis-heading"><span className="kobo-section-icon"><ChartNoAxesCombined aria-hidden="true"/></span><div><h2>{analysisLabel('Questions & charts','Columns & charts')}</h2><small>{questionQuery?`${filtered.count} of ${analysis.questions.length} ${analysisLabel('questions','columns')}`:`${analysis.questions.length} ${analysisLabel('questions','columns')} shown`}</small></div></div>
     <div className="kobo-analysis-view-switch" role="group" aria-label="Analysis view"><button type="button" aria-label="Charts view" aria-pressed={!tableOnly} onClick={()=>onTableOnlyChange(false)} title="Tables and charts"><ChartNoAxesCombined aria-hidden="true"/>{'Charts view'}</button><button type="button" aria-label="Table view" aria-pressed={tableOnly} onClick={()=>onTableOnlyChange(true)} title="Browse response rows and columns"><Table2 aria-hidden="true"/>{'Table view'}</button></div>
     <div className="kobo-analysis-tools">{typeof tools==='function'?tools(groupControls):tools}</div>
    </div>
    <div className="kobo-analysis-toolbar-controls">
-   <label className="kobo-question-search"><Search aria-hidden="true"/><input aria-label="Search questions" placeholder="Search questions…" value={questionSearch} onChange={event=>setQuestionSearch(event.target.value)} onKeyDown={event=>{if(event.key==='Escape')setQuestionSearch('')}}/>{questionSearch&&<button type="button" className="soft" aria-label="Clear question search" onClick={()=>setQuestionSearch('')}><X aria-hidden="true"/></button>}</label>
+   <label className="kobo-question-search"><Search aria-hidden="true"/><input aria-label={analysisLabel('Search questions','Search columns')} placeholder={analysisLabel('Search questions…','Search columns…')} value={questionSearch} onChange={event=>setQuestionSearch(event.target.value)} onKeyDown={event=>{if(event.key==='Escape')setQuestionSearch('')}}/>{questionSearch&&<button type="button" className="soft" aria-label="Clear question search" onClick={()=>setQuestionSearch('')}><X aria-hidden="true"/></button>}</label>
    <KoboActionMenu label={tableOnly?(tree.nodes.get(tableGroup)?.label||'All groups'):(tree.nodes.get(active)?.label||'View group')} ariaLabel="Navigate questions" icon={<Layers aria-hidden="true"/>} className="kobo-navigator">
     <label className="kobo-navigator-search"><Search aria-hidden="true"/><input aria-label="Find a question or group" placeholder="Find a question or group" value={search} onChange={event=>setSearch(event.target.value)}/></label>
     <div className="kobo-navigator-results">{tableOnly&&<button type="button" className="kobo-nav-group" aria-current={tableGroup==='@all'?'location':undefined} onClick={()=>{setTableGroup('@all');setQuestionSearch('')}}>All groups</button>}{tree.list.map(group=>{

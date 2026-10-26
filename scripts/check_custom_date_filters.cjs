@@ -1,0 +1,45 @@
+const assert=require('node:assert/strict');
+const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const base=process.env.CUSTOM_DATE_FILTER_URL||'http://127.0.0.1:5401';
+(async()=>{
+ const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+ try{for(const theme of ['glass-light','glass-dark','executive','multicolor','unhcr'])for(const width of [1440,390]){
+  console.log('Date filters',theme,width);
+  const page=await browser.newPage({viewport:{width,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(String(e)));
+  await page.addInitScript(t=>localStorage.setItem('app-theme',t),theme);
+  await page.route('**/api/app/**',r=>r.fulfill({json:{available:false}}));
+  const choose=async(label,value)=>{await page.getByRole('button',{name:label,exact:true}).click();await page.getByRole('option',{name:value,exact:true}).click()};
+  const count=async(n)=>{await page.waitForFunction(expected=>document.querySelector('.kobo-header-submissions strong')?.textContent===String(expected),n)};
+  await page.goto(base+'/#/custom');await page.getByRole('button',{name:'New project',exact:true}).click();
+  await page.getByLabel('Choose analysis data',{exact:true}).setInputFiles({name:`Months-${theme}-${width}.csv`,mimeType:'text/csv',buffer:Buffer.from('Date,Other,Amount\n2025-12-31,2025-12-31,1\n2026-02-01,2026-01-01,2\n2026-02-15,2026-02-01,3\n2026-03-10,2026-02-01,4\n2026-04-20,2026-03-01,5\n,,6\n')});
+  await page.getByRole('button',{name:'Read file',exact:true}).click();await page.getByRole('button',{name:'Prepare data',exact:true}).click();await page.getByRole('button',{name:'Choose filters',exact:true}).click();
+  await page.getByRole('checkbox',{name:'Use Date as a filter',exact:true}).check();
+  await choose('Date filter display for Date','Month dropdown');
+  await page.screenshot({path:`output/custom-analysis/date-filter-choice-${theme}-${width}.png`});
+  assert(await page.getByRole('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+  await page.getByRole('button',{name:'Review',exact:true}).click();await page.getByRole('button',{name:'Create project',exact:true}).click();await page.locator('.custom-setup').waitFor({state:'hidden'});await count(6);
+  const months=page.getByRole('button',{name:'All date months',exact:true});await months.click();
+  const menu=page.getByRole('dialog',{name:'Date months filters',exact:true});
+  const labels=await menu.getByRole('checkbox').evaluateAll(els=>els.map(e=>e.closest('label')?.textContent.trim()));
+  assert(labels[0].includes('2026-04')&&labels[1].includes('2026-03')&&labels[2].includes('2026-02'));
+  await menu.getByRole('checkbox',{name:'2026-02',exact:true}).check();await menu.getByRole('checkbox',{name:'2026-04',exact:true}).check();await menu.getByRole('button',{name:'Done',exact:true}).click();await count(3);
+  await page.getByRole('button',{name:'Choose fields',exact:true}).click();await choose('Date filter display for Date','Both');await page.getByRole('button',{name:'Apply changes',exact:true}).click();
+  const range=page.locator('.kobo-range').filter({has:page.locator('legend',{hasText:'Date'})});
+  await range.getByLabel('From',{exact:true}).fill('2026-02-15');await count(2);await range.getByLabel('To',{exact:true}).fill('2026-04-19');await count(1);
+  assert((await page.locator('.kobo-active-filters').textContent()).includes('2026-02'));
+  await page.screenshot({path:`output/custom-analysis/date-filter-both-${theme}-${width}.png`});
+  await page.getByRole('button',{name:'Choose fields',exact:true}).click();await choose('Date filter display for Date','Date range');await page.getByRole('button',{name:'Apply changes',exact:true}).click();await count(2);
+  assert.equal(await page.locator('.kobo-date-filter').count(),0);
+  await page.getByRole('button',{name:'Choose fields',exact:true}).click();await choose('Date filter display for Date','Month dropdown');await page.getByRole('button',{name:'Apply changes',exact:true}).click();await count(6);
+  assert.equal(await page.locator('.kobo-range').count(),0);
+  await page.getByRole('button',{name:'All date months',exact:true}).click();await page.getByRole('dialog',{name:'Date months filters',exact:true}).getByRole('checkbox',{name:'2026-02',exact:true}).check();await page.getByRole('button',{name:'Done',exact:true}).click();await count(2);
+  await page.getByRole('button',{name:'Reset filters',exact:true}).click();await count(6);
+  await page.getByRole('button',{name:'Manage data',exact:true}).click();await page.getByRole('button',{name:'Prepare data',exact:true}).click();await page.getByRole('button',{name:'Choose filters',exact:true}).click();
+  assert.equal(await page.getByRole('button',{name:'Date filter display for Date',exact:true}).innerText(),'Month dropdown');
+  await page.getByRole('button',{name:'Review',exact:true}).click();await page.getByRole('button',{name:'Apply changes',exact:true}).click();await page.locator('.custom-setup').waitFor({state:'hidden'});
+  await page.getByRole('button',{name:'All date months',exact:true}).waitFor();
+  await page.getByRole('button',{name:'All date months',exact:true}).focus();await page.keyboard.press('Enter');await page.getByRole('dialog',{name:'Date months filters',exact:true}).waitFor();await page.keyboard.press('Escape');
+  assert.deepEqual(errors,[]);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+  await page.close();
+ }console.log('PASS date filters: wizard modes, multiple months, AND with inclusive ranges, hidden constraint cleanup, reset, reopening, keyboard, five themes desktop/mobile');}finally{await browser.close()}
+})().catch(e=>{console.error(e);process.exitCode=1});

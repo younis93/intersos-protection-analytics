@@ -19,6 +19,7 @@ class AddedQuestion(BaseModel):
     sheet: int = Field(ge=0)
     column: int = Field(ge=0)
     repeat: str = ''
+    group: str | None = None
     choices: list[ReviewChoice] = Field(default_factory=list)
     separator: str = ''
 
@@ -63,11 +64,25 @@ def effective_form(base, config, sheets, allow_empty=False):
         repeat = added.get('repeat', '')
         if repeat and not any(g['id'] == repeat and g['repeat'] for g in base['groups']):
             raise ValueError('The repeat group for an added question is no longer available.')
+        group_id = added.get('group') if added.get('group') is not None else repeat
+        groups = {g['id']: g for g in base['groups']}
+        current, seen, scope = group_id, set(), ''
+        while current:
+            if current not in groups or current in seen:
+                raise ValueError('Choose an existing question group with valid ancestry.')
+            seen.add(current)
+            group = groups[current]
+            if group['repeat']:
+                scope = current
+                break
+            current = group.get('parent', '')
+        if scope != repeat:
+            raise ValueError('The question group must belong to the source worksheet repeat context.')
         if not added['label'].strip(): raise ValueError('Enter a question label.')
         kind = added['kind']
         q = {'id': qid, 'name': qid, 'labels': {'en': added['label']},
              'kind': kind, 'type': {'category': 'select_one', 'multiple': 'select_multiple', 'number': 'decimal'}.get(kind, kind),
-             'group': repeat, 'repeat': repeat, 'metadata': False, 'identifying': False,
+             'group': group_id, 'repeat': repeat, 'metadata': False, 'identifying': False,
              'choices': deepcopy(added.get('choices', [])), 'order': len(questions),
              'addedFromData': True, 'sourceColumn': {'sheet': si, 'column': ci}}
         questions[qid] = q

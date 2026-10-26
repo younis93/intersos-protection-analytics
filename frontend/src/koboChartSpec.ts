@@ -1,24 +1,27 @@
 import {advancedChartSpec} from './koboAdvancedChartSpec';
 import {displayPercent,formatPercent,percentageDecimals} from './koboPercentages';
-import {markColor} from './koboMarkColors';
+import {resultWithColors,markColor} from './koboMarkColors';
 import type {Data,Layout} from 'plotly.js';
 import type {Theme} from './types';
-import {chartGrid,chartInk,chartPrimary,chartCategoryColor} from './ChartPrimitives';
+import type {KoboQuestionSettings} from './koboTypes';
+import {koboThemeColor} from './koboThemeColors';
+import {chartGrid,chartInk} from './ChartPrimitives';
 import {chartCaption} from './koboChartLabels';
 import {barValueLabel,labelInk} from './koboDataLabels';
 import {chartLabel,resolveAppearance} from './koboAppearance';
 import {koboChartRows,koboScreenChartRows,isDenseKoboChart,readableKoboChartType,type KoboChartPanel} from './koboChartDensity';
 
-export function chartSpec(result:KoboChartPanel,language:string,exporting=false,themeOverride?:Theme,containerWidth=900):{data:Data[];layout:Partial<Layout>}{
+export function chartSpec(result:KoboChartPanel,language:string,exporting=false,themeOverride?:Theme,containerWidth=900,colorSettings?:KoboQuestionSettings):{data:Data[];layout:Partial<Layout>}{
  const appearance=resolveAppearance(result.appearance),shown=exporting?koboChartRows(result):koboScreenChartRows(result);
  const dense=!exporting&&isDenseKoboChart(result);
  const type=dense?'bar':readableKoboChartType(result,exporting,containerWidth);
  const horizontal=type==='bar',pie=type==='pie'||type==='donut',percentage=appearance.metric==='percent';
- const colors=shown.map(row=>markColor(result,{answer:row.id}));
  const value=(count:number,percent:number|null|undefined)=>percentage?percent??0:count;
  const theme=themeOverride||(typeof document!=='undefined'?document.documentElement.dataset.theme||'glass-light':'glass-light') as Theme;
+ if(colorSettings)result={...result,...resultWithColors(result,colorSettings,theme)};
+ const colors=shown.map(row=>markColor(result,{answer:row.id},theme));
  const ink=exporting?'#263746':chartInk(theme),grid=exporting?'#e4ebf0':chartGrid(theme),scale=exporting?2.3:1;
- const advanced=advancedChartSpec(result,language,exporting,ink,grid);if(advanced)return advanced;
+ const advanced=advancedChartSpec(result,language,exporting,ink,grid,theme);if(advanced)return advanced;
  const legendPosition=appearance.legend,legendRight=legendPosition==='right',legendLeft=legendPosition==='left',legendTop=legendPosition==='top';
  const showlegend=legendPosition==='hidden'?false:legendPosition==='auto'?result.breakdowns.length>0||pie:true;
  const axis={fixedrange:true,automargin:true,gridcolor:grid,rangemode:'tozero' as const,...(appearance.grid!=='auto'?{showgrid:appearance.grid==='show'}:{})};
@@ -68,12 +71,12 @@ export function chartSpec(result:KoboChartPanel,language:string,exporting=false,
    const entries=shown.map((row,index)=>column.id?indexed[index].get(column.id):row),values=entries.map(entry=>entry?value(entry.count,entry.percent):0);
    const labels=entries.map((entry,index)=>entry&&(appearance.labels!=='auto'||values[index]>0)?chartLabel(entry.count,displayPercent(entry),labelMode,language,decimals):'');
    const placed=labels.map((text,index)=>barValueLabel(text,values[index],maximum,(horizontal?usable:plotHeight)*.88,thickness,labelFont,horizontal,stacked));
-   const fill=shown.map(row=>markColor(result,{answer:row.id,...(column.id?{breakdown:column.id}:{})}));
+   const fill=shown.map(row=>markColor(result,{answer:row.id,...(column.id?{breakdown:column.id}:{})},theme));
    const contrast=Array.isArray(fill)?fill.map(labelInk):labelInk(fill);
    data.push({type:type==='line'?'scatter':'bar',mode:type==='line'?visibleLabels?'text+lines+markers':'lines+markers':undefined,name:column.label||result.label,orientation:horizontal?'h':undefined,
     x:horizontal?values:shown.map(position),y:horizontal?shown.map(position):values,text:visibleLabels?(type==='line'?labels.map((text,index)=>appearance.labels==='auto'&&index%Math.max(stride,Math.ceil(shown.length*labelFont*4/usable))!==0?'':text):placed.map(label=>label.text)):undefined,textposition:type==='line'?'top center':visibleLabels?placed.map(label=>label.position):'none',cliponaxis:false,
     ...(type!=='line'?{insidetextanchor:'end' as const,insidetextfont:{color:contrast,size:labelFont,weight:700},outsidetextfont:{color:ink,size:labelFont,weight:700},textangle:0,constraintext:'none' as const}:{textfont:{color:ink,size:labelFont,weight:700}}),
-    marker:{color:fill},line:{color:result.colors[column.id||'series']||(column.id?chartCategoryColor(column.id):chartPrimary)},
+    marker:{color:fill},line:{color:result.colors[column.id||'series']||(koboThemeColor(column.id||'series',theme))},
     customdata:entries.map((entry,index)=>[entry?.count??0,entry?.percent==null?'-':`${entry.percent}%`,shown[index].label,shown[index].id,column.id||null]),hovertext:entries.map((entry,index)=>hoverText(shown[index].label,entry?.count,displayPercent(entry),column.id?column.label:undefined)),hovertemplate:'%{hovertext}<extra></extra>'} as unknown as Data); // Plotly supports per-point positions and font colors beyond the bundled TS declarations.
   });
  }

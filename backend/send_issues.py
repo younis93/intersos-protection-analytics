@@ -28,6 +28,7 @@ from .issue_duplicate_matches import IssueDuplicateMatches
 from .lawyer_contact_defaults import DEFAULT_LAWYER_CONTACTS
 from .file_security import validate_xlsx_archive
 from .legal_platform import REVIEW_FINDING_ARABIC, _find
+from .legal_page_cache import compute as cached_page_computation
 
 DATASETS = {"beneficiaries": "Beneficiaries Review", "assessments": "Assessments Review", "legalservices": "Legal Services Review", "awareness": "Awareness Review"}
 UNASSIGNED = "Unassigned"
@@ -301,7 +302,8 @@ def make_router(get_store: Callable, contacts: Contacts | None = None) -> APIRou
         with lock:
             if cache.get("revision") != store.revision:
                 revision = store.revision
-                lawyers, rows = collect_findings(store)
+                lawyers, rows = cached_page_computation(store, "send-issues.findings", {}, lambda: collect_findings(store),
+                    is_current=lambda: get_store() is store)
                 if revision != store.revision:
                     raise HTTPException(409, "Review data changed. Refresh Send Issues and select findings again.")
                 cache.update(revision=revision, lawyers=lawyers, rows=rows)

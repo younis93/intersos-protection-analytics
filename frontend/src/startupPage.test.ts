@@ -9,6 +9,7 @@ function setup(search='',native?:unknown){
   return stored;
 }
 describe('startup preference persistence',()=>{
+  it('supports Custom Analysis on launch',async()=>{setup('?startupPage=custom');expect(readStartupPage()).toBe('custom');await saveStartupPage('custom');expect(readStartupPage()).toBe('custom')});
   it('loads the durable native preference after a fresh launch',()=>{
     setup('?startupPage=kobo&startupEpoch=123');
     expect(readStartupPage()).toBe('kobo');

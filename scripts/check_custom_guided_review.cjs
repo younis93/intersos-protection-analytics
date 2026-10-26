@@ -1,0 +1,73 @@
+const assert=require('node:assert/strict'),fs=require('node:fs');
+const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+(async()=>{
+ const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+ fs.mkdirSync('output/custom-analysis',{recursive:true});
+ try{
+  for(const theme of ['glass-light','glass-dark'])for(const width of [1440,390]){
+   console.log('Review workflow',theme,width);
+   const page=await browser.newPage({viewport:{width,height:1000}}),errors=[];
+   page.on('pageerror',e=>errors.push(String(e)));
+   await page.addInitScript(theme=>localStorage.setItem('app-theme',theme),theme);
+   await page.route('**/api/app/**',route=>route.fulfill({json:{available:false}}));
+   const choose=async(label,option)=>{await page.getByRole('button',{name:label,exact:true}).click();await page.getByRole('listbox',{name:label+' options',exact:true}).getByRole('option',{name:option,exact:true}).click()};
+   await page.goto('http://127.0.0.1:5399/#/custom');
+   await page.getByRole('button',{name:'New project',exact:true}).click();
+   await page.getByLabel('Choose analysis data',{exact:true}).setInputFiles({name:`Review-${theme}-${width}.csv`,mimeType:'text/csv',buffer:Buffer.from('Code,Amount,Needs,Date,Ignore\n001,12,water; food;water,04/05/2026 09:30,foo\n002,oops,food;;,15/05/2026,bar\n')});
+   await page.getByRole('button',{name:'Read file',exact:true}).click();
+   await page.getByRole('button',{name:'Prepare data',exact:true}).click();
+
+   await page.locator('.custom-column-list button').nth(1).click();await choose('Column type','Number');
+   await page.locator('.custom-column-list button').nth(2).click();await choose('Column type','Multiple choice');
+   assert.equal(await page.getByRole('button',{name:'Answer delimiter',exact:true}).innerText(),'Choose delimiter');
+   await page.locator('.custom-column-list button').nth(4).click();await page.getByLabel('Include in analysis',{exact:true}).uncheck();
+   await page.locator('.custom-column-list button').nth(3).click();await choose('File date convention','UK - day/month/year');
+   await page.getByLabel('Include time in a separate column',{exact:true}).check();await page.getByLabel('Time column label',{exact:true}).fill('Visit time');
+   await page.getByRole('button',{name:'Choose filters',exact:true}).click();
+   assert.equal(await page.locator('.custom-filter-list input:checked').count(),0);
+   await page.getByRole('checkbox',{name:'Use Code as a filter',exact:true}).check();
+   await page.getByRole('checkbox',{name:'Use Visit time as a filter',exact:true}).check();
+   await page.getByRole('button',{name:'Review',exact:true}).click();
+   await page.getByRole('heading',{name:'2 columns need attention before saving',exact:true}).waitFor();
+   assert(await page.getByRole('button',{name:'Create project',exact:true}).isDisabled());
+   assert.equal(await page.locator('.custom-review-status.attention').count(),2);
+   assert.equal(await page.locator('.custom-review-status.excluded').count(),1);
+   await page.getByRole('button',{name:'Edit Needs (column 3)',exact:true}).click();
+   assert.equal(await page.getByLabel('Column display label',{exact:true}).inputValue(),'Needs');
+   await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='Column display label');
+   await choose('Answer delimiter','Custom');
+   await page.getByLabel('Custom answer delimiter',{exact:true}).fill('::');
+   await choose('Answer delimiter','Semicolon');
+   assert.equal(await page.getByLabel('Custom answer delimiter',{exact:true}).count(),0);
+   await page.waitForFunction(()=>document.querySelector('.custom-split-answers')?.children.length===2);
+   await page.locator('.custom-categories summary').click();
+   await page.getByLabel('Label for water',{exact:true}).fill('Water');
+   await page.getByRole('button',{name:'Return to review',exact:true}).click();
+   assert.equal(await page.locator('.custom-review-status.attention').count(),1);
+   assert(await page.getByRole('button',{name:'Create project',exact:true}).isDisabled());
+   await page.getByRole('button',{name:'Edit Amount (column 2)',exact:true}).click();
+   await page.getByLabel('Treat invalid values as missing in calculations',{exact:true}).check();
+   await page.getByRole('button',{name:'Return to review',exact:true}).click();
+   await page.getByRole('heading',{name:'Accepted warnings',exact:true}).waitFor();
+   assert.equal(await page.locator('.custom-review-status.attention').count(),0);
+   assert(await page.getByRole('button',{name:'Create project',exact:true}).isEnabled());
+   await page.getByRole('button',{name:'Edit filters',exact:true}).click();
+   assert(await page.getByRole('checkbox',{name:'Use Code as a filter',exact:true}).isChecked());
+   assert(await page.getByRole('checkbox',{name:'Use Visit time as a filter',exact:true}).isChecked());
+   await page.getByRole('button',{name:'Review',exact:true}).click();
+   await page.screenshot({path:`output/custom-analysis/guided-review-${theme}-${width}.png`});
+   assert(await page.getByRole('dialog').evaluate(el=>el.scrollWidth<=el.clientWidth+1));
+   await page.getByRole('button',{name:'Create project',exact:true}).click();
+   await page.getByRole('dialog').waitFor({state:'hidden'});
+   const id=page.url().split('#/custom/')[1],saved=await (await page.request.get(`http://127.0.0.1:5399/api/custom/projects/${id}`)).json();
+   assert.equal(saved.settings.filterFields.length,2);assert.equal(saved.customConfig.columns[2].separator,';');
+   assert.equal(saved.customConfig.columns[2].categories.water,'Water');assert(saved.customConfig.columns[1].invalidAsMissing);
+   await page.getByRole('button',{name:'Manage data',exact:true}).click();await page.getByRole('button',{name:'Prepare data',exact:true}).click();
+   await page.locator('.custom-column-list button').nth(2).click();
+   assert.equal(await page.getByRole('button',{name:'Answer delimiter',exact:true}).innerText(),'Semicolon');
+   await page.getByRole('button',{name:'Close prepare data',exact:true}).click();
+   assert.deepEqual(errors,[]);await page.close();
+  }
+  console.log('PASS: delimiter presets/custom input, split previews, review with blockers, accepted warnings, exclusions, direct editing/return, filter preservation and persistence on desktop/mobile light/dark.');
+ }finally{await browser.close()}
+})().catch(e=>{console.error(e);process.exitCode=1});

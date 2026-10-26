@@ -1,0 +1,7 @@
+.reupload-settings{display:grid;gap:12px;margin:18px 0;padding:16px;border:1px solid var(--border);border-radius:12px;min-width:0}
+.reupload-settings legend{font-weight:700;padding:0 6px}
+.reupload-settings label{display:flex;gap:10px;align-items:flex-start;cursor:pointer}
+.reupload-settings input{margin-top:4px;flex:none}
+.reupload-settings small{display:block;color:var(--muted);margin-top:4px;line-height:1.5}
+.reupload-review-notice{margin:16px 0;padding:16px;border:1px solid var(--border);border-radius:12px;line-height:1.5}
+.reupload-review-notice ul{margin-bottom:0;padding-inline-start:22px}

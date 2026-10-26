@@ -11,6 +11,7 @@ import {
 exportLegalCases
 } from "./api";
 import type { LegalMetadata } from "./types";
+import {beneficiaryProfileFields} from './beneficiaryProfile';
 export const ASSESSMENT_STATUS_FIELDS = [
   "Date of the Request",
   "Request for Pending Status",
@@ -126,7 +127,7 @@ export function CaseTree({ item, metadata, showBeneficiary = false, onOpenCase }
         <summary>
           Beneficiary information <ChevronDown />
         </summary>
-        <RecordGrid row={item.beneficiary} />
+        <RecordGrid row={beneficiaryProfileFields(item.beneficiary)} keepEmpty={['Contact number 1','Contact number 2']} />
       </details>
       <div className="case-timeline">
         <div className="case-level-heading">
@@ -289,14 +290,13 @@ export function NestedTable({ title, rows }: { title: string; rows: any[] }) {
   );
 }
 
-export function RecordGrid({ row, omit = [] }: { row: any; omit?: string[] }) {
+export function RecordGrid({ row, omit = [], keepEmpty = [] }: { row: any; omit?: string[]; keepEmpty?: string[] }) {
   return (
     <div className="case-record">
       {Object.entries(row)
         .filter(
           ([k, v]) =>
-            v !== "" &&
-            v !== null &&
+            (keepEmpty.includes(k) || (v !== "" && v !== null)) &&
             !omit.some(
               (item) => k.trim().toLowerCase() === item.trim().toLowerCase(),
             ),
@@ -304,7 +304,7 @@ export function RecordGrid({ row, omit = [] }: { row: any; omit?: string[] }) {
         .map(([k, v]) => (
           <div key={k}>
             <span>{k}</span>
-            <strong>{renderCell(v, k)}</strong>
+            <strong>{keepEmpty.includes(k) && (v === '' || v === null || v === undefined) ? '' : renderCell(v, k)}</strong>
           </div>
         ))}
     </div>

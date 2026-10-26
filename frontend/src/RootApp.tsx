@@ -8,12 +8,12 @@ import StartupScreen from './StartupScreen';
 import {beginProcessingCardMotion} from './processingCardMotion';
 import {readStartupPage} from './startupPage';
 
-type Workspace='welcome'|'legal'|'kobo';
+type Workspace='welcome'|'legal'|'kobo'|'custom';
 type StartupPhase='visible'|'exiting'|'hidden';
 const STARTUP_MINIMUM_MS=700;
 const STARTUP_EXIT_MS=360;
 const STARTUP_MAXIMUM_MS=8000;
-const workspaceFromUrl=():Workspace=>{const hash=window.location.hash;if(!hash||hash==='#'||hash==='#/')return 'welcome';if(hash==='#/kobo'||hash.startsWith('#/kobo/'))return 'kobo';if(!hash.startsWith('#/legal'))window.history.replaceState(null,'',`${window.location.pathname}${window.location.search}#/legal/overview`);return 'legal'};
+const workspaceFromUrl=():Workspace=>{const hash=window.location.hash;if(!hash||hash==='#'||hash==='#/')return 'welcome';if(hash==='#/custom'||hash.startsWith('#/custom/'))return 'custom';if(hash==='#/kobo'||hash.startsWith('#/kobo/'))return 'kobo';if(!hash.startsWith('#/legal'))window.history.replaceState(null,'',`${window.location.pathname}${window.location.search}#/legal/overview`);return 'legal'};
 
 
 function WorkspaceApp(){
@@ -25,7 +25,7 @@ function WorkspaceApp(){
   if(!window.location.hash){
    const preference=readStartupPage();
    if(preference!=='home'){
-    const route=preference==='legal'?'#/legal/overview':'#/kobo';
+    const route=preference==='legal'?'#/legal/overview':`#/${preference}`;
     window.history.replaceState(null,'',`${window.location.pathname}${window.location.search}${route}`);
     return preference;
    }
@@ -58,7 +58,7 @@ function WorkspaceApp(){
  const markStartupReady=useCallback(()=>setStartupReady(true),[]);
  const unlockFox=()=>{setFoxUnlocked(true);try{localStorage.setItem(GUARDIAN_FOX_STORAGE_KEY,'true')}catch{/* The fox remains available for this session. */}};
  if(workspace==='welcome')return <Welcome foxUnlocked={foxUnlocked} onFoxUnlock={unlockFox}/>;
- if(workspace==='kobo')return <KoboAnalysis/>;
+ if(workspace==='kobo'||workspace==='custom')return <KoboAnalysis key={workspace} workspace={workspace}/>;
  return <><div className={desktopStartup?'desktop-app-content':'startup-app-content'} aria-hidden={startupPhase!=='hidden'} inert={startupPhase!=='hidden'?true:undefined}><LegalPlatform onStartupReady={markStartupReady}/></div>{startupPhase!=='hidden'&&<StartupScreen phase={startupPhase}/>}</>;
 }
 

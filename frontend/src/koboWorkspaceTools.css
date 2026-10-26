@@ -7,3 +7,6 @@
 
 /* The content grid supplies the single gap between filters and each workspace. */
 .kobo-shell .kobo-filter-surface.kobo-workspace-filters{margin-bottom:0}.kobo-workspace-tools>h2:first-child{margin-block-start:0}
+.kobo-workspace-card button.kobo-summary-sort{display:flex;align-items:center;gap:6px;width:100%;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;color:inherit;font:inherit;font-weight:inherit;text-align:start;cursor:pointer}
+.kobo-workspace-card .kobo-summary-sort:hover{text-decoration:underline;text-underline-offset:3px}
+.kobo-workspace-card .kobo-summary-sort>span{font-size:9px}

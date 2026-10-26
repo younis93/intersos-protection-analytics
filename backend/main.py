@@ -11,13 +11,14 @@ import socket
 import sys
 import unicodedata
 from pathlib import Path
+from threading import RLock
 from typing import Any, Literal
 from urllib.parse import unquote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, StrictInt
@@ -33,6 +34,7 @@ from .indicator_reconciliation import IndicatorMasterWorkbook, build_reconciliat
 from . import updater
 from .import_progress import legal_import_tracker, ImportBusyError, ImportCancelled
 from .static_cache import static_cache_policy
+from .legal_page_cache import page as cache_legal_page
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -115,6 +117,7 @@ def remembered_legal_file_payload(paths: list[Path]) -> dict[str, bytes]:
 
 duplicate_exclusions = DuplicateExclusionRegistry()
 legal_store: LegalStore | None = None
+legal_project_lock = RLock()
 indicator_master: IndicatorMasterWorkbook | None = None
 indicator_master_restore_error = ""
 legal_store_loading = False
@@ -167,21 +170,38 @@ def publish_legal_candidate(candidate, operation, before_publish=None):
     return metadata
 
 
-def load_initial_legal_store() -> None:
+def load_initial_legal_store(*, source_selection: dict[str, Any] | None = None) -> None:
     """Restore the remembered Legal data outside the desktop window startup path."""
     global legal_store, legal_store_loading, legal_store_restore_error
+    global REMEMBERED_LEGAL_FOLDER, REMEMBERED_LEGAL_FILES, REMEMBERED_LEGAL_SOURCE, REMEMBERED_LEGAL_SOURCE_CONFIGURED
     legal_store_loading = True
     operation = None
     try:
         operation = legal_import_tracker.begin(source="startup")
+        if source_selection is not None:
+            # A desktop restore is authoritative. Never expose a store created
+            # from sample data during an earlier backend import.
+            legal_store = None
+            if source_selection.get("error"):
+                raise ValueError(source_selection["error"])
+            REMEMBERED_LEGAL_SOURCE = source_selection["kind"]
+            if REMEMBERED_LEGAL_SOURCE not in {"folder", "files"}:
+                raise ValueError("Invalid saved Legal source type.")
+            folder = source_selection.get("folder", "")
+            REMEMBERED_LEGAL_FOLDER = Path(folder) if folder else None
+            REMEMBERED_LEGAL_FILES = [Path(path) for path in source_selection.get("files", [])]
+            REMEMBERED_LEGAL_SOURCE_CONFIGURED = True
         use_files=REMEMBERED_LEGAL_SOURCE=="files"
         if REMEMBERED_LEGAL_SOURCE_CONFIGURED:
             if use_files:
                 candidate = LegalStore.from_files(remembered_legal_file_payload(REMEMBERED_LEGAL_FILES), "Selected Legal Platform CSV files", exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=prepare_import_exclusions) if REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else None
-                unavailable = "The last selected Legal Platform CSV files are unavailable. Choose a new source."
+                unavailable = "The last selected Legal Platform CSV files are unavailable: " + ", ".join(map(str, REMEMBERED_LEGAL_FILES)) + ". Choose a new source."
             else:
                 candidate = LegalStore.from_folder(REMEMBERED_LEGAL_FOLDER, exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=prepare_import_exclusions) if REMEMBERED_LEGAL_FOLDER and REMEMBERED_LEGAL_FOLDER.is_dir() else None
-                unavailable = "The last selected Legal Platform folder is unavailable. Choose a new source."
+                unavailable = f"The last selected Legal Platform folder is unavailable: {REMEMBERED_LEGAL_FOLDER or '(no folder saved)'}. Choose a new source."
+        elif UPLOAD_ONLY:
+            candidate = None
+            unavailable = "Choose a Legal Platform source folder or CSV files first."
         else:
             candidate = LegalStore.from_folder(LEGAL_SAMPLE, exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=prepare_import_exclusions) if LEGAL_SAMPLE.exists() else None
             unavailable = ""
@@ -401,6 +421,7 @@ def legal_metadata():
 
 
 @app.post("/api/legal/overview")
+@cache_legal_page(lambda: require_legal_store())
 def legal_overview(request: OverviewRequest):
     try:
         return require_legal_store().overview(request.projects, request.locations, request.months, request.filters)
@@ -408,6 +429,7 @@ def legal_overview(request: OverviewRequest):
         raise HTTPException(400, str(exc)) from exc
 
 @app.post("/api/legal/overview-filters")
+@cache_legal_page(lambda: require_legal_store())
 def legal_overview_filters(request: OverviewRequest):
     try:
         return require_legal_store().overview_filters(request.projects, request.locations, request.months, request.filters)
@@ -415,17 +437,20 @@ def legal_overview_filters(request: OverviewRequest):
         raise HTTPException(400, str(exc)) from exc
 
 @app.get("/api/legal/deportation-dashboard")
+@cache_legal_page(lambda: require_legal_store())
 def legal_deportation_dashboard():
     try:return require_legal_store().deportation_dashboard()
     except ValueError as exc: raise HTTPException(400,str(exc)) from exc
 
 @app.post("/api/legal/deportation-dashboard")
+@cache_legal_page(lambda: require_legal_store())
 def legal_deportation_dashboard_filtered(request:LegalQuery):
     try:return require_legal_store().deportation_dashboard(request.filters,request.search)
     except ValueError as exc: raise HTTPException(400,str(exc)) from exc
 
 
 @app.post("/api/legal/hotline-dashboard")
+@cache_legal_page(lambda: require_legal_store())
 def legal_hotline_dashboard(request: LegalQuery):
     from .hotline import dashboard
     try: return dashboard(require_legal_store().frames.get("legalhotlines"), request.filters,request.search)
@@ -478,7 +503,81 @@ def require_legal_store() -> LegalStore:
     return legal_store
 
 
+@app.get('/api/legal/backup')
+def legal_project_backup(exportMonth: str | None = Query(None, pattern=r'^\d{4}-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$')):
+    from datetime import datetime
+    from .legal_workspace import backup_project
+    try:
+        with legal_project_lock:
+            store = require_legal_store()
+            raw = backup_project(store, duplicate_exclusions.exclusion_rows())
+        now = datetime.now()
+        month = exportMonth or f'{now.year}-{("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")[now.month - 1]}'
+        return Response(raw, media_type='application/zip', headers={
+            'Content-Disposition': f'attachment; filename="Legal Platform export {month}.zip"', 'Cache-Control': 'no-store'})
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+def restore_legal_project(raw, operation):
+    global legal_store, REMEMBERED_LEGAL_FOLDER, REMEMBERED_LEGAL_SOURCE, REMEMBERED_LEGAL_SOURCE_CONFIGURED
+    from .legal_workspace import read_backup, persist_restored_project
+    operation.check_cancelled()
+    payload, exclusions = read_backup(raw)
+    operation.check_cancelled()
+    # Build against the ZIP's review decisions without touching the active registry.
+    candidate = LegalStore.from_files(payload, 'Imported Legal Platform project', exclusions=exclusions,
+        operation=operation, reconcile_exclusions=lambda store: None)
+    operation.start('Finalizing metadata')
+    metadata = candidate.metadata()
+    operation.finish('Finalizing metadata')
+    operation.begin_publication()
+    with legal_project_lock:
+        folder = persist_restored_project(payload, exclusions, duplicate_exclusions)
+        operation.start('Publishing')
+        legal_store = candidate
+        REMEMBERED_LEGAL_FOLDER = folder
+        REMEMBERED_LEGAL_SOURCE = 'folder'
+        REMEMBERED_LEGAL_SOURCE_CONFIGURED = True
+    operation.finish('Publishing')
+    operation.complete()
+    return metadata
+
+
+@app.post('/api/legal/backups/restore')
+async def legal_project_restore(file: UploadFile = File(...), operationId: str | None = None):
+    from .legal_workspace import MAX_BACKUP
+    operation = None
+    try:
+        operation = legal_import_tracker.begin(operationId, 'project')
+        chunks, total = [], 0
+        while chunk := await file.read(1024 * 1024):
+            operation.check_cancelled()
+            total += len(chunk)
+            if total > MAX_BACKUP:
+                raise HTTPException(413, 'Project ZIP must be 200 MB or smaller.')
+            chunks.append(chunk)
+        return await run_in_threadpool(restore_legal_project, b''.join(chunks), operation)
+    except ImportBusyError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ImportCancelled as exc:
+        if operation: operation.fail(exc)
+        raise HTTPException(409, 'Import cancelled') from exc
+    except asyncio.CancelledError:
+        if operation: operation.cancel()
+        raise
+    except HTTPException as exc:
+        if operation: operation.fail(exc.detail)
+        raise
+    except Exception as exc:
+        if operation: operation.fail(exc)
+        raise HTTPException(400, str(exc)) from exc
+    finally:
+        await file.close()
+
+
 @app.post("/api/legal/review")
+@cache_legal_page(lambda: require_legal_store(), review_defaults=True)
 def legal_review(request: LegalQuery):
     if request.page < 1 or request.pageSize < 1 or request.pageSize > 5000: raise HTTPException(400, "Invalid pagination")
     return require_legal_store().review(request.dataset, request.search, request.rule, request.page, request.pageSize, request.severity,request.lawyer,request.project,request.location,request.date,request.comparisonMonth,request.nameCompareChars,request.allowNameVariations,request.exactMatchesOnly,filters=request.filters)
@@ -634,6 +733,7 @@ def export_duplicate_exclusions():
 
 
 @app.post("/api/legal/explorer")
+@cache_legal_page(lambda: require_legal_store())
 def legal_explorer(request: LegalQuery):
     if request.page < 1 or request.pageSize < 1 or request.pageSize > 500: raise HTTPException(400, "Invalid pagination")
     if request.sortDirection not in {"asc","desc"}: raise HTTPException(400,"Invalid sort direction")
@@ -646,6 +746,7 @@ def legal_studio(request: LegalStudioRequest):
     except ValueError as exc: raise HTTPException(400,str(exc)) from exc
 
 @app.post("/api/legal/analytics-dashboard")
+@cache_legal_page(lambda: require_legal_store())
 def legal_analytics_dashboard(request: LegalAnalyticsDashboardRequest):
     if request.page<1 or request.pageSize<1 or request.pageSize>10000 or request.sortDirection not in {"asc","desc"}: raise HTTPException(400,"Invalid dashboard query.")
     try:return require_legal_store().analytics_dashboard(request.dataset,request.filters,request.search,request.page,request.pageSize,request.sortColumn,request.sortDirection)
@@ -653,6 +754,7 @@ def legal_analytics_dashboard(request: LegalAnalyticsDashboardRequest):
 
 
 @app.post("/api/legal/sampling")
+@cache_legal_page(lambda: require_legal_store())
 def legal_sampling(request: SamplingQuery):
     from .sampling import table
     if request.page < 1 or request.pageSize < 1 or request.pageSize > 10000:
@@ -673,6 +775,7 @@ def legal_sampling_export(request: SamplingQuery):
 
 
 @app.get("/api/legal/explorer-filters/{dataset}")
+@cache_legal_page(lambda: require_legal_store())
 def legal_explorer_filters(dataset:str):
     try:return require_legal_store().explorer_filters(dataset)
     except ValueError as exc:raise HTTPException(400,str(exc)) from exc
@@ -687,20 +790,24 @@ def legal_explorer_export(export_format:str,request:LegalQuery):
 
 
 @app.post("/api/legal/case")
+@cache_legal_page(lambda: require_legal_store())
 def legal_case(request: CaseQuery): return require_legal_store().case(request.query,request.filters,20,request.viewMode,request.page,request.pageSize,request.sortColumn,request.sortDirection,request.columns)
 
 
 @app.post("/api/legal/case-filters")
+@cache_legal_page(lambda: require_legal_store())
 def linked_case_filters(request:CaseQuery):return require_legal_store().case_filters(request.filters,request.query)
 
 
 @app.post("/api/legal/explorer-filters/{dataset}")
+@cache_legal_page(lambda: require_legal_store())
 def linked_explorer_filters(dataset:str,request:LegalQuery):
     try:return require_legal_store().explorer_filters(dataset,request.filters,request.search)
     except ValueError as exc:raise HTTPException(400,str(exc)) from exc
 
 
 @app.get("/api/legal/case-filters")
+@cache_legal_page(lambda: require_legal_store())
 def legal_case_filters(): return require_legal_store().case_filters()
 
 
@@ -768,22 +875,32 @@ def table_workbook(request: TableWorkbookRequest):
 
 
 @app.post("/api/legal/lawyers")
+@cache_legal_page(lambda: require_legal_store())
 def legal_lawyers(request:LegalQuery): return require_legal_store().lawyer_summary(request.filters)
 
 
 @app.post("/api/legal/representation-case-load/{status}")
+@cache_legal_page(lambda: require_legal_store())
 def legal_representation_case_load(status:str,request:LegalQuery):
     if status not in {"open","closed"}:raise HTTPException(404,"Unknown case load status")
     return require_legal_store().representation_case_load(request.filters,status)
 
 
 @app.post("/api/legal/intelligence/{page}")
+@cache_legal_page(lambda: require_legal_store())
 def legal_intelligence(page:str,request:LegalQuery):
     if page not in {"command-center","lawyer-intelligence","donor-impact"}:raise HTTPException(404,"Unknown intelligence page")
     return require_legal_store().intelligence(page,request.filters)
 
 
-@app.post("/api/legal/indicators")
+@app.post("/api/legal/indicators", name="legal_indicators")
+def legal_indicators_response(request: IndicatorReportRequest):
+    # The report already contains JSON values. Avoid recursively copying its
+    # source-record references through FastAPI's generic object encoder again.
+    return JSONResponse(legal_indicators(request))
+
+
+@cache_legal_page(lambda: require_legal_store(), indicator_revisions=True)
 def legal_indicators(request:IndicatorReportRequest):
     store=require_legal_store()
     key=(request.fromDate,request.toDate,tuple(sorted(set(request.projects))),tuple(sorted(set(request.projectLocations))),tuple(sorted(set(request.years))),tuple(sorted(set(request.quarters))),tuple(sorted(set(request.months))),tuple(sorted(set(request.communityTypes))))
@@ -812,7 +929,12 @@ def monthly_cached_reports(store, request):
                 if len(key[6]) == 1 and key == monthly_cache_key(request, key[6][0])}
 
 
-@app.post("/api/legal/indicators/monthly")
+@app.post("/api/legal/indicators/monthly", name="legal_indicators_monthly")
+def legal_indicators_monthly_response(request: IndicatorReportRequest):
+    return JSONResponse(legal_indicators_monthly(request))
+
+
+@cache_legal_page(lambda: require_legal_store(), indicator_revisions=True)
 def legal_indicators_monthly(request: IndicatorReportRequest):
     from .indicator_reporting import build_monthly_reports
     store = require_legal_store()
@@ -944,6 +1066,7 @@ def indicator_reconciliation_export(request: IndicatorReportRequest):
 
 
 @app.post("/api/legal/detention")
+@cache_legal_page(lambda: require_legal_store())
 def legal_detention(request:LegalQuery):
     if request.page < 1 or request.pageSize < 1 or request.pageSize > 500: raise HTTPException(400,"Invalid pagination")
     if request.sortDirection not in {"asc","desc"}: raise HTTPException(400,"Invalid sort direction")
@@ -1011,6 +1134,15 @@ app.include_router(make_send_issues_router(require_legal_store))
 
 from .kobo_api import make_router as make_kobo_router
 app.include_router(make_kobo_router())
+
+
+# Custom imports use the shared analysis services with their own project database.
+from .custom_analysis import make_custom_router, custom_store
+_custom_store = custom_store()
+app.include_router(make_custom_router(_custom_store))
+_custom_services = make_kobo_router(_custom_store, prefix='/api/custom')
+_custom_services.routes = [route for route in _custom_services.routes if '/imports/' not in route.path and not route.path.endswith('/review')]
+app.include_router(_custom_services)
 
 if STATIC_DIR.exists():
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="dashboard")

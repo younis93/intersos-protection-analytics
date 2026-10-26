@@ -32,9 +32,20 @@ class KoboFilter(BaseModel):
     values: list[str] = Field(default_factory=list)
     minimum: float | str | None = None
     maximum: float | str | None = None
+    months: list[str] = Field(default_factory=list)
+
+    @field_validator('months')
+    @classmethod
+    def validate_months(cls, values):
+        for value in values:
+            if not re.fullmatch(r'[0-9]{4}-(0[1-9]|1[0-2])', value):
+                raise ValueError('Months must use YYYY-MM format.')
+            date.fromisoformat(value + '-01')
+        return sorted(set(values), reverse=True)
 
     @model_validator(mode='after')
     def validate_bounds(self):
+        if self.months and self.kind != 'date': raise ValueError('Month selections require a date filter.')
         if self.kind == 'category': return self
         bounds = []
         for value in [self.minimum, self.maximum]:
@@ -98,6 +109,7 @@ class AnalysisViewSettings(BaseModel):
     language: Literal['en', 'ar'] = 'en'
     filters: list[KoboFilter] = Field(default_factory=list)
     filterFields: list[str] = Field(default_factory=list)
+    dateFilterModes: dict[str, Literal['range', 'month', 'both']] = Field(default_factory=dict)
     hidden: list[str] = Field(default_factory=list)
     metadata: bool = False
     hideBlanks: bool = True
@@ -160,7 +172,7 @@ class KoboSettings(AnalysisViewSettings):
 
 def new_project_settings(form: dict) -> KoboSettings:
     """Initialize new projects only; stored and explicitly supplied settings keep their colors."""
-    return KoboSettings(language='en', hidden=[q['id'] for q in form['questions'] if q['identifying']],
+    return KoboSettings(language='en', filterFields=[q['id'] for q in form['questions'] if q.get('addedFromData') and not q.get('identifying')], hidden=[q['id'] for q in form['questions'] if q['identifying']],
                         questions={q['id']: QuestionSettings(palette='Blue') for q in form['questions']})
 
 
@@ -513,30 +525,39 @@ class ProjectStore:
         if not row: raise KeyError('Project not found.')
         return bytes(row[0]), bytes(row[1])
 
-    def repair(self, pid, payload, form_raw, data_raw):
+    def repair(self, pid, payload, form_raw, data_raw, *, preserve_settings=False, expected_updated=None):
         # Keep the project identity, latest display settings until the reviewed sources are applied.
         with self.connect() as db:
-            row = db.execute('SELECT settings,payload FROM projects WHERE id=?', (pid,)).fetchone()
+            if expected_updated is not None: db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT settings,payload,updated FROM projects WHERE id=?', (pid,)).fetchone()
             if not row: raise KeyError('Project not found.')
             settings = json.loads(row[0])
-            known = {q['id'] for q in payload['form']['questions']}
-            settings['hidden'] = list(set(settings.get('hidden', [])) | {q['id'] for q in payload['form']['questions'] if q['identifying'] and q['id'] not in {old['id'] for old in json.loads(row[1])['form']['questions']}})
-            settings['hidden'] = [qid for qid in settings['hidden'] if qid in known]
-            settings['filterFields'] = [qid for qid in settings.get('filterFields', []) if qid in known]
-            settings['filters'] = [f for f in settings.get('filters', []) if f['field'] in known]
-            settings['questions'] = {qid: {**cfg, 'breakdown': cfg.get('breakdown', '') if cfg.get('breakdown', '') in known else '', 'breakdowns': [field for field in cfg.get('breakdowns', []) if field in known]} for qid, cfg in settings.get('questions', {}).items() if qid in known}
-            from .kobo_indicators import indicator_issues
-            for definition in settings.get('indicators', []):
-                item = IndicatorDefinition.model_validate({**definition, 'reviewIssues': []})
-                definition['reviewIssues'] = indicator_issues(payload, item)
-            from .kobo_saved_views import saved_view_issues
-            for view in settings.get('savedViews', []):
-                if view.get('questionKinds'):
-                    added = known - view['questionKinds'].keys()
-                    view['snapshot']['hidden'] = list(dict.fromkeys([*view['snapshot'].get('hidden', []), *sorted(added)]))
-                    view['questionKinds'].update({q['id']: q['kind'] for q in payload['form']['questions'] if q['id'] in added})
-                view['reviewIssues'] = saved_view_issues(payload, SavedAnalysisView.model_validate(view))
-            if any(view['id'] == settings.get('activeViewId') and view['reviewIssues'] for view in settings.get('savedViews', [])): settings['activeViewId'] = ''
+            if expected_updated is not None and row[2] != expected_updated:
+                raise ValueError('The project changed since this upload was read. Reopen the upload to use the latest settings.')
+            if not preserve_settings:
+                known = {q['id'] for q in payload['form']['questions']}
+                settings['hidden'] = list(set(settings.get('hidden', [])) | {q['id'] for q in payload['form']['questions'] if q['identifying'] and q['id'] not in {old['id'] for old in json.loads(row[1])['form']['questions']}})
+                settings['hidden'] = [qid for qid in settings['hidden'] if qid in known]
+                previous_ids = {q['id'] for q in json.loads(row[1])['form']['questions']}
+                new_filter_ids = [q['id'] for q in payload['form']['questions'] if q.get('addedFromData') and not q.get('identifying') and q['id'] not in previous_ids]
+                settings['filterFields'] = list(dict.fromkeys([*[qid for qid in settings.get('filterFields', []) if qid in known], *new_filter_ids]))
+                settings['filters'] = [f for f in settings.get('filters', []) if f['field'] in known]
+                settings['questions'] = {qid: {**cfg, 'breakdown': cfg.get('breakdown', '') if cfg.get('breakdown', '') in known else '', 'breakdowns': [field for field in cfg.get('breakdowns', []) if field in known]} for qid, cfg in settings.get('questions', {}).items() if qid in known}
+                from .kobo_indicators import indicator_issues
+                for definition in settings.get('indicators', []):
+                    item = IndicatorDefinition.model_validate({**definition, 'reviewIssues': []})
+                    definition['reviewIssues'] = indicator_issues(payload, item)
+                from .kobo_saved_views import saved_view_issues
+                for view in settings.get('savedViews', []):
+                    if view.get('questionKinds'):
+                        added = known - view['questionKinds'].keys()
+                        view['snapshot']['hidden'] = list(dict.fromkeys([*view['snapshot'].get('hidden', []), *sorted(added)]))
+                        view['questionKinds'].update({q['id']: q['kind'] for q in payload['form']['questions'] if q['id'] in added})
+                    view['reviewIssues'] = saved_view_issues(payload, SavedAnalysisView.model_validate(view))
+                if any(view['id'] == settings.get('activeViewId') and view['reviewIssues'] for view in settings.get('savedViews', [])): settings['activeViewId'] = ''
+                if payload.get('customConfig'):
+                    from .custom_analysis import reconcile_settings
+                    settings = reconcile_settings(json.loads(row[1]), payload, settings)
             db.execute('UPDATE projects SET payload=?,form=?,data=?,settings=?,updated=? WHERE id=?', (json.dumps(payload, ensure_ascii=False), form_raw, data_raw, json.dumps(settings), datetime.now().isoformat(), pid))
         return self.get(pid)
 
@@ -545,12 +566,26 @@ class ProjectStore:
             db.execute('DELETE FROM projects WHERE id=?', (pid,))
 
 
+def filter_rule_summary(rule: KoboFilter, choices=None):
+    if rule.kind == 'category':
+        return ', '.join('Blank / unanswered' if v == '__blank__' else (choices or {}).get(v, v) for v in rule.values)
+    parts = []
+    if rule.kind == 'date' and rule.months: parts.append('Months: ' + ', '.join(rule.months))
+    if rule.minimum is not None or rule.maximum is not None or not parts:
+        parts.append(f'{rule.minimum if rule.minimum is not None else "Any"} - {rule.maximum if rule.maximum is not None else "Any"}')
+    return '; '.join(parts)
+
+
 def matches(value, rule: KoboFilter):
     if rule.kind == 'category':
         if not rule.values: return True
         return any(v in rule.values for v in (value if isinstance(value, list) else [str(value) if value is not None else '__blank__']))
     if missing(value): return False
-    if rule.kind == 'date': value = str(value)[:10]
+    if rule.kind == 'date':
+        value = str(value)[:10]
+        try: date.fromisoformat(value)
+        except (ValueError, TypeError): return False
+        if rule.months and value[:7] not in rule.months: return False
     try:
         low = float(rule.minimum) if rule.kind == 'number' and rule.minimum is not None else rule.minimum
         high = float(rule.maximum) if rule.kind == 'number' and rule.maximum is not None else rule.maximum
@@ -693,7 +728,7 @@ def question_result(q: dict, records: list[dict], settings: KoboSettings, questi
     colors.update(cfg.colors)
     from .kobo_trends import answer_trend
     trend = answer_trend(q, cfg, questions, answered, lookup, categories, rows)
-    return {'trend': trend, 'id': q['id'], 'name': q['name'], 'label': label(q, settings.language), 'group': q['group'], 'kind': q['kind'], 'repeat': q['repeat'], 'denominator': denominator, 'missing': len(cohort) - denominator, 'total': len(cohort), 'rows': rows, 'statistics': stats, 'bins': bins, 'breakdowns': breakdowns, 'breakdownDisplay': cfg.breakdownDisplay, 'breakdownFields': [{'id': dim['id'], 'label': label(dim, settings.language)} for dim in dimensions], 'percentageBasis': 'Answered respondents within each breakdown category' if breakdowns else 'Respondents who answered this question', 'percentageDecimals': settings.percentageDecimals, 'chart': cfg.chart or ('line' if q['kind'] == 'date' else 'column'), 'colors': colors, 'pointColors': cfg.pointColors, 'appearance': cfg.appearance.model_dump()}
+    return {'addedFromData': bool(q.get('addedFromData')), 'trend': trend, 'id': q['id'], 'name': q['name'], 'label': label(q, settings.language), 'group': q['group'], 'kind': q['kind'], 'repeat': q['repeat'], 'denominator': denominator, 'missing': len(cohort) - denominator, 'total': len(cohort), 'rows': rows, 'statistics': stats, 'bins': bins, 'breakdowns': breakdowns, 'breakdownDisplay': cfg.breakdownDisplay, 'breakdownFields': [{'id': dim['id'], 'label': label(dim, settings.language)} for dim in dimensions], 'percentageBasis': ('Records with a value within each breakdown category' if breakdowns else 'Records with a value in this column') if q.get('customColumn') else ('Answered respondents within each breakdown category' if breakdowns else 'Respondents who answered this question'), 'percentageDecimals': settings.percentageDecimals, 'chart': cfg.chart or ('line' if q['kind'] == 'date' else 'column'), 'colors': colors, 'pointColors': cfg.pointColors, 'appearance': cfg.appearance.model_dump()}
 
 
 def analyze(project: dict, settings: KoboSettings, question: str = ''):
@@ -718,6 +753,6 @@ def analyze(project: dict, settings: KoboSettings, question: str = ''):
     for rule in settings.filters:
         q = questions[rule.field]
         choices = {c['name']: label(c, settings.language) for c in q['choices']}
-        value = ', '.join('Blank / unanswered' if v == '__blank__' else choices.get(v, v) for v in rule.values) if rule.kind == 'category' else f'{rule.minimum if rule.minimum is not None else "Any"} - {rule.maximum if rule.maximum is not None else "Any"}'
+        value = filter_rule_summary(rule, choices)
         filter_summary.append(f'{label(q, settings.language)}: {value}')
     return {'total': sum(not r['scope'] for r in project['records']), 'filtered': sum(not r['scope'] for r in records), 'questions': results, 'filterSummary': filter_summary, 'groups': [{**g, 'label': label(g, settings.language)} for g in project['form']['groups']], 'settings': settings.model_dump()}

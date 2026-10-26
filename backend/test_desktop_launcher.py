@@ -149,7 +149,7 @@ class DesktopLauncherTests(unittest.TestCase):
 
     def test_deferred_legal_restore_starts_background_loader(self):
         called = threading.Event()
-        backend_main = SimpleNamespace(legal_store_loading=False, load_initial_legal_store=called.set)
+        backend_main = SimpleNamespace(legal_store_loading=False, load_initial_legal_store=lambda **kwargs: called.set())
         thread = launcher.start_legal_restore(backend_main)
         thread.join(timeout=1)
         self.assertTrue(backend_main.legal_store_loading)
@@ -222,6 +222,7 @@ class DesktopLauncherTests(unittest.TestCase):
             "unhcr": "#f3f7fa",
             "executive": "#f4f2ed",
             "multicolor": "#f3f5f9",
+            "forest": "#f4f7f5",
         }
         for theme, background in expected_backgrounds.items():
             with self.subTest(theme=theme):

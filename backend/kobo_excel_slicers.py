@@ -73,7 +73,8 @@ def initial_filter_summary(specs, settings):
         if rule.kind == 'category':
             values = ', '.join(sorted(spec['selected'] or []))
         else:
-            values = f'{rule.minimum if rule.minimum is not None else "Any"} - {rule.maximum if rule.maximum is not None else "Any"}'
+            from .kobo import filter_rule_summary
+            values = filter_rule_summary(rule)
         summaries.append(spec['caption'] + ': ' + values)
     return '; '.join(summaries) or 'All responses'
 

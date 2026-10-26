@@ -1,5 +1,6 @@
-import {chartPrimary,chartCategoryColor} from './ChartPrimitives';
+import {koboThemeColor,currentKoboTheme} from './koboThemeColors';
 import {resolveKoboColors} from './koboCustomizeOptions';
+import type {Theme} from './types';
 import type {KoboQuestionSettings,KoboResult} from './koboTypes';
 
 export type KoboMarkTarget={answer:string;breakdown?:string};
@@ -12,12 +13,12 @@ export function markTargetFromPoint(result:KoboResult,customdata:unknown):KoboMa
 }
 export const markColorKey=(result:KoboResult,target:KoboMarkTarget)=>JSON.stringify([(result.breakdownFields||[]).map(field=>field.id),target.breakdown??null,target.answer]);
 export const usesPointColor=(result:KoboResult)=>result.breakdowns.length>0||result.chart==='line';
-export function markColor(result:KoboResult,target:KoboMarkTarget){
+export function markColor(result:KoboResult,target:KoboMarkTarget,theme:Theme=currentKoboTheme()){
  const override=result.pointColors?.[markColorKey(result,target)];
  if(usesPointColor(result)&&override)return override;
- if(target.breakdown!==undefined)return result.colors[target.breakdown]||chartCategoryColor(target.breakdown);
- if(result.chart==='line')return result.colors.series||chartPrimary;
- return result.colors[target.answer]||(['pie','donut'].includes(result.chart)?chartCategoryColor(target.answer):chartPrimary);
+ if(target.breakdown!==undefined)return result.colors[target.breakdown]||koboThemeColor(target.breakdown,theme);
+ if(result.chart==='line')return result.colors.series||koboThemeColor('series',theme);
+ return result.colors[target.answer]||koboThemeColor(target.answer,theme);
 }
 export function editMarkColor(result:KoboResult,cfg:KoboQuestionSettings,target:KoboMarkTarget,color:string|null):KoboQuestionSettings{
  const next={...cfg,colors:{...cfg.colors},pointColors:{...cfg.pointColors}};
@@ -25,4 +26,4 @@ export function editMarkColor(result:KoboResult,cfg:KoboQuestionSettings,target:
  if(color===null)delete map[key];else map[key]=color;
  return next;
 }
-export const resultWithColors=(result:KoboResult,cfg:KoboQuestionSettings):KoboResult=>({...result,colors:resolveKoboColors(result,cfg.palette,cfg.colors),pointColors:cfg.pointColors||{}});
+export const resultWithColors=(result:KoboResult,cfg:KoboQuestionSettings,theme:Theme=currentKoboTheme()):KoboResult=>({...result,colors:resolveKoboColors(result,cfg.palette,cfg.colors,theme),pointColors:cfg.pointColors||{}});

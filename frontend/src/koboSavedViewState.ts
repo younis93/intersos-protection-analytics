@@ -2,7 +2,7 @@ import {questionDefaults,type KoboSettings,type KoboProject} from './koboTypes';
 import {appearanceDefaults} from './koboAppearance';
 import type {KoboSavedView,KoboViewSnapshot} from './koboSavedViewTypes';
 
-const defaults={language:'en',filters:[],filterFields:[],hidden:[],metadata:false,hideBlanks:true,hideZero:true,hideEmpty:true,percentageDecimals:0,questionSort:'form',questions:{},viewMode:'charts'} as const;
+const defaults={dateFilterModes:{},language:'en',filters:[],filterFields:[],hidden:[],metadata:false,hideBlanks:true,hideZero:true,hideEmpty:true,percentageDecimals:0,questionSort:'form',questions:{},viewMode:'charts'} as const;
 const questionDefault={...questionDefaults,palette:null,chart:null,pointColors:{},trendDateField:'',trendUnit:'month' as const,appearance:appearanceDefaults};
 export function viewSnapshot(settings:KoboSettings|KoboViewSnapshot):KoboViewSnapshot{
  const snapshot=Object.fromEntries(Object.entries(defaults).map(([key,value])=>[key,settings[key as keyof KoboViewSnapshot]??value])) as KoboViewSnapshot;
@@ -15,7 +15,7 @@ function canonical(value:unknown):unknown{
  return value;
 }
 export function viewSignature(settings:KoboSettings|KoboViewSnapshot){
- const snapshot=viewSnapshot(settings);snapshot.hidden.sort();snapshot.filters=snapshot.filters.map(f=>({...f,minimum:f.minimum??null,maximum:f.maximum??null,values:[...f.values].sort()})).sort((a,b)=>a.field.localeCompare(b.field));
+ const snapshot=viewSnapshot(settings);snapshot.hidden.sort();snapshot.filters=snapshot.filters.map(f=>({...f,months:[...(f.months||[])].sort(),minimum:f.minimum??null,maximum:f.maximum??null,values:[...f.values].sort()})).sort((a,b)=>a.field.localeCompare(b.field));
  for(const [id,cfg] of Object.entries(snapshot.questions))if(JSON.stringify(canonical(cfg))===JSON.stringify(canonical(questionDefault)))delete snapshot.questions[id];
  return JSON.stringify(canonical(snapshot));
 }

@@ -1528,22 +1528,264 @@ def test_detention_reconciliation_notes_not_detained_cases_within_selected_filte
     raw=workbook.getvalue()
     result=store.detention_reconciliation(raw,"detention.xlsx","2026-01","P1")
     rows={row["beneficiaryId"]:row for row in result["rows"]}
-    new_note="Case is not detained in the platform"
+    new_note="Case ID found in Assessments but beneficiary is not marked as detained"
     old_note="Case ID available in Excel but missing from Platform"
     assert {case_id for case_id,row in rows.items() if row["note"]==new_note}=={"B1","B2","B3"}
-    assert all(rows[case_id]["note"]==old_note for case_id in ("B4","B5","B7","B8","B9","B10"))
+    assert all(rows[case_id]["note"]==old_note for case_id in ("B4","B7","B8","B9","B10"))
+    assert rows["B5"]["note"]=="Case ID available in Excel but missing from Platform"
     assert "B6" not in rows
     assert result["platformRecords"]==1
     assert result["comparisonRecords"]==10
     assert result["matched"]==1
     assert result["unmatched"]==9
     assert rows["B1"]["caseAvailable"] is True
-    assert rows["B1"]["differences"]==[{"field":"Case ID","assessment":"Missing","excel":"Present"}]
+    assert rows["B1"]["differences"]==[{"field":"Is the beneficiary detained","assessment":"No","excel":"Listed in detention workbook"}]
+    assert rows["B2"]["differences"][0]["assessment"]=="No لا"
+    assert rows["B3"]["differences"][0]["assessment"]=="لا"
     expanded=store.detention_reconciliation(raw,"detention.xlsx","2026-01,2026-02",["P1","P2"])
     assert {row["beneficiaryId"] for row in expanded["rows"] if row["note"]==new_note}=={"B1","B2","B3","B4","B5"}
     exported=store.detention_reconciliation_export(raw,"detention.xlsx","2026-01","P1")
     issue_sheet=load_workbook(io.BytesIO(exported))["Comparison issues"]
     assert sum(row[1]==new_note for row in issue_sheet.iter_rows(min_row=5,values_only=True))==3
+
+
+def test_detention_reconciliation_identifies_other_detained_months_and_exports_details():
+    payload=required_payload()
+    records=[
+        ("B1","P1","Yes","05/12/2025"),
+        ("B1","P1","نعم","05/02/2026"),
+        ("B1","P1","Yes نعم","06/02/2026"),
+        ("B2","P1","No لا","05/01/2026"),
+        ("B2","P1","Yes","05/02/2026"),
+        ("B3","P2","Yes","05/02/2026"),
+        ("B4","P1","Unknown","05/01/2026"),
+        ("B4","P1","Yes","05/02/2026"),
+        ("B5","P1","Yes","invalid"),
+        ("B6","P1","No","05/02/2026"),
+        ("B7","P1","Yes نعم","05/03/2026"),
+        ("B8","P1","","05/01/2026"),
+        ("B8","P1","Yes","05/02/2026"),
+    ]
+    payload["assessments"]=csv(**{
+        "Assessment ID":[f"A{i}" for i in range(len(records))],
+        "Beneficiary ID":[row[0] for row in records],
+        "Projects":[row[1] for row in records],
+        "Is the beneficiary detained":[row[2] for row in records],
+        "Date of Assessment":[row[3] for row in records],
+    })
+    store=LegalStore.from_files(payload,"test")
+    workbook=io.BytesIO()
+    pd.DataFrame({
+        "Identification Date":["05/01/2026"]*9,
+        "Beneficiary ID (Platform Case ID)":[f"B{i}" for i in range(1,10)],
+    }).to_excel(workbook,index=False)
+    raw=workbook.getvalue()
+    result=store.detention_reconciliation(raw,"detention.xlsx","2026-01","P1")
+    rows={row["beneficiaryId"]:row for row in result["rows"]}
+    other_note="Detained assessment found in another month"
+    assert {key for key,row in rows.items() if row["note"]==other_note}=={"B1","B7"}
+    assert rows["B1"]["differences"]==[{
+        "field":"Assessment month (outside selected months)",
+        "assessment":"2025-12, 2026-02","excel":"Selected comparison months: 2026-01",
+    }]
+    assert rows["B7"]["differences"][0]["assessment"]=="2026-03"
+    assert rows["B2"]["note"]=="Case ID found in Assessments but beneficiary is not marked as detained"
+    for case_id in ("B3","B4","B5","B6","B8","B9"):
+        assert rows[case_id]["note"]=="Case ID available in Excel but missing from Platform"
+    assert rows["B1"]["caseAvailable"] is True
+    assert rows["B7"]["caseAvailable"] is False
+    assert (result["platformRecords"],result["comparisonRecords"],result["matched"],result["unmatched"])==(0,9,0,9)
+    export=store.detention_reconciliation_export(raw,"detention.xlsx","2026-01","P1")
+    exported=list(load_workbook(io.BytesIO(export))["Comparison issues"].iter_rows(min_row=5,values_only=True))
+    for issue in result["rows"]:
+        difference=issue["differences"][0]
+        assert any(row[1:3]==(issue["note"],issue["beneficiaryId"]) and row[4:7]==(difference["field"],difference["assessment"],difference["excel"]) for row in exported)
+    expanded=store.detention_reconciliation(raw,"detention.xlsx","2026-01,2026-02",["P1","P2"])
+    assert {row["beneficiaryId"] for row in expanded["rows"] if row["note"]==other_note}=={"B7"}
+    assert not any(row["beneficiaryId"]=="B2" and row["note"]=="Case ID found in Assessments but beneficiary is not marked as detained" for row in expanded["rows"])
+
+
+@pytest.mark.parametrize("assessment_name,excel_name",[("  Alice Smith ","ALICE-SMITH"),("أَحْمَد علي","احمدعلي")])
+def test_detention_reconciliation_same_name_different_ids(assessment_name,excel_name):
+    payload=required_payload()
+    payload["beneficiaries"]=csv(**{"Case ID":["B1","B2"],"Name (Filter Color Red)":[assessment_name,assessment_name]})
+    payload["assessments"]=csv(**{
+        "Assessment ID":["A1","A2","A3","A4","A5","A6","A7"],
+        "Beneficiary ID":["B1","B1","B1","B2","B3","B4",""],
+        "Name":[assessment_name,assessment_name,assessment_name,"",assessment_name,assessment_name,assessment_name],
+        "Projects":["P1"]*4+["P2","P1","P1"],
+        "Date of Assessment":["05/01/2026","06/01/2026","05/02/2026","05/01/2026","05/01/2026","05/03/2026","05/01/2026"],
+        "Is the beneficiary detained":["Yes","No","Yes","No","Yes","Yes","No"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    # Imports restore profile names; clear this value to exercise comparison fallback.
+    store.frames["assessments"].loc[store.frames["assessments"]["Beneficiary ID"].eq("B2"),"Name"]=""
+    workbook=io.BytesIO()
+    pd.DataFrame({
+        "Identification Date":["05/01/2026"]*3,
+        "Beneficiary ID (Platform Case ID)":["X1","X2","X3"],
+        "Arabic Name":[excel_name,"",excel_name+"z"],
+    }).to_excel(workbook,index=False)
+    raw=workbook.getvalue()
+    result=store.detention_reconciliation(raw,"detention.xlsx","2026-01","P1")
+    rows={row["beneficiaryId"]:row for row in result["rows"]}
+    issue=rows["X1"]
+    assert issue["note"]=="Same name found with a different Case ID - verify identity"
+    assert issue["name"]==excel_name
+    assert issue["caseAvailable"] is False
+    assert issue["differences"]==[
+        {"field":"Case ID","assessment":"B1","excel":"X1"},
+        {"field":"Case ID","assessment":"B2","excel":"X1"},
+    ]
+    assert "B1" not in rows
+    assert issue["relatedCases"]==[{"caseId":"B1","caseAvailable":True},{"caseId":"B2","caseAvailable":True}]
+    assert all(rows[key]["note"]=="Case ID available in Excel but missing from Platform" for key in ("X2","X3"))
+    assert (result["platformRecords"],result["comparisonRecords"],result["matched"],result["unmatched"])==(1,3,0,3)
+    export=store.detention_reconciliation_export(raw,"detention.xlsx","2026-01","P1")
+    exported=[row for row in load_workbook(io.BytesIO(export))["Comparison issues"].iter_rows(min_row=5,values_only=True) if row[2]=="X1"]
+    assert len(exported)==2
+    assert [(row[4],row[5],row[6]) for row in exported]==[(item["field"],item["assessment"],item["excel"]) for item in issue["differences"]]
+    assert all(row[1]==issue["note"] for row in exported)
+
+
+def test_detention_reconciliation_consolidation_preserves_distinct_and_unrelated_issues():
+    payload=required_payload()
+    payload["beneficiaries"]=csv(**{"Case ID":["B1"],"Name (Filter Color Red)":["Shared Name"]})
+    payload["assessments"]=csv(**{
+        "Assessment ID":["A1","A2","A3","A4","A5"],
+        "Beneficiary ID":["B1","B1","U1","","M1"],
+        "Name":["Shared Name","Shared Name","Unrelated Person","No ID Person","Matched Person"],
+        "Projects":["P1"]*5,"Date of Assessment":["05/01/2026"]*5,
+        "Is the beneficiary detained":["Yes"]*5,"Gender":["Female"]*5,"Nationality":["Iraq"]*5,
+    })
+    store=LegalStore.from_files(payload,"test")
+    workbook=io.BytesIO()
+    pd.DataFrame({
+        "Identification Date":["05/01/2026"]*4,
+        "Beneficiary ID (Platform Case ID)":["X1","X2","","M1"],
+        "Arabic Name":["Shared Name","Shared Name","No ID Person","Matched Person"],
+        "Sex":["Male"]*4,"Nationality":["Syria"]*4,
+    }).to_excel(workbook,index=False)
+    raw=workbook.getvalue()
+    result=store.detention_reconciliation(raw,"detention.xlsx","2026-01","P1")
+    issues=result["rows"]
+    assert result["unmatched"]==len(issues)==6
+    assert result["matched"]==0
+    assert result["missingCaseIds"]=={"assessments":1,"excel":1}
+    assert not any(row["beneficiaryId"]=="B1" for row in issues)
+    by_id={row["beneficiaryId"]:row for row in issues if row["beneficiaryId"]}
+    assert by_id["U1"]["note"]=="Case ID available in platform but missing from Excel"
+    for excel_id in ("X1","X2"):
+        assert by_id[excel_id]["note"]=="Same name found with a different Case ID - verify identity"
+        assert by_id[excel_id]["differences"]==[{"field":"Case ID","assessment":"B1","excel":excel_id}]
+        assert by_id[excel_id]["relatedCases"]==[{"caseId":"B1","caseAvailable":True}]
+    assert {row["note"] for row in issues if not row["beneficiaryId"]}=={"Case ID missing in Assessments","Case ID missing in Excel"}
+    assert by_id["M1"]["differences"]==[
+        {"field":"Gender","assessment":"Female","excel":"Male"},
+        {"field":"Nationality","assessment":"Iraq","excel":"Syria"},
+    ]
+    export=store.detention_reconciliation_export(raw,"detention.xlsx","2026-01","P1")
+    exported=list(load_workbook(io.BytesIO(export))["Comparison issues"].iter_rows(min_row=5,values_only=True))
+    assert len(exported)==7
+    assert not any(row[2]=="B1" for row in exported)
+    assert sum(row[2]=="U1" for row in exported)==1
+    assert sum(row[2]=="M1" for row in exported)==2
+
+
+def test_detention_reconciliation_screenshot_cases_show_only_id_discrepancies():
+    payload=required_payload()
+    names=["تامر احمد الراعي","علي محمد عباس","محمد مصطفى مصطفى"]
+    platform_ids=["86945","86946","86947"]
+    excel_ids=["89645","89646","98647"]
+    payload["assessments"]=csv(**{
+        "Assessment ID":["A1","A2","A3"],"Beneficiary ID":platform_ids,"Name":names,
+        "Projects":["P1"]*3,"Date of Assessment":["05/10/2026"]*3,
+        "Is the beneficiary detained":["Yes نعم"]*3,
+    })
+    store=LegalStore.from_files(payload,"test")
+    workbook=io.BytesIO()
+    pd.DataFrame({"Identification Date":["05/10/2026"]*3,"Beneficiary ID (Platform Case ID)":excel_ids,"Arabic Name":names}).to_excel(workbook,index=False)
+    raw=workbook.getvalue()
+    result=store.detention_reconciliation(raw,"detention.xlsx","2026-10","P1")
+    issues=[row for row in result["rows"] if row["note"]=="Same name found with a different Case ID - verify identity"]
+    assert len(issues)==3
+    for issue,platform_id,excel_id,name in zip(issues,platform_ids,excel_ids,names):
+        assert issue["beneficiaryId"]==excel_id
+        assert issue["name"]==name
+        assert issue["differences"]==[{"field":"Case ID","assessment":platform_id,"excel":excel_id}]
+    assert result["unmatched"]==3
+    assert len(result["rows"])==3
+    assert result["matched"]==0
+    export=store.detention_reconciliation_export(raw,"detention.xlsx","2026-10","P1")
+    exported=[row for row in load_workbook(io.BytesIO(export))["Comparison issues"].iter_rows(min_row=5,values_only=True) if row[2] in excel_ids]
+    assert len(exported)==3
+    assert [(row[4],row[5],row[6]) for row in exported]==[("Case ID",platform_id,excel_id) for platform_id,excel_id in zip(platform_ids,excel_ids)]
+
+
+@pytest.mark.parametrize("status,date,expected",[
+    ("Yes","05/01/2026",None),
+    ("No","05/01/2026","Case ID found in Assessments but beneficiary is not marked as detained"),
+    ("Yes","05/02/2026","Detained assessment found in another month"),
+    ("Unknown","05/01/2026","Case ID available in Excel but missing from Platform"),
+])
+def test_detention_reconciliation_same_id_takes_precedence_over_name_candidates(status,date,expected):
+    payload=required_payload()
+    payload["beneficiaries"]=csv(**{"Case ID":["B1","B2"],"Name (Filter Color Red)":["Same Person"]*2})
+    payload["assessments"]=csv(**{
+        "Assessment ID":["A1","A2"],"Beneficiary ID":["B1","B2"],"Name":["Same Person"]*2,
+        "Projects":["P1"]*2,"Date of Assessment":[date,"05/01/2026"],
+        "Is the beneficiary detained":[status,"No"],
+    })
+    store=LegalStore.from_files(payload,"test")
+    workbook=io.BytesIO()
+    pd.DataFrame({"Identification Date":["05/01/2026"],"Beneficiary ID (Platform Case ID)":["B1"],"Arabic Name":["Same Person"]}).to_excel(workbook,index=False)
+    result=store.detention_reconciliation(workbook.getvalue(),"detention.xlsx","2026-01","P1")
+    if expected is None:
+        assert result["matched"]==1
+        assert result["rows"]==[]
+    else:
+        assert len(result["rows"])==1
+        assert result["rows"][0]["note"]==expected
+        assert result["rows"][0]["caseAvailable"] is True
+
+
+@pytest.mark.parametrize("candidate_ids",[["B1"],["B1","B2"]])
+def test_detention_reconciliation_blank_excel_id_shows_same_name_platform_candidates(candidate_ids):
+    payload=required_payload()
+    ids=[*candidate_ids,"B3","B4","U1"]
+    payload["beneficiaries"]=csv(**{"Case ID":ids,"Name (Filter Color Red)":["عبد الله سعدات"]*(len(ids)-1)+["Unrelated Person"]})
+    payload["assessments"]=csv(**{
+        "Assessment ID":[f"A{i}" for i in range(len(ids))],"Beneficiary ID":ids,
+        "Projects":["P1"]*len(candidate_ids)+["P1","P2","P1"],
+        "Date of Assessment":["05/10/2026"]*len(candidate_ids)+["05/09/2026","05/10/2026","05/10/2026"],
+        "Is the beneficiary detained":["Yes"]*len(ids),
+    })
+    store=LegalStore.from_files(payload,"test")
+    workbook=io.BytesIO()
+    pd.DataFrame({
+        "Identification Date":["05/10/2026"]*3,"Beneficiary ID (Platform Case ID)":["","",""],
+        "Arabic Name":["عَبْدالله سعدات","Unmatched Name",""],
+    }).to_excel(workbook,index=False)
+    raw=workbook.getvalue()
+    result=store.detention_reconciliation(raw,"detention.xlsx","2026-10","P1")
+    note="Name found in Assessments but Case ID missing in Excel - verify identity"
+    issues=[row for row in result["rows"] if row["note"]==note]
+    assert len(issues)==1
+    issue=issues[0]
+    assert issue["beneficiaryId"]==""
+    assert issue["caseAvailable"] is False
+    assert issue["name"]=="عَبْدالله سعدات"
+    assert issue["differences"]==[{"field":"Case ID","assessment":case_id,"excel":"Missing"} for case_id in candidate_ids]
+    assert issue["relatedCases"]==[{"caseId":case_id,"caseAvailable":True} for case_id in candidate_ids]
+    assert not any(row["beneficiaryId"] in candidate_ids for row in result["rows"])
+    assert any(row["beneficiaryId"]=="U1" and row["note"]=="Case ID available in platform but missing from Excel" for row in result["rows"])
+    assert sum(row["note"]=="Case ID missing in Excel" for row in result["rows"])==2
+    assert result["missingCaseIds"]["excel"]==3
+    assert result["matched"]==0
+    assert result["unmatched"]==4
+    export=store.detention_reconciliation_export(raw,"detention.xlsx","2026-10","P1")
+    exported=[row for row in load_workbook(io.BytesIO(export))["Comparison issues"].iter_rows(min_row=5,values_only=True) if row[1]==note]
+    assert [(row[4],row[5],row[6]) for row in exported]==[("Case ID",case_id,"Missing") for case_id in candidate_ids]
 
 
 def test_detention_reconciliation_reports_blank_case_ids_on_both_sides():

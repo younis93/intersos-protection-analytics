@@ -104,6 +104,7 @@ def preview_settings(project, current, package):
         result[key] = incoming[key]
     result['hidden'] = [qid for qid in result['hidden'] if qid not in used] + remap(incoming['hidden'], 'Question visibility')
     result['filterFields'] = remap(incoming['filterFields'], 'Filter fields')
+    result['dateFilterModes'] = {mapping[qid]: mode for qid, mode in incoming.get('dateFilterModes', {}).items() if qid in mapping and destination[mapping[qid]]['kind'] == 'date'}
     result['questions'] = {qid: cfg for qid, cfg in result['questions'].items() if qid not in used}
     result['filters'] = []
     for rule in incoming['filters']:

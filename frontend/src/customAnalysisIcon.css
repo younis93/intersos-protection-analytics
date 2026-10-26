@@ -1,0 +1,11 @@
+.welcome-page .workspace-icon .custom-analysis-icon{width:26px;height:26px;overflow:visible}
+.custom-icon-bar{transform-box:fill-box;transform-origin:center bottom}
+.workspace-teal:is(:hover,:focus-visible) .custom-icon-bar{animation:custom-chart-rise 1.2s cubic-bezier(.22,1,.36,1) both}
+.workspace-teal:is(:hover,:focus-visible) .custom-icon-bar-two{animation-delay:.1s}
+.workspace-teal:is(:hover,:focus-visible) .custom-icon-bar-three{animation-delay:.2s}
+.workspace-teal:is(:hover,:focus-visible) .custom-icon-lens{animation:custom-lens-scan 1.6s cubic-bezier(.45,0,.25,1) both}
+.workspace-teal:is(:hover,:focus-visible) .custom-icon-lens-glint{animation:custom-lens-glint 1.6s ease-in-out both}
+@keyframes custom-chart-rise{0%{transform:scaleY(.25);opacity:.45}55%{transform:scaleY(1.12);opacity:1}100%{transform:scaleY(1);opacity:1}}
+@keyframes custom-lens-scan{0%,100%{transform:translate(0,0)}30%{transform:translate(-5px,-2px)}65%{transform:translate(-2px,-5px)}}
+@keyframes custom-lens-glint{0%,100%{opacity:.55}45%{opacity:1}}
+@media(prefers-reduced-motion:reduce){.workspace-teal .custom-analysis-icon *{animation:none!important;transform:none!important}}

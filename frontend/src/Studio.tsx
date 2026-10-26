@@ -1,7 +1,7 @@
 import {AnimatedActionIcon} from './AnimatedActionIcon';
 import {AnimatedSectionIcon} from './AnimatedNavigationIcon';
 import {SharedFilterDrawer} from './SharedFilterDrawer';
-import {ChartFrame,plotConfig,chartInk as ink,chartGrid as grid} from './ChartPrimitives';
+import {ChartFrame,plotConfig,chartAccent,chartInk as ink,chartGrid as grid} from './ChartPrimitives';
 import {ValueTable} from "./ValueTable";
 import {useEffect,useMemo,useState} from 'react';
 import Plot from './LazyPlot';
@@ -96,7 +96,7 @@ function buildChart(view:StudioView|null,type:ChartType,theme:Theme,options:Stud
   const custom=(item:ReturnType<typeof cell>)=>[item.count,item.displayPercent*100,item.totalShare*100,item.value];
   const selectedHover=options.valueMode==='count'?'':`<br>${valueTitle(options.valueMode)}: %{customdata[3]:.1f}%`;
   const hover=(series:string,categoryToken:string)=>`${categoryToken}${columns.length>1?`<br>Series: ${series}`:''}<br>Count: %{customdata[0]:,.0f}${selectedHover}<br>Share of filtered total: %{customdata[2]:.1f}%<extra></extra>`;
-  if(type==='heatmap'&&columns.length>1)return{data:[{type:'heatmap',x:columns,y:rows,z:rows.map(row=>columns.map(column=>cell(row,column).value)),customdata:rows.map(row=>columns.map(column=>custom(cell(row,column)))),colorscale:[[0,'#edf2fb'],[1,marks[columns[0]]||'#315ea8']],colorbar:{title:percentageAxis?'%':'Count'},hovertemplate:`%{y}<br>Series: %{x}<br>Count: %{customdata[0]:,.0f}${selectedHover}<br>Share of filtered total: %{customdata[2]:.1f}%<extra></extra>`}],layout:common};
+  if(type==='heatmap'&&columns.length>1)return{data:[{type:'heatmap',x:columns,y:rows,z:rows.map(row=>columns.map(column=>cell(row,column).value)),customdata:rows.map(row=>columns.map(column=>custom(cell(row,column)))),colorscale:[[0,theme==='forest'?'#edf5ef':'#edf2fb'],[1,marks[columns[0]]||(theme==='forest'?chartAccent(theme):'#315ea8')]],colorbar:{title:percentageAxis?'%':'Count'},hovertemplate:`%{y}<br>Series: %{x}<br>Count: %{customdata[0]:,.0f}${selectedHover}<br>Share of filtered total: %{customdata[2]:.1f}%<extra></extra>`}],layout:common};
   if(type==='donut'&&columns.length===1)return{data:[{type:'pie',labels:rows,values:rows.map(row=>cell(row,columns[0]).count),hole:.58,textinfo:options.labelMode==='hide'?'none':options.labelMode==='show'?'label+percent':'percent',marker:{colors:rows.map((row,index)=>marks[row]||palette[index%palette.length])},textfont:{color:rows.map((row,index)=>texts[row]||defaultText[index%defaultText.length])},customdata:rows.map(row=>custom(cell(row,columns[0]))),hovertemplate:`%{label}<br>Count: %{customdata[0]:,.0f}<br>Percent of filtered total: %{customdata[2]:.1f}%<extra></extra>`}],layout:{...common,margin:{l:30,r:30,t:30,b:30},showlegend:false}};
   const horizontal=(type==='bar'||type==='stacked')&&options.orientation==='horizontal';
   const traces=columns.map((column,index)=>{

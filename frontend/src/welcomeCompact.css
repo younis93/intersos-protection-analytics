@@ -1,0 +1,44 @@
+/* Keep all workspace entries together, including at desktop display scaling. */
+main.welcome-page{min-height:100dvh;padding:86px 28px 20px;display:flex;flex-direction:column}
+.welcome-page .welcome-content{width:min(1120px,100%);align-self:center;margin-block:auto}
+.welcome-page .welcome-header-compact{position:relative;top:-50px;margin-bottom:22px}
+.welcome-page .welcome-logo-secret{position:relative;top:-12px;width:168px;margin-bottom:10px}
+.welcome-page .welcome-logo-mark{width:126px;height:108px}
+.welcome-page .welcome-logo-word{font-size:29px}
+.welcome-page .welcome-header>span{font-size:13px}
+.welcome-page .workspace-cards{grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.welcome-page .workspace-card{min-height:252px;padding:22px;border-radius:22px}
+.welcome-page .workspace-icon{width:44px;height:44px;border-radius:13px}
+.welcome-page .workspace-icon svg{width:24px;height:24px}
+.welcome-page .workspace-badge{margin:14px 0 7px;font-size:9px;letter-spacing:.07em}
+.welcome-page .workspace-card>strong{font-size:23px;line-height:1.2}
+.welcome-page .workspace-card>p{margin:9px 0 18px;font-size:13px;line-height:1.5}
+.welcome-page .workspace-enter{font-size:11px}
+.welcome-page .welcome-footer{position:relative;z-index:31;display:flex;align-items:flex-end;justify-content:space-between;gap:20px;width:100%;flex:none;margin-top:24px;color:var(--muted);font-size:10px;line-height:1.5}
+.welcome-footer .designer-unlock{flex:none;text-align:right}
+.welcome-footer .designer-unlock strong{color:var(--ink);font-size:11px}
+@media(max-width:900px){
+ .welcome-page .workspace-cards{grid-template-columns:1fr;gap:12px}
+ .welcome-page .workspace-card{display:grid;grid-template-columns:40px minmax(0,1fr);gap:4px 12px;min-height:0;padding:16px 18px;border-radius:18px}
+ .welcome-page .workspace-icon{grid-column:1;grid-row:1/4;width:40px;height:40px}
+ .welcome-page .workspace-badge{grid-column:2;margin:0;font-size:9px}
+ .welcome-page .workspace-card>strong{grid-column:2;font-size:20px}
+ .welcome-page .workspace-card>p{grid-column:2;margin:2px 0 4px;font-size:12px;line-height:1.45;max-width:none}
+ .welcome-page .workspace-enter{grid-column:2;margin-top:2px;font-size:10px}
+ .welcome-page .welcome-header-compact{margin-bottom:18px}
+ .welcome-page .welcome-logo-mark{width:108px;height:92px}
+ .welcome-page .welcome-logo-word{font-size:26px}
+}
+@media(max-width:480px){
+ main.welcome-page{padding:78px 14px 20px}
+ .welcome-page .welcome-footer{gap:14px;margin-top:20px;font-size:9px}
+ .welcome-page .welcome-footer>span{max-width:60%}
+ .welcome-page .welcome-header-compact{margin-bottom:14px}
+}
+@media(min-width:901px) and (max-height:650px){
+ main.welcome-page{padding-top:78px;padding-bottom:18px}
+ .welcome-page .welcome-header-compact{margin-bottom:16px}
+ .welcome-page .welcome-logo-mark{width:103px;height:88px}
+ .welcome-page .welcome-logo-word{font-size:26px}
+ .welcome-page .workspace-card{min-height:232px;padding:18px}
+}

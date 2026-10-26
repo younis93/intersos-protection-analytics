@@ -25,7 +25,7 @@ describe('customization drafts',()=>{
  });
  it('uses series colors for line charts and skips blank answers',()=>{
   const result:KoboResult={id:'q',name:'q',label:'Question',group:'',kind:'category',repeat:'',denominator:1,missing:0,total:1,statistics:{},chart:'bar',breakdowns:[],rows:[{id:'a',label:'Answer',count:1,percent:100},{id:'__blank__',label:'Blank',count:0,percent:null}],percentageBasis:'Respondents',colors:{}};
-  expect(colorEntries(result).map(entry=>entry.id)).toEqual(['a']);expect(defaultKoboColor(result,'a')).toBe('#1683d8');
+  expect(colorEntries(result).map(entry=>entry.id)).toEqual(['a']);expect(defaultKoboColor(result,'a')).toBe('#2166AC');
   expect(colorEntries({...result,chart:'line'})).toEqual([{id:'series',label:'Line series'}]);
  });
 });

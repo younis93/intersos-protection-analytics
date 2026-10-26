@@ -56,6 +56,7 @@ import SingleMonthIndicatorChart from "./SingleMonthIndicatorChart";
 import { isSingleMonth } from "./timelineChart";
 import type { IndicatorReconciliation,IndicatorReconciliationMetadata,IndicatorReport,IndicatorReportGroup,IndicatorReportItem,IndicatorSection,IndicatorSourceRecord } from "./types";
 import { useDebouncedValue } from "./useDebouncedValue";
+import {defaultIndicatorReport} from './indicatorReportCache';
 import { ValueTable } from "./ValueTable";
 import { VirtualRows } from "./VirtualRows";
 
@@ -295,7 +296,7 @@ export function IndicatorReportingCheck({projects,months,projectOptions,monthOpt
 }
 
 export function IndicatorReporting({revision,onOpenCase,caseReviewOpen=false}:{revision:number;onOpenCase?:(id:string)=>void;caseReviewOpen?:boolean}){
-  const [report,setReport]=useState<IndicatorReport|null>(null),[projects,setProjects]=useState<string[]>([]),[locations,setLocations]=useState<string[]>([]),[quarters,setQuarters]=useState<string[]>([]),[months,setMonths]=useState<string[]>([]),[communityTypes,setCommunityTypes]=useState<string[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState(""),[toast,setToast]=useState(""),[filterDrawer,setFilterDrawer]=useState(false),[fullView,setFullView]=useState<IndicatorReportItem|null>(null),[idDrill,setIdDrill]=useState<{ids:string[];count:number;title:string;records:IndicatorSourceRecord[];revision?:string}|null>(null),[view,setView]=useState<"report"|"analysis"|"check">("report"),[monthlyReports,setMonthlyReports]=useState<{month:string;report:IndicatorReport}[]>([]),[analysisLoading,setAnalysisLoading]=useState(false),[exporting,setExporting]=useState(false),[narrativeExporting,setNarrativeExporting]=useState(false);
+  const [report,setReport]=useState<IndicatorReport|null>(defaultIndicatorReport),[projects,setProjects]=useState<string[]>([]),[locations,setLocations]=useState<string[]>([]),[quarters,setQuarters]=useState<string[]>([]),[months,setMonths]=useState<string[]>([]),[communityTypes,setCommunityTypes]=useState<string[]>([]),[loading,setLoading]=useState(()=>!defaultIndicatorReport()),[error,setError]=useState(""),[toast,setToast]=useState(""),[filterDrawer,setFilterDrawer]=useState(false),[fullView,setFullView]=useState<IndicatorReportItem|null>(null),[idDrill,setIdDrill]=useState<{ids:string[];count:number;title:string;records:IndicatorSourceRecord[];revision?:string}|null>(null),[view,setView]=useState<"report"|"analysis"|"check">("report"),[monthlyReports,setMonthlyReports]=useState<{month:string;report:IndicatorReport}[]>([]),[analysisLoading,setAnalysisLoading]=useState(false),[exporting,setExporting]=useState(false),[narrativeExporting,setNarrativeExporting]=useState(false);
   const [selectedIndicators,setSelectedIndicators]=useState<string[]|null>(null);
   const indicatorOptions=useMemo(()=>report?indicatorVisibilityOptions(report):[],[report]);
   const indicatorValues=useMemo(()=>indicatorOptions.map(option=>option.value),[indicatorOptions]);
@@ -307,7 +308,18 @@ export function IndicatorReporting({revision,onOpenCase,caseReviewOpen=false}:{r
   const latestIndicatorQuery=useRef(indicatorQuery);latestIndicatorQuery.current=indicatorQuery;
   const debouncedQuery=useDebouncedValue(indicatorQuery,180);
   const reportMatchesFilters=useMemo(()=>reportMatchesIndicatorScope(report,indicatorQuery),[report,indicatorQuery]);
-  useEffect(()=>{const controller=new AbortController();const current=()=>!controller.signal.aborted&&latestIndicatorQuery.current===debouncedQuery;setLoading(true);setError("");getLegalIndicators(debouncedQuery.projects,debouncedQuery.locations,[],debouncedQuery.quarters,debouncedQuery.months,debouncedQuery.communityTypes,controller.signal).then((next)=>{if(current())setReport(next)}).catch((reason)=>{if(current()&&reason.name!=="AbortError")setError(reason.message)}).finally(()=>{if(current())setLoading(false)});return()=>controller.abort()},[debouncedQuery]);
+  useEffect(()=>{
+    const controller=new AbortController();
+    const current=()=>!controller.signal.aborted&&latestIndicatorQuery.current===debouncedQuery;
+    const ready=[debouncedQuery.projects,debouncedQuery.locations,debouncedQuery.quarters,debouncedQuery.months,debouncedQuery.communityTypes].every(values=>!values.length)?defaultIndicatorReport():null;
+    if(ready&&current()){setReport(ready);setLoading(false);setError("");return()=>controller.abort()}
+    setLoading(true);setError("");
+    getLegalIndicators(debouncedQuery.projects,debouncedQuery.locations,[],debouncedQuery.quarters,debouncedQuery.months,debouncedQuery.communityTypes,controller.signal)
+      .then(next=>{if(current())setReport(next)})
+      .catch(reason=>{if(current()&&reason.name!=="AbortError")setError(reason.message)})
+      .finally(()=>{if(current())setLoading(false)});
+    return()=>controller.abort();
+  },[debouncedQuery]);
   const locationOptions=report?.filterOptions.locations||[];
   const communityTypeOptions=report?.filterOptions.communityTypes||[];
   const quarterOptions=useMemo(()=>report?.filterOptions.quarters||[],[report]);

@@ -42,7 +42,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Frontend tests failed." }
           npm run build --prefix frontend
           if ($LASTEXITCODE -ne 0) { throw "Frontend build failed." }
-          python -m PyInstaller --noconfirm --clean --windowed --onedir --name "Iraq Data Analysis" --icon "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico" --distpath packaging-temp/dist --workpath packaging-temp/work --specpath packaging-temp/spec --add-data "$env:GITHUB_WORKSPACE\frontend\dist;frontend\dist" --add-data "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico;." --collect-all polars "$env:GITHUB_WORKSPACE\desktop_launcher.py"
+          python -m PyInstaller --noconfirm --clean --windowed --onedir --name "Iraq Data Analysis" --icon "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico" --distpath packaging-temp/dist --workpath packaging-temp/work --specpath packaging-temp/spec --add-data "$env:GITHUB_WORKSPACE\frontend\dist;frontend\dist" --add-data "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico;." --add-data "$env:GITHUB_WORKSPACE\backend\custom_preparation_policy.json;backend" --collect-all polars "$env:GITHUB_WORKSPACE\desktop_launcher.py"
       - name: Sign application and build signed installer
         shell: pwsh
         env:

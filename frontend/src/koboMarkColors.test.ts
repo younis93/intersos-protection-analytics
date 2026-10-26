@@ -5,6 +5,17 @@ import {questionDefaults,type KoboResult} from './koboTypes';
 
 const base:KoboResult={id:'q',name:'q',label:'Question',group:'',repeat:'',kind:'category',denominator:10,missing:0,total:10,statistics:{},percentageBasis:'Respondents',chart:'column',colors:{f:'#123456',m:'#789ABC',series:'#123456'},breakdownFields:[{id:'gender',label:'Gender'}],breakdowns:[{id:'f',label:'Female',values:['f'],denominator:5},{id:'m',label:'Male',values:['m'],denominator:5}],rows:['a','b'].map(id=>({id,label:'Same translated label',count:5,percent:50,series:[{id:'f',count:2,percent:40},{id:'m',count:3,percent:60}]}))};
 describe('individual chart colors',()=>{
+ it('uses forest defaults while preserving explicit answer, point, and category colors',()=>{
+  const plain={...base,breakdowns:[],colors:{}};
+  expect((chartSpec(plain,'en',false,'forest').data[0] as any).marker.color).toEqual(['#347653','#459467']);
+  expect((chartSpec(plain,'en',false,'glass-light').data[0] as any).marker.color).toEqual(['#2166AC','#3787C0']);
+  const custom={...plain,colors:{a:'#abcdef'}};
+  expect((chartSpec(custom,'en',false,'forest').data[0] as any).marker.color).toEqual(['#abcdef','#459467']);
+  const pie={...plain,chart:'pie' as const};
+  expect((chartSpec(pie,'en',false,'forest').data[0] as any).marker.colors).not.toEqual((chartSpec(pie,'en',false,'glass-light').data[0] as any).marker.colors);
+  const line={...plain,chart:'line' as const,pointColors:{[markColorKey(plain,{answer:'a'})]:'#123456'}};
+  expect(markColor(line,{answer:'a'},'forest')).toBe('#123456');
+ });
  it('resolves stable identifiers from ordinary and nested pie event payloads',()=>{
   expect(markTargetFromPoint(base,[2,'40%','Label','b','f'])).toEqual({answer:'b',breakdown:'f'});
   expect(markTargetFromPoint(base,[[2,'40%','Label','b',null]])).toEqual({answer:'b'});

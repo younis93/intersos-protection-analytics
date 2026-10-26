@@ -69,6 +69,8 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 var
   AppSummaryHeading: TNewStaticText;
   AppSummaryText: TNewStaticText;
+  CertificateExplanationShown: Boolean;
+  CertificateExplanationAccepted: Boolean;
 
 function HasCommandLineSwitch(const SwitchName: String): Boolean;
 var
@@ -114,6 +116,87 @@ end;
 function UpdateTrustReady: Boolean;
 begin
   Result := CertificateInstalled('Root') and CertificateInstalled('TrustedPublisher');
+end;
+
+function ConfirmCertificateInstallation: Boolean;
+var
+  Dialog: TSetupForm;
+  Heading, Explanation, CertificateDetails: TNewStaticText;
+  ContinueButton, CancelButton: TNewButton;
+begin
+  Result := True;
+  if WizardSilent then
+    exit;
+  if CertificateExplanationShown then
+  begin
+    Result := CertificateExplanationAccepted;
+    exit;
+  end;
+
+  CertificateExplanationShown := True;
+  Dialog := CreateCustomForm(ScaleX(560), ScaleY(480), False, True);
+  try
+    Dialog.Caption := '{#MyAppName} Setup';
+    Dialog.ClientWidth := ScaleX(560);
+    Dialog.Font.Name := 'Segoe UI';
+    Dialog.Font.Size := 9;
+    Dialog.Color := clWhite;
+
+    Heading := TNewStaticText.Create(Dialog);
+    Heading.AutoSize := False;
+    Heading.Parent := Dialog;
+    Heading.SetBounds(ScaleX(24), ScaleY(22), Dialog.ClientWidth - ScaleX(48), 0);
+    Heading.Font.Name := 'Segoe UI Semibold';
+    Heading.Font.Size := 12;
+    Heading.Font.Color := $00784016;
+    Heading.WordWrap := True;
+    Heading.Caption := 'Certificate required for application updates';
+    Heading.AdjustHeight;
+
+    Explanation := TNewStaticText.Create(Dialog);
+    Explanation.AutoSize := False;
+    Explanation.Parent := Dialog;
+    Explanation.SetBounds(Heading.Left, Heading.Top + Heading.Height + ScaleY(16), Heading.Width, 0);
+    Explanation.WordWrap := True;
+    Explanation.Caption :=
+      'Iraq Data Analysis needs to install the INTERSOS Protection Analytics signing certificate for your Windows account. ' +
+      'This allows Windows to verify application updates signed with this certificate.' + #13#10 + #13#10 +
+      'Installing it adds the certificate to your account''s Trusted Root Certification Authorities and Trusted Publishers stores.' + #13#10 + #13#10 +
+      'Windows may display a Security Warning asking whether to install the certificate. ' +
+      'Continue only if you obtained this installer from a trusted INTERSOS source and have verified the certificate details.' + #13#10 + #13#10 +
+      'Select Continue to proceed. If Windows displays the certificate warning, select Yes to approve installation or No to stop.';
+    Explanation.AdjustHeight;
+
+    CertificateDetails := TNewStaticText.Create(Dialog);
+    CertificateDetails.AutoSize := False;
+    CertificateDetails.Parent := Dialog;
+    CertificateDetails.SetBounds(Heading.Left, Explanation.Top + Explanation.Height + ScaleY(18), Heading.Width, 0);
+    CertificateDetails.WordWrap := True;
+    CertificateDetails.Caption := 'Publisher: INTERSOS Protection Analytics' + #13#10 +
+      'Expected certificate thumbprint (SHA-1):' + #13#10 + '{#SigningCertificateThumbprint}';
+    CertificateDetails.AdjustHeight;
+
+    CancelButton := TNewButton.Create(Dialog);
+    CancelButton.Parent := Dialog;
+    CancelButton.SetBounds(Dialog.ClientWidth - ScaleX(120),
+      CertificateDetails.Top + CertificateDetails.Height + ScaleY(24), ScaleX(96), ScaleY(28));
+    CancelButton.Caption := 'Cancel';
+    CancelButton.Cancel := True;
+    CancelButton.ModalResult := mrCancel;
+
+    ContinueButton := TNewButton.Create(Dialog);
+    ContinueButton.Parent := Dialog;
+    ContinueButton.SetBounds(CancelButton.Left - ScaleX(108), CancelButton.Top, ScaleX(96), ScaleY(28));
+    ContinueButton.Caption := 'Continue';
+    ContinueButton.Default := True;
+    ContinueButton.ModalResult := mrOk;
+    Dialog.ClientHeight := CancelButton.Top + CancelButton.Height + ScaleY(22);
+    Dialog.ActiveControl := ContinueButton;
+    CertificateExplanationAccepted := Dialog.ShowModal = mrOk;
+    Result := CertificateExplanationAccepted;
+  finally
+    Dialog.Free;
+  end;
 end;
 
 function WebView2VersionAvailable(const RootKey: Integer): Boolean;
@@ -327,6 +410,11 @@ begin
 
   if not UpdateTrustReady then
   begin
+    if not ConfirmCertificateInstallation then
+    begin
+      Result := 'Certificate installation was cancelled. No certificates were changed. Setup cannot continue without the signing certificate.';
+      exit;
+    end;
     ExtractTemporaryFile('{#SigningCertificateName}');
     CertificatePath := ExpandConstant('{tmp}\{#SigningCertificateName}');
     RootAdded := False;
@@ -337,7 +425,7 @@ begin
       RootAdded := ChangeCertificateStore('add', 'Root', CertificatePath);
       if not RootAdded then
       begin
-        Result := 'Unable to trust the INTERSOS signing certificate in the current user Root store.';
+        Result := 'The INTERSOS signing certificate could not be added to your account''s Trusted Root Certification Authorities store. The Windows request may have been declined. Setup cannot continue without the signing certificate.';
         exit;
       end;
     end;

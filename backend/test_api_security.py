@@ -34,7 +34,7 @@ class LocalApiSecurityTests(unittest.TestCase):
             with patch.object(main,"REMEMBERED_LEGAL_SOURCE_CONFIGURED",True), patch.object(main,"REMEMBERED_LEGAL_SOURCE","folder"), patch.object(main,"REMEMBERED_LEGAL_FOLDER",folder):
                 main.load_initial_legal_store()
             self.assertIsNotNone(main.legal_store)
-            self.assertEqual(main.legal_store.source,folder.name)
+            self.assertEqual(main.legal_store.source,str(folder))
             self.assertFalse(main.legal_store_loading)
 
     def test_exclusion_import_normalizes_numeric_ids_and_extended_headers(self):
