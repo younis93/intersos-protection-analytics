@@ -20,6 +20,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from backend.app_settings import read_settings, update_settings
+from backend.process_launch import launch_independent_process
 
 
 APP_TITLE = "Iraq Data Analysis"
@@ -1160,6 +1161,12 @@ class DesktopApi:
         return self.process_legal_files([str(path) for path in paths], operationId, use_cache=False)
 
 
+def should_recover_native_runtime(error: Exception) -> bool:
+    return (sys.platform == "win32" and getattr(sys, "frozen", False)
+            and "--native-runtime-recovery" not in sys.argv
+            and "Failed to resolve Python.Runtime.Loader.Initialize" in str(error))
+
+
 def main() -> None:
     metrics = StartupMetrics()
     metrics.mark("process-started")
@@ -1204,6 +1211,7 @@ def main() -> None:
 
     webview.settings["ALLOW_DOWNLOADS"] = True
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
+    recover_native_runtime = False
     try:
         window_title = f"{APP_TITLE} {APP_VERSION}"
         fullscreen_controller = NativeFullscreenController(window_title)
@@ -1234,16 +1242,26 @@ def main() -> None:
             icon=str(resource_path("intersos-protection-analytics.ico")),
         )
     except Exception as exc:
-        show_error(
-            "The application window could not start. Ensure Microsoft Edge WebView2 Runtime "
-            f"is installed, then try again.\n\n{exc}"
-        )
+        recover_native_runtime = should_recover_native_runtime(exc)
+        metrics.mark("native-window-failed", str(exc))
+        if not recover_native_runtime:
+            show_error(f"The application window could not start.\n\n{exc}")
     finally:
         runtime.stop()
         if runtime.backend_main is not None:
             runtime.backend_main.store = None
         single_instance.close()
         metrics.mark("process-exited")
+    if recover_native_runtime:
+        # Release the single-instance mutex before the replacement starts.
+        try:
+            launch_independent_process(
+                [sys.executable, *sys.argv[1:], "--native-runtime-recovery"],
+                cwd=str(Path(sys.executable).parent), close_fds=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except Exception as exc:
+            show_error(f"The application could not restart after a runtime error.\n\n{exc}")
 
 
 if __name__ == "__main__":

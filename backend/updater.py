@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .version import APP_VERSION, DEFAULT_GITHUB_REPOSITORY
+from .process_launch import launch_independent_process
 
 REPOSITORY = os.getenv("INTERSOS_GITHUB_REPOSITORY", DEFAULT_GITHUB_REPOSITORY).strip()
 SIGNING_CERTIFICATE_THUMBPRINT = "C4F1B12A3BCCC73BEF903FA3796304CF0E67670D"
@@ -114,6 +115,7 @@ try {
     }
 
     Write-UpdateLog "Version $InstalledVersion verified. Relaunching the application."
+    $env:PYINSTALLER_RESET_ENVIRONMENT = '1'
     Start-Process -FilePath $ApplicationPath -WorkingDirectory $InstallDirectory
     Write-UpdateLog 'Update completed successfully.'
     exit 0
@@ -224,13 +226,13 @@ def _start_update_runner(command: list[str], target: Path) -> subprocess.Popen:
     arguments = dict(close_fds=True, stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        process = subprocess.Popen(command, creationflags=flags | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000), **arguments)
+        process = launch_independent_process(command, creationflags=flags | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000), **arguments)
     except PermissionError as reason:
         if reason.winerror != 5:
             raise
         # Restricted Windows jobs can forbid breakaway. Keep valid hidden
         # console handles and the same startup verification when retrying.
-        process = subprocess.Popen(command, creationflags=flags, **arguments)
+        process = launch_independent_process(command, creationflags=flags, **arguments)
     log = target.with_name("update-runner.log")
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
