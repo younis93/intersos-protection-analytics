@@ -1,3 +1,7 @@
+import {recordColumnType} from './columnFilters';
+import {ValueTable} from './ValueTable';
+import {useMemo} from 'react';
+import {VirtualRows} from './VirtualRows';
 import {Eye,SlidersHorizontal,Search,LoaderCircle} from 'lucide-react';
 import {AppSelect} from './SelectionControls';
 import type {CustomColumn,CustomConfig,CustomPreview} from './CustomColumnSetup';
@@ -6,6 +10,8 @@ import {customKindLabel} from './customImportReviewState';
 import {ColumnTypeBadge,columnTypes,ColumnInterpretationControls,ColumnValueLabels,ColumnInvalidPolicy,ColumnIssues,InterpretedValue,showValue} from './CustomColumnControls';
 
 export default function CustomColumnPreparation({config,preview,onChange,busy,selected,onSelect,query,onQuery}:{config:CustomConfig;preview:CustomPreview;onChange:(config:CustomConfig)=>void;busy:boolean;selected:string;onSelect:(id:string)=>void;query:string;onQuery:(value:string)=>void}){
+ const filtered=useMemo(()=>config.columns.filter(c=>(c.label+' '+c.header+' '+customKindLabel(c.kind)).toLocaleLowerCase().includes(query.toLocaleLowerCase())),[config.columns,query]);
+ const issueCounts=useMemo(()=>{const counts=new Map<string,number>();for(const issue of preview.issues)counts.set(issue.question,(counts.get(issue.question)||0)+issue.count);return counts},[preview.issues]);
  const column=config.columns.find(c=>c.id===selected)||config.columns[0];
  if(!column)return null;
  const profile=preview.profiles.find(p=>p.id===column.id),prep={...preparationDefaults,...column.preparation},controls=preparationControls(column.kind);
@@ -16,15 +22,16 @@ export default function CustomColumnPreparation({config,preview,onChange,busy,se
  const paused=Object.entries(prep).filter(([key,value])=>!controls.includes(key as keyof Preparation)&&JSON.stringify(value)!==JSON.stringify(preparationDefaults[key as keyof Preparation])).length;
  return <div className="custom-editor-grid custom-type-editor">
   <aside className="custom-columns glass" aria-label="Preparation columns"><label className="custom-search"><Search size={17}/><input aria-label="Search preparation columns" placeholder="Search columns or types..." value={query} onChange={e=>onQuery(e.target.value)}/></label>
-   <div className="custom-column-list">{config.columns.filter(c=>(c.label+' '+c.header+' '+customKindLabel(c.kind)).toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(c=>{
-    const issues=preview.issues.filter(issue=>issue.question===c.id).reduce((sum,issue)=>sum+issue.count,0);
+   <VirtualRows className="custom-column-list" items={filtered} enabled={filtered.length>60} estimate={68} resetKey={query} buttonRows revealIndex={filtered.findIndex(c=>c.id===column.id)} render={c=>{
+    const issues=issueCounts.get(c.id)||0;
     return <button type="button" key={c.id} aria-pressed={column.id===c.id} className={column.id===c.id?'selected':''} onClick={()=>onSelect(c.id)}><span className="custom-column-number">{c.index+1}</span><span className="custom-column-list-label"><strong dir="auto">{c.label||'Untitled'}</strong><ColumnTypeBadge kind={c.kind}/>{!c.included&&<small>Excluded from analysis</small>}</span>{issues>0&&<b className="custom-warning" aria-label={`${issues} issues`}>{issues}</b>}</button>;
-   })}</div>
+   }}/>
   </aside>
   <div className="custom-column-details">
    <section className="custom-settings-panel" aria-label="Column preparation settings">
     <header className="custom-panel-heading"><SlidersHorizontal/><div><small>Source column {column.index+1}{!column.included?' · Excluded':''}</small><h3 dir="auto">{column.header||'Blank header'}</h3><p>Prepare this column for analysis.</p></div><ColumnTypeBadge kind={column.kind}/></header>
     <label className="custom-check custom-column-included"><input disabled={busy} type="checkbox" checked={column.included} onChange={e=>change({included:e.target.checked})}/>Include in analysis</label>
+    {column.kind==='text'&&profile&&profile.distinct>100&&<p className="custom-control-hint">{profile.distinct.toLocaleString()} distinct text answers. Text fields with more than 100 distinct answers start excluded on new imports. Include this column if needed.</p>}
     <div className="custom-field-grid"><label className="kobo-field">Display label<input disabled={busy} aria-label="Column display label" value={column.label} maxLength={1000} onChange={e=>change({label:e.target.value})}/></label><AppSelect label="Column type" value={column.kind} options={columnTypes} disabled={busy} onChange={value=>change({kind:value as CustomColumn['kind'],invalidAsMissing:false})}/><label className="kobo-field">Group<input disabled={busy} aria-label="Column group" value={column.group} maxLength={200} placeholder="Optional group" onChange={e=>change({group:e.target.value})}/></label></div>
     {profile&&profile.detected!==column.kind&&!pending&&<p className="custom-control-hint">Detected type: <strong>{customKindLabel(profile.detected)}</strong>. Your selected type controls preparation and analysis.</p>}
     {paused>0&&<p className="custom-control-hint">Settings for other types are remembered and paused. Switching back restores them.</p>}
@@ -40,7 +47,7 @@ export default function CustomColumnPreparation({config,preview,onChange,busy,se
    </section>
    <section className="custom-preview-panel" aria-label="Preparation preview" aria-busy={pending}>
     <header className="custom-panel-heading"><Eye/><div><h3>Preparation preview</h3><p>Original values alongside the result of your active settings.</p></div><span>Read only</span></header>
-    {pending?<p className="custom-preview-updating" role="status"><LoaderCircle size={16} className="kobo-restore-spinner"/>Updating preview...</p>:profile&&<><div className="custom-profile">{[['Detected type',customKindLabel(profile.detected)],['Distinct values',profile.distinct],['Missing',profile.missing],['Changed by cleanup',profile.changed||0],['Invalid',profile.invalid]].map(([label,value])=><div key={label}><small>{label}</small><strong>{value}</strong></div>)}</div><div className="custom-table-wrap"><table><thead><tr><th>Original value</th>{controls.includes('trim')&&<th>After cleanup</th>}<th>{column.kind==='date'?'Prepared date':column.kind==='multiple'?'Split answers':'Prepared value'}</th>{column.kind==='date'&&column.includeTime&&<th>Separate time column</th>}</tr></thead><tbody>{profile.preview.map((value,i)=><tr key={i}><td dir="auto">{value.original}</td>{controls.includes('trim')&&<td dir="auto">{showValue(value.prepared)}</td>}<td dir="auto"><InterpretedValue column={column} value={value.value}/></td>{column.kind==='date'&&column.includeTime&&<td>{showValue(value.time)}</td>}</tr>)}</tbody></table></div><ColumnIssues profile={profile}/></>}
+    {pending?<p className="custom-preview-updating" role="status"><LoaderCircle size={16} className="kobo-restore-spinner"/>Updating preview...</p>:profile&&<><div className="custom-profile">{[['Detected type',customKindLabel(profile.detected)],['Distinct values',profile.distinct],['Missing',profile.missing],['Changed by cleanup',profile.changed||0],['Invalid',profile.invalid]].map(([label,value])=><div key={label}><small>{label}</small><strong>{value}</strong></div>)}</div><div className="custom-table-wrap"><ValueTable key={column.id} recordFilters="local" filterColumns={[{key:"original",label:"Original value"},...(controls.includes("trim")?[{key:"cleanup",label:"After cleanup"}]:[]),{key:"prepared",label:column.kind==="date"?"Prepared date":column.kind==="multiple"?"Split answers":"Prepared value",type:recordColumnType(column.label,column.kind==="number"?"number":column.kind==="date"?"date":"text")},...(column.kind==="date"&&column.includeTime?[{key:"time",label:"Separate time column"}]:[])]}><thead><tr><th>Original value</th>{controls.includes('trim')&&<th>After cleanup</th>}<th>{column.kind==='date'?'Prepared date':column.kind==='multiple'?'Split answers':'Prepared value'}</th>{column.kind==='date'&&column.includeTime&&<th>Separate time column</th>}</tr></thead><tbody>{profile.preview.map((value,i)=><tr key={i}><td dir="auto" data-filter-value={value.original}>{value.original}</td>{controls.includes('trim')&&<td dir="auto">{showValue(value.prepared)}</td>}<td dir="auto"><InterpretedValue column={column} value={value.value}/></td>{column.kind==='date'&&column.includeTime&&<td>{showValue(value.time)}</td>}</tr>)}</tbody></ValueTable></div><ColumnIssues profile={profile}/></>}
    </section>
   </div>
  </div>;

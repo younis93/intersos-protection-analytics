@@ -1,3 +1,5 @@
+import {localValueLoader,useColumnFilters} from './ColumnFilterControls';
+import {filterRecords} from './columnFilters';
 import {AnimatedActionIcon} from './AnimatedActionIcon';
 import {AnimatedSectionIcon} from './AnimatedNavigationIcon';
 import {RowSelectionCheckbox} from './TableControls';
@@ -34,14 +36,19 @@ export function issueGroups(rows:IssueFinding[]) {
 export function toggleIssueSelection(current:Set<string>,ids:string[],checked:boolean){const next=new Set(current);for(const id of ids){if(checked)next.add(id);else next.delete(id);}return next;}
 function SelectionCheckbox({ids,selected,onChange,label}:{ids:string[];selected:Set<string>;onChange:(checked:boolean)=>void;label:string}){return <RowSelectionCheckbox total={ids.length} selectedCount={ids.filter(id=>selected.has(id)).length} onChange={onChange} label={label}/>;}
 
-function FindingTable({rows,selected,onToggle}:{rows:IssueFinding[];selected:Set<string>;onToggle:(ids:string[],checked:boolean)=>void}){
+function FindingTable({rows:sourceRows,selected,onToggle}:{rows:IssueFinding[];selected:Set<string>;onToggle:(ids:string[],checked:boolean)=>void}){
+  const [columnFilters,setColumnFilters]=useColumnFilters(JSON.stringify([sourceRows[0]?.dataset,sourceRows[0]?.rule]));
+  const fieldKeys:Record<string,string>={'Case ID':'caseId','Assessment ID':'assessmentId','Service ID':'serviceId','Hotline ID':'hotlineId','Awareness ID':'awarenessId','Issue':'rule','Finding detail':'detail','Matching records and lawyers':'matchingCases','Closure information':'linkedServiceStatuses'};
+  const getValue=(row:IssueFinding,column:string)=>column==='Matching records and lawyers'?row.matchingCases||row.duplicateMatches?.map(peer=>[peer.reference,peer.name,peer.lawyer].filter(Boolean).join(', ')).join('; '):(row as unknown as Record<string,unknown>)[fieldKeys[column]||column];
+  const rows=filterRecords(sourceRows,columnFilters,getValue);
+  const recordFilters={filters:columnFilters,onChange:(next:typeof columnFilters)=>{setColumnFilters(next);setPage(1)},loadValues:localValueLoader(sourceRows,columnFilters,getValue)};
   const [page,setPage]=useState(1);const pageSize=25;const pages=Math.max(1,Math.ceil(rows.length/pageSize));const current=Math.min(page,pages);
-  const duplicates=rows.some(row=>row.duplicateMatches?.length||row.matchingCases);
-  const closure=rows[0]?.rule.startsWith('Open assessment with all services closed');
-  const identifiers=([['caseId','Case ID'],['assessmentId','Assessment ID'],['serviceId','Service ID'],['hotlineId','Hotline ID'],['awarenessId','Awareness ID']] as const).filter(([key])=>rows.some(row=>row[key]));
+  const duplicates=sourceRows.some(row=>row.duplicateMatches?.length||row.matchingCases);
+  const closure=sourceRows[0]?.rule.startsWith('Open assessment with all services closed');
+  const identifiers=([['caseId','Case ID'],['assessmentId','Assessment ID'],['serviceId','Service ID'],['hotlineId','Hotline ID'],['awarenessId','Awareness ID']] as const).filter(([key])=>sourceRows.some(row=>row[key]));
   return <section className="si-group glass">
-    <header><SelectionCheckbox ids={rows.map(r=>r.id)} selected={selected} onChange={checked=>onToggle(rows.map(r=>r.id),checked)} label={`Select all ${rows.length} matching findings for ${rows[0].rule}`}/><div><h3>{rows[0].rule}</h3><small>{rows[0].reviewPage} · {rows.length} findings · {rows.filter(r=>selected.has(r.id)).length} selected across all pages</small></div></header>
-    <div className="si-table-scroll" role="region" aria-label={`${rows[0].rule} findings`} tabIndex={0}><ValueTable><thead><tr><th scope="col" className="si-select-column">Select</th>{identifiers.map(([key,title])=><th scope="col" className="si-reference-column" key={key}>{title}</th>)}<th scope="col" className="si-issue-column">Issue</th>{duplicates&&<th scope="col" className="si-matches-column">Matching records and lawyers</th>}{closure&&<th scope="col" className="si-matches-column">Closure information</th>}<th scope="col" className="si-prose-column">Finding detail</th></tr></thead>
+    <header><SelectionCheckbox ids={rows.map(r=>r.id)} selected={selected} onChange={checked=>onToggle(rows.map(r=>r.id),checked)} label={`Select all ${rows.length} matching findings for ${sourceRows[0].rule}`}/><div><h3>{sourceRows[0].rule}</h3><small>{sourceRows[0].reviewPage} · {rows.length} findings · {rows.filter(r=>selected.has(r.id)).length} selected across all pages</small></div></header>
+    <div className="si-table-scroll" role="region" aria-label={`${sourceRows[0].rule} findings`} tabIndex={0}><ValueTable recordFilters={recordFilters} filterColumns={[{key:"",label:""},...identifiers.map(([,label])=>({key:label,label})),{key:"Issue",label:"Issue"},...(duplicates?[{key:"Matching records and lawyers",label:"Matching records and lawyers"}]:[]),...(closure?[{key:"Closure information",label:"Closure information"}]:[]),{key:"Finding detail",label:"Finding detail"}]}><thead><tr><th scope="col" className="si-select-column">Select</th>{identifiers.map(([key,title])=><th scope="col" className="si-reference-column" key={key}>{title}</th>)}<th scope="col" className="si-issue-column">Issue</th>{duplicates&&<th scope="col" className="si-matches-column">Matching records and lawyers</th>}{closure&&<th scope="col" className="si-matches-column">Closure information</th>}<th scope="col" className="si-prose-column">Finding detail</th></tr></thead>
     <tbody>{rows.slice((current-1)*pageSize,current*pageSize).map(row=><tr key={row.id} className={selected.has(row.id)?'si-selected':''}>
       <td className="si-select-column"><input type="checkbox" aria-label={`Select ${row.rule}, record ${row.recordId||row.caseId||row.row}`} checked={selected.has(row.id)} onChange={e=>onToggle([row.id],e.target.checked)}/></td>
       {identifiers.map(([key])=><td className="si-reference-column" key={key}>{row[key]?String(row[key]).split(',').map((value,index)=><span key={index}>{value.trim()}</span>):'Not available'}</td>)}
@@ -50,7 +57,7 @@ function FindingTable({rows,selected,onToggle}:{rows:IssueFinding[];selected:Set
       {closure&&<td className="si-matches-column"><span><strong>Status:</strong> {row.assessmentStatus||'Not available'}</span><span><strong>Closure request:</strong> {row.requestForClosedStatus||'Not requested'}</span><span><strong>Linked services:</strong> {row.linkedServiceCount??0}</span><span><strong>Service statuses:</strong> {row.linkedServiceStatuses||'Not available'}</span></td>}
       <td className="si-prose-column">{row.detail||'Not available'}</td>
     </tr>)}</tbody></ValueTable></div>
-    <footer><span>{(current-1)*pageSize+1}-{Math.min(current*pageSize,rows.length)} of {rows.length}</span><button className="soft" disabled={current===1} onClick={()=>setPage(current-1)}>Previous</button><span>Page {current} of {pages}</span><button className="soft" disabled={current===pages} onClick={()=>setPage(current+1)}>Next</button></footer>
+    <footer><span>{rows.length?(current-1)*pageSize+1:0}-{Math.min(current*pageSize,rows.length)} of {rows.length}</span><button className="soft" disabled={current===1} onClick={()=>setPage(current-1)}>Previous</button><span>Page {current} of {pages}</span><button className="soft" disabled={current===pages} onClick={()=>setPage(current+1)}>Next</button></footer>
   </section>;
 }
 

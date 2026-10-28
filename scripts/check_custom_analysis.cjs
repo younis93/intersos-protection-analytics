@@ -30,7 +30,7 @@ const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-run
    await page.locator('.custom-column-list button').nth(2).click();
    await page.getByText('These dates could use UK or US format.').waitFor();
    await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='Choose filters'&&!b.disabled));
-   await page.getByRole('button',{name:'File date convention',exact:true}).click();
+   await page.getByRole('button',{name:'Column date convention',exact:true}).click();
    await page.getByRole('option',{name:'UK - day/month/year',exact:true}).click();
    await page.getByText('4 May 2026',{exact:true}).waitFor();
    await page.getByLabel('Include time in a separate column',{exact:true}).check();
@@ -72,11 +72,12 @@ const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-run
    assert.equal(saved.customConfig.columns[3].included,false);
    await page.getByRole('button',{name:'Manage data',exact:true}).click();await page.getByRole('button',{name:'Prepare data',exact:true}).click();
    await page.getByRole('heading',{name:'Prepare your data'}).waitFor();
-   assert.equal(await page.getByRole('button',{name:'File date convention',exact:true}).innerText(),'UK - day/month/year');
+   assert.equal(await page.getByRole('button',{name:'Column date convention',exact:true}).count(),0);
    assert.equal(await page.getByLabel('Column display label',{exact:true}).inputValue(),'Record ID');
    assert.equal(await page.getByLabel('Column group',{exact:true}).inputValue(),'Identity');
    assert(await page.getByLabel('Include time in a separate column',{exact:true}).count()===0);
    await page.locator('.custom-column-list button').nth(2).click();
+   assert.equal(await page.getByRole('button',{name:'Column date convention',exact:true}).innerText(),'UK - day/month/year');
    assert(await page.getByLabel('Include time in a separate column',{exact:true}).isChecked());
    await page.getByRole('button',{name:'Choose filters',exact:true}).click();
    await page.getByRole('checkbox',{name:'Use Start time as a filter',exact:true}).waitFor();

@@ -83,7 +83,7 @@ def prepare(frame):
     return eligible[columns], fields, ""
 
 
-def pipeline(frame, filters=None, search="", removeDuplicateBeneficiaryIds=False, removeDuplicateContacts=False, facets=False):
+def pipeline(frame, filters=None, search="", removeDuplicateBeneficiaryIds=False, removeDuplicateContacts=False, facets=False, columnFilters=None):
     base, fields, reason = prepare(frame)
     if reason:
         return None, fields, {}, reason
@@ -127,7 +127,11 @@ def pipeline(frame, filters=None, search="", removeDuplicateBeneficiaryIds=False
     for position in range(max(len(male), len(female))):
         if position < len(male): ordered.append(male[position])
         if position < len(female): ordered.append(female[position])
-    return selected.loc[ordered + other], fields, options, ""
+    selected=selected.loc[ordered + other]
+    if columnFilters:
+        from .column_filters import apply_column_filters
+        selected=apply_column_filters(selected,columnFilters)
+    return selected, fields, options, ""
 
 
 def table(frame, *, page=1, pageSize=100, **query):

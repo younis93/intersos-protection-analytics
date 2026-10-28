@@ -170,9 +170,20 @@ class KoboSettings(AnalysisViewSettings):
         return value
 
 
-def new_project_settings(form: dict) -> KoboSettings:
+def new_project_settings(form: dict, records=None) -> KoboSettings:
     """Initialize new projects only; stored and explicitly supplied settings keep their colors."""
-    return KoboSettings(language='en', filterFields=[q['id'] for q in form['questions'] if q.get('addedFromData') and not q.get('identifying')], hidden=[q['id'] for q in form['questions'] if q['identifying']],
+    distinct = {q['id']: set() for q in form['questions'] if q['kind'] == 'text'}
+    large_text = set()
+    for record in records or []:
+        if not distinct: break
+        for qid, value in record.get('values', {}).items():
+            if qid not in distinct or missing(value): continue
+            distinct[qid].add(str(value))
+            if len(distinct[qid]) > 100:
+                large_text.add(qid)
+                del distinct[qid]  # Stop retaining/counting answers once the threshold is known.
+    hidden = [q['id'] for q in form['questions'] if q['identifying'] or q['id'] in large_text]
+    return KoboSettings(language='en', filterFields=[q['id'] for q in form['questions'] if q.get('addedFromData') and q['id'] not in hidden], hidden=hidden,
                         questions={q['id']: QuestionSettings(palette='Blue') for q in form['questions']})
 
 
@@ -493,7 +504,7 @@ class ProjectStore:
 
     def create(self, name, payload, form_raw, data_raw, settings: KoboSettings | None = None):
         pid = uuid.uuid4().hex
-        settings = (settings or new_project_settings(payload['form'])).model_dump()
+        settings = (settings or new_project_settings(payload['form'], payload.get('records'))).model_dump()
         with self.connect() as db:
             db.execute('INSERT INTO projects VALUES (?,?,?,?,?,?,?)', (pid, name.strip() or 'Untitled Kobo project', datetime.now().isoformat(), json.dumps(payload, ensure_ascii=False), json.dumps(settings), form_raw, data_raw))
         return self.get(pid)

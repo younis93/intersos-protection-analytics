@@ -1,3 +1,6 @@
+import {useLegalRecordFilters} from './useLegalRecordFilters';
+import type {RecordFilterControl} from './ColumnFilterControls';
+import type {ColumnFilter} from './columnFilters';
 import {AnimatedActionIcon} from './AnimatedActionIcon';
 import {AnimatedSectionIcon} from './AnimatedNavigationIcon';
 import {SharedFilterDrawer} from './SharedFilterDrawer';
@@ -40,10 +43,10 @@ export const notifyCasesExportTask=()=>casesExportListeners.forEach((listener)=>
 
 export const subscribeCasesExportTask=(listener:(task:CasesExportTask)=>void)=>{casesExportListeners.add(listener);return()=>{casesExportListeners.delete(listener)}};
 
-export const startCasesExportTask=(query:string,filters:Record<string,string[]>)=>{
+export const startCasesExportTask=(query:string,filters:Record<string,string[]>,columnFilters:ColumnFilter[]=[])=>{
   if(casesExportTask.preparing)return;
   const controller=new AbortController();casesExportController=controller;casesExportTask={preparing:true,error:""};notifyCasesExportTask();
-  void exportLegalCases(query,filters,"filtered-beneficiary-cases.xlsx",[],controller.signal).catch((reason:any)=>{
+  void exportLegalCases(query,filters,"filtered-beneficiary-cases.xlsx",[],controller.signal,columnFilters).catch((reason:any)=>{
     if(reason?.name!=="AbortError")casesExportTask={preparing:false,error:reason?.message||"Excel export failed."};
   }).finally(()=>{
     if(casesExportController!==controller)return;
@@ -83,6 +86,7 @@ export function Cases({
     [columnDrawer, setColumnDrawer] = useState(false),
     [columnSearch, setColumnSearch] = useState(""),
     [error, setError] = useState("");
+  const recordFilters=useLegalRecordFilters("cases","beneficiaries",filters,query,()=>setTablePage(1),"cases",setFilters);
   const [exportTask,setExportTask]=useState(getCasesExportTask);
   useEffect(()=>subscribeCasesExportTask(setExportTask),[]);
   useEffect(()=>{if(exportTask.error)setError(exportTask.error)},[exportTask.error]);
@@ -97,7 +101,7 @@ export function Cases({
     setError("");
     const request = ++caseRequest.current;
     const current=()=>request===caseRequest.current&&term===latestScope.current.query&&nextFilters===latestScope.current.filters;
-    getLegalCase(term,nextFilters,{viewMode:nextView,page:nextPage,pageSize:100,sortColumn:nextSort,sortDirection:nextDirection,columns:selectedColumns})
+    getLegalCase(term,nextFilters,{viewMode:nextView,page:nextPage,pageSize:100,sortColumn:nextSort,sortDirection:nextDirection,columns:selectedColumns,columnFilters:recordFilters.columnFilters})
       .then((next) => {if(!current())return;setData(next);if(nextView==="table"&&!selectedColumns.length)setSelectedColumns(next.columns.map((column) => column.key))})
       .catch((reason) => {if(current())setError(reason.message || "Unable to load beneficiary cases.")})
       .finally(() => {if(current())setBusy(false)});
@@ -120,14 +124,15 @@ export function Cases({
       run(query, filters, viewMode, 1);
     }, filterChanged?120:300);
     return () => window.clearTimeout(queryTimer.current);
-  }, [query,filters]);
+  }, [query,filters,recordFilters.columnFilters]);
   useEffect(()=>{
     const controller=new AbortController();
     const timer=window.setTimeout(()=>getLegalCaseFilters(controller.signal,filters,query).then(next=>{if(!controller.signal.aborted)setFilterOptions(next.groups)}).catch(reason=>{if(!controller.signal.aborted)setError(reason.message)}),200);
     return()=>{window.clearTimeout(timer);controller.abort()};
   },[filters,query,metadata.revision]);
-  const activeCount = Object.values(filters).reduce((sum,items)=>sum+items.length,0);
+  const activeCount = recordFilters.control.filters.length;
   const clear = () => {
+    recordFilters.clear();
     setFilters({});
     setTablePage(1);
   };
@@ -172,7 +177,7 @@ export function Cases({
               placeholder="Search cases"
             />
           </label>
-          <button className={`primary case-export-button${exportTask.preparing?" is-preparing":""}`} aria-busy={exportTask.preparing} aria-label={exportTask.preparing?"Cancel Excel download":"Download Excel"} title={exportTask.preparing?"Cancel Excel download":"Download Excel"} onClick={()=>{if(exportTask.preparing)cancelCasesExportTask();else{setError("");startCasesExportTask(query,filters)}}}>
+          <button className={`primary case-export-button${exportTask.preparing?" is-preparing":""}`} aria-busy={exportTask.preparing} aria-label={exportTask.preparing?"Cancel Excel download":"Download Excel"} title={exportTask.preparing?"Cancel Excel download":"Download Excel"} onClick={()=>{if(exportTask.preparing)cancelCasesExportTask();else{setError("");startCasesExportTask(query,filters,recordFilters.columnFilters)}}}>
             <span className="case-export-content"><Download/><span className="case-export-label">Excel</span></span>
             {exportTask.preparing&&<><span className="button-spinner case-export-spinner" aria-hidden="true"/><span className="case-export-cancel"><X/><span className="case-export-label">Cancel</span></span></>}
           </button>
@@ -212,7 +217,7 @@ export function Cases({
         ))
       ) : (
         <div className={`case-table-refresh ${busy ? "refreshing" : ""}`}><HierarchicalCaseTable
-          cases={data?.cases || []} onOpenCase={onOpenCase}
+          cases={data?.cases || []} onOpenCase={onOpenCase} recordFilters={recordFilters.control}
           page={data?.page || tablePage} total={data?.totalRows || 0}
           onPageChange={(next)=>{setTablePage(next);run(query,filters,"table",next)}}
           sortColumn={sortColumn}
@@ -226,17 +231,17 @@ export function Cases({
   );
 }
 
-export function HierarchicalCaseTable({cases,page,total,onPageChange,sortColumn,sortDirection,onSort,onOpenCase}:{cases:any[];page:number;total:number;onPageChange:(page:number)=>void;sortColumn:string;sortDirection:"asc"|"desc";onSort:(column:string)=>void;onOpenCase:(id:string)=>void}) {
+export function HierarchicalCaseTable({cases,page,total,recordFilters,onPageChange,sortColumn,sortDirection,onSort,onOpenCase}:{cases:any[];page:number;total:number;recordFilters?:RecordFilterControl;onPageChange:(page:number)=>void;sortColumn:string;sortDirection:"asc"|"desc";onSort:(column:string)=>void;onOpenCase:(id:string)=>void}) {
   const [selected,setSelected]=useState<Map<string,Record<string,unknown>>>(new Map());
   const summaryColumns=[["Lawyer","Lawyer"],["beneficiaries::Case ID","Case ID"],["beneficiaries::Name (Filter Color Red)","Name"],["beneficiaries::Project","Project"],["beneficiaries::Project Location","Location"],["beneficiaries::DoB","Date of birth"]] as [string,string][];
   const rowFor=(item:any)=>({"Case ID":String(getField(item.beneficiary,"Case ID")||""),Name:String(getField(item.beneficiary,"Name (Filter Color Red)")||""),Project:String(getField(item.beneficiary,"Project")||""),Location:String(getField(item.beneficiary,"Project Location")||""),Lawyer:String((item.lawyers||[]).join(", ")||"Unassigned")});
   const displayedCases=[...cases].sort((left,right)=>Number(selected.has(String(getField(right.beneficiary,"Case ID")||"")))-Number(selected.has(String(getField(left.beneficiary,"Case ID")||""))));
-  return <div className="glass case-table hierarchical-case-table"><div className="legal-card-heading"><div className="indicator-total-block detention-table-total"><strong>{total.toLocaleString()}</strong><span>Total</span></div><TableSelectionActions selected={selected} filename="selected-beneficiary-cases.xlsx" onClear={()=>setSelected(new Map())} onDownloadSelected={()=>exportLegalCases("",{},"selected-beneficiary-cases.xlsx",Array.from(selected.keys()))} iconOnly/><Pager compact page={page} total={total} onChange={onPageChange}/></div><ValueTable><thead><tr><th><RowSelectionCheckbox label="Select visible cases" total={(cases||[]).length} selectedCount={(cases||[]).filter((item)=>selected.has(String(getField(item.beneficiary,"Case ID")||""))).length} onChange={checked=>setSelected((current)=>{const next=new Map(current);cases.forEach((item)=>{const row=rowFor(item),key=row["Case ID"];if(checked)next.set(key,row);else next.delete(key)});return next})}/></th>{summaryColumns.map(([key,label])=><SortableHeader key={key} direction={sortColumn===key?sortDirection:undefined} onSort={()=>onSort(key)} buttonProps={{"className":sortColumn===key?"active":""}}><span>{label}</span><b>{sortColumn===key?(sortDirection==="asc"?"▲":"▼"):"↕"}</b></SortableHeader>)}<th>Connected records</th></tr></thead><tbody>{displayedCases.map((item,index)=>{const row=rowFor(item),key=row["Case ID"],counts=item.counts||{};return <tr className={selected.has(key)?"case-row-selected":""} key={key||index}><td><input aria-label="Select case" type="checkbox" checked={selected.has(key)} onChange={()=>setSelected((current)=>{const next=new Map(current);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td><td>{value(row.Lawyer)}</td><td><button className="table-action" onClick={()=>onOpenCase(key)} aria-label={`Open case ${key}`}>{value(key)}<ArrowRight/></button></td><td>{value(row.Name)}</td><td>{value(row.Project)}</td><td>{value(row.Location)}</td><td>{value(getField(item.beneficiary,"DoB"))}</td><td><div className="case-connected-summary"><span><b>{counts.assessments||0}</b><small>Assessments</small></span><span><b>{counts.services||0}</b><small>Services</small></span>{counts.followups>0&&<span><b>{counts.followups}</b><small>Follow-ups</small></span>}{counts.fees>0&&<span><b>{counts.fees}</b><small>Legal fees</small></span>}</div></td></tr>})}</tbody></ValueTable></div>;
+  return <div className="glass case-table hierarchical-case-table"><div className="legal-card-heading"><div className="indicator-total-block detention-table-total"><strong>{total.toLocaleString()}</strong><span>Total</span></div><TableSelectionActions selected={selected} onResetFilters={recordFilters?()=>recordFilters.onChange([]):undefined} hasActiveFilters={Boolean(recordFilters?.filters.length)} filename="selected-beneficiary-cases.xlsx" onClear={()=>setSelected(new Map())} onDownloadSelected={()=>exportLegalCases("",{},"selected-beneficiary-cases.xlsx",Array.from(selected.keys()))} iconOnly/><Pager compact page={page} total={total} onChange={onPageChange}/></div><ValueTable recordFilters={recordFilters?{...recordFilters,showClearAll:false}:undefined} filterColumns={[{key:"",label:""},...summaryColumns.map(([key,label])=>({key,label})),{key:"",label:""}]}><thead><tr><th><RowSelectionCheckbox label="Select visible cases" total={(cases||[]).length} selectedCount={(cases||[]).filter((item)=>selected.has(String(getField(item.beneficiary,"Case ID")||""))).length} onChange={checked=>setSelected((current)=>{const next=new Map(current);cases.forEach((item)=>{const row=rowFor(item),key=row["Case ID"];if(checked)next.set(key,row);else next.delete(key)});return next})}/></th>{summaryColumns.map(([key,label])=><SortableHeader key={key} direction={sortColumn===key?sortDirection:undefined} onSort={()=>onSort(key)} buttonProps={{"className":sortColumn===key?"active":""}}><span>{label}</span><b>{sortColumn===key?(sortDirection==="asc"?"▲":"▼"):"↕"}</b></SortableHeader>)}<th>Connected records</th></tr></thead><tbody>{displayedCases.map((item,index)=>{const row=rowFor(item),key=row["Case ID"],counts=item.counts||{};return <tr className={selected.has(key)?"case-row-selected":""} key={key||index}><td><input aria-label="Select case" type="checkbox" checked={selected.has(key)} onChange={()=>setSelected((current)=>{const next=new Map(current);if(next.has(key))next.delete(key);else next.set(key,row);return next})}/></td><td>{value(row.Lawyer)}</td><td><button className="table-action" onClick={()=>onOpenCase(key)} aria-label={`Open case ${key}`}>{value(key)}<ArrowRight/></button></td><td>{value(row.Name)}</td><td>{value(row.Project)}</td><td>{value(row.Location)}</td><td>{value(getField(item.beneficiary,"DoB"))}</td><td><div className="case-connected-summary"><span><b>{counts.assessments||0}</b><small>Assessments</small></span><span><b>{counts.services||0}</b><small>Services</small></span>{counts.followups>0&&<span><b>{counts.followups}</b><small>Follow-ups</small></span>}{counts.fees>0&&<span><b>{counts.fees}</b><small>Legal fees</small></span>}</div></td></tr>})}</tbody></ValueTable></div>;
   /* legacy flat renderer retained below only as unreachable migration reference */
   const rows:Record<string,unknown>[]=[];const columns:{key:string;label:string;dataset:string}[]=[];
   const groups:{label:string;count:number}[]=[];
   columns.forEach((column) => {const last=groups[groups.length-1];if(last?.label===column.dataset)last.count+=1;else groups.push({label:column.dataset,count:1})});
-  return <div className="glass case-table connected-case-table"><ValueTable><thead>
+  return <div className="glass case-table connected-case-table"><ValueTable recordFilters="local"><thead>
     <tr className="case-dataset-head">{groups.map((group) => <th key={group.label} colSpan={group.count}>{group.label}</th>)}</tr>
     <tr>{columns.map((column) => <SortableHeader key={column.key} direction={sortColumn===column.key?sortDirection:undefined} onSort={() => onSort(column.key)} buttonProps={{"className":sortColumn===column.key?"active":""}}><span>{column.label}</span><b>{sortColumn===column.key?(sortDirection==="asc"?"▲":"▼"):"↕"}</b></SortableHeader>)}</tr>
   </thead><tbody>{rows.map((row,index) => <tr key={index}>{columns.map((column) => <td key={column.key}>{value(row[column.key])}</td>)}</tr>)}</tbody></ValueTable></div>;

@@ -21,6 +21,15 @@ export const wrapAxisLabel=(label:string,max=30)=>{
   return lines.join("<br>");
 };
 
+const bilingualAxisLabel=(label:string,groupSelections=false):string=>{
+  if(groupSelections){
+    const selections=label.split(/,\s*/).map(item=>bilingualAxisLabel(item).split("<br>"));
+    return [selections.map(parts=>parts[0]).join(", "),selections.map(parts=>parts[1]).filter(Boolean).join("، ")].filter(Boolean).join("<br>");
+  }
+  const parts=label.match(/^(.*?)\s*(\(?[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF].*)$/u);
+  return parts?.[1].trim()?`${parts[1].trim().replace(/\s*[-–:|/]\s*$/u, "")}<br>${parts[2].trim()}`:label;
+};
+
 export const compactDetentionLabel=(title:string,label:string)=>{
   if(title==="Detaining Authority")return wrapAxisLabel(label);
   if(!["Detaining Authority","Possible Charges"].includes(title))return label;
@@ -41,15 +50,22 @@ export function ChartCard({
   display,
   onSelect,
   theme,
+  fullWidth = false,
 }: {
   chart: Chart;
   display: Display;
   onSelect: (field: string, value: string) => void;
   theme: Theme;
+  fullWidth?: boolean;
 }) {
   const [modal, setModal] = useState(false),
     [graph, setGraph] = useState<any>(null);
   const rows = [...chart.rows].reverse();
+  const beneficiaryCategories = ["vulnerability", "protection category"].includes(chart.title.toLowerCase());
+  const awarenessTopics = ["session topic - sessions", "session topic - participants"].includes(chart.title.toLowerCase());
+  const bilingualLabels = beneficiaryCategories || awarenessTopics || ["type of request", "detaining authority", "type of document"].includes(chart.title.toLowerCase());
+  const englishOnlyLabels = chart.title.toLowerCase() === "assessment legal-service need";
+  const englishLabels = englishOnlyLabels ? rows.map(row=>row.label.split(/,\s*/).map(item=>bilingualAxisLabel(item).split("<br>")[0]).join(", ")) : [];
   const priorityColors:Record<string,string>={High:"#dc2626",Medium:"#d97706",Low:"#16a34a","Not recorded":"#94a3b8"};
   const values = rows.map((r) => (display === "percent" ? r.percent : r.count));
   const text = rows.map((r) =>
@@ -60,7 +76,7 @@ export function ChartCard({
         : `${formatNumber(r.count)} · ${formatPercent(r.percent)}`,
   );
   return (
-    <article className={`chart-card glass${chart.kind==="wide-bar"||["Detaining Authority","Possible Charges"].includes(chart.title)?" wide":""}`}>
+    <article className={`chart-card glass${fullWidth||beneficiaryCategories||awarenessTopics||chart.kind==="wide-bar"||["Detaining Authority","Possible Charges"].includes(chart.title)?" wide":""}`}>
       <div className="card-title">
         <div>
           <h3>{chart.title}</h3>
@@ -85,11 +101,12 @@ export function ChartCard({
               type: "bar",
               orientation: "h",
               x: values,
-              y: rows.map((r) => compactDetentionLabel(chart.title,r.label)),
+              y: rows.map((r) => bilingualLabels ? r.label : compactDetentionLabel(chart.title,r.label)),
               customdata: rows.map((r) => r.filterValue || r.label),
               text,
               textposition: "auto",
-              hovertemplate: "%{y}<br>%{text}<extra></extra>",
+              hovertext: englishOnlyLabels ? englishLabels : undefined,
+              hovertemplate: englishOnlyLabels ? "%{hovertext}<br>%{text}<extra></extra>" : "%{y}<br>%{text}<extra></extra>",
               marker: {
                 color: chart.title === "Priority" ? rows.map((row)=>priorityColors[row.label]||"#64748b") : theme === "multicolor" ? rows.map((_, index) => categoryPalette[index % categoryPalette.length]) : chartAccent(theme),
                 line: { color: "rgba(255,255,255,.55)", width: 1 },
@@ -98,7 +115,7 @@ export function ChartCard({
           ]}
           layout={{
             autosize: true,
-            height: Math.max(290, rows.length * 34),
+            height: Math.max(290, rows.length * (bilingualLabels ? 48 : 34) + (bilingualLabels ? 44 : 0)),
             margin: { l: chart.title === "Detaining Authority" ? 260 : 18, r: 16, t: 8, b: 36 },
             paper_bgcolor: "rgba(0,0,0,0)",
             plot_bgcolor: "rgba(0,0,0,0)",
@@ -114,7 +131,9 @@ export function ChartCard({
               tickformat: display === "percent" ? ".0%" : ",d",
               fixedrange: true,
             },
-            yaxis: { automargin: true, fixedrange: true },
+            yaxis: { automargin: true, fixedrange: true, ...(bilingualLabels || englishOnlyLabels ? {
+              tickmode: "array", tickvals: rows.map(row=>row.label), ticktext: englishOnlyLabels ? englishLabels : rows.map(row=>bilingualAxisLabel(row.label,beneficiaryCategories)),
+            } : {}) },
             showlegend: false,
           }}
           config={plotConfig}

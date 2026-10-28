@@ -24,7 +24,7 @@ describe('type-aware column preparation',()=>{
   expect(render('multiple')).toContain('Answer delimiter');expect(render('category')).not.toContain('Answer delimiter');expect(render('category')).toContain('Edit value labels');expect(render('text')).not.toContain('Edit value labels');
  });
  it.each(['text','number','date','category','multiple'] as const)('shows type editing, counts, source position and missing tokens for %s',kind=>{
-  const html=render(kind);expect(html).toContain('Column type');expect(html).toContain('Source column 1');expect(html).toContain('Missing value tokens');expect(html).toContain('Changed by cleanup');expect(preparationControls(kind)).toContain('missingTokens');
+  const html=render(kind);expect(html).not.toContain('File date convention');expect(html.includes('Column date convention')).toBe(kind==='date');expect(html).toContain('Column type');expect(html).toContain('Source column 1');expect(html).toContain('Missing value tokens');expect(html).toContain('Changed by cleanup');expect(preparationControls(kind)).toContain('missingTokens');
  });
  it('pauses incompatible settings without mutating saved settings',()=>{
   const date={...column,kind:'date' as const};expect(activePreparation(date)).toEqual(preparationDefaults);expect(date.preparation?.trim).toBe(true);expect(activePreparation(column).trim).toBe(true);expect(activePreparation(column).currency).toBe('');

@@ -55,6 +55,37 @@ def test_inference():
     assert infer('empty', [None, '']) == 'text'
 
 
+def test_large_text_defaults_preserve_numbers_dates_and_saved_choices():
+    from datetime import date, timedelta
+    rows = [(i + 2, [f'Response {i}', i, (date(2026, 1, 1) + timedelta(days=i)).isoformat(), 'Repeated']) for i in range(101)]
+    columns = initial_columns(['Comment', 'Amount', 'Date', 'City'], rows)
+    assert [(c.kind, c.included) for c in columns] == [('text', False), ('number', True), ('date', True), ('category', True)]
+    assert initial_columns(['Comment'], rows[:100])[0].included
+    previous = {'columns': [c.model_dump() for c in columns]}
+    previous['columns'][0]['included'] = True
+    previous['columns'][1]['included'] = False
+    restored = initial_columns(['Comment', 'Amount', 'Date', 'City'], rows, previous)
+    assert [c.included for c in restored] == [True, False, True, True]
+
+
+def test_all_large_text_fields_can_be_previewed_and_opted_in(env):
+    client, store = env
+    raw = ('Comment\n' + '\n'.join(f'Response {i}' for i in range(101)) + '\n').encode()
+    p = stage(client, raw)
+    assert not p['config']['columns'][0]['included']
+    assert p['profiles'][0]['distinct'] == 101
+    confirm(client, p, 400)  # Saving still requires a deliberate column selection.
+    p['config']['columns'][0]['included'] = True
+    configured = client.post(f'/api/custom/columns/{p["token"]}/configure', json=p['config'])
+    assert configured.status_code == 200, configured.text
+    saved = confirm(client, configured.json())
+    assert len(store.get(saved['id'])['records']) == 101
+    reopened = client.post(f'/api/custom/projects/{saved["id"]}/columns').json()
+    assert reopened['config']['columns'][0]['included']
+    replacement = stage(client, raw, pid=saved['id'])
+    assert replacement['config']['columns'][0]['included']
+
+
 def test_reopen_reads_project_once(env, monkeypatch):
     client, store = env
     p = stage(client); p['config']['dateFormat'] = 'uk'

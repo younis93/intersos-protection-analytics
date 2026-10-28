@@ -1,4 +1,5 @@
 export type SamplingState = {
+  columnFilters?:import('./columnFilters').ColumnFilter[];
   search:string;
   filters:Record<string,string[]>;
   page:number;

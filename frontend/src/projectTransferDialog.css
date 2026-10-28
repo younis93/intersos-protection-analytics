@@ -1,0 +1,27 @@
+.project-transfer-dialog{box-sizing:border-box;width:min(480px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;padding:28px;border:1px solid var(--line);border-radius:20px;background:var(--panel-strong);color:var(--ink);box-shadow:0 24px 80px #0004;font-family:inherit}
+.project-transfer-dialog::backdrop{background:rgb(15 23 42 / 45%);backdrop-filter:blur(6px)}
+.project-transfer-dialog header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.project-transfer-emblem{display:grid;place-items:center;width:46px;height:46px;border-radius:14px;background:color-mix(in srgb,var(--blue) 12%,transparent);color:var(--blue)}
+.project-transfer-dialog header button{padding:8px;display:grid;place-items:center}
+.project-transfer-dialog button svg{width:18px;height:18px}
+.project-transfer-dialog h2{margin:0 0 8px;font-size:23px;letter-spacing:-.025em}
+.project-transfer-dialog p{font-size:13px;line-height:1.65;color:var(--muted);margin:0 0 18px}
+.project-transfer-file{padding:10px 12px;border:1px solid var(--line);border-radius:10px;overflow-wrap:anywhere}
+.project-protection-toggle{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px;border:1px solid var(--line);border-radius:12px;margin:20px 0;background:var(--panel)}
+.project-protection-toggle strong,.project-protection-toggle small{display:block}.project-protection-toggle small{font-size:12px;color:var(--muted);margin-top:4px}
+.project-protection-toggle input{appearance:none;position:relative;width:40px;height:24px;margin:0;border:1px solid var(--line);border-radius:20px;background:var(--muted);flex:none;cursor:pointer}
+.project-protection-toggle input:checked{background:var(--blue);border-color:var(--blue)}
+.project-protection-toggle input::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;background:white;border-radius:50%;box-shadow:0 1px 3px #0003}
+.project-protection-toggle input:checked::after{left:19px}
+.project-transfer-dialog fieldset{margin:0;padding:0;border:0;min-width:0}
+.project-transfer-dialog fieldset>label{display:block;font-size:13px;font-weight:600;margin:16px 0 7px}
+.project-transfer-dialog fieldset input{box-sizing:border-box;min-width:0;width:100%;height:44px;padding:10px 12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;color:var(--ink);font:inherit}
+.project-password-input{display:flex;align-items:center;position:relative}.project-password-input input{padding-right:48px}.project-password-input button{position:absolute;right:5px;padding:7px;border:0;background:transparent;display:grid;place-items:center}
+.project-transfer-dialog .project-protection-help{font-size:12px;margin:10px 0 16px}
+.project-transfer-dialog .project-protection-note{font-size:12px;padding:12px 14px;border-radius:10px;background:color-mix(in srgb,var(--blue) 6%,var(--panel));border:1px solid var(--line)}
+.project-transfer-dialog .project-transfer-error{padding:12px;border:1px solid #dc262655;border-radius:10px;background:#dc262610;color:var(--ink)}
+.project-transfer-dialog footer{display:flex;justify-content:flex-end;gap:10px;margin-top:24px}.project-transfer-dialog footer button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:10px 14px}
+.project-transfer-dialog :focus-visible{outline:2px solid var(--blue);outline-offset:3px}.project-transfer-dialog button:disabled{opacity:.6;cursor:wait}
+.project-transfer-spinner{animation:project-transfer-spin 1s linear infinite}@keyframes project-transfer-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.project-transfer-spinner{animation:none}}
+@media(max-width:480px){.project-transfer-dialog{padding:20px}.project-transfer-dialog footer{flex-wrap:wrap}.project-transfer-dialog footer button{font-size:13px}.project-transfer-dialog footer button:first-child{flex:0 0 auto}.project-transfer-dialog footer button:last-child{flex:1}}

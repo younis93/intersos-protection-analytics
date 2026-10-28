@@ -59,10 +59,12 @@ const base=process.argv[2]||'http://127.0.0.1:5197';
   await page.locator('[data-question-id="q40"]').focus();await page.locator('#question-q40').waitFor();
   assert(await page.locator('#question-q40').evaluate(node=>node.contains(document.activeElement)),'Focus should enter the loaded question');
   // Existing filters survive a display-setting change through a stable card callback.
+  const filterToggle=page.getByRole('button',{name:'Filter responses',exact:true});
+  if(await filterToggle.getAttribute('aria-expanded')==='false')await filterToggle.click();
   await page.locator('.kobo-filter-grid .app-select-trigger').click();
   await page.getByRole('checkbox',{name:'Safety',exact:true}).check();await page.getByRole('button',{name:'Done',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('.kobo-active-filters')?.textContent.includes('Safety'));
-  await page.locator('#question-q0').getByRole('button',{name:'% only',exact:true}).click();
+  await page.locator('#question-q0').getByRole('button',{name:'Percentages',exact:true}).click();
   await page.waitForTimeout(700);assert.equal(calls.settings().filters[0].values[0],'Safety');assert.equal(calls.settings().questions.q0.breakdownDisplay,'percent');
   assert.equal(await page.getByRole('button',{name:'View report',exact:true}).count(),0);
   await page.evaluate(()=>window.location.hash='#/kobo/scroll/report');await page.waitForURL('**/#/kobo/scroll');
@@ -70,7 +72,7 @@ const base=process.argv[2]||'http://127.0.0.1:5197';
   await page.evaluate(()=>window.location.hash='#/kobo');await page.getByRole('heading',{name:'Your Kobo projects'}).waitFor();
   assert.equal(await page.locator('.js-plotly-plot').count(),0);assert.deepEqual(errors,[]);
   const typesPage=await browser.newPage({viewport:{width:1100,height:900}});typesPage.on('pageerror',e=>errors.push(String(e)));
-  await mock(typesPage,6,f=>{f.results[0].denominator=0;f.results[0].rows=[];for(const [index,chart] of [[1,'pie'],[2,'donut'],[3,'line'],[4,'column']]){f.results[index].chart=chart;f.results[index].breakdowns=[];f.results[index].breakdownFields=[];}});
+  await mock(typesPage,6,f=>{f.results[0].denominator=0;f.results[0].rows=[];for(const [index,chart] of [[1,'pie'],[2,'donut'],[3,'line'],[4,'column']]){f.results[index].chart=chart;f.results[index].breakdowns=[];f.results[index].breakdownFields=[];if(chart==='pie'||chart==='donut')f.results[index].rows=f.results[index].rows.slice(0,4)}});
   await typesPage.goto(`${base}/#/kobo/scroll`,{waitUntil:'domcontentloaded'});await typesPage.locator('#question-q0').waitFor();
   assert.equal(await typesPage.locator('#question-q0 .js-plotly-plot').count(),0);assert(await typesPage.locator('#question-q0 .kobo-chart').evaluate(node=>node.getBoundingClientRect().height<=331));
   for(const [index,type] of [[1,'pie'],[2,'pie'],[3,'scatter'],[4,'bar']]){

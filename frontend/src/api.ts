@@ -1,3 +1,4 @@
+import {projectResponseError} from './projectProtection';
 import {legalFetch as fetch, setLegalRevision} from "./legalQueryCache";
 import {defaultIndicatorReport,indicatorReportGeneration,retainDefaultIndicatorReport} from './indicatorReportCache';
 import {legalExportMonth,legalProjectFilename} from './legalProjectBackup';
@@ -27,7 +28,7 @@ import type {
   UpdateCheck,
   UpdateStatus,
 } from "./types";
-const API = import.meta.env.DEV ? "http://127.0.0.1:8000/api" : "/api";
+export const API = import.meta.env.DEV ? "http://127.0.0.1:8000/api" : "/api";
 async function parse<T>(r: Response): Promise<T> {
   if (!r.ok) {
     const x = await r.json().catch(() => ({ detail: r.statusText }));
@@ -99,7 +100,7 @@ export const getStudio = (
     signal,
   }).then(parse<StudioResult>);
 export const getLegalStudio = (dataset:string,rowDimension:string,columnDimension:string,filters:Filters,measure:string,signal?:AbortSignal,secondColumnDimension="") => fetch(`${API}/legal/studio`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dataset,rowDimension,columnDimension,secondColumnDimension,filters,measure}),signal}).then(parse<StudioResult>);
-export const getLegalAnalyticsDashboard = (query:{dataset:string;filters:Filters;search:string;page:number;pageSize:number;sortColumn:string;sortDirection:"asc"|"desc"},signal?:AbortSignal) => fetch(`${API}/legal/analytics-dashboard`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(query),signal}).then(parse<LegalAnalyticsDashboard>);
+export const getLegalAnalyticsDashboard = (query:{dataset:string;filters:Filters;search:string;page:number;pageSize:number;sortColumn:string;sortDirection:"asc"|"desc";columnFilters?:import('./columnFilters').ColumnFilter[]},signal?:AbortSignal) => fetch(`${API}/legal/analytics-dashboard`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(query),signal}).then(parse<LegalAnalyticsDashboard>);
 export interface ExplorerQuery {
   sheetId: string;
   search: string;
@@ -182,8 +183,8 @@ export const exportIndicatorSourceRecords = async (revision:string,records:impor
 };
 export const getLegalIndicatorsMonthly = (projects:string[],projectLocations:string[],years:string[],quarters:string[],months:string[],communityTypes:string[]=[],signal?:AbortSignal) =>
   fetch(`${API}/legal/indicators/monthly`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(Object.fromEntries(Object.entries({projects,projectLocations,years,quarters,months,communityTypes}).map(([key,values])=>[key,[...new Set(values)].sort()]))),signal}).then(parse<{months:string[];reports:{month:string;report:IndicatorReport}[]}>);
-export const exportLegalDetention = async (search:string,filters:Record<string,string[]>,sortColumn:string,sortDirection:"asc"|"desc") => {
-  const response=await fetch(`${API}/legal/detention/export`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({search,filters,sortColumn,sortDirection})});
+export const exportLegalDetention = async (search:string,filters:Record<string,string[]>,sortColumn:string,sortDirection:"asc"|"desc",columnFilters:import("./columnFilters").ColumnFilter[]=[]) => {
+  const response=await fetch(`${API}/legal/detention/export`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({search,filters,sortColumn,sortDirection,...(columnFilters.length?{columnFilters}:{})})});
   if(!response.ok)throw new Error(await response.text()||"Could not export detention table data.");
   const url=URL.createObjectURL(await response.blob()),link=document.createElement("a");
   link.href=url;link.download="detention-cases.xlsx";document.body.appendChild(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),2000);
@@ -214,8 +215,10 @@ const uploadLegalSource = async (
   operationId?:string,
   signal?:AbortSignal,
   project=false,
+  password?:string,
 ) => {
   const body = new FormData();
+  if(project&&password!==undefined)body.append('password',password);
   files.forEach((file) => body.append(project?"file":"files", file));
   return new Promise<LegalMetadata>((resolve, reject) => {
     const request = new XMLHttpRequest();
@@ -250,9 +253,7 @@ const uploadLegalSource = async (
         resolve(payload as LegalMetadata);
       } else {
         reject(
-          new Error(
-            payload.detail || request.statusText || "Folder upload failed",
-          ),
+          project?projectResponseError(payload.detail,"Unable to import project."):new Error(payload.detail || request.statusText || "Folder upload failed"),
         );
       }
     };
@@ -261,13 +262,13 @@ const uploadLegalSource = async (
   });
 };
 export const uploadLegalFolder=(files:File[],onProgress?:Parameters<typeof uploadLegalSource>[1],operationId?:string,signal?:AbortSignal)=>uploadLegalSource(files,onProgress,operationId,signal);
-export const importLegalProject=(file:File,onProgress?:Parameters<typeof uploadLegalSource>[1],operationId?:string,signal?:AbortSignal)=>uploadLegalSource([file],onProgress,operationId,signal,true);
-export const exportLegalProject=async()=>{
+export const importLegalProject=(file:File,onProgress?:Parameters<typeof uploadLegalSource>[1],operationId?:string,signal?:AbortSignal,password?:string)=>uploadLegalSource([file],onProgress,operationId,signal,true,password);
+export const exportLegalProject=async(password?:string)=>{
   const date=new Date();
-  const response=await fetch(`${API}/legal/backup?exportMonth=${encodeURIComponent(legalExportMonth(date))}`,{cache:'no-store'});
-  if(!response.ok){const issue=await response.json().catch(()=>({detail:'Unable to export project.'}));throw new Error(issue.detail||'Unable to export project.');}
+  const response=await fetch(`${API}/legal/backup?exportMonth=${encodeURIComponent(legalExportMonth(date))}`,{cache:'no-store',method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
+  if(!response.ok){const issue=await response.json().catch(()=>({detail:'Unable to export project.'}));throw projectResponseError(issue.detail,'Unable to export project.');}
   const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');
-  link.href=url;link.download=legalProjectFilename(date);document.body.appendChild(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1500);
+  link.href=url;link.download=legalProjectFilename(date).replace(/\.zip$/,password===undefined?'.zip':'.intersos');document.body.appendChild(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1500);
 };
 export const getLegalReview = (
   dataset: string,
@@ -300,7 +301,16 @@ export const getLegalReview = (
       comparisonMonth,
     }),
     signal,
-  }).then(parse<LegalReview>);
+  }).then(async response=>{
+    const first=await parse<LegalReview>(response);
+    if(!rule||page!==1||!first.rows||first.total<=first.rows.length)return first;
+    const rows=[...first.rows];
+    for(let nextPage=2;nextPage<=Math.ceil(first.total/5000);nextPage++){
+      const next=await getLegalReview(dataset,search,rule,nextPage,filters,comparisonMonth,nameCompareChars,allowNameVariations,exactMatchesOnly,signal,fieldFilters);
+      rows.push(...next.rows);
+    }
+    return {...first,rows};
+  });
 export const legalReviewExportUrl = (
   dataset: string,
   comparisonMonth = "",
@@ -333,28 +343,40 @@ export const getLegalExplorer = (
   sortDirection: "asc" | "desc" = "asc",
   pageSize = 100,
   signal?: AbortSignal,
+  columnFilters: import('./columnFilters').ColumnFilter[] = [],
 ) =>
   fetch(`${API}/legal/explorer`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dataset, search, page, pageSize, filters, sortColumn, sortDirection }),
+    body: JSON.stringify({ dataset, search, page, pageSize, filters, sortColumn, sortDirection, ...(columnFilters.length?{columnFilters}:{}) }),
     signal,
   }).then(parse<LegalExplorerResult>);
-export const getLegalExplorerFilters = (dataset: string, signal?: AbortSignal, filters:Record<string,string[]>={}, search="") =>
-  fetch(`${API}/legal/explorer-filters/${dataset}`, { method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dataset,filters,search}), cache: "no-store", signal }).then(
+export const getLegalExplorerFilters = (dataset: string, signal?: AbortSignal, filters:Record<string,string[]>={}, search="",columnFilters:import("./columnFilters").ColumnFilter[]=[]) =>
+  fetch(`${API}/legal/explorer-filters/${dataset}`, { method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dataset,filters,search,...(columnFilters.length?{columnFilters}:{})}), cache: "no-store", signal }).then(
     parse<{ columns: { name: string; values: string[]; valueCount?: number; truncated?: boolean }[] }>,
   );
+/** Fetch matching rows in bounded API pages for the explicit select-all action. */
+export async function getAllLegalExplorer(dataset:string,search:string,filters:Record<string,string[]>,sortColumn:string,sortDirection:'asc'|'desc',columnFilters:import('./columnFilters').ColumnFilter[],signal?:AbortSignal){
+  const first=await getLegalExplorer(dataset,search,1,filters,sortColumn,sortDirection,500,signal,columnFilters);
+  const rows=[...first.rows];
+  for(let page=2;page<=Math.ceil(first.total/500);page++){
+    const next=await getLegalExplorer(dataset,search,page,filters,sortColumn,sortDirection,500,signal,columnFilters);
+    rows.push(...next.rows);
+  }
+  return rows;
+}
 export const exportLegalExplorer = async (
   format: "csv" | "xlsx",
   dataset: string,
   search: string,
   filters: Record<string, string[]> = {},
   signal?: AbortSignal,
+  columnFilters: import('./columnFilters').ColumnFilter[] = [],
 ) => {
   const response = await fetch(`${API}/legal/explorer-export/${format}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dataset, search, filters }),
+    body: JSON.stringify({ dataset, search, filters, ...(columnFilters.length?{columnFilters}:{}) }),
     signal,
   });
   if (!response.ok) {
@@ -395,7 +417,7 @@ export const exportTableWorkbookSheets = async (filename:string,sheets:{title:st
 export const getLegalCase = (
   query: string,
   filters: Record<string, string[]> = {},
-  options: {viewMode?: "cards" | "table";page?: number;pageSize?: number;sortColumn?: string;sortDirection?: "asc" | "desc";columns?:string[]} = {},
+  options: {viewMode?: "cards" | "table";page?: number;pageSize?: number;sortColumn?: string;sortDirection?: "asc" | "desc";columns?:string[];columnFilters?:import("./columnFilters").ColumnFilter[]} = {},
   signal?: AbortSignal,
 ) =>
   fetch(`${API}/legal/case`, {
@@ -414,11 +436,12 @@ export const exportLegalCases = async (
   filename = "beneficiary-cases.xlsx",
   caseIds: string[] = [],
   signal?: AbortSignal,
+  columnFilters: import("./columnFilters").ColumnFilter[] = [],
 ) => {
   const response = await fetch(`${API}/legal/case-export`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, filters, caseIds }),
+    body: JSON.stringify({ query, filters, caseIds, ...(columnFilters.length?{columnFilters}:{}) }),
     signal,
   });
   if (!response.ok) {
@@ -503,11 +526,12 @@ export const getLegalDetention = (
   sortColumn = "",
   sortDirection: "asc" | "desc" = "asc",
   signal?: AbortSignal,
+  columnFilters: import("./columnFilters").ColumnFilter[] = [],
 ) =>
   fetch(`${API}/legal/detention`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ search, page, pageSize: 100, filters, sortColumn, sortDirection }),signal,
+    body: JSON.stringify({ search, page, pageSize: 100, filters, sortColumn, sortDirection, ...(columnFilters.length?{columnFilters}:{}) }),signal,
   }).then(
     parse<{
       total: number;

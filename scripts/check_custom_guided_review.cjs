@@ -21,7 +21,7 @@ const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-run
    await page.locator('.custom-column-list button').nth(2).click();await choose('Column type','Multiple choice');
    assert.equal(await page.getByRole('button',{name:'Answer delimiter',exact:true}).innerText(),'Choose delimiter');
    await page.locator('.custom-column-list button').nth(4).click();await page.getByLabel('Include in analysis',{exact:true}).uncheck();
-   await page.locator('.custom-column-list button').nth(3).click();await choose('File date convention','UK - day/month/year');
+   await page.locator('.custom-column-list button').nth(3).click();await choose('Column date convention','UK - day/month/year');
    await page.getByLabel('Include time in a separate column',{exact:true}).check();await page.getByLabel('Time column label',{exact:true}).fill('Visit time');
    await page.getByRole('button',{name:'Choose filters',exact:true}).click();
    assert.equal(await page.locator('.custom-filter-list input:checked').count(),0);

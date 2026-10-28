@@ -17,6 +17,7 @@ from urllib.parse import unquote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from .project_encryption import ExportProtection, ProjectProtectionError, protect_backup, unlock_backup, MAGIC, OVERHEAD
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -35,6 +36,7 @@ from . import updater
 from .import_progress import legal_import_tracker, ImportBusyError, ImportCancelled
 from .static_cache import static_cache_policy
 from .legal_page_cache import page as cache_legal_page
+from .column_filters import ColumnFilter, apply_column_filters, value_page
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -269,6 +271,7 @@ async def prevent_stale_api_state(request, call_next):
 
 
 class LegalQuery(BaseModel):
+    columnFilters: list[ColumnFilter] = Field(default_factory=list)
     dataset: str = "beneficiaries"
     search: str = ""
     rule: str = ""
@@ -298,6 +301,7 @@ class LegalStudioRequest(BaseModel):
     measure: str = "records"
 
 class LegalAnalyticsDashboardRequest(BaseModel):
+    columnFilters: list[ColumnFilter] = Field(default_factory=list)
     dataset: str
     filters: dict[str, list[str]] = {}
     search: str = ""
@@ -308,6 +312,7 @@ class LegalAnalyticsDashboardRequest(BaseModel):
 
 
 class SamplingQuery(BaseModel):
+    columnFilters: list[ColumnFilter] = Field(default_factory=list)
     search: str = ""
     filters: dict[str, list[str]] = {}
     removeDuplicateBeneficiaryIds: bool = False
@@ -361,6 +366,7 @@ class OverviewRequest(BaseModel):
 
 
 class CaseQuery(BaseModel):
+    columnFilters: list[ColumnFilter] = Field(default_factory=list)
     query: str
     filters: dict[str, list[str]] = {}
     caseIds: list[str] = []
@@ -376,6 +382,53 @@ class TableWorkbookSheet(BaseModel):
     title: str
     columns: list[str]
     rows: list[dict[str, object]]
+
+
+def filtered_record_result(result, rules, page, page_size, total_key='total'):
+    """Filter the complete record list without changing dashboard calculations."""
+    if not rules: return result
+    import pandas as pd
+    rows = result.get('rows', [])
+    columns = list(dict.fromkeys([*result.get('columns', []), *(key for row in rows for key in row)]))
+    frame = pd.DataFrame(rows, columns=columns)
+    filtered = apply_column_filters(frame, rules)
+    start = (page - 1) * page_size
+    return {**result, total_key: len(filtered), 'page': page, 'pageSize': page_size,
+            'rows': [rows[index] for index in filtered.index[start:start + page_size]]}
+
+
+class RecordValuesQuery(LegalQuery):
+    source: Literal['explorer', 'detention', 'studio', 'cases', 'sampling'] = 'explorer'
+    removeDuplicateBeneficiaryIds: bool = False
+    removeDuplicateContacts: bool = False
+    column: str
+    valueSearch: str = ''
+    offset: int = Field(0, ge=0)
+    limit: int = Field(100, ge=1, le=200)
+
+
+@app.post('/api/legal/record-values')
+def legal_record_values(request: RecordValuesQuery):
+    import pandas as pd
+    store = require_legal_store()
+    try:
+        legacy = {key: values for key, values in request.filters.items() if key != request.column}
+        if request.source == 'explorer':
+            prepared = store.explorer_preparation(request.dataset)
+            # Like the existing linked drawer, exclude the current field's own selection.
+            frame = prepared.frame.loc[prepared.select(request.search, legacy)]
+        elif request.source == 'cases':
+            frame = store.case_record_frame(request.search, legacy)
+        elif request.source == 'sampling':
+            from .sampling import pipeline
+            frame, _, _, reason = pipeline(store.frames.get('legalservices'),filters=legacy,search=request.search,removeDuplicateBeneficiaryIds=request.removeDuplicateBeneficiaryIds,removeDuplicateContacts=request.removeDuplicateContacts)
+            if reason: raise ValueError(reason)
+        else:
+            if request.source == 'detention': result = store.detention_cases(request.search,1,10**9,legacy)
+            else: result = store.analytics_dashboard(request.dataset,legacy,request.search,1,10**9)
+            frame = pd.DataFrame(result['rows'], columns=result['columns'])
+        return value_page(frame,request.column,request.columnFilters,request.valueSearch,request.offset,request.limit)
+    except ValueError as exc: raise HTTPException(400,str(exc)) from exc
 
 
 class TableWorkbookRequest(BaseModel):
@@ -505,6 +558,15 @@ def require_legal_store() -> LegalStore:
 
 @app.get('/api/legal/backup')
 def legal_project_backup(exportMonth: str | None = Query(None, pattern=r'^\d{4}-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$')):
+    return legal_project_backup_response(exportMonth)
+
+
+@app.post('/api/legal/backup')
+def legal_project_backup_protected(body: ExportProtection, exportMonth: str | None = Query(None, pattern=r'^\d{4}-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$')):
+    return legal_project_backup_response(exportMonth, body.value())
+
+
+def legal_project_backup_response(exportMonth, password=None):
     from datetime import datetime
     from .legal_workspace import backup_project
     try:
@@ -513,17 +575,26 @@ def legal_project_backup(exportMonth: str | None = Query(None, pattern=r'^\d{4}-
             raw = backup_project(store, duplicate_exclusions.exclusion_rows())
         now = datetime.now()
         month = exportMonth or f'{now.year}-{("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")[now.month - 1]}'
-        return Response(raw, media_type='application/zip', headers={
-            'Content-Disposition': f'attachment; filename="Legal Platform export {month}.zip"', 'Cache-Control': 'no-store'})
+        raw = protect_backup(raw, password)
+        extension = 'intersos' if password is not None else 'zip'
+        return Response(raw, media_type='application/octet-stream' if password is not None else 'application/zip', headers={
+            'Content-Disposition': f'attachment; filename="Legal Platform export {month}.{extension}"', 'Cache-Control': 'no-store'})
+    except ProjectProtectionError as exc:
+        raise HTTPException(400, exc.detail) from None
     except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+        raise HTTPException(400, {'code': 'invalid_backup', 'message': str(exc)}) from None
 
 
-def restore_legal_project(raw, operation):
+def restore_legal_project(raw, operation, password=None):
     global legal_store, REMEMBERED_LEGAL_FOLDER, REMEMBERED_LEGAL_SOURCE, REMEMBERED_LEGAL_SOURCE_CONFIGURED
     from .legal_workspace import read_backup, persist_restored_project
     operation.check_cancelled()
-    payload, exclusions = read_backup(raw)
+    raw = unlock_backup(raw, password)
+    operation.check_cancelled()
+    try:
+        payload, exclusions = read_backup(raw)
+    except ValueError as exc:
+        raise ProjectProtectionError('invalid_backup', str(exc)) from None
     operation.check_cancelled()
     # Build against the ZIP's review decisions without touching the active registry.
     candidate = LegalStore.from_files(payload, 'Imported Legal Platform project', exclusions=exclusions,
@@ -545,7 +616,7 @@ def restore_legal_project(raw, operation):
 
 
 @app.post('/api/legal/backups/restore')
-async def legal_project_restore(file: UploadFile = File(...), operationId: str | None = None):
+async def legal_project_restore(file: UploadFile = File(...), operationId: str | None = None, password: str | None = Form(None)):
     from .legal_workspace import MAX_BACKUP
     operation = None
     try:
@@ -554,10 +625,16 @@ async def legal_project_restore(file: UploadFile = File(...), operationId: str |
         while chunk := await file.read(1024 * 1024):
             operation.check_cancelled()
             total += len(chunk)
-            if total > MAX_BACKUP:
+            if total > MAX_BACKUP + OVERHEAD:
                 raise HTTPException(413, 'Project ZIP must be 200 MB or smaller.')
             chunks.append(chunk)
-        return await run_in_threadpool(restore_legal_project, b''.join(chunks), operation)
+        raw = b''.join(chunks)
+        if total > MAX_BACKUP + (OVERHEAD if raw.startswith(MAGIC) else 0):
+            raise HTTPException(413, 'Project must be 200 MB or smaller.')
+        return await run_in_threadpool(restore_legal_project, raw, operation, password)
+    except ProjectProtectionError as exc:
+        if operation: operation.fail(str(exc))
+        raise HTTPException(400, exc.detail) from None
     except ImportBusyError as exc:
         raise HTTPException(409, str(exc)) from exc
     except ImportCancelled as exc:
@@ -571,7 +648,7 @@ async def legal_project_restore(file: UploadFile = File(...), operationId: str |
         raise
     except Exception as exc:
         if operation: operation.fail(exc)
-        raise HTTPException(400, str(exc)) from exc
+        raise HTTPException(400, {'code': 'invalid_backup', 'message': str(exc)}) from None
     finally:
         await file.close()
 
@@ -737,7 +814,7 @@ def export_duplicate_exclusions():
 def legal_explorer(request: LegalQuery):
     if request.page < 1 or request.pageSize < 1 or request.pageSize > 500: raise HTTPException(400, "Invalid pagination")
     if request.sortDirection not in {"asc","desc"}: raise HTTPException(400,"Invalid sort direction")
-    try: return require_legal_store().explorer(request.dataset, request.search, request.page, request.pageSize, request.filterColumn, request.filterValue,request.filters,request.sortColumn,request.sortDirection)
+    try: return require_legal_store().explorer(request.dataset, request.search, request.page, request.pageSize, request.filterColumn, request.filterValue,request.filters,request.sortColumn,request.sortDirection,column_filters=request.columnFilters)
     except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
 @app.post("/api/legal/studio")
@@ -749,7 +826,10 @@ def legal_studio(request: LegalStudioRequest):
 @cache_legal_page(lambda: require_legal_store())
 def legal_analytics_dashboard(request: LegalAnalyticsDashboardRequest):
     if request.page<1 or request.pageSize<1 or request.pageSize>10000 or request.sortDirection not in {"asc","desc"}: raise HTTPException(400,"Invalid dashboard query.")
-    try:return require_legal_store().analytics_dashboard(request.dataset,request.filters,request.search,request.page,request.pageSize,request.sortColumn,request.sortDirection)
+    try:
+        store = require_legal_store()
+        result = store.analytics_dashboard(request.dataset,request.filters,request.search,1 if request.columnFilters else request.page,10**9 if request.columnFilters else request.pageSize,request.sortColumn,request.sortDirection)
+        return filtered_record_result(result, request.columnFilters, request.page, request.pageSize, 'matchedRows')
     except ValueError as exc:raise HTTPException(400,str(exc)) from exc
 
 
@@ -783,7 +863,7 @@ def legal_explorer_filters(dataset:str):
 
 @app.post("/api/legal/explorer-export/{export_format}")
 def legal_explorer_export(export_format:str,request:LegalQuery):
-    try:payload=require_legal_store().explorer_export(request.dataset,request.search,request.filters,export_format)
+    try:payload=require_legal_store().explorer_export(request.dataset,request.search,request.filters,export_format,column_filters=request.columnFilters)
     except ValueError as exc:raise HTTPException(400,str(exc)) from exc
     media="text/csv" if export_format=="csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     return Response(payload,media_type=media,headers={"Content-Disposition":f'attachment; filename="{request.dataset}-filtered.{export_format}"'})
@@ -791,7 +871,9 @@ def legal_explorer_export(export_format:str,request:LegalQuery):
 
 @app.post("/api/legal/case")
 @cache_legal_page(lambda: require_legal_store())
-def legal_case(request: CaseQuery): return require_legal_store().case(request.query,request.filters,20,request.viewMode,request.page,request.pageSize,request.sortColumn,request.sortDirection,request.columns)
+def legal_case(request: CaseQuery):
+    try: return require_legal_store().case(request.query,request.filters,20,request.viewMode,request.page,request.pageSize,request.sortColumn,request.sortDirection,request.columns,column_filters=request.columnFilters)
+    except ValueError as exc: raise HTTPException(400,str(exc)) from exc
 
 
 @app.post("/api/legal/case-filters")
@@ -802,7 +884,7 @@ def linked_case_filters(request:CaseQuery):return require_legal_store().case_fil
 @app.post("/api/legal/explorer-filters/{dataset}")
 @cache_legal_page(lambda: require_legal_store())
 def linked_explorer_filters(dataset:str,request:LegalQuery):
-    try:return require_legal_store().explorer_filters(dataset,request.filters,request.search)
+    try:return require_legal_store().explorer_filters(dataset,request.filters,request.search,column_filters=request.columnFilters)
     except ValueError as exc:raise HTTPException(400,str(exc)) from exc
 
 
@@ -836,7 +918,12 @@ def legal_attachment_download(url: str = Query(..., min_length=8)):
 
 @app.post("/api/legal/case-export")
 def legal_case_export(request: CaseQuery):
-    payload=require_legal_store().case_export(request.query,request.filters,request.caseIds)
+    store=require_legal_store()
+    case_ids=request.caseIds
+    if request.columnFilters and not case_ids:
+        try: case_ids=apply_column_filters(store.case_record_frame(request.query,request.filters),request.columnFilters)['Case ID'].tolist() or ['\x00no-matches']
+        except ValueError as exc: raise HTTPException(400,str(exc)) from exc
+    payload=store.case_export(request.query,request.filters,case_ids)
     name="beneficiary-case" if request.query else "filtered-beneficiary-cases"
     return Response(payload,media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":f'attachment; filename="{name}.xlsx"'})
 
@@ -1070,14 +1157,18 @@ def indicator_reconciliation_export(request: IndicatorReportRequest):
 def legal_detention(request:LegalQuery):
     if request.page < 1 or request.pageSize < 1 or request.pageSize > 500: raise HTTPException(400,"Invalid pagination")
     if request.sortDirection not in {"asc","desc"}: raise HTTPException(400,"Invalid sort direction")
-    return require_legal_store().detention_cases(request.search,request.page,request.pageSize,request.filters,request.sortColumn,request.sortDirection)
+    try:
+        result = require_legal_store().detention_cases(request.search,1 if request.columnFilters else request.page,10**9 if request.columnFilters else request.pageSize,request.filters,request.sortColumn,request.sortDirection)
+        return filtered_record_result(result,request.columnFilters,request.page,request.pageSize)
+    except ValueError as exc: raise HTTPException(400,str(exc)) from exc
 
 
 @app.post("/api/legal/detention/export")
 def legal_detention_export(request: LegalQuery):
     if request.sortDirection not in {"asc", "desc"}: raise HTTPException(400, "Invalid sort direction")
-    result = require_legal_store().detention_cases(request.search, 1, 10001, request.filters,
+    result = require_legal_store().detention_cases(request.search, 1, 10**9 if request.columnFilters else 10001, request.filters,
                                                  request.sortColumn, request.sortDirection)
+    result = filtered_record_result(result,request.columnFilters,1,10001)
     if result["total"] > 10000: raise HTTPException(400, "Excel export is limited to 10,000 selected rows.")
     columns = [*result["columns"], "Case ID"]
     rows = [{column: row.get("caseId", "") if column == "Case ID" else row.get(column, "")

@@ -1,3 +1,5 @@
+import {useProjectTransfer} from './useProjectTransfer';
+import {projectFileAccept,projectUploadLimit} from './projectProtection';
 import {formatUpdateSize,UpdateReleaseNotes} from "./UpdateReleaseNotes";
 import {AnimatedNavigationIcon} from './AnimatedNavigationIcon';
 
@@ -406,21 +408,25 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
       await finishImport();
     }
   };
-  const restoreProject = async (file:File) => {
+  const projectTransfer=useProjectTransfer({onCancelImport:()=>{void cancelProcessing()}});
+  const restoreProject = async (file:File,password?:string) => {
     if(uploading||restoringData||exportingProject)return;
-    if(file.size>200*1024*1024){setError('Choose a project ZIP of 200 MB or smaller.');return;}
+    if(file.size>projectUploadLimit)throw new Error('Choose a project file of 200 MB or smaller.');
     const operationId=beginImportProgress();
     setUploading(true);setUploadProgress(0);setUploadPhase('uploading');setError('');
     const controller=new AbortController();uploadController.current=controller;
     try{
-      const next=await importLegalProject(file,status=>{setUploadPhase(status.phase);if(status.percent!==null)setUploadProgress(status.percent)},operationId,controller.signal);
+      const next=await importLegalProject(file,status=>{setUploadPhase(status.phase);if(status.percent!==null)setUploadProgress(status.percent)},operationId,controller.signal,password);
       setMetadata(next);setDataRevision(value=>value+1);setReviewCaseId('');setCaseQuery('');setPage('overview');
-    }catch(reason){importFailure(reason)}finally{await finishImport()}
+    }catch(reason){
+      if(cancellation.current||(reason instanceof DOMException&&reason.name==='AbortError'))importFailure(reason);
+      throw reason;
+    }finally{await finishImport()}
   };
-  const backupProject = async () => {
+  const backupProject = async (password?:string) => {
     if(uploading||restoringData||exportingProject||!metadata?.ready)return;
     setExportingProject(true);setError('');
-    try{await exportLegalProject()}catch(reason:any){setError(reason.message||'Unable to export project.')}finally{setExportingProject(false)}
+    try{await exportLegalProject(password)}finally{setExportingProject(false)}
   };
   const selectFolder = async () => {
     if(uploading||restoringData)return;
@@ -502,7 +508,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
             <small>Review & analytics</small>
           </div>
         </div>
-        <div className="sidebar-workspace-controls"><button className="soft sidebar-fullscreen" onClick={toggleFullscreen} title={fullscreen ? "Exit full screen" : "Enter full screen"} aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}>{fullscreen ? <Minimize2/> : <Maximize2/>}<span>Full screen</span></button><div className={`data-source-control app-select app-select-theme ${dataMenuOpen?"open":""}`}><Database className="app-select-icon"/><span className="app-select-label">Data source</span><button className="app-select-trigger" disabled={uploading||restoringData||exportingProject} aria-busy={uploading||exportingProject} aria-haspopup="menu" aria-expanded={dataMenuOpen} onClick={() => setDataMenuOpen((current)=>!current)}><span>{exportingProject ? "Exporting project..." : uploading ? uploadPhase === "uploading" ? `Uploading ${uploadProgress}%` : "Processing records…" : "Choose source"}</span><ChevronDown/></button>{dataMenuOpen&&<><button className="data-source-backdrop" aria-label="Close data source menu" onClick={()=>setDataMenuOpen(false)}/><div className="app-select-menu data-source-menu" role="menu"><ImportSourceGuide compact/><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFolder()}}><FolderOpen/><span><strong>Select folder</strong><small>Load all supported CSV files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_folder&&<button className="data-source-refresh" aria-label="Refresh selected folder" title="Refresh selected folder" onClick={()=>{setDataMenuOpen(false);refreshSelectedFolder()}}><RefreshCw/></button>}</div><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFiles()}}><Database/><span><strong>Select multiple CSV files</strong><small>Choose individual source files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_files&&<button className="data-source-refresh" aria-label="Refresh selected CSV files" title="Refresh selected CSV files" onClick={()=>{setDataMenuOpen(false);refreshSelectedFiles()}}><RefreshCw/></button>}</div><LegalProjectTransfer canExport={Boolean(metadata?.ready)} exporting={exportingProject} onImport={()=>{setDataMenuOpen(false);projectInput.current?.click()}} onExport={()=>{setDataMenuOpen(false);void backupProject()}}/><footer><span>Current source</span><strong>{metadata?.source||"No folder loaded"}</strong></footer></div></>}</div></div>
+        <div className="sidebar-workspace-controls"><button className="soft sidebar-fullscreen" onClick={toggleFullscreen} title={fullscreen ? "Exit full screen" : "Enter full screen"} aria-label={fullscreen ? "Exit full screen" : "Enter full screen"}>{fullscreen ? <Minimize2/> : <Maximize2/>}<span>Full screen</span></button><div className={`data-source-control app-select app-select-theme ${dataMenuOpen?"open":""}`}><Database className="app-select-icon"/><span className="app-select-label">Data source</span><button className="app-select-trigger" disabled={uploading||restoringData||exportingProject} aria-busy={uploading||exportingProject} aria-haspopup="menu" aria-expanded={dataMenuOpen} onClick={() => setDataMenuOpen((current)=>!current)}><span>{exportingProject ? "Exporting project..." : uploading ? uploadPhase === "uploading" ? `Uploading ${uploadProgress}%` : "Processing records…" : "Choose source"}</span><ChevronDown/></button>{dataMenuOpen&&<><button className="data-source-backdrop" aria-label="Close data source menu" onClick={()=>setDataMenuOpen(false)}/><div className="app-select-menu data-source-menu" role="menu"><ImportSourceGuide compact/><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFolder()}}><FolderOpen/><span><strong>Select folder</strong><small>Load all supported CSV files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_folder&&<button className="data-source-refresh" aria-label="Refresh selected folder" title="Refresh selected folder" onClick={()=>{setDataMenuOpen(false);refreshSelectedFolder()}}><RefreshCw/></button>}</div><div className="data-source-option"><button role="menuitem" onClick={()=>{setDataMenuOpen(false);selectFiles()}}><Database/><span><strong>Select multiple CSV files</strong><small>Choose individual source files</small></span></button>{(window as any).pywebview?.api?.refresh_legal_files&&<button className="data-source-refresh" aria-label="Refresh selected CSV files" title="Refresh selected CSV files" onClick={()=>{setDataMenuOpen(false);refreshSelectedFiles()}}><RefreshCw/></button>}</div><LegalProjectTransfer canExport={Boolean(metadata?.ready)} exporting={exportingProject} onImport={()=>{setDataMenuOpen(false);projectInput.current?.click()}} onExport={()=>{setDataMenuOpen(false);projectTransfer.exportProject(backupProject)}}/><footer><span>Current source</span><strong>{metadata?.source||"No folder loaded"}</strong></footer></div></>}</div></div>
         <div className="legal-sidebar-utilities"><button aria-label="Home" title="Home" onClick={() => {window.location.hash="/"}}><Home/><span>Home</span></button><button className="legal-menu-slide-toggle" aria-label={sidebarCollapsed ? "Expand menu" : "Slide menu left"} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? "Expand menu" : "Slide menu left"} onClick={() => {setDataMenuOpen(false);setSidebarCollapsed((current) => {const next=!current;localStorage.setItem("legal-sidebar-collapsed",String(next));return next})}}><>{sidebarCollapsed?<ArrowRight/>:<ArrowLeft/>}</><span>{sidebarCollapsed ? "Expand" : "Slide left"}</span></button></div>
         <LegalPageNavigation items={availableNav} page={page} onNavigate={setPage} loadStatuses={loadStatuses} sendIssuesStatus={sendIssuesStatus}/>
       </aside>
@@ -511,7 +517,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
           <div className="mobile-brand">Legal Platform</div>
           <div className="header-actions">
             <div id="legal-header-scroll-controls" className="legal-header-scroll-slot"/>
-            <input ref={projectInput} hidden type="file" accept=".zip,application/zip" aria-label="Import Legal Platform project ZIP" onChange={event=>{const file=event.target.files?.[0];event.currentTarget.value='';if(file)void restoreProject(file)}}/>
+            <input ref={projectInput} hidden type="file" accept={projectFileAccept} aria-label="Import Legal Platform project ZIP" onChange={event=>{const file=event.target.files?.[0];event.currentTarget.value='';if(file)void projectTransfer.importProject(file,password=>restoreProject(file,password))}}/>
             {exportingProject&&<span role="status">Exporting project...</span>}
             <input
               ref={folderInput}
@@ -614,7 +620,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
       </main>
       {(uploading||restoringData||cancelPending||processingResult)&&<ProcessingRecords key={importOperationId||"startup"} progress={processingResult||importProgress} uploadPercent={uploading&&uploadPhase==="uploading"?uploadProgress:undefined} restoring={!uploading} onCancel={cancelProcessing} onDismiss={()=>setProcessingResult(null)} cancelPending={cancelPending} cancelError={cancelError}/>}
       {reviewCaseId && metadata?.ready && coreAvailable && <CaseReviewModal key={metadata.revision} caseId={reviewCaseId} metadata={metadata} onClose={() => setReviewCaseId("")} />}
-      <NotificationToast message={copiedValue} label="Copied"/>
+      {projectTransfer.view}<NotificationToast message={copiedValue} label="Copied"/>
       {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon" data-updating={Boolean(updateStatus&&['downloading','verifying','installing','restarting'].includes(updateStatus.phase))} aria-hidden="true"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?"Updates need configuration":updateInfo?.message?.startsWith("Unable")?"Unable to check for updates":"You’re up to date"}</h2>{updateInfo?.available?<UpdateReleaseNotes notes={updateInfo.notes} sizeBytes={updateInfo.sizeBytes}/>:<p>{updateInfo?.message||`You are using version ${updateInfo?.currentVersion||'1.0.18'}.`}</p>}{updateStatus&&updateStatus.phase!=="idle"&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.phase==="downloading"&&<small>Downloaded {formatUpdateSize(updateStatus.downloadedBytes)} of {formatUpdateSize(updateStatus.totalBytes||updateInfo?.sizeBytes)}</small>}{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}{updateInfo?.available&&<UpdateFallbackNotice failed={updateStatus?.phase === "error"}/>}<div className="update-actions">{updateInfo?.available&&(!updateStatus||["idle","error"].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>{updateStatus?.phase === "error" ? "Try again" : "Update now"}</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&["installing","restarting"].includes(updateStatus.phase))}>{updateInfo?.available?"Later":"Close"}</button></div></section></div>}
     </div>
   );

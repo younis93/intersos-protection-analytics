@@ -264,7 +264,7 @@ export function NestedTable({ title, rows }: { title: string; rows: any[] }) {
       </h4>
       {rows.length ? (
         <div>
-          <ValueTable>
+          <ValueTable recordFilters="local">
             <thead>
               <tr>
                 {columns.map((c) => (

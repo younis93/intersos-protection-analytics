@@ -1,3 +1,4 @@
+import {projectResponseError} from './projectProtection';
 import KoboGeography from './KoboGeography';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {sortPivotRows,type PivotSort} from './koboPivotSort';
@@ -8,10 +9,10 @@ export type WorkspaceReport=import('./koboTypes').KoboReport;
 export const emptyReport:WorkspaceReport={title:'',findings:'',methodology:'',recommendations:'',questions:[]};
 const message=(e:unknown)=>e instanceof Error?e.message:String(e);
 
-export async function downloadBackup(id:string){
- const response=await fetch(`${analysisBase()}/projects/${encodeURIComponent(id)}/backup`,{credentials:'include'});
- if(!response.ok){const issue=await response.json().catch(()=>({detail:'Unable to create backup. Please retry.'}));throw new Error(typeof issue.detail==='string'?issue.detail:'Unable to create backup. Please retry.');}
- downloadBlob(await response.blob(),`project.${analysisWorkspace()}-backup.zip`);
+export async function downloadBackup(id:string,password?:string){
+ const response=await fetch(`${analysisBase()}/projects/${encodeURIComponent(id)}/backup`,{credentials:'include',method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
+ if(!response.ok){const issue=await response.json().catch(()=>({detail:'Unable to create backup. Please retry.'}));throw projectResponseError(issue.detail,'Unable to create backup. Please retry.');}
+ downloadBlob(await response.blob(),`project.${analysisWorkspace()}-backup.${password===undefined?'zip':'intersos'}`);
 }
 function ResultSummary({result,language}:{result:KoboResult;language:string}){
  const[sort,setSort]=useState<PivotSort|null>(null);

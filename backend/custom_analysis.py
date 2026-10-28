@@ -172,8 +172,11 @@ def initial_columns(headers, data, previous=None):
         # Reuse only unique exact headers, or the same duplicate occurrence by position.
         saved = next((c for c in old if c['header'] == header and ((counts[header] == old_counts[header] == 1) or c['index'] == i)), None)
         values = [row[i] if i < len(row) else None for _, row in data]
+        kind = saved['kind'] if saved else infer(header, values)
+        # Keep large free-text fields opt-in on first import. Never override a saved decision.
+        included = saved.get('included', True) if saved else not (kind == 'text' and len({str(v) for v in values if not missing(v)}) > 100)
         result.append(Column.model_validate({**(saved or {}), 'id': saved['id'] if saved else 'col_' + uuid.uuid4().hex, 'index': i, 'header': header,
-            'label': saved['label'] if saved else header or f'Column {i + 1}', 'kind': saved['kind'] if saved else infer(header, values)}))
+            'label': saved['label'] if saved else header or f'Column {i + 1}', 'kind': kind, 'included': included}))
     return result
 
 
@@ -181,12 +184,12 @@ def available_filter_ids(config):
     return {qid for c in config.columns if c.included for qid in ([c.id, c.id + '__time'] if c.kind == 'date' and c.includeTime else [c.id])} | {c.id for c in config.calculatedColumns if c.included}
 
 
-def build(tables, config, baseline):
+def build(tables, config, baseline, *, allow_empty=False):
     headers, data = table_data(tables, config)
     expected = {(c.id, c.index, c.header) for c in baseline}
     if {(c.id, c.index, c.header) for c in config.columns} != expected or len(config.columns) != len(expected):
         raise ValueError('Review every original column exactly once. Source identifiers cannot be changed.')
-    if not any(c.included for c in config.columns): raise ValueError('Include at least one column.')
+    if not allow_empty and not any(c.included for c in config.columns): raise ValueError('Include at least one column.')
     records = [{'id': f'row_{ri}', 'row': ri, 'sheet': 0, 'scope': '', 'parent': '', 'values': {}} for ri, _ in data]
     questions, profiles, issues, groups = [], [], [], {}
     for column in config.columns:
@@ -354,7 +357,7 @@ def make_custom_router(store=None):
 
     def describe(token, item, config):
         headers, data = table_data(item['tables'], config) if config.columns else ([], [])
-        payload, review = build(item['tables'], config, item['config'].columns) if config.columns else (None, {'profiles': [], 'issues': [], 'rows': 0, 'preview': []})
+        payload, review = build(item['tables'], config, item['config'].columns, allow_empty=True) if config.columns else (None, {'profiles': [], 'issues': [], 'rows': 0, 'preview': []})
         previous = item['previous'].get('columns', [])
         before = {c['id']: c for c in previous}
         current = {c.id: c.model_dump() for c in config.columns}

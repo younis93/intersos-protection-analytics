@@ -112,6 +112,34 @@ def test_native_missing_answer_counts_are_not_formatted_as_dashes():
     pivot.DataBodyRange.Cells.return_value.FormatConditions.Add.assert_not_called()
 
 
+def test_native_percentage_formatting_supplies_com_operator_argument():
+    from unittest.mock import Mock
+    from backend.kobo_excel import _style_pivot
+    pivot = Mock(); report = Mock()
+    pivot.DataBodyRange.Columns.Count = 1
+    pivot.DataBodyRange.Rows.Count = 2
+    pivot.DataBodyRange.Row = 8
+    first = pivot.DataBodyRange.Cells.return_value
+    first.PivotCell.DataField.Name = '%'
+    first.PivotCell.ColumnItems.Count = 0
+    condition = Mock()
+
+    # The native COM call rejects a missing Operator with DISP_E_PARAMNOTOPTIONAL.
+    def add(condition_type, operator, formula):
+        assert condition_type == 2 and operator == 0
+        assert formula.startswith('=OR($A8="Blank / unanswered",')
+        assert 'COUNTIFS(' in formula
+        return condition
+
+    report.Range.return_value.FormatConditions.Add.side_effect = add
+    _style_pivot(pivot, report, {
+        'id': 'question', 'breakdownFields': [],
+        'rows': [{'id': 'yes', 'label': 'Yes'}],
+    })
+    report.Range.return_value.FormatConditions.Add.assert_called_once()
+    assert condition.NumberFormat == '"-"'
+
+
 def test_metric_pivot_orders_only_this_questions_items_without_enumerating_the_cache(monkeypatch):
     from unittest.mock import Mock, call
     import backend.kobo_excel as native

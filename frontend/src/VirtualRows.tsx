@@ -1,7 +1,7 @@
 import {cloneElement, type ReactElement, type KeyboardEvent, useLayoutEffect, useMemo, useRef, useState} from "react";
 import {rowOffsets, windowIndexes} from "./virtualWindow";
 
-export function VirtualRows<T>({items,render,table=false,columns=1,enabled=items.length>200,estimate=42,resetKey,initialFocusIndex=null}:{items:T[];render:(item:T,index:number)=>ReactElement;table?:boolean;columns?:number;enabled?:boolean;estimate?:number;resetKey?:string;initialFocusIndex?:number|null}) {
+export function VirtualRows<T>({items,render,table=false,columns=1,enabled=items.length>200,estimate=42,resetKey,initialFocusIndex=null,className,buttonRows=false,revealIndex=null}:{items:T[];render:(item:T,index:number)=>ReactElement;table?:boolean;columns?:number;enabled?:boolean;estimate?:number;resetKey?:string;initialFocusIndex?:number|null;className?:string;buttonRows?:boolean;revealIndex?:number|null}) {
   const element=useRef<HTMLElement|null>(null),heights=useRef(new Map<number,number>());
   const [version,setVersion]=useState(0),[viewport,setViewport]=useState({top:0,height:360}),[focus,setFocus]=useState<number|null>(initialFocusIndex);
   const previousItems=useRef(items);
@@ -10,6 +10,12 @@ export function VirtualRows<T>({items,render,table=false,columns=1,enabled=items
   const indexes=enabled?windowIndexes(offsets,viewport.top,viewport.height,focus):items.map((_,index)=>index);
   useLayoutEffect(()=>{const previous=previousItems.current;previousItems.current=items;if(!table&&previous.length===items.length&&previous.every((item,index)=>item===items[index]))return;heights.current.clear();setVersion(value=>value+1);setFocus(null);const root=table?element.current?.closest<HTMLElement>(".legal-table-wrap"):element.current;if(root&&table)root.scrollTop=0},[items,table]);
   useLayoutEffect(()=>{if(!table&&element.current)element.current.scrollTop=0},[resetKey,table]);
+  useLayoutEffect(()=>{
+    const root=element.current;
+    if(!root||table||!enabled||revealIndex===null||revealIndex<0||revealIndex>=items.length)return;
+    if(offsets[revealIndex]<root.scrollTop)root.scrollTop=offsets[revealIndex];
+    else if(offsets[revealIndex+1]>root.scrollTop+root.clientHeight)root.scrollTop=offsets[revealIndex+1]-root.clientHeight;
+  },[revealIndex,resetKey,enabled,table]);
   useLayoutEffect(()=>{
     const node=element.current,root=table?node?.closest<HTMLElement>(".legal-table-wrap"):node;
     if(!node||!root||!enabled)return;
@@ -23,7 +29,7 @@ export function VirtualRows<T>({items,render,table=false,columns=1,enabled=items
     const measure=()=>{let changed=false;node.querySelectorAll<HTMLElement>("[data-window-index]").forEach(row=>{const index=Number(row.dataset.windowIndex),height=row.getBoundingClientRect().height;if(height>0&&Math.abs((heights.current.get(index)||estimate)-height)>0.5){heights.current.set(index,height);changed=true}});if(changed)setVersion(value=>value+1)};
     measure();const observer=typeof ResizeObserver!=="undefined"?new ResizeObserver(measure):null;
     node.querySelectorAll<HTMLElement>("[data-window-index]").forEach(row=>observer?.observe(row));
-    if(pendingFocus.current!==null){const row=node.querySelector<HTMLElement>(`[data-window-index="${pendingFocus.current}"]`);(row?.matches('[role=option]')?row:row?.querySelector<HTMLElement>("input"))?.focus({preventScroll:true});if(pendingLastControl.current){const controls=Array.from(row?.querySelectorAll<HTMLElement>("input,button")||[]).filter(control=>control.getClientRects().length>0&&getComputedStyle(control).visibility!=="hidden");controls.at(-1)?.focus({preventScroll:true})}pendingFocus.current=null;pendingLastControl.current=false}
+    if(pendingFocus.current!==null){const row=node.querySelector<HTMLElement>(`[data-window-index="${pendingFocus.current}"]`);(row?.matches(buttonRows?'button, [role=option]':'[role=option]')?row:row?.querySelector<HTMLElement>("input"))?.focus({preventScroll:true});if(pendingLastControl.current){const controls=(buttonRows&&row?.matches("button")?[row]:Array.from(row?.querySelectorAll<HTMLElement>("input,button")||[])).filter(control=>control.getClientRects().length>0&&getComputedStyle(control).visibility!=="hidden");controls.at(-1)?.focus({preventScroll:true})}pendingFocus.current=null;pendingLastControl.current=false}
     return()=>observer?.disconnect();
   });
   const keyboard=(event:KeyboardEvent<HTMLElement>)=>{
@@ -32,16 +38,16 @@ export function VirtualRows<T>({items,render,table=false,columns=1,enabled=items
     if(!Number.isFinite(index))return;
     const target=event.target as HTMLElement;
     const row=target.closest<HTMLElement>("[data-window-index]");
-    const controls=Array.from(row?.querySelectorAll<HTMLElement>("input,button")||[]).filter(node=>node.getClientRects().length>0&&getComputedStyle(node).visibility!=="hidden");
+    const controls=(buttonRows&&row?.matches("button")?[row]:Array.from(row?.querySelectorAll<HTMLElement>("input,button")||[])).filter(node=>node.getClientRects().length>0&&getComputedStyle(node).visibility!=="hidden");
     const forwardTab=enabled&&event.key==="Tab"&&!event.shiftKey&&target===controls.at(-1)&&index<items.length-1;
     const backwardTab=event.key==="Tab"&&event.shiftKey&&target===controls[0]&&index>0;
-    if(!target.matches("input[type=checkbox], [role=option]")&&!forwardTab&&!backwardTab)return;
+    if(!target.matches(buttonRows?"button, input[type=checkbox], [role=option]":"input[type=checkbox], [role=option]")&&!forwardTab&&!backwardTab)return;
     let next=index;
     if(event.key==="ArrowDown"||forwardTab)next=Math.min(items.length-1,index+1);
     else if(event.key==="ArrowUp"||backwardTab)next=Math.max(0,index-1);
     else if(event.key==="Home")next=0;else if(event.key==="End")next=items.length-1;else return;
     event.preventDefault();
-    if(!enabled){const row=element.current?.querySelector<HTMLElement>(`[data-window-index="${next}"]`);(row?.matches('[role=option]')?row:row?.querySelector<HTMLElement>("input"))?.focus();if(backwardTab){const controls=Array.from(row?.querySelectorAll<HTMLElement>("input,button")||[]).filter(control=>control.getClientRects().length>0&&getComputedStyle(control).visibility!=="hidden");controls.at(-1)?.focus()}return}
+    if(!enabled){const row=element.current?.querySelector<HTMLElement>(`[data-window-index="${next}"]`);(row?.matches(buttonRows?'button, [role=option]':'[role=option]')?row:row?.querySelector<HTMLElement>("input"))?.focus();if(backwardTab){const controls=(buttonRows&&row?.matches("button")?[row]:Array.from(row?.querySelectorAll<HTMLElement>("input,button")||[])).filter(control=>control.getClientRects().length>0&&getComputedStyle(control).visibility!=="hidden");controls.at(-1)?.focus()}return}
     pendingFocus.current=next;pendingLastControl.current=backwardTab;setFocus(next);
     const root=element.current;if(root){if(offsets[next]<root.scrollTop)root.scrollTop=offsets[next];else if(offsets[next+1]>root.scrollTop+root.clientHeight)root.scrollTop=offsets[next+1]-root.clientHeight}
   };
@@ -51,5 +57,5 @@ export function VirtualRows<T>({items,render,table=false,columns=1,enabled=items
   if(previous<offsets.at(-1)!)rows.push(gap(offsets.at(-1)!-previous,"tail"));
   const handlers={onKeyDown:keyboard,onFocusCapture:(event:React.FocusEvent<HTMLElement>)=>{const row=(event.target as HTMLElement).closest<HTMLElement>("[data-window-index]");if(row)setFocus(Number(row.dataset.windowIndex))},onBlurCapture:(event:React.FocusEvent<HTMLElement>)=>{if(!element.current?.contains(event.relatedTarget as Node|null))setFocus(null)}};
   if(table)return <tbody ref={node=>{element.current=node}} {...handlers}>{rows}</tbody>;
-  return <div data-virtual-rows ref={node=>{element.current=node}} {...handlers}>{rows}</div>;
+  return <div className={className} data-virtual-rows ref={node=>{element.current=node}} {...handlers}>{rows}</div>;
 }

@@ -4,6 +4,7 @@ import type {KoboResult} from './koboTypes';
 import type {Theme} from './types';
 import {KoboRenderScheduler} from './koboRenderScheduler';
 import './koboRendering.css';
+import {KoboChartSkeleton} from './KoboChartLoading';
 
 const SchedulerContext=createContext<KoboRenderScheduler|null>(null);
 const ThemeContext=createContext<Theme>('glass-light');
@@ -23,14 +24,16 @@ export const useKoboTheme=()=>useContext(ThemeContext);
 export function useScheduledKoboChart(enabled=true){
  const scheduler=useContext(SchedulerContext),host=useRef<HTMLDivElement>(null);
  const[active,setActive]=useState(false),[height,setHeight]=useState(0);
- useEffect(()=>{setActive(false);const node=host.current;if(!node||!enabled)return;if(!scheduler){const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){setActive(true);observer.disconnect()}},{rootMargin:'400px'});observer.observe(node);return()=>observer.disconnect()}return scheduler.register(node,'chart',setActive)},[scheduler,enabled]);
+ const[attempt,setAttempt]=useState(0);
+ useEffect(()=>{setActive(false);const node=host.current;if(!node||!enabled)return;if(!scheduler){const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){setActive(true);observer.disconnect()}},{rootMargin:'400px'});observer.observe(node);return()=>observer.disconnect()}return scheduler.register(node,'chart',setActive)},[scheduler,enabled,attempt]);
  useEffect(()=>{
-  const node=host.current;if(!node||!active)return;
+  const node=host.current?.querySelector('.kobo-chart-viewport');if(!node||!active)return;
   const observer=new ResizeObserver(entries=>{const next=entries[0]?.contentRect.height;if(next>0)setHeight(current=>Math.abs(current-next)>1?next:current)});
   observer.observe(node);return()=>observer.disconnect();
  },[active]);
  const complete=()=>{if(host.current)scheduler?.complete(host.current)};
- return{host,active,height,complete};
+ const retry=()=>{setActive(false);setAttempt(value=>value+1)};
+ return{host,active,height,complete,retry,attempt};
 }
 
 export function estimatedQuestionHeight(result:KoboResult,width:number,tableOnly=false){
@@ -51,6 +54,6 @@ export function KoboDeferredQuestion({question,eager=false,children,tableOnly=fa
  useLayoutEffect(()=>{const node=host.current;if(ready&&focusRequested.current){focusRequested.current=false;node?.querySelector<HTMLElement>('button,a,input')?.focus({preventScroll:true})}},[ready]);
  if(!scheduler)return <>{children}</>;
  return <div ref={host} className={`kobo-deferred-question${ready?' is-ready':''}`} style={{'--question-estimate':`${estimate}px`} as CSSProperties} tabIndex={ready?-1:0} aria-label={ready?undefined:question.label} onFocus={event=>{if(!ready&&event.target===event.currentTarget){focusRequested.current=true;setReady(true)}}} data-question-id={question.id}>
-  {ready?children:<div className="kobo-question-placeholder glass" style={{height:estimate}} aria-hidden="true"><span>{question.name}</span><strong>{question.label}</strong><div/></div>}
+  {ready?children:<div className="kobo-question-placeholder glass" style={{height:estimate}} aria-hidden="true"><span>{question.name}</span><strong>{question.label}</strong><div className={`kobo-question-skeleton-body${tableOnly?' is-table-only':''}`}><div className="kobo-skeleton-table">{Array.from({length:6},(_,i)=><i key={i}/>)}</div>{!tableOnly&&<KoboChartSkeleton height={Math.min(360,estimate-230)}/>}</div></div>}
  </div>;
 }

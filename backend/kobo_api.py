@@ -7,6 +7,7 @@ import uuid
 from typing import Any, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from .project_encryption import ExportProtection, ProjectProtectionError, protect_backup, unlock_backup, MAX_UPLOAD
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -191,7 +192,11 @@ class IndicatorRequest(BaseModel):
     indicator: IndicatorDefinition
 
 
+from .column_filters import ColumnFilter, model_record_page, indicator_record_frame, value_page
+
+
 class QualityRequest(BaseModel):
+    columnFilters: list[ColumnFilter] = Field(default_factory=list)
     settings: KoboSettings
     check: str = ''
     page: int = Field(1, ge=1)
@@ -204,6 +209,7 @@ class SavedViewApplyRequest(BaseModel):
 
 
 class IndicatorRecordsRequest(IndicatorRequest):
+    columnFilters: list[ColumnFilter] = Field(default_factory=list)
     status: Literal['all', 'complete', 'incomplete'] = 'all'
     page: int = Field(1, ge=1)
     pageSize: int = Field(25, ge=1, le=100)
@@ -229,10 +235,17 @@ class PreviewImportSettings(CheckImport):
 
 
 class ResponseRequest(AnalysisRequest):
+    columnFilters: list[ColumnFilter] = Field(default_factory=list)
     question: str
     search: str = ''
     page: int = Field(1, ge=1)
     pageSize: int = Field(50, ge=1, le=200)
+
+
+class ResponseValuesRequest(ResponseRequest):
+    column: str
+    valueSearch: str = ''
+    offset: int = Field(0, ge=0)
 
 
 class ExportRequest(AnalysisRequest):
@@ -258,7 +271,10 @@ class PivotDrilldown(BaseModel):
     breakdown: str | None = None
 
 
+
+
 class DataRequest(BaseModel):
+    columnFilters: list[ColumnFilter] = Field(default_factory=list)
     drilldown: PivotDrilldown | None = None
     settings: KoboSettings
     scope: str = ''
@@ -272,6 +288,24 @@ class DataRequest(BaseModel):
 
 class DataExportRequest(DataRequest):
     selectedIds: list[str] | None = None
+
+
+class DataValuesRequest(DataRequest):
+    column: str
+    valueSearch: str = ''
+    offset: int = Field(0, ge=0)
+
+
+class QualityValuesRequest(QualityRequest):
+    column: str
+    valueSearch: str = ''
+    offset: int = Field(0, ge=0)
+
+
+class IndicatorValuesRequest(IndicatorRecordsRequest):
+    column: str
+    valueSearch: str = ''
+    offset: int = Field(0, ge=0)
 
 
 def answer_examples(sheets, mappings, issues):
@@ -354,10 +388,14 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
     def projects(): return store.list()
 
     @router.post('/backups/restore', response_model=ProjectResponse)
-    async def restore_backup(file: UploadFile = File(...)):
-        from .kobo_workspace import MAX_BACKUP, read_backup
-        raw = await file.read(MAX_BACKUP + 1)
+    async def restore_backup(file: UploadFile = File(...), password: str | None = Form(None)):
+        from .kobo_workspace import read_backup
         try:
+            raw = await file.read(MAX_UPLOAD + 1)
+        finally:
+            await file.close()
+        try:
+            raw = await run_in_threadpool(unlock_backup, raw, password)
             name, payload, settings, form_raw, data_raw = await run_in_threadpool(read_backup, raw)
             if bool(payload.get('customConfig')) != (prefix == '/api/custom'):
                 raise ValueError('Choose a backup from this workspace.')
@@ -370,17 +408,32 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
                 raise ValueError('Duplicate question identifiers in backup.')
             filtered_records(payload, settings)
             return await run_in_threadpool(store.create, name, payload, form_raw, data_raw, settings)
+        except ProjectProtectionError as exc:
+            raise HTTPException(400, exc.detail) from None
         except (ValueError, KeyError, TypeError) as exc:
-            raise HTTPException(400, str(exc)) from exc
+            raise HTTPException(400, {'code': 'invalid_backup', 'message': str(exc)}) from None
 
     @router.get('/projects/{pid}/backup')
     def download_backup(pid: str):
+        return backup_response(pid)
+
+    @router.post('/projects/{pid}/backup')
+    def download_protected_backup(pid: str, body: ExportProtection):
+        return backup_response(pid, body.value())
+
+    def backup_response(pid, password=None):
         from .kobo_workspace import backup_project
         get(pid)
         try:
-            return Response(backup_project(store, pid), media_type='application/zip', headers={'Content-Disposition': 'attachment; filename="project.kobo-backup.zip"'})
+            raw = protect_backup(backup_project(store, pid), password)
+            extension = 'intersos' if password is not None else 'zip'
+            workspace = 'custom' if prefix == '/api/custom' else 'kobo'
+            return Response(raw, media_type='application/octet-stream' if password is not None else 'application/zip', headers={
+                'Content-Disposition': f'attachment; filename="project.{workspace}-backup.{extension}"', 'Cache-Control': 'no-store'})
+        except ProjectProtectionError as exc:
+            raise HTTPException(400, exc.detail) from None
         except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
+            raise HTTPException(400, {'code': 'invalid_backup', 'message': str(exc)}) from None
 
     @router.post('/projects/{pid}/geography')
     def geographic_analysis(pid: str, body: dict):
@@ -600,7 +653,7 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
         try:
             form = effective_form(item['form'], body.reviewConfig.model_dump(), item['sheets'])
             records, _ = normalize(form, item['sheets'], mapping_payload(item, body.mappings, body.reviewConfig.model_dump()), body.policies)
-            defaults = new_project_settings(form)
+            defaults = new_project_settings(form, records)
             return preview_settings({'form': form, 'records': records}, defaults, body.package)
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
@@ -640,7 +693,7 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
         initial_settings = None
         if body.settingsPackage is not None:
             if item.get('projectId'): raise HTTPException(400, 'Import shared settings from the project Settings menu after reviewing your data.')
-            defaults = new_project_settings(form)
+            defaults = new_project_settings(form, records)
             try: initial_settings = KoboSettings.model_validate(preview_settings(payload, defaults, body.settingsPackage)['settings'])
             except ValueError as exc: raise HTTPException(400, str(exc)) from exc
         try:
@@ -666,8 +719,19 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
 
     @router.post('/projects/{pid}/quality-review', response_model=QualityResult)
     def review_quality(pid: str, body: QualityRequest):
-        try: return quality_review(get(pid), body.settings, check_id=body.check, page=body.page, page_size=body.pageSize)
+        try:
+            result = quality_review(get(pid), body.settings, check_id=body.check, page=1 if body.columnFilters else body.page, page_size=10**9 if body.columnFilters else body.pageSize)
+            return model_record_page(result,body.columnFilters,body.page,body.pageSize)
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
+    @router.post('/projects/{pid}/quality-review/values')
+    def quality_values(pid: str, body: QualityValuesRequest):
+        import pandas as pd
+        try:
+            result = quality_review(get(pid),body.settings,check_id=body.check,page=1,page_size=10**9)
+            frame = pd.DataFrame([row.model_dump() for row in result.rows],columns=['row','scope','answer','reason'])
+            return value_page(frame,body.column,body.columnFilters,body.valueSearch,body.offset)
+        except ValueError as exc: raise HTTPException(400,str(exc)) from exc
 
     @router.post('/projects/{pid}/indicators/results', response_model=list[IndicatorResult])
     def indicator_results(pid: str, body: AnalysisRequest):
@@ -690,8 +754,17 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
 
     @router.post('/projects/{pid}/indicators/records', response_model=IndicatorResult)
     def indicator_records(pid: str, body: IndicatorRecordsRequest):
-        try: return calculate_indicator(get(pid), body.settings, body.indicator, status=body.status, page=body.page, page_size=body.pageSize)
+        try:
+            result = calculate_indicator(get(pid),body.settings,body.indicator,status=body.status,page=1 if body.columnFilters else body.page,page_size=10**9 if body.columnFilters else body.pageSize)
+            return model_record_page(result,body.columnFilters,body.page,body.pageSize,indicator_record_frame(result))
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
+    @router.post('/projects/{pid}/indicators/records/values')
+    def indicator_values(pid: str, body: IndicatorValuesRequest):
+        try:
+            result = calculate_indicator(get(pid),body.settings,body.indicator,status=body.status,page=1,page_size=10**9)
+            return value_page(indicator_record_frame(result),body.column,body.columnFilters,body.valueSearch,body.offset)
+        except ValueError as exc: raise HTTPException(400,str(exc)) from exc
 
     @router.post('/projects/{pid}/analysis', response_model=AnalysisResponse)
     def analysis(pid: str, body: AnalysisRequest):
@@ -710,8 +783,7 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
             return question_result(question, records, body.settings, questions, lookup)
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
-    @router.post('/projects/{pid}/responses')
-    def responses(pid: str, body: ResponseRequest):
+    def response_rows(pid, body):
         p = get(pid)
         q = next((q for q in p['form']['questions'] if q['id'] == body.question), None)
         if not q: raise HTTPException(404, 'Question not found.')
@@ -726,24 +798,60 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
             values = value if isinstance(value, list) else [value]
             searchable = str(value) + ' ' + ' '.join(captions.get(str(item), str(item)) for item in values)
             if query in searchable.casefold(): rows.append({'id': record['id'], 'row': record['row'], 'value': value})
-        start = (body.page - 1) * body.pageSize
-        return {'total': len(rows), 'rows': rows[start:start + body.pageSize]}
+        def answer(value):
+            return ', '.join(captions.get(str(item),str(item)) for item in value) if isinstance(value,list) else captions.get(str(value),str(value))
+        import pandas as pd
+        frame = pd.DataFrame([{'row':row['row'],'answer':answer(row['value'])} for row in rows],columns=['row','answer'])
+        return rows, frame
+
+    @router.post('/projects/{pid}/responses')
+    def responses(pid: str, body: ResponseRequest):
+        from .column_filters import apply_column_filters
+        rows, frame = response_rows(pid,body)
+        try: indexes=apply_column_filters(frame,body.columnFilters).index
+        except ValueError as exc: raise HTTPException(400,str(exc)) from exc
+        start=(body.page-1)*body.pageSize
+        return {'total':len(indexes),'rows':[rows[index] for index in indexes[start:start+body.pageSize]]}
+
+    @router.post('/projects/{pid}/responses/values')
+    def response_values(pid: str, body: ResponseValuesRequest):
+        _, frame = response_rows(pid,body)
+        try: return value_page(frame,body.column,body.columnFilters,body.valueSearch,body.offset)
+        except ValueError as exc: raise HTTPException(400,str(exc)) from exc
 
     @router.post('/projects/{pid}/data')
     def data(pid: str, body: DataRequest):
         from .kobo_data import data_page
         try:
-            return data_page(get(pid), body.settings, body.scope, body.columns, body.search, body.sortColumn, body.sortDirection, body.page, body.pageSize, drilldown=body.drilldown.model_dump() if body.drilldown else None)
+            return data_page(get(pid), body.settings, body.scope, body.columns, body.search, body.sortColumn, body.sortDirection, body.page, body.pageSize, drilldown=body.drilldown.model_dump() if body.drilldown else None, column_filters=body.columnFilters)
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
     @router.post('/projects/{pid}/data/export')
     def export_data(pid: str, body: DataExportRequest):
         from .kobo_data import data_workbook
         try:
-            content = data_workbook(get(pid), body.settings, body.scope, body.columns, body.search, body.sortColumn, body.sortDirection, body.selectedIds, drilldown=body.drilldown.model_dump() if body.drilldown else None)
+            content = data_workbook(get(pid), body.settings, body.scope, body.columns, body.search, body.sortColumn, body.sortDirection, body.selectedIds, drilldown=body.drilldown.model_dump() if body.drilldown else None, column_filters=body.columnFilters)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return Response(content, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={'Content-Disposition': 'attachment; filename="kobo-response-data.xlsx"'})
+
+    @router.post('/projects/{pid}/data/values')
+    def data_values(pid: str, body: DataValuesRequest):
+        import pandas as pd
+        from .kobo_data import data_rows
+        from .column_filters import value_page
+        try:
+            project = get(pid)
+            result = data_rows(project,body.settings,body.scope,body.columns,body.search,drilldown=body.drilldown.model_dump() if body.drilldown else None)
+            frame = pd.DataFrame([{'__row__':row['row'],**row['values']} for row in result['rows']],columns=['__row__',*body.columns])
+            result = value_page(frame,body.column,body.columnFilters,body.valueSearch,body.offset)
+            question = next((q for q in project['form']['questions'] if q['id']==body.column), {})
+            kind='number' if body.column=='__row__' or question.get('kind')=='number' else 'date' if question.get('kind')=='date' else 'text'
+            import re
+            identifier=bool(re.search(r'\b(id|identifier|phone|code)\b',re.sub(r'[_/]+',' ',question.get('name','')),re.I))
+            result['type']='text' if identifier else kind
+            return result
+        except ValueError as exc: raise HTTPException(400,str(exc)) from exc
 
     @router.get('/projects/{pid}/filter-options/{question:path}')
     def filter_options(pid: str, question: str):

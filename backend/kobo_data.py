@@ -32,7 +32,7 @@ def pivot_records(project, settings, scope, records, selection):
     return selected
 
 
-def data_rows(project, settings, scope, columns, search='', sort_column='', direction='asc', drilldown=None):
+def data_rows(project, settings, scope, columns, search='', sort_column='', direction='asc', drilldown=None, column_filters=None):
     questions = {q['id']: q for q in project['form']['questions'] if q['repeat'] == scope}
     if scope and not questions:
         raise ValueError('Response table not found.')
@@ -79,16 +79,22 @@ def data_rows(project, settings, scope, columns, search='', sort_column='', dire
                 return (1, item[1]['values'][sort_column].casefold())
             filled.sort(key=sort_key, reverse=direction == 'desc')
             rows = filled + blank
+    if column_filters:
+        import pandas as pd
+        from .column_filters import apply_column_filters
+        frame = pd.DataFrame([{'__row__':item[1]['row'], **item[1]['values']} for item in rows], columns=['__row__', *columns])
+        indexes = apply_column_filters(frame, column_filters).index
+        rows = [rows[index] for index in indexes]
     return {'total': len(records), 'matched': len(rows), 'rows': [item[1] for item in rows]}
 
 
-def data_page(project, settings, scope, columns, search='', sort_column='', direction='asc', page=1, page_size=50, drilldown=None):
-    result = data_rows(project, settings, scope, columns, search, sort_column, direction, drilldown)
+def data_page(project, settings, scope, columns, search='', sort_column='', direction='asc', page=1, page_size=50, drilldown=None, column_filters=None):
+    result = data_rows(project, settings, scope, columns, search, sort_column, direction, drilldown, column_filters)
     start = (page - 1) * page_size
     return {**result, 'rows': result['rows'][start:start + page_size]}
 
 
-def data_workbook(project, settings, scope, columns, search='', sort_column='', direction='asc', selected_ids=None, drilldown=None):
+def data_workbook(project, settings, scope, columns, search='', sort_column='', direction='asc', selected_ids=None, drilldown=None, column_filters=None):
     from collections import Counter
     from io import BytesIO
     from openpyxl import Workbook
@@ -96,7 +102,7 @@ def data_workbook(project, settings, scope, columns, search='', sort_column='', 
     from openpyxl.styles import Alignment, Font, PatternFill
 
     columns = list(dict.fromkeys(columns))
-    result = data_rows(project, settings, scope, columns, search, sort_column, direction, drilldown)
+    result = data_rows(project, settings, scope, columns, search, sort_column, direction, drilldown, None if selected_ids is not None else column_filters)
     selected = None if selected_ids is None else set(selected_ids)
     questions = {q['id']: q for q in project['form']['questions']}
     labels = [label(questions[qid], settings.language) for qid in columns]

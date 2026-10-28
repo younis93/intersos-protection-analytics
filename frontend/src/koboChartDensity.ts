@@ -34,6 +34,16 @@ export function koboScreenChartRows(result:KoboResult){
  return result.rows.filter(row=>row.id!=='__blank__').slice().sort((a,b)=>b.count-a.count||(a.id<b.id?-1:a.id>b.id?1:0));
 }
 
+/** Bound a single live plot as well as the number of cached plots. Exports use the full result. */
+export function koboScreenChartPage(result:KoboResult,rows:KoboResult['rows'],requestedPage=0){
+ const pageSize=Math.max(1,Math.min(100,Math.floor(1000/Math.max(1,result.breakdowns.length))));
+ const paged=!result.trend&&rows.length>pageSize;
+ const pages=paged?Math.ceil(rows.length/pageSize):1;
+ const page=Math.max(0,Math.min(pages-1,requestedPage));
+ const start=paged?page*pageSize:0,end=paged?Math.min(rows.length,start+pageSize):rows.length;
+ return{result:paged?{...result,chart:isDenseKoboChart(result)?'bar':readableKoboChartType(result),rows:rows.slice(start,end)}:result,paged,page,pages,start,end,total:rows.length};
+}
+
 /** Bound printed panels so labels stay legible after proportional page placement. */
 export function koboPdfChartPanels(result:KoboResult){
  if(result.chart==='line'&&result.trend)return [result as KoboChartPanel];

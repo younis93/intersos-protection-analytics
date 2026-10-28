@@ -54,4 +54,34 @@ describe('Kobo rendering scheduler',()=>{
   scheduler.register(element(first),'chart',a);scheduler.register(element(second),'chart',b);near([first,second]);tick();scheduler.complete(element(first));tick();
   expect(a).toHaveBeenCalledTimes(1);expect(b).not.toHaveBeenCalled();expect(tasks.size).toBe(0);scheduler.dispose();
  });
+ it('keeps a bounded cache while visiting 100 charts and reactivates an evicted chart',()=>{
+  const scheduler=new KoboRenderScheduler(),nodes=Array.from({length:100},()=>node(5000));
+  const mounted=new Set<number>();let peak=0;
+  nodes.forEach((target,index)=>scheduler.register(element(target),'chart',active=>{if(active)mounted.add(index);else mounted.delete(index);peak=Math.max(peak,mounted.size)}));
+  nodes.forEach((target,index)=>{
+   if(index){nodes[index-1].top=5000;near([nodes[index-1]],false)}
+   target.top=100;near([target]);tick();scheduler.complete(element(target));
+   expect(mounted.has(index)).toBe(true);
+  });
+  expect(peak).toBe(8);expect(mounted.has(0)).toBe(false);
+  nodes[99].top=5000;near([nodes[99]],false);nodes[0].top=100;near([nodes[0]]);tick();
+  expect(mounted.has(0)).toBe(true);expect(mounted.size).toBe(8);scheduler.dispose();
+ });
+ it('releases a failed chart immediately and allows it to re-register for retry',()=>{
+  const scheduler=new KoboRenderScheduler(),first=node(100),second=node(1200),a=vi.fn(),b=vi.fn();
+  const unregister=scheduler.register(element(first),'chart',a);scheduler.register(element(second),'chart',b);
+  near([first,second]);tick();scheduler.complete(element(first));tick();
+  expect(b).toHaveBeenCalledExactlyOnceWith(true);scheduler.complete(element(second));
+  unregister();scheduler.register(element(first),'chart',a);near([first]);tick();
+  expect(a).toHaveBeenCalledTimes(2);scheduler.dispose();
+ });
+ it('recovers the queue if a chart never calls its completion handler',()=>{
+  vi.useFakeTimers();
+  try{
+   const scheduler=new KoboRenderScheduler(),first=node(100),second=node(1200),b=vi.fn();
+   scheduler.register(element(first),'chart',vi.fn());scheduler.register(element(second),'chart',b);
+   near([first,second]);tick();expect(b).not.toHaveBeenCalled();vi.advanceTimersByTime(5000);tick();
+   expect(b).toHaveBeenCalledExactlyOnceWith(true);scheduler.dispose();
+  }finally{vi.useRealTimers()}
+ });
 });

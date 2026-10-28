@@ -4,6 +4,30 @@ from backend.test_kobo import sample, workbook
 from backend.test_kobo_preview import preview_client
 
 
+def test_large_text_defaults_and_explicit_selection_survive_reopen_and_repair(preview_client):
+    from backend.kobo import new_project_settings
+    client, store, _ = preview_client
+    form = workbook({'survey': [['type', 'name', 'label'], ['text', 'comment', 'Comment'], ['text', 'code', 'Code'], ['integer', 'amount', 'Amount'], ['date', 'day', 'Day']]})
+    raw = ('comment,code,amount,day\n' + '\n'.join(f'Response {i},Same,{i},2026-01-01' for i in range(101))).encode()
+    staged = client.post('/api/kobo/imports/preview', files={'form': ('form.xlsx', form), 'data': ('data.csv', raw)})
+    assert staged.status_code == 200, staged.text
+    p = staged.json()
+    saved = client.post('/api/kobo/imports/confirm', json={'token': p['token'], 'name': 'Large text', 'mappings': p['mappings']})
+    assert saved.status_code == 200, saved.text
+    project = saved.json()
+    assert project['settings']['hidden'] == ['comment']
+    stored = store.get(project['id'])
+    assert not new_project_settings(stored['form'], stored['records'][:100]).hidden
+    settings = KoboSettings.model_validate(project['settings'])
+    settings.hidden = ['code']  # Explicitly include the large field and hide a different field.
+    store.save(project['id'], settings)
+    assert store.get(project['id'])['settings']['hidden'] == ['code']
+    repaired = store.repair(project['id'], {k: v for k, v in stored.items() if k not in {'id', 'name', 'settings', 'updated'}}, form, raw)
+    assert repaired['settings']['hidden'] == ['code']
+    explicit = store.create('Explicit settings', stored, form, raw, settings=KoboSettings())
+    assert explicit['settings']['hidden'] == []
+
+
 def staged_import(client):
     form = workbook({'survey': [['type', 'name', 'label'], ['begin_group', 'group', 'Group'], ['select_one g', 'gender', 'Gender'], ['end_group', '', '']],
         'choices': [['list_name', 'name', 'label'], ['g', 'f', 'Female'], ['g', 'm', 'Male']]})

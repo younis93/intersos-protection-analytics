@@ -198,7 +198,10 @@ def _style_pivot(pivot, report, result, totals=None):
         answer_code = next((row['id'] for row in result['rows'] if row['id'] != '__blank__'), '__blank__')
         denominator = pivot_value(totals, 'Answered total', answer_code, parts, result) if totals is not None else answered_formula(result['id'], answer_code, parts, indirect=True)[1:]
         formula = f'=OR($A{body.Row}={excel_literal(blank_label)},{denominator}=0)'
-        condition = target.FormatConditions.Add(2, Formula1=formula); condition.NumberFormat = '"-"'
+        # Excel's COM dispatch can reject an omitted Operator even for
+        # xlExpression (2), where Excel ignores the operator's value.
+        condition = target.FormatConditions.Add(2, 0, formula)
+        condition.NumberFormat = '"-"'
     return area
 
 

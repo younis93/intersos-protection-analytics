@@ -23,7 +23,6 @@ export default function KoboProjects({projects,onCreate,onRename,onDelete,header
   {onImported&&projectImport.fileInput}
   <section className="kobo-page-heading kobo-projects-heading"><div><span className="eyebrow">{custom?'CUSTOM ANALYSIS':'SURVEY ANALYSIS'}</span><h1>{custom?'Your Custom Analysis projects':'Your Kobo projects'}</h1></div><div className={`sample-project-actions kobo-project-header-actions${headerAction||onImported?' has-restore':''}`}>{!custom&&<button type="button" className="soft sample-calculator-button" onClick={()=>setCalculatorOpen(true)}><SampleCalculatorIcon/>Sample size calculator</button>}{headerAction??importButton()}<button type="button" className="primary" onClick={onCreate}><Plus/> New project</button></div></section>
   {headerFeedback}
-  {projectImport.error&&<p role="alert" className="error kobo-project-restore-error">{projectImport.error}</p>}
   {!custom&&calculatorOpen&&<SampleSizeCalculator onClose={()=>setCalculatorOpen(false)}/>}
   {!!projects.length&&<section ref={toolbar} className="glass kobo-project-toolbar" aria-label="Project search and sorting">
    <SearchField label="Search projects" placeholder="Search projects by name…" value={search} onChange={setSearch} clearable/>

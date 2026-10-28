@@ -1,6 +1,8 @@
 import './recordsTable.css';
 import {ChevronLeft,ChevronRight,Search,X} from 'lucide-react';
 import {useLayoutEffect,useRef,type ComponentPropsWithoutRef,type ReactNode} from 'react';
+import {FilterableHeader,type RecordFilterControl} from './ColumnFilterControls';
+import type {FilterColumn} from './columnFilters';
 
 /** Shared search field used by record tables and project collections. */
 export function SearchField({value,onChange,label,placeholder=label,clearable=false}:{value:string;onChange:(value:string)=>void;label:string;placeholder?:string;clearable?:boolean}){
@@ -17,8 +19,9 @@ export function Pager({page,total,onChange,compact=false,iconOnly=false,pageSize
   return <div className={`legal-pager ${compact?'legal-pager-compact':''}`}><button className="soft" disabled={page<=1} onClick={previous} aria-label="Previous page" title="Previous page">{compact||iconOnly?<ChevronLeft/>:'Previous'}</button><span>Page {page} of {pages}</span><button className="soft" disabled={page>=pages} onClick={next} aria-label="Next page" title="Next page">{compact||iconOnly?<ChevronRight/>:'Next'}</button></div>;
 }
 
-export function SortableHeader({direction,onSort,children,buttonProps,...props}:ComponentPropsWithoutRef<'th'>&{direction?:'asc'|'desc';onSort:()=>void;buttonProps?:ComponentPropsWithoutRef<'button'>}){
-  return <th {...props} aria-sort={direction==='asc'?'ascending':direction==='desc'?'descending':'none'}><button {...buttonProps} onClick={onSort}>{children}</button></th>;
+export function SortableHeader({direction,onSort,children,buttonProps,filterControl,filterColumn,...props}:ComponentPropsWithoutRef<'th'>&{direction?:'asc'|'desc';onSort:()=>void;buttonProps?:ComponentPropsWithoutRef<'button'>;filterControl?:RecordFilterControl;filterColumn?:FilterColumn}){
+  const button=<button {...buttonProps} onClick={onSort}>{children}</button>;
+  return <th {...props} aria-sort={direction==='asc'?'ascending':direction==='desc'?'descending':'none'}>{filterControl&&filterColumn?<FilterableHeader column={filterColumn} control={filterControl}>{button}</FilterableHeader>:button}</th>;
 }
 
 export function RowSelectionCheckbox({selectedCount,total,onChange,label,disabled=false}:{selectedCount:number;total:number;onChange:(checked:boolean)=>void;label:string;disabled?:boolean}){

@@ -1,9 +1,23 @@
 import {describe,it,expect} from 'vitest';
-import {koboChartRows,koboScreenChartRows,isDenseKoboChart,koboPdfChartKey,koboPdfChartPanels,readableKoboChartType} from './koboChartDensity';
+import {koboChartRows,koboScreenChartRows,koboScreenChartPage,isDenseKoboChart,koboPdfChartKey,koboPdfChartPanels,readableKoboChartType} from './koboChartDensity';
 import {chartSpec} from './koboChartSpec';
 import type {KoboResult} from './koboTypes';
 const fixture=(count=24,series=2):KoboResult=>({id:'q',name:'q',label:'District',group:'',repeat:'',kind:'category',denominator:268,missing:0,total:268,statistics:{},percentageBasis:'Answered',colors:{},chart:'column',breakdowns:Array.from({length:series},(_,i)=>({id:`s${i}`,label:`Series ${i}`,denominator:134})),rows:Array.from({length:count},(_,i)=>({id:`r${i}`,label:`District ${i} - a long category name that must remain separate from its bars`,count:i+1,percent:50,series:Array.from({length:series},(_,j)=>({id:`s${j}`,count:i+j+1,percent:(i+j+1)/134*100}))}))});
 describe('crowded chart presentation',()=>{
+ it('bounds a 25,000-answer field without dropping answers or changing the source',()=>{
+  const source=fixture(25000,0),ordered=koboScreenChartRows(source),ids:string[]=[];
+  for(let index=0;index<250;index++){
+   const view=koboScreenChartPage(source,ordered,index);expect(view.result.rows).toHaveLength(100);ids.push(...view.result.rows.map(row=>row.id));
+  }
+  expect(ids).toEqual(ordered.map(row=>row.id));expect(new Set(ids).size).toBe(25000);expect(source.rows[0].id).toBe('r0');
+  const spec=chartSpec(koboScreenChartPage(source,ordered).result,'en');expect((spec.data[0] as any).y).toHaveLength(100);expect(spec.layout.height).toBeLessThan(20000);
+ });
+ it('bounds grouped marks, clamps a last page, and leaves chronological trends intact',()=>{
+  const source=fixture(251,20),ordered=koboScreenChartRows(source),view=koboScreenChartPage(source,ordered,999);
+  expect(view.result.rows.length*20).toBeLessThanOrEqual(1000);expect(view.end).toBe(251);expect(view.page).toBe(view.pages-1);
+  const trend={...source,trend:{dateField:'d',unit:'month' as const,excluded:0,periods:[],denominators:[],series:[]}};
+  expect(koboScreenChartPage(trend,ordered).result).toBe(trend);
+ });
  it('shows every nonzero grouped value in screen and image output',()=>{const result=fixture();for(const exporting of [false,true]){const spec=chartSpec(result,'en',exporting);expect(readableKoboChartType(result,exporting)).toBe('bar');expect(spec.data).toHaveLength(2);for(const trace of spec.data)expect((trace as {text:string[]}).text.filter(Boolean)).toHaveLength(24);expect(spec.layout.yaxis?.tickvals).toHaveLength(24)}});
  it('reserves a full category-label gutter and grows height even if a small height was selected',()=>{const spec=chartSpec({...fixture(),appearance:{height:320}},'en',true);expect(spec.layout.margin?.l).toBeGreaterThan(350);expect(spec.layout.height).toBeGreaterThan(1500);const band=(Number(spec.layout.height)-Number(spec.layout.margin?.t)-Number(spec.layout.margin?.b))/24;expect(band).toBeGreaterThan(2*32.2*1.3)});
  it('splits PDF comparisons without dropping, repeating, or changing categories or values',()=>{const result=fixture(25,2),panels=koboPdfChartPanels(result);expect(panels.map(panel=>panel.rows.length)).toEqual([7,6,6,6]);expect(panels.flatMap(panel=>panel.rows)).toEqual(result.rows);expect(panels.every(panel=>panel.chart==='bar')).toBe(true);expect(new Set(panels.map(koboPdfChartKey)).size).toBe(panels.length);expect(result.chart).toBe('column')});

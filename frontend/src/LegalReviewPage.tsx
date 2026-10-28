@@ -1,3 +1,8 @@
+import {TableResetButton} from './TableSelectionActions';
+import {ColumnFilterChips,localValueLoader,useColumnFilters,type RecordFilterControl} from './ColumnFilterControls';
+import {filterRecords} from './columnFilters';
+import {reviewFilterValue} from './reviewColumnFilters';
+import {exportTableWorkbook} from './api';
 import {AwarenessIdButton} from './DeportationCaseModal';
 import {AnimatedActionIcon} from './AnimatedActionIcon';
 
@@ -196,6 +201,7 @@ export function FindingTable({
     [helpOpen, setHelpOpen] = useState(false),
     [error, setError] = useState(""),
     [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const [columnFilters,setColumnFilters]=useColumnFilters(JSON.stringify([dataset,rule,findingRevision]));
   const page=1;
   useEffect(() => {
     const controller = new AbortController();
@@ -229,7 +235,9 @@ export function FindingTable({
     try{await navigator.clipboard.writeText(name)}catch{const field=document.createElement("textarea");field.value=name;field.style.position="fixed";field.style.opacity="0";document.body.appendChild(field);field.select();document.execCommand("copy");field.remove()}
     announceLegalCopy(name);
   };
-  const visibleRows=(result?.rows||[]).filter((row)=>(!ignoreCourtVerdict || !/court verdict|\bother\b|اخرى/i.test(row.typeOfDocument||"")) && (closureRequestGroup === undefined || ((row.requestForClosedStatus || "").trim().toLowerCase() === "yes") === closureRequestGroup));
+  const sourceRows=(result?.rows||[]).filter((row)=>(!ignoreCourtVerdict || !/court verdict|\bother\b|اخرى/i.test(row.typeOfDocument||"")) && (closureRequestGroup === undefined || ((row.requestForClosedStatus || "").trim().toLowerCase() === "yes") === closureRequestGroup));
+  const visibleRows=filterRecords(sourceRows,columnFilters,reviewFilterValue);
+  const recordFilterControl:RecordFilterControl={showClearAll:false,filters:columnFilters,onChange:setColumnFilters,loadValues:localValueLoader(sourceRows,columnFilters,reviewFilterValue)};
   const tableTitle = closureRequestGroup === undefined ? displayReviewRule(rule) : closureRequestGroup ? "Open assessment with all services closed (Closure requested by lawyer)" : "Open assessment with all services closed (Closure not requested by lawyer)";
   const tableGroups = [{title: "", rows: visibleRows.map((row, index) => ({row, index}))}];
   const rowKey = (row: LegalFlag, index: number) => dataset === "legalhotlines" ? row.hotlineId || row.recordId : `${row.recordId || row.row}|${row.caseId}|${row.assessmentId}|${row.serviceId}|${row.awarenessId}|${index}`;
@@ -238,7 +246,7 @@ export function FindingTable({
   const selectedRows = visibleRows.filter((row, index) => isExcludable(row) && selectedRowKeys.includes(rowKey(row, index)));
   useEffect(() => {
     setSelectedRowKeys([]);
-  }, [dataset, rule, search, page, filters, fieldFilters, comparisonMonth, nameCompareChars, allowNameVariations, exactMatchesOnly, findingRevision, ignoreCourtVerdict]);
+  }, [dataset, rule, search, page, filters, fieldFilters, comparisonMonth, nameCompareChars, allowNameVariations, exactMatchesOnly, findingRevision, ignoreCourtVerdict,columnFilters]);
   const hotlineSourceColumns = dataset === "legalhotlines" ? Object.keys(result?.rows[0]?.sourceFields || {}) : [];
   const tableHeaders = reviewTableCells(<>
     <th className="review-selection-column"><RowSelectionCheckbox label={`Select visible records for ${displayReviewRule(rule)}`} total={excludableRows.length} selectedCount={selectedRows.length} disabled={!excludableRows.length} onChange={checked=>setSelectedRowKeys(checked?visibleRows.map((row,index)=>isExcludable(row)?rowKey(row,index):'').filter(Boolean):[])}/></th>
@@ -264,6 +272,7 @@ export function FindingTable({
     <th></th>
   </>);
   const columnLabels = tableHeaders.map((header) => isValidElement<{children?: ReactNode}>(header) && typeof header.props.children === "string" ? header.props.children : "");
+  recordFilterControl.columns=columnLabels.map(label=>({key:label,label,type:/date|created on/i.test(label)?'date':/^(current age|spouse current age|linked services|amount spent)/i.test(label)?'number':'text'}));
   const columnOrder = reviewColumnIndices(dataset, rule, columnLabels, REVIEW_CHECK_METHODS[rule]?.columns || []);
   const cellsForRow = (r: LegalFlag, i: number) => reviewTableCells(<>
       <td className="review-selection-column"><input aria-label={`Select ${r.name || r.caseId || r.assessmentId || r.serviceId || r.awarenessId || "record"}`} type="checkbox" disabled={!isExcludable(r)} checked={selectedRowKeys.includes(rowKey(r, i))} onChange={() => setSelectedRowKeys((current) => current.includes(rowKey(r, i)) ? current.filter((key) => key !== rowKey(r, i)) : [...current, rowKey(r, i)])} /></td>
@@ -314,6 +323,7 @@ export function FindingTable({
   </>);
   return (
     <section className="glass finding-table-section">
+      {visibleRows.length===0&&<ColumnFilterChips control={recordFilterControl}/>}
       <header>
         <div className="finding-title-wrap">
           <button className="finding-help-button" type="button" aria-label={`How to check ${rule}`} title="How to check" aria-expanded={helpOpen} onClick={() => setHelpOpen((current) => !current)}><CircleHelp /></button>
@@ -349,6 +359,8 @@ export function FindingTable({
             </label>
           )}
           {(rule === "Duplicate service" || rule === "Duplicate service without Assessment ID") && <label className="exact-match-filter"><input type="checkbox" checked={ignoreCourtVerdict} onChange={(event)=>onIgnoreCourtVerdictChange(event.target.checked)}/><span>Ignore Court Verdict and Other</span></label>}
+          <TableResetButton iconOnly disabled={!columnFilters.length&&!selectedRowKeys.length} onReset={()=>{setColumnFilters([]);setSelectedRowKeys([])}}/>
+          <button type="button" className="soft" disabled={!visibleRows.length} onClick={()=>void exportTableWorkbook(`${dataset}-filtered-findings.xlsx`,columnOrder.map(index=>columnLabels[index]).filter(Boolean),visibleRows.map(row=>Object.fromEntries(columnOrder.map(index=>columnLabels[index]).filter(Boolean).map(label=>[label,reviewFilterValue(row,label)])))).catch(reason=>setError(reason.message))}>Excel</button>
           <div className="indicator-total-block finding-total">
             <strong>{visibleRows.length.toLocaleString()}</strong>
             <span>Total</span>
@@ -358,7 +370,6 @@ export function FindingTable({
       {selectedRows.length > 0 && (
         <div className="review-bulk-action-bar" role="status">
           <span><b>{selectedRows.length}</b> selected</span>
-          <button className="soft" onClick={() => setSelectedRowKeys([])}>Clear selection</button>
           <button className="review-bulk-exclude" onClick={() => onBulkExclude(selectedRows)}><Ban /> Exclude selected</button>
         </div>
       )}
@@ -381,7 +392,7 @@ export function FindingTable({
             {group.title && <header><h4>{group.title}</h4><p>{group.rows.length.toLocaleString()} records</p></header>}
             {group.rows.length === 0 ? <div className="review-clear compact">No matching records</div> : <>
           <div className="legal-table-wrap">
-            <ValueTable>
+            <ValueTable recordFilters={recordFilterControl}>
               <thead>
                 <tr>
                   {columnOrder.map((index) => <Fragment key={index}>{tableHeaders[index]}</Fragment>)}
@@ -531,7 +542,11 @@ export function ReviewPageBody({
   useEffect(() => {
     if (amalProjectOnly) setSelectedRules((current) => current.filter((rule) => !AMAL_HIDDEN_ASSESSMENT_RULES.has(rule)));
   }, [amalProjectOnly]);
-  const sortedExcludedFindings = [...visibleExcludedFindings].sort((left,right) => {
+  const [exclusionColumnFilters,setExclusionColumnFilters]=useColumnFilters(`excluded-${dataset}`);
+  const exclusionFilterValue=(entry:DuplicateExclusion,key:string)=>key==='identifier'?entry.identifierValue||entry.caseId:key==='status'?entry.pendingRecheck?'Recheck':'Excluded':entry[key as keyof DuplicateExclusion];
+  const exclusionFilterColumns=[{key:'',label:''},...Object.entries({rule:'Finding',identifier:'Identifier',name:'Name',project:'Project',excludedAt:'Date excluded',source:'Source context',status:'Status'}).map(([key,label])=>({key,label,type:(key==='excludedAt'?'date':'text') as 'date'|'text'})),{key:'',label:''}];
+  const exclusionFilterControl={filters:exclusionColumnFilters,onChange:setExclusionColumnFilters,columns:exclusionFilterColumns,loadValues:localValueLoader(visibleExcludedFindings,exclusionColumnFilters,exclusionFilterValue)};
+  const sortedExcludedFindings = filterRecords(visibleExcludedFindings,exclusionColumnFilters,exclusionFilterValue).sort((left,right) => {
     const value=(entry:DuplicateExclusion) => exclusionSort.key === "identifier" ? entry.identifierValue || entry.caseId : exclusionSort.key === "page" ? entry.dataset || "beneficiaries" : String(entry[exclusionSort.key as keyof DuplicateExclusion] || "");
     const result=value(left).localeCompare(value(right),undefined,{numeric:true,sensitivity:"base"}); return exclusionSort.direction === "asc" ? result : -result;
   });
@@ -735,7 +750,7 @@ export function ReviewPageBody({
               <button className="soft" disabled={!selectedExcludedFindings.length || exclusionBusy} onClick={() => setRestoreConfirmation(sortedExcludedFindings.filter((entry) => selectedExcludedFindings.includes(exclusionKey(entry))))}>Restore selected ({selectedExcludedFindings.length})</button>
               <ExcelDownloadButton className="primary excluded-findings-excel" onClick={()=>downloadExcelUrl(duplicateExclusionsExportUrl(),"excluded-findings.xlsx")}>Excel</ExcelDownloadButton>
             </div>
-            <div className="legal-table-wrap"><ValueTable className="excluded-findings-table"><thead><tr><th><input aria-label="Select all excluded findings" type="checkbox" checked={sortedExcludedFindings.length>0 && sortedExcludedFindings.every((entry)=>selectedExcludedFindings.includes(exclusionKey(entry)))} onChange={(event) => setSelectedExcludedFindings(event.target.checked ? sortedExcludedFindings.map(exclusionKey) : [])} /></th>{[["rule","Finding"],["identifier","Identifier"],["name","Name"],["project","Project"],["excludedAt","Date excluded"],["source","Source context"]].map(([key,label]) => <th key={key}><button onClick={() => toggleExclusionSort(key)}>{label}{exclusionSort.key === key ? exclusionSort.direction === "asc" ? " ▲" : " ▼" : " ↕"}</button></th>)}<th>Status</th><th></th></tr></thead><tbody>{sortedExcludedFindings.length ? sortedExcludedFindings.map((entry) => <tr key={exclusionKey(entry)}><td><input aria-label={`Select ${entry.identifierValue || entry.caseId}`} type="checkbox" checked={selectedExcludedFindings.includes(exclusionKey(entry))} onChange={() => setSelectedExcludedFindings((current) => current.includes(exclusionKey(entry)) ? current.filter((key) => key !== exclusionKey(entry)) : [...current,exclusionKey(entry)])} /></td><td><span className={`excluded-finding-tag ${exclusionRuleClass(entry.rule)}`}>{entry.rule}</span></td><td>{entry.identifierValue || entry.caseId}</td><td>{entry.name || "—"}</td><td>{entry.project ? formatProjectLabel(entry.project) : "—"}</td><td>{entry.excludedAt ? new Date(entry.excludedAt).toLocaleString() : "—"}</td><td>{entry.source || "—"}</td><td>{entry.pendingRecheck ? <span className="duplicate-recheck-badge">Recheck</span> : "Excluded"}</td><td><button className="soft" onClick={() => setRestoreConfirmation([entry])} disabled={exclusionBusy}>Restore</button></td></tr>) : <tr><td colSpan={9}>No records are excluded on this review page.</td></tr>}</tbody></ValueTable></div>
+            <div className="legal-table-wrap"><ValueTable recordFilters={exclusionFilterControl} filterColumns={exclusionFilterColumns} className="excluded-findings-table"><thead><tr><th><input aria-label="Select all excluded findings" type="checkbox" checked={sortedExcludedFindings.length>0 && sortedExcludedFindings.every((entry)=>selectedExcludedFindings.includes(exclusionKey(entry)))} onChange={(event) => setSelectedExcludedFindings(event.target.checked ? sortedExcludedFindings.map(exclusionKey) : [])} /></th>{[["rule","Finding"],["identifier","Identifier"],["name","Name"],["project","Project"],["excludedAt","Date excluded"],["source","Source context"]].map(([key,label]) => <th key={key}><button onClick={() => toggleExclusionSort(key)}>{label}{exclusionSort.key === key ? exclusionSort.direction === "asc" ? " ▲" : " ▼" : " ↕"}</button></th>)}<th>Status</th><th></th></tr></thead><tbody>{sortedExcludedFindings.length ? sortedExcludedFindings.map((entry) => <tr key={exclusionKey(entry)}><td><input aria-label={`Select ${entry.identifierValue || entry.caseId}`} type="checkbox" checked={selectedExcludedFindings.includes(exclusionKey(entry))} onChange={() => setSelectedExcludedFindings((current) => current.includes(exclusionKey(entry)) ? current.filter((key) => key !== exclusionKey(entry)) : [...current,exclusionKey(entry)])} /></td><td><span className={`excluded-finding-tag ${exclusionRuleClass(entry.rule)}`}>{entry.rule}</span></td><td>{entry.identifierValue || entry.caseId}</td><td>{entry.name || "—"}</td><td>{entry.project ? formatProjectLabel(entry.project) : "—"}</td><td>{entry.excludedAt ? new Date(entry.excludedAt).toLocaleString() : "—"}</td><td>{entry.source || "—"}</td><td>{entry.pendingRecheck ? <span className="duplicate-recheck-badge">Recheck</span> : "Excluded"}</td><td><button className="soft" onClick={() => setRestoreConfirmation([entry])} disabled={exclusionBusy}>Restore</button></td></tr>) : <tr><td colSpan={9}>No records are excluded on this review page.</td></tr>}</tbody></ValueTable></div>
           </section>
         </div>,
         document.body,

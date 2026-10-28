@@ -2259,8 +2259,21 @@ class LegalStore:
         format_excel_dates(workbook)
         output=io.BytesIO();workbook.save(output);return output.getvalue()
 
-    def explorer_filters(self,dataset:str,filters=None,search="")->dict[str,Any]:
+    def explorer_filters(self,dataset:str,filters=None,search="", *, column_filters=None)->dict[str,Any]:
         if dataset not in self.frames: raise ValueError("Dataset not loaded")
+        if column_filters:
+            from .column_filters import apply_column_filters
+            prepared=self.explorer_preparation(dataset);columns=[]
+            for column in self.frames[dataset].columns:
+                indexes=prepared.select(search,without_field(filters,column))
+                frame=apply_column_filters(prepared.frame.loc[indexes],column_filters,exclude_column=column)
+                values=filter_values(frame[column],str(column))
+                limited=values[:500]
+                for token in (filters or {}).get(column,[]):
+                    selected=selection_value(token)
+                    if selected in values and selected not in limited:limited.append(selected)
+                columns.append({'name':str(column),'values':limited,'valueCount':len(values),'truncated':len(values)>len(limited)})
+            return {'columns':columns}
         if filters or search:
             cache_key=("facets",dataset,search,tuple(sorted((key,tuple(values)) for key,values in (filters or {}).items() if values)))
             if cache_key in self._explorer_filter_cache:return self._explorer_filter_cache[cache_key]
@@ -2405,9 +2418,12 @@ class LegalStore:
                 self._explorer_prepared[dataset] = PreparedExplorer(self.frames[dataset], dataset)
             return self._explorer_prepared[dataset]
 
-    def explorer(self, dataset: str, search: str="", page: int=1, page_size: int=100, filter_column: str="", filter_value: str="", filters:dict[str,list[str]]|None=None, sort_column:str="", sort_direction:str="asc") -> dict[str, Any]:
+    def explorer(self, dataset: str, search: str="", page: int=1, page_size: int=100, filter_column: str="", filter_value: str="", filters:dict[str,list[str]]|None=None, sort_column:str="", sort_direction:str="asc", *, column_filters=None) -> dict[str, Any]:
         prepared = self.explorer_preparation(dataset)
         indexes = prepared.select(search, filters, filter_column, filter_value, sort_column, sort_direction)
+        if column_filters:
+            from .column_filters import apply_column_filters
+            indexes = apply_column_filters(prepared.frame.loc[indexes], column_filters).index
         start = (page-1)*page_size
         frame = prepared.frame.loc[indexes[start:start+page_size]]
         columns = [str(column) for column in frame.columns]
@@ -2415,7 +2431,7 @@ class LegalStore:
                 for index, record in zip(frame.index, frame.itertuples(index=False, name=None))]
         return {"dataset": dataset, "total": len(indexes), "page": page, "pageSize": page_size, "columns": columns, "rows": rows}
 
-    def explorer_export(self, dataset: str, search: str="", filters:dict[str,list[str]]|None=None, export_format: str="xlsx") -> bytes:
+    def explorer_export(self, dataset: str, search: str="", filters:dict[str,list[str]]|None=None, export_format: str="xlsx", *, column_filters=None) -> bytes:
         if dataset not in self.frames: raise ValueError("Dataset not loaded")
         frame=self.frames[dataset].copy();source_columns=list(frame.columns)
         if dataset=="legalhotlines":
@@ -2435,6 +2451,9 @@ class LegalStore:
         for column,selections in (filters or {}).items():
             if column in frame.columns and selections:frame=filter_rows(frame,column,selections)
         frame=frame[source_columns]
+        if column_filters:
+            from .column_filters import apply_column_filters
+            frame=apply_column_filters(frame,column_filters)
         hotline_date_columns=[column for column in frame.columns if DATE_HINT.search(str(column))] if dataset=="legalhotlines" else []
         hotline_values={}
         for column in hotline_date_columns:
@@ -2635,9 +2654,36 @@ class LegalStore:
                 if match and match not in chosen:chosen.append(match)
         return chosen
 
-    def case(self,query:str,filters:dict[str,list[str]]|None=None,limit:int=20,view_mode:str="cards",page:int=1,page_size:int=100,sort_column:str="",sort_direction:str="asc",selected_columns:list[str]|None=None) -> dict[str, Any]:
+    def case_record_frame(self, query="", filters=None):
+        """Full case-summary cohort used by header facets and case-table filters."""
+        beneficiaries=self.frames['beneficiaries'];bid=_find(list(beneficiaries.columns),'Case ID')
+        fields={label:_find(list(beneficiaries.columns),*hints) for label,hints in [('Name',('Name (Filter Color Red)','Name')),('Project',('Project',)),('Location',('Project Location',)),('Date of birth',('DoB','Date of Birth'))]}
+        frame=beneficiaries[beneficiaries[bid].map(clean_id).isin(self._case_candidate_ids(query,filters))]
+        rows=[]
+        for _,record in frame.iterrows():
+            case_id=clean_id(record[bid]);lawyers=[]
+            def collect(source):
+                column=_find(list(source.columns),'Lawyers','Lawyer')
+                if column: lawyers.extend(source[column].map(clean_id).tolist())
+            assessments=self._related('assessments','Beneficiary ID',case_id)
+            for _,assessment in assessments.iterrows():
+                aid=_find(list(assessments.columns),'Assessment ID')
+                if aid: collect(self._related('legalservices','Assessment ID',clean_id(assessment[aid])))
+                collect(pd.DataFrame([assessment]))
+            collect(pd.DataFrame([record]))
+            rows.append({'Case ID':case_id,'Lawyer':', '.join(dict.fromkeys(value for value in lawyers if value)) or 'Unassigned',**{label:record.get(column,'') if column else '' for label,column in fields.items()}})
+        result=pd.DataFrame(rows,columns=['Lawyer','Case ID','Name','Project','Location','Date of birth'])
+        aliases={'Case ID':'Case ID','Name (Filter Color Red)':'Name','Project':'Project','Project Location':'Location','DoB':'Date of birth'}
+        for raw,label in aliases.items():result['beneficiaries::'+raw]=result[label]
+        return result
+
+    def case(self,query:str,filters:dict[str,list[str]]|None=None,limit:int=20,view_mode:str="cards",page:int=1,page_size:int=100,sort_column:str="",sort_direction:str="asc",selected_columns:list[str]|None=None, *, column_filters=None) -> dict[str, Any]:
         b=self.frames["beneficiaries"];bid=_find(list(b.columns),"Case ID");candidate_ids=self._case_candidate_ids(query,filters)
         found=b[b[bid].map(clean_id).isin(candidate_ids)]
+        if column_filters:
+            from .column_filters import apply_column_filters
+            matching=apply_column_filters(self.case_record_frame(query,filters),column_filters)['Case ID']
+            found=found[found[bid].map(clean_id).isin(matching)]
         if view_mode=="table":
             case_sort=sort_column.split("::",1)[-1] if sort_column else bid
             if sort_column=="Lawyer":case_sort=_find(list(found.columns),"Lawyers","Lawyer") or bid

@@ -1,3 +1,4 @@
+import {ValueTable} from './ValueTable';
 import {AlertTriangle,CheckCircle2,ArrowRight,LoaderCircle} from 'lucide-react';
 import {koboLabel,type KoboPreview} from './koboTypes';
 
@@ -33,7 +34,7 @@ export default function KoboAnswerReview({preview,search,busy,checking,checkErro
     {issues.map((issue,index)=>{const info=answerIssuePresentation(issue.message);return <section className="kobo-answer-issue" key={index}><div><h5>{info.title}</h5><span className="kobo-answer-row-count">{issue.count.toLocaleString()} affected {issue.count===1?'row':'rows'}</span></div><p>{info.description}</p>
      {info.kind==='choices'&&question&&['category','multiple'].includes(question.kind)?<button className="soft" disabled={busy||checking} onClick={()=>onChoices(qid)}>Review answer choices<ArrowRight/></button>:info.kind==='conflict'?<button className="soft" disabled={busy||checking} onClick={()=>onSources(qid,true)}>Review source conflicts<ArrowRight/></button>:<button className="soft" disabled={busy||checking} onClick={()=>onSources(qid,false)}>Review source columns<ArrowRight/></button>}
     </section>})}
-    <details className="kobo-answer-examples"><summary>View source examples</summary>{examples.length?<div className="kobo-answer-table"><table><thead><tr><th>Worksheet</th><th>Row</th><th>Column</th><th>Original answer</th></tr></thead><tbody>{examples.flatMap((ex,i)=>ex.values.map((v,j)=><tr key={`${i}:${j}`}><td dir="auto">{ex.sheet}</td><td>{ex.row}</td><td dir="auto">{v.column}</td><td dir="auto">{v.value===null||v.value===undefined||v.value===''?'(blank)':String(v.value)}</td></tr>))}</tbody></table></div>:<p>No source examples are available for this question. Review its mapped source columns.</p>}</details>
+    <details className="kobo-answer-examples"><summary>View source examples</summary>{examples.length?<div className="kobo-answer-table"><ValueTable recordFilters="local"><thead><tr><th>Worksheet</th><th>Row</th><th>Column</th><th>Original answer</th></tr></thead><tbody>{examples.flatMap((ex,i)=>ex.values.map((v,j)=><tr key={`${i}:${j}`}><td dir="auto">{ex.sheet}</td><td>{ex.row}</td><td dir="auto">{v.column}</td><td dir="auto">{v.value===null||v.value===undefined||v.value===''?'(blank)':String(v.value)}</td></tr>))}</tbody></ValueTable></div>:<p>No source examples are available for this question. Review its mapped source columns.</p>}</details>
     <details className="kobo-column-details"><summary>Technical details</summary><p>Question ID: {qid}</p>{issues.map((issue,i)=><p key={i}>{issue.message}</p>)}</details>
    </article>;
   })}

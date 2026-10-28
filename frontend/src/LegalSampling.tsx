@@ -1,3 +1,5 @@
+import {TableResetButton} from './TableSelectionActions';
+import {useLegalRecordFilters} from './useLegalRecordFilters';
 import {AnimatedActionIcon} from './AnimatedActionIcon';
 import {SharedFilterDrawer} from './SharedFilterDrawer';
 import {Search,X} from 'lucide-react';
@@ -16,19 +18,20 @@ export default function LegalSampling({state,update}:{state:SamplingState;update
   const [data,setData]=useState<SamplingResult|null>(null),[busy,setBusy]=useState(true),[error,setError]=useState('');
   const [drawer,setDrawer]=useState(false),[filterSearch,setFilterSearch]=useState(''),[attempt,setAttempt]=useState(0);
   const search=useDebouncedValue(state.search);
+  const recordFilters=useLegalRecordFilters("sampling","legalservices",state.filters,search,()=>update({page:1}),"sampling",filters=>update({filters,page:1}),{removeDuplicateBeneficiaryIds:state.removeDuplicateBeneficiaryIds,removeDuplicateContacts:state.removeDuplicateContacts});
   useEffect(()=>{
     const controller=new AbortController();setBusy(true);setError('');
-    getLegalSampling({...state,search},controller.signal).then(result=>{if(!controller.signal.aborted)setData(result)})
+    getLegalSampling({...state,search,filters:recordFilters.requestLegacy,columnFilters:recordFilters.columnFilters},controller.signal).then(result=>{if(!controller.signal.aborted)setData(result)})
       .catch(reason=>{if(!controller.signal.aborted)setError(reason.message||'Unable to load Sampling.')})
       .finally(()=>{if(!controller.signal.aborted)setBusy(false)});
     return()=>controller.abort();
-  },[search,state.filters,state.page,state.removeDuplicateBeneficiaryIds,state.removeDuplicateContacts,attempt]);
-  const active=Object.values(state.filters).reduce((sum,values)=>sum+values.length,0);
-  const changed=active+Number(Boolean(state.search))+Number(state.removeDuplicateBeneficiaryIds)+Number(state.removeDuplicateContacts);
-  const reset=()=>update(initialSamplingState());
+  },[search,state.filters,state.page,state.removeDuplicateBeneficiaryIds,state.removeDuplicateContacts,attempt,recordFilters.columnFilters]);
+  const active=recordFilters.control.filters.length;
+  const changed=recordFilters.columnFilters.length+active+Number(Boolean(state.search))+Number(state.removeDuplicateBeneficiaryIds)+Number(state.removeDuplicateContacts);
+  const reset=()=>{recordFilters.clear();update(initialSamplingState())};
   const setFilter=(column:string,values:string[])=>update({page:1,filters:{...state.filters,[column]:values}});
   const options={...Object.fromEntries(Object.keys(state.filters).map(key=>[key,[] as string[]])),...data?.filterOptions};
-  const download=async()=>{try{await exportLegalSampling(state)}catch(reason){setError(reason instanceof Error?reason.message:'Sampling export failed.')}};
+  const download=async()=>{try{await exportLegalSampling({...state,search,filters:recordFilters.requestLegacy,columnFilters:recordFilters.columnFilters})}catch(reason){setError(reason instanceof Error?reason.message:'Sampling export failed.')}};
   return <section className="studio-fixed-section sampling-section" aria-label="Sampling" aria-busy={busy}>
     <LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={changed} onClear={reset} filterLabel="All filters">
       <div className="glass studio-quick-toolbar">
@@ -38,6 +41,7 @@ export default function LegalSampling({state,update}:{state:SamplingState;update
         <div className="studio-quick-actions">
           <button className="primary" onClick={()=>setDrawer(true)}><AnimatedActionIcon type="filters"/>All filters {active>0&&<b>{active}</b>}</button>
           <button className="soft detention-filter-clear" disabled={!changed&&state.page===1} onClick={reset}><AnimatedActionIcon type="reset"/>Reset</button>
+          <TableResetButton iconOnly disabled={!recordFilters.control.filters.length} onReset={recordFilters.clear}/>
           <ExcelDownloadButton className="primary studio-excel" onClick={download} disabled={busy||search!==state.search||Boolean(error)||!data?.available}>Excel</ExcelDownloadButton>
         </div>
       </div>
@@ -57,7 +61,7 @@ export default function LegalSampling({state,update}:{state:SamplingState;update
       {!busy&&!error&&data&&!data.available&&<TableState className="sampling-message">{data.reason}</TableState>}
       {!busy&&!error&&data?.available&&<>
         {data.total===0&&<TableState className="sampling-message">No eligible legal-services records match these settings. Primary contacts must contain exactly ten digits starting with 77, 78, or 75.</TableState>}
-        <div className="legal-table-wrap"><ValueTable><thead><tr>{data.columns.map(column=><th className="no-sort" key={column} scope="col">{column}</th>)}</tr></thead>
+        <div className="legal-table-wrap"><ValueTable recordFilters={{...recordFilters.control,showClearAll:false}}><thead><tr>{data.columns.map(column=><th className="no-sort" key={column} scope="col">{column}</th>)}</tr></thead>
           <tbody>{data.rows.map((row,index)=><tr key={index}>{data.columns.map(column=><td key={column}>{formatTableValue(row[column])}</td>)}</tr>)}</tbody>
         </ValueTable></div>
       </>}

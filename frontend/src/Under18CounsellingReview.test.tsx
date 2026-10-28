@@ -28,10 +28,10 @@ describe("Under-18 counselling review", () => {
       onOpenCase={() => {}} findingRevision={0} onFindingContextMenu={() => {}} onBulkExclude={() => {}}
     />);
     for (const header of ["Date of birth", "Current age", "Type of Service Provided", "Beneficiary ID", "Assessment ID", "Service ID", "Name", "Lawyer", "Project", "Project location"]) {
-      expect(markup).toContain(`>${header}</th>`);
+      expect(markup).toContain(`class="column-header-label">${header}</div>`);
     }
-    expect(markup.indexOf(">Date of birth</th>")).toBeLessThan(markup.indexOf(">Beneficiary ID</th>"));
-    expect(markup.indexOf(">Current age</th>")).toBeLessThan(markup.indexOf(">Beneficiary ID</th>"));
+    expect(markup.indexOf('>Date of birth</div>')).toBeLessThan(markup.indexOf('>Beneficiary ID</div>'));
+    expect(markup.indexOf('>Current age</div>')).toBeLessThan(markup.indexOf('>Beneficiary ID</div>'));
     for (const value of ["22/10/2008", "17", "Legal Counselling", "B1", "A1", "S1", "P1", "Erbil"]) {
       expect(markup).toContain(`>${value}</td>`);
     }

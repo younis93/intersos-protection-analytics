@@ -121,6 +121,7 @@ export function AppSelect({
   disabled = false,
   ariaLabel,
   searchable = false,
+  preserveOrder = false,
 }: {
   label: string;
   value: string;
@@ -131,15 +132,17 @@ export function AppSelect({
   disabled?: boolean;
   ariaLabel?: string;
   searchable?: boolean;
+  preserveOrder?: boolean;
 }) {
   const [open, setOpen] = useState(false), [search, setSearch] = useState("");
   const {root, menu} = useDropdownPosition(open, () => setOpen(false));
   const menuId=useId();
   options=useMemo(()=>{
+    if(preserveOrder)return options;
     const orderedValues=sortFilterValues(label,options.map(([value])=>value));
     const positions=new Map(orderedValues.map((value,index)=>[value,index]));
     return [...options].sort((left,right)=>positions.get(left[0])!-positions.get(right[0])!);
-  },[label,options]);
+  },[label,options,preserveOrder]);
   const selected = options.find(([option]) => option === value)?.[1] || value;
   const isProjectSelect = /^projects?$/i.test(label.trim());
   const displayCaption = (caption: string) =>

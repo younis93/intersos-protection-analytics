@@ -222,6 +222,7 @@ if ($PythonSslPolicy -and (Test-Path -LiteralPath $PythonSslPolicy)) {
     $PyInstallerArgs += @('--add-data', "$PythonSslPolicy;.")
 }
 $PyInstallerArgs += @('--hidden-import', 'win32timezone', '--hidden-import', 'pythoncom', '--hidden-import', 'win32com.client', '--hidden-import', 'win32process', '--hidden-import', 'win32api')
+$PyInstallerArgs += @('--collect-all', 'cryptography')
 if ($Clean) { $PyInstallerArgs += '--clean' }
 $PyInstallerArgs += (Join-Path $ProjectRoot 'desktop_launcher.py')
 & $VenvPython -m PyInstaller @PyInstallerArgs

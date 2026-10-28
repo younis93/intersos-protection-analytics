@@ -1,3 +1,8 @@
+import {TableResetButton} from './TableSelectionActions';
+import {localValueLoader,useColumnFilters} from './ColumnFilterControls';
+import {filterRecords} from './columnFilters';
+import {exportTableWorkbook} from './api';
+import {useLegalRecordFilters} from './useLegalRecordFilters';
 import {AnimatedActionIcon} from './AnimatedActionIcon';
 import {AnimatedSectionIcon} from './AnimatedNavigationIcon';
 import {SharedFilterDrawer} from './SharedFilterDrawer';
@@ -69,10 +74,18 @@ export function DetentionCases({
   const drillMenuRef=useRef<HTMLDivElement>(null);
   const debouncedRecordSearch=useDebouncedValue(recordSearch);
   const issueQuery=issueSearch.trim().toLocaleLowerCase();
-  const visibleIssues=(comparisonResult?.rows||[]).filter(row=>!issueQuery||[
+  const comparisonSourceIssues=(comparisonResult?.rows||[]).filter(row=>!issueQuery||[
     row.beneficiaryId,row.name,row.lawyer,row.note,row.note.startsWith("Different:")?"Different field data":"",...(row.relatedCases||[]).map(related=>related.caseId),
     ...row.differences.flatMap(difference=>[difference.field,difference.assessment,difference.excel]),
   ].some(value=>String(value??"").toLocaleLowerCase().includes(issueQuery)));
+  const [comparisonFilters,setComparisonFilters]=useColumnFilters('detention-comparison');
+  useEffect(()=>setComparisonFilters([]),[comparisonResult]);
+  const comparisonRows=comparisonSourceIssues.flatMap((row,index)=>(row.differences.length?row.differences:[{field:'Record',assessment:'',excel:''}]).map(difference=>({__issue:index,Issue:row.note.startsWith('Different:')?'Different field data':row.note,'Case ID':row.beneficiaryId,Name:row.name,'Different field':difference.field,'Platform Value':difference.assessment,'Excel value':difference.excel,difference})));
+  const filteredComparisons=filterRecords(comparisonRows,comparisonFilters);
+  const comparisonFilterControl={showClearAll:false,filters:comparisonFilters,onChange:setComparisonFilters,columns:[...['Issue','Case ID','Name','Different field','Platform Value','Excel value'].map(key=>({key,label:key})),{key:'',label:''}],loadValues:localValueLoader(comparisonRows,comparisonFilters)};
+  const matchingIssues=new Map<number,typeof comparisonSourceIssues[number]>();
+  filteredComparisons.forEach(entry=>{const existing=matchingIssues.get(entry.__issue);if(existing)existing.differences.push(entry.difference);else matchingIssues.set(entry.__issue,{...comparisonSourceIssues[entry.__issue],differences:[entry.difference]})});
+  const visibleIssues=[...matchingIssues.values()];
   const issueGroups=new Map<string,typeof visibleIssues>();
   visibleIssues.forEach(row=>{
     const label=row.note.startsWith("Different:")?"Different field data":row.note;
@@ -81,16 +94,17 @@ export function DetentionCases({
   });
   useEffect(()=>setIssueSearch(""),[comparisonResult]);
   const [page,setPage]=useQueryPage(JSON.stringify([filters,tab,tab==="records"?debouncedRecordSearch:""]));
+  const recordFilters=useLegalRecordFilters("detention","assessments",filters,debouncedRecordSearch,()=>setPage(1),"detention");
   useEffect(() => {
     let current=true;
     setBusy(true);
     setError("");
-    getLegalDetention(tab==="records"?debouncedRecordSearch:"", page, filters,tab==="records"?recordSortColumn:"",recordSortDirection)
+    getLegalDetention(tab==="records"?debouncedRecordSearch:"", page, recordFilters.requestLegacy,tab==="records"?recordSortColumn:"",recordSortDirection,undefined,tab==="records"?recordFilters.columnFilters:[])
       .then((result)=>{if(current)setData(result)})
       .catch((reason) => {if(current)setError(reason.message || "Unable to load detention records.")})
       .finally(() => {if(current)setBusy(false)});
     return()=>{current=false};
-  }, [page, filters, tab, debouncedRecordSearch, recordSortColumn, recordSortDirection]);
+  }, [page, filters, tab, debouncedRecordSearch, recordSortColumn, recordSortDirection,recordFilters.columnFilters]);
   const updateFilter = (label: string, selections: string[]) => {
     setFilters((current) => ({
       ...current,
@@ -98,7 +112,8 @@ export function DetentionCases({
     }));
     setPage(1);
   };
-  const activeCount=Object.values(filters).reduce((sum,items)=>sum+items.length,0);
+  const activeCount=recordFilters.control.filters.length+Object.values(filters).reduce((n,values)=>n+values.length,0);
+  const clearFilters=()=>{recordFilters.clear();setFilters({})};
   const quickFilterLabels=["Project","Project location","Detention governorate","Date of Assessment","Date of Detention","Date of the released","Current status","Type of Released","Nationality"];
   const quickFilters=()=>quickFilterLabels.map((label)=><CheckboxMultiSelect key={label} label={label} values={data?.filterOptions?.[label]||[]} selected={filters[label]||[]} onChange={(items)=>updateFilter(label,items)} hideLabel/>);
   const availableMonths=(data?.trend||[]).map((row)=>row.month).reverse();
@@ -126,7 +141,7 @@ export function DetentionCases({
   const exportComparison=async()=>{
     if(!comparisonFile||!comparisonMonths.length||!comparisonSheet)return;
     setComparisonExporting(true);
-    try{await exportLegalDetentionReconciliation(comparisonFile,comparisonMonths,comparisonProjects,comparisonSheet)}
+    try{if(comparisonFilters.length||issueSearch.trim())await exportTableWorkbook("filtered-detention-comparison.xlsx",["Issue","Case ID","Name","Different field","Platform Value","Excel value"],filteredComparisons);else await exportLegalDetentionReconciliation(comparisonFile,comparisonMonths,comparisonProjects,comparisonSheet)}
     catch(error:any){setError(error.message||"Could not export comparison issues.")}
     finally{setComparisonExporting(false)}
   };
@@ -134,7 +149,7 @@ export function DetentionCases({
     if(!data||tableExporting)return;
     setTableExporting(true);
     try{
-      await exportLegalDetention(recordSearch,filters,recordSortColumn,recordSortDirection);
+      await exportLegalDetention(debouncedRecordSearch,recordFilters.requestLegacy,recordSortColumn,recordSortDirection,recordFilters.columnFilters);
     }catch(reason:any){setError(reason.message||"Could not export detention table data.")}
     finally{setTableExporting(false)}
   };
@@ -165,10 +180,10 @@ export function DetentionCases({
         <button className={tab==="records"?"active":""} onClick={()=>{legalLoadScheduler.promotePage("detention","records");setTab("records")}}><AnimatedSectionIcon Icon={TableProperties} iconStyle="table-properties" active={tab==="records"} size={17}/>Detention detail table</button>
         <button className={tab==="reconcile"?"active":""} onClick={()=>setTab("reconcile")}><AnimatedSectionIcon Icon={ShieldCheck} iconStyle="shield-check" active={tab==="reconcile"} size={17}/>Platform and Excel Comparison</button>
       </nav>
-      {tab!=="reconcile"&&<LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={()=>{setFilters({});setPage(1)}}>
+      {tab!=="reconcile"&&<LegalScrollControls onFilters={()=>setDrawer(true)} activeCount={activeCount} onClear={clearFilters}>
       <div className="glass detention-toolbar">
         {quickFilters()}
-        <div className="detention-toolbar-actions"><button className="soft case-filter-button" onClick={()=>setDrawer(true)}><AnimatedActionIcon type="filters"/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft detention-filter-clear" disabled={!activeCount} onClick={()=>{setFilters({});setPage(1)}}><AnimatedActionIcon type="reset"/>Reset</button></div>
+        <div className="detention-toolbar-actions"><button className="soft case-filter-button" onClick={()=>setDrawer(true)}><AnimatedActionIcon type="filters"/>Filters {activeCount>0&&<b>{activeCount}</b>}</button><button className="soft detention-filter-clear" disabled={!activeCount} onClick={clearFilters}><AnimatedActionIcon type="reset"/>Reset</button></div>
       </div>
       </LegalScrollControls>}
       {tab==="analysis"&&<>
@@ -194,10 +209,10 @@ export function DetentionCases({
         <div className="legal-card-heading">
           <label className="detention-table-search"><Search/><input className="table-search-input" value={recordSearch} onChange={(event)=>{setRecordSearch(event.target.value)}} placeholder="Search detention cases"/></label>
           <div className="indicator-total-block detention-table-total"><strong>{data?.total.toLocaleString() || 0}</strong><span>Total</span></div>
-          <TableSelectionActions selected={selectedRecords} filename="selected-detention-records.xlsx" onClear={()=>setSelectedRecords(new Map())} onDownloadAll={exportDetentionTable} iconOnly/>{data&&<Pager compact page={page} total={data.total} onChange={setPage}/>}
+          <TableSelectionActions selected={selectedRecords} onResetFilters={recordFilters.clear} hasActiveFilters={recordFilters.control.filters.length>0} filename="selected-detention-records.xlsx" onClear={()=>setSelectedRecords(new Map())} onDownloadAll={exportDetentionTable} iconOnly/>{data&&<Pager compact page={page} total={data.total} onChange={setPage}/>}
         </div>
         <div className="legal-table-wrap">
-          <ValueTable>
+          <ValueTable recordFilters={{...recordFilters.control,showClearAll:false}}>
             <thead>
               <tr><th><RowSelectionCheckbox label="Select visible detention records" total={(data?.rows||[]).length} selectedCount={(data?.rows||[]).filter((row:any)=>selectedRecords.has(String(row.__rowKey))).length} onChange={checked=>setSelectedRecords((current)=>{const next=new Map(current);data?.rows.forEach((row:any)=>{const key=String(row.__rowKey);if(checked)next.set(key,row);else next.delete(key)});return next})}/></th>
                 {data?.columns.map((column) => (
@@ -246,14 +261,14 @@ export function DetentionCases({
             <div className={comparisonResult.missingCaseIds?.assessments||comparisonResult.missingCaseIds?.excel?"unmatched":"matched"}><span>Missing Case IDs</span><strong>{((comparisonResult.missingCaseIds?.assessments||0)+(comparisonResult.missingCaseIds?.excel||0)).toLocaleString()}</strong></div>
             <div className="matched"><span>Fully matched</span><strong>{comparisonResult.matched.toLocaleString()}</strong></div>
             <div className={comparisonResult.unmatched?"unmatched":"matched"}><span>Needs review</span><strong>{comparisonResult.unmatched.toLocaleString()}</strong></div>
-            <div className="reconciliation-export"><ExcelDownloadButton className="primary" onClick={exportComparison} busy={comparisonExporting} disabled={!comparisonResult.rows.length}/></div>
+            <div className="reconciliation-export"><TableResetButton iconOnly disabled={!comparisonFilters.length} onReset={()=>setComparisonFilters([])}/><ExcelDownloadButton className="primary" onClick={exportComparison} busy={comparisonExporting} disabled={!comparisonResult.rows.length}/></div>
           </div>
           {comparisonResult.warnings.length>0&&<details className="reconciliation-warnings"><summary>{comparisonResult.warnings.length} workbook column warning{comparisonResult.warnings.length===1?"":"s"}</summary>{comparisonResult.warnings.map((warning)=><p key={warning}>{warning}</p>)}</details>}
           <div className="reconciliation-issues-toolbar">
             <SearchField label="Search comparison issues" placeholder="Search issues by Case ID, name or difference" value={issueSearch} onChange={setIssueSearch} clearable/>
             <span role="status" aria-live="polite">{visibleIssues.length.toLocaleString()} of {comparisonResult.rows.length.toLocaleString()} issues</span>
           </div>
-          <div className="legal-table-wrap reconciliation-table"><ValueTable><thead><tr><th className="no-sort">Issue</th><th className="no-sort">Case ID</th><th className="no-sort">Name</th><th className="no-sort">Different field</th><th className="no-sort">Platform Value</th><th className="no-sort">Excel value</th><th className="no-sort">Action</th></tr></thead><tbody>{visibleIssues.length?Array.from(issueGroups).flatMap(([label,rows],groupIndex)=>{
+          <div className="legal-table-wrap reconciliation-table"><ValueTable recordFilters={comparisonFilterControl} filterColumns={comparisonFilterControl.columns}><thead><tr><th className="no-sort">Issue</th><th className="no-sort">Case ID</th><th className="no-sort">Name</th><th className="no-sort">Different field</th><th className="no-sort">Platform Value</th><th className="no-sort">Excel value</th><th className="no-sort">Action</th></tr></thead><tbody>{visibleIssues.length?Array.from(issueGroups).flatMap(([label,rows],groupIndex)=>{
             const groupLineCount=rows.reduce((sum,row)=>sum+Math.max(1,row.differences.length),0);
             return rows.flatMap((row,rowIndex)=>{
               const differences=row.differences?.length?row.differences:[{field:"Record",assessment:"—",excel:"—"}];
@@ -269,7 +284,7 @@ export function DetentionCases({
           }):<tr><td colSpan={7}>{comparisonResult.rows.length?<div className="reconciliation-search-empty" role="status">No issues match your search.</div>:<div className="reconciliation-empty"><CheckCircle2/><strong>All records match for {comparisonResult.month}</strong></div>}</td></tr>}</tbody></ValueTable></div>
         </>}
       </section>}
-      {drawer&&<SharedFilterDrawer title="Filter detention cases" eyebrow="DETENTION FILTERS" onClose={()=>setDrawer(false)} onReset={()=>{setFilters({});setPage(1)}} resetDisabled={!activeCount}
+      {drawer&&<SharedFilterDrawer title="Filter detention cases" eyebrow="DETENTION FILTERS" onClose={()=>setDrawer(false)} onReset={clearFilters} resetDisabled={!activeCount}
         fields={Object.entries(data?.filterOptions||{}).map(([label,values])=>({key:label,label,values,selected:filters[label]||[],formatCaption:(item:string)=>/date/i.test(label)?formatFilterMonth(item):item,onChange:(items:string[])=>updateFilter(label,items)}))}/>}
       {drillMenu&&createPortal(<div ref={drillMenuRef} className="detention-drill-menu" role="menu" aria-label="Chart table options" style={{left:drillMenu.x,top:drillMenu.y}}><span>Filtered records</span><button role="menuitem" autoFocus onClick={()=>{setDrillMenu(null);setPage(1);setTab("records")}}><TableProperties/><div><strong>Open detail table</strong><small>Keep all active filters</small></div><ArrowRight/></button><button role="menuitem" className="cancel" onClick={()=>setDrillMenu(null)}><X/>Cancel</button></div>,document.body)}
     </div>
