@@ -17,24 +17,26 @@ def write_trend_series(book,chart,result,matrix,metrics,support_sheet,legacy_bas
     while chart.SeriesCollection().Count:chart.SeriesCollection(1).Delete()
     if not matrix or not matrix[0]:return
     trend=result['trend'];projection=result.get('chartProjection')
-    original=trend['series'];indices={series['id']:i for i,series in enumerate(original)}
+    original=[*trend['series'],*[s for s in trend.get('percentageSeries',[]) if s['id'] not in {v['id'] for v in trend['series']}]];indices={answer:i for i,answer in enumerate(result.get('_trendBasisIds',[series['id'] for series in original]))}
     display=(projection or {}).get('trend',trend)['series']
     measure=result.get('measure');mode=result.get('percentageMode','legacy-respondents')
     if measure and (measure['operation']!='sum' or mode=='legacy-respondents'):metrics=['count']
     if len(display)*len(metrics)>255:raise ValueError('Excel trend charts support up to 255 series. Choose a smaller Top N or export one chart metric.')
     helper=support_sheet(book,'_Kobo trend chart values');first=helper.UsedRange.Row+helper.UsedRange.Rows.Count+4
     chosen=[indices[series['id']] for series in display if series['id'] in indices]
+    hidden=[indices[series['id']] for series in original if series['id'] not in {s['id'] for s in trend['series']}]
+    excluded=list(dict.fromkeys(chosen+hidden))
     grand=f'SUM({matrix_range(matrix)})'
     for pi,period in enumerate(trend['periods'],first):excel_cell(helper,pi,1).Value=period
     for ai,series in enumerate(display):
         other=series['id']=='__chart_other__'
         own_index=indices.get(series['id'])
-        selected_columns=[matrix_range([[row[index]] for row in matrix]) for index in chosen]
+        selected_columns=[matrix_range([[row[index]] for row in matrix]) for index in excluded]
         row_total=remaining_sum(matrix_range(matrix),selected_columns) if other else f'SUM({matrix_range([[row[own_index]] for row in matrix])})'
         for mi,metric in enumerate(metrics):
             column=2+ai*len(metrics)+mi
             for pi,row in enumerate(matrix):
-                numerator=remaining_sum(matrix_range([row]),[row[index] for index in chosen]) if other else row[own_index]
+                numerator=remaining_sum(matrix_range([row]),[row[index] for index in excluded]) if other else row[own_index]
                 denominator=legacy_bases[pi] if mode=='legacy-respondents' and legacy_bases else grand if mode=='grand-total' else f'SUM({matrix_range([row])})' if mode in {'column-total','breakdown-group'} else row_total
                 formula=numerator if metric=='count' else f'IFERROR(IF({denominator}=0,"-",{numerator}/{denominator}),"-")'
                 excel_cell(helper,first+pi,column).Formula2='='+formula

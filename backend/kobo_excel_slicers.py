@@ -103,9 +103,9 @@ def pivot_value(pivot, metric, answer, parts=(), result=None):
         args.extend([excel_literal(field_name(result, 'Answer')), excel_literal(option['caption'])])
     if not direct and not sparse: args.extend([excel_literal('AnswerCode'), excel_literal(answer)])
     elif not binary and (metric == 'Responses' or sparse and metric == '#'):
-        row = next((row for row in result['rows'] if row['id'] == answer), {'label': answer})
+        row = next((row for row in result.get('percentageRows',result['rows']) if row['id'] == answer), {'label': answer})
         caption = row['label']
-        if sum(other['label'] == caption for other in result['rows']) > 1: caption += f' [{answer}]'
+        if sum(other['label'] == caption for other in result.get('percentageRows',result['rows'])) > 1: caption += f' [{answer}]'
         args.extend([excel_literal(field_name(result, 'Answer')), excel_literal(caption)])
     for level, part in enumerate(parts, 1): args.extend([excel_literal(field_name(result or {}, f'Breakdown{level}')), excel_literal(part)])
     return 'IFERROR(N(GETPIVOTDATA(' + ','.join(args) + ')),0)'

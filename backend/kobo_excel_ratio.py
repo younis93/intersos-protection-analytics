@@ -7,7 +7,7 @@ def selection_base(totals,result,parts=()):
         from .kobo_excel_count_cells import count_sum
         return count_sum(result,parts=parts)
     source={**result,'_countPivot':result['_overallCountPivot']} if not parts and '_overallCountPivot' in result else result
-    counts=[pivot_value(totals,'Responses',a['id'],parts,source) for a in result['rows']]
+    counts=[pivot_value(totals,'Responses',a['id'],parts,source) for a in result.get('percentageRows',result['rows'])]
     return '('+'+'.join(counts)+')' if counts else '0'
 def group_base(totals,result,parts):
     if not parts:return selection_base(totals,result)

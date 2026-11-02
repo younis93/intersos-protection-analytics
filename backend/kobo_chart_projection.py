@@ -59,7 +59,9 @@ def project_chart(result, cfg, question=None):
             trend['series'].append({'id':'__chart_other__','label':'Other (chart aggregation)','points':points})
         if other and mode!='legacy-respondents':
             from .kobo_pivot_percentages import apply_pivot_percentages
-            nested={'rows':[{'id':s['id'],'count':0,'value':None,'series':[dict(point,id=period) for point,period in zip(s['points'],trend['periods'])]} for s in trend['series']], 'breakdowns':[{'id':period} for period in trend['periods']], 'measure':measure, 'denominator':result['denominator'],'percentageDecimals':result.get('percentageDecimals',0)}
+            visible_ids={s['id'] for s in result['trend']['series']}
+            basis_series=[*trend['series'],*[s for s in result['trend'].get('percentageSeries',[]) if s['id'] not in visible_ids]]
+            nested={'rows':[{'id':s['id'],'count':0,'value':None,'series':[dict(point,id=period) for point,period in zip(s['points'],trend['periods'])]} for s in basis_series], 'breakdowns':[{'id':period} for period in trend['periods']], 'measure':measure, 'denominator':result['denominator'],'percentageDecimals':result.get('percentageDecimals',0)}
             apply_pivot_percentages(nested,cfg)
             for series,row in zip(trend['series'],nested['rows']):
                 for point,cell in zip(series['points'],row['series']):point.update(percent=cell['percent'],displayPercent=cell['displayPercent'])

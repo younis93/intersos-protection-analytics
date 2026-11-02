@@ -19,14 +19,16 @@ def additive_sum_report(book,report,result,position,start,support_sheet,values,v
     helper=support_sheet(book,'_Kobo sum values');first=helper.UsedRange.Row+helper.UsedRange.Rows.Count+4
     quoted="'"+helper.Name.replace("'","''")+"'!"
     def reference(r,c):return f'{quoted}${get_column_letter(c)}${r}'
+    basis_rows=result.get('percentageRows',rows)
+    basis_indices={answer['id']:i for i,answer in enumerate(basis_rows)}
     matrix=[]
-    for ri,answer in enumerate(rows,first):
+    for ri,answer in enumerate(basis_rows,first):
         refs=[]
         for ci,column in enumerate(base_columns,1):
             mask='*'.join([visible,series[answer['id']],*([columns[column['id']]] if column else [])])
             excel_cell(helper,ri,ci).Formula2=measure_formula(values,mask,'sum');refs.append(reference(ri,ci))
         matrix.append(refs)
-    result['_chartRawCells']={(answer['id'],column['id'] if column else ''):{'count':matrix[ri][ci]} for ri,answer in enumerate(rows) for ci,column in enumerate(base_columns)}
+    result['_chartRawCells']={(answer['id'],column['id'] if column else ''):{'count':matrix[basis_indices[answer['id']]][ci]} for ri,answer in enumerate(rows) for ci,column in enumerate(base_columns)}
     column_totals=[live_sum([r[ci] for r in matrix]) for ci in range(len(base_columns))]
     row_totals=[live_sum(r) for r in matrix];grand=live_sum([cell for r in matrix for cell in r])
     mode=result['percentageMode'];decimals=measure['decimals'];heading=start+5
@@ -37,6 +39,7 @@ def additive_sum_report(book,report,result,position,start,support_sheet,values,v
             n=column_totals[ci] if ci<len(base_columns) else grand
             d=n if mode=='column-total' else grand
         else:
+            ri=basis_indices[rows[ri]['id']]
             n=matrix[ri][ci] if ci<len(base_columns) else row_totals[ri]
             d=grand if mode=='grand-total' else (column_totals[ci] if ci<len(base_columns) else grand) if mode=='column-total' else row_totals[ri]
         if mode=='breakdown-group':
@@ -98,12 +101,13 @@ def additive_sum_report(book,report,result,position,start,support_sheet,values,v
         from .kobo_excel_layout import excel_literal
         trend=result['trend'];date_raw=scalar(trend['dateField']);fmt={'day':'yyyy-mm-dd','month':'yyyy-mm','year':'yyyy'}[trend['unit']]
         dates=helper_column('period',f'IFERROR(IF({date_raw}="","",TEXT({date_raw},{excel_literal(fmt)})),"")')
-        answers=[r for r in rows if r['id']!='__blank__'];top=first+len(rows)+5;point_refs=[]
+        answers=[r for r in basis_rows if r['id']!='__blank__'];top=first+len(basis_rows)+5;point_refs=[]
         for pi,period in enumerate(trend['periods'],top):
             excel_cell(helper,pi,1).Value=period;refs=[]
             for ai,answer in enumerate(answers,2):
                 mask=f'{visible}*{series[answer["id"]]}*({dates}={excel_literal(period)})';excel_cell(helper,pi,ai).Formula2=measure_formula(values,mask,'sum');refs.append(reference(pi,ai))
             point_refs.append(refs)
+        result['_trendBasisIds']=[answer['id'] for answer in answers]
         result['_trendRawCells']={answer['id']:[point_refs[pi][ai] for pi in range(len(point_refs))] for ai,answer in enumerate(answers)}
         from .kobo_excel_trend_projection import write_trend_series
         write_trend_series(book,plot,result,point_refs,['percent'] if percent_mode else ['count'],support_sheet)

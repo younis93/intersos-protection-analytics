@@ -179,7 +179,17 @@ class AnswerTrend(BaseModel):
     series: list[TrendSeries]
 
 
+class AnswerVisibility(BaseModel):
+    shown: int
+    answered: int
+    missing: int
+    total: int
+    hiddenCount: int
+
+
 class QuestionResult(BaseModel):
+    pivotSort: dict[str, Any] | None = None
+    answerVisibility: AnswerVisibility | None = None
     filterMode: str = 'page'
     filterScope: str = ''
     cohortCount: int = 0

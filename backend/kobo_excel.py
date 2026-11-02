@@ -33,6 +33,12 @@ EXPORT_TIMEOUT_SECONDS = 3600
 
 def order_export_answers(result, visible, cfg):
     """Rank the complete export universe by the active filtered counts."""
+    if cfg.pivotSort and (visible or {}).get('pivotSort'):
+        order = {row['id']: index for index, row in enumerate(visible['rows'])}
+        result['rows'].sort(key=lambda row: (row['id'] == '__blank__', order.get(row['id'], len(order))))
+        if result.get('trend'):
+            result['trend']['series'].sort(key=lambda series: order.get(series['id'], len(order)))
+        return
     if cfg.chart == 'histogram' or result.get('bins'): return
     if cfg.answerSort.startswith('count'):
         counts = {row['id']: (row.get('value') if result.get('measure') else row['count']) for row in (visible or {}).get('rows', [])}
@@ -45,7 +51,7 @@ def order_export_answers(result, visible, cfg):
 
 
 def answer_label(result, answer):
-    duplicate = sum(r['label'] == answer['label'] for r in result['rows']) > 1
+    duplicate = sum(r['label'] == answer['label'] for r in result.get('percentageRows',result['rows'])) > 1
     return f"{answer['label']} [{answer['id']}]" if duplicate else answer['label']
 
 
@@ -106,7 +112,7 @@ def iter_source_rows(project, result, settings, context=None):
     dimensions = breakdown_fields(cfg, context['questions'], q) if cfg else []
     lookup = context['lookup']
     answers = [r for r in result['rows'] if r['id'] != '__blank__']
-    counts = Counter(row['label'] for row in result['rows'])
+    counts = Counter(row['label'] for row in result.get('percentageRows', result['rows']))
     captions_by_answer = {row['id']: f"{row['label']} [{row['id']}]" if counts[row['label']] > 1 else row['label'] for row in result['rows']}
     blank = next((row for row in result['rows'] if row['id'] == '__blank__'), None)
     dimension_labels = []
@@ -663,14 +669,17 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                 dimensions = len(result.get('breakdownFields', []))
                 excel_cell(report, start + 2, 1).Value = safe_spreadsheet_value('Breakdowns: ' + ' / '.join(field['label'] for field in result.get('breakdownFields', [])) if dimensions else result['percentageBasis'])
                 messages.put({'progress': 20+round(completed / len(snapshot['questions']) * 75), 'message': f'Creating grouped analysis: {completed}/{len(snapshot["questions"])}'})
-                if not question_rows[result['id']] or (not result['denominator'] and settings.hideBlanks):
+                if not result['rows'] or not question_rows[result['id']] or (not result['denominator'] and settings.hideBlanks):
                     if specs: excel_cell(report, start + 1, 1).Value = 'No recorded answers in the exported responses.'
-                    excel_cell(report, start + 5, 1).Value = 'No answered responses under the current filters.'; next_row = start+13; continue
+                    excel_cell(report, start + 5, 1).Value = 'All answers are hidden. Show all answers in analysis to include them in this report.' if not result['rows'] and settings.questions.get(result['id'],QuestionSettings()).hiddenAnswers else 'No answered responses under the current filters.'; next_row = start+13; continue
                 pivot_row = start+7
                 if independent and specs:
                     bottom = excel_cell(report, start + 4, 1).Top + ((len(specs)+3)//4)*156 + 24
                     while excel_cell(report, pivot_row - 2, 1).Top < bottom: pivot_row += 1
-                pivot = active_cache.CreatePivotTable(excel_cell(report, pivot_row, 1), f'KoboPivot{position:03d}')
+                keep_original = 'percentageRows' in result
+                pivot_sheet = _support_sheet(book, '_Kobo original pivots') if keep_original else report
+                pivot_destination = pivot_sheet.UsedRange.Row + pivot_sheet.UsedRange.Rows.Count + 6 if keep_original else pivot_row
+                pivot = active_cache.CreatePivotTable(excel_cell(pivot_sheet, pivot_destination, 1), f'KoboPivot{position:03d}')
                 pivot.EnableDrilldown = True; pivot.SaveData = True
                 pivot.ManualUpdate = True
                 pivot.HasAutoFormat = False; pivot.PreserveFormatting = True
@@ -685,7 +694,7 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                     from .kobo_excel_binary import add_binary_metrics
                     add_binary_metrics(pivot, result)
                 else:
-                    for metric in (['count'] if source.get('sparse') or result.get('percentageMode')=='breakdown-group' else metrics): add_metric(pivot, result, metric, _percentage_field)
+                    for metric in (['count'] if keep_original or source.get('sparse') or result.get('percentageMode')=='breakdown-group' else metrics): add_metric(pivot, result, metric, _percentage_field)
                 pivot.DisplayErrorString = True; pivot.ErrorString = '-'; pivot.RowGrand = False; pivot.ColumnGrand = False; pivot.PreserveFormatting = True; pivot.RowAxisLayout(1)
                 pivot.DisplayNullString = True; pivot.NullString = '0'
                 pivot.MergeLabels = True
@@ -709,10 +718,14 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                         answered = pivot_value(totals, 'Answered total', base_answer, result=result)
                         cohort = pivot_value(totals, 'Cohort size', base_answer, result=result)
                         excel_cell(report, start + 1, 1).Formula = '="Answered: "&' + answered + '&". Missing: "&(' + cohort + '-' + answered + ')&". ' + ('Repeat entries.' if result['repeat'] else 'Respondents.') + '"'
-                    _fixed_pivot_items(pivot, result, project, settings)
+                    _fixed_pivot_items(pivot, {**result, 'rows': result.get('percentageRows', result['rows'])}, project, settings)
                 _style_pivot(pivot, report, result, totals)
                 telemetry.begin('formulas', message=f'Writing question values: {completed}/{len(snapshot["questions"])}')
-                area, footer = native_report(book, report, pivot, totals, result, metrics, _support_sheet, settings.language)
+                if keep_original:
+                    from .kobo_excel_percentages import report_table
+                    area, footer = report_table(book, report, totals, result, pivot_row, metrics, _support_sheet, settings.language)
+                else:
+                    area, footer = native_report(book, report, pivot, totals, result, metrics, _support_sheet, settings.language)
                 chart_pivot, chart_metrics = pivot, [result['appearance']['metric']]
                 telemetry.begin('charts', message=f'Building chart: {completed}/{len(snapshot["questions"])}')
                 from .kobo_excel_trends import trend_chart, native_heatmap, write_heatmap_formats
@@ -729,7 +742,9 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                     if chart is None: excel_cell(report, start + 3, 1).Value = 'No answered responses available for a chart.'
                 from .kobo_excel_chart_projection import project_excel_chart
                 project_excel_chart(book,chart,result,_support_sheet)
-                if source.get('binary'):
+                if keep_original:
+                    excel_cell(report, start+3, 1).Value = 'Hidden answers remain included in percentage totals. Inspect contributing responses in the Data worksheet.'
+                if source.get('binary') and not keep_original:
                     from .kobo_excel_binary import DRILLDOWN_NOTE
                     note = excel_range(report, start+3, 1, start+3, 10); note.Merge(); note.Value = DRILLDOWN_NOTE; note.WrapText = True; note.RowHeight = 34
                 telemetry.begin('slicers', message=f'Connecting question filters: {completed}/{len(snapshot["questions"])}')

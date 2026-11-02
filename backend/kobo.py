@@ -71,10 +71,20 @@ class ChartAppearance(BaseModel):
     bars: Literal['group', 'stack'] = 'group'
 
 
+class PivotSort(BaseModel):
+    id: str
+    label: str
+    metric: Literal['answer', 'count', 'percent']
+    series: list[str] | None = None
+    direction: Literal['asc', 'desc']
+
+
 class QuestionSettings(BaseModel):
+    pivotSort: PivotSort | None = None
     filterMode: Literal['page', 'own', 'additional'] = 'page'
     ownFilters: list[KoboFilter] = Field(default_factory=list)
     hiddenAnswers: list[str] = Field(default_factory=list)
+    hiddenAnswerPercentageMode: Literal['adjust', 'keep-original'] = 'adjust'
     chartTopN: int | None = Field(None, ge=1, le=1000000)
     chartOther: bool = False
     percentageMode: Literal['legacy-respondents', 'grand-total', 'column-total', 'row-total', 'breakdown-group'] = 'legacy-respondents'
@@ -784,7 +794,7 @@ def active_question_filters(cfg):
 
 def question_cohort(question, records, cfg, questions, lookup):
     """Resolve a question cohort once, using ancestor values for repeat filters."""
-    hidden = set(cfg.hiddenAnswers) if question['kind'] in {'category', 'multiple', 'text'} else set()
+    hidden = set(cfg.hiddenAnswers) if cfg.hiddenAnswerPercentageMode == 'adjust' and question['kind'] in {'category', 'multiple', 'text'} else set()
     def visible(record):
         value = record['values'].get(question['id'])
         codes = {'__blank__'} if missing(value) else set(value) if question['kind'] == 'multiple' else {str(value)}
@@ -812,8 +822,35 @@ def question_filter_summary(question, cfg, settings, questions):
     return [f"{label(questions[f.field], settings.language)}: {filter_rule_summary(f, {c['name']: label(c, settings.language) for c in questions[f.field]['choices']})}" for f in rules if f.field in questions]
 
 
+def answer_visibility_summary(q, records, cfg, questions, lookup):
+    """Keep response totals independent of the hidden-answer percentage base."""
+    if not cfg.hiddenAnswers or q['kind'] not in {'category', 'multiple', 'text'}: return None
+    original = question_cohort(q, records, cfg.model_copy(update={'hiddenAnswers': []}), questions, lookup)
+    shown = question_cohort(q, records, cfg.model_copy(update={'hiddenAnswerPercentageMode': 'adjust'}), questions, lookup)
+    answered = sum(not missing(r['values'].get(q['id'])) for r in original)
+    return {'shown': sum(not missing(r['values'].get(q['id'])) for r in shown),
+            'answered': answered, 'missing': len(original) - answered, 'total': len(original),
+            'hiddenCount': len(set(cfg.hiddenAnswers))}
+
+
 def question_result(q: dict, records: list[dict], settings: KoboSettings, questions: dict, lookup: dict):
     cfg = resolved_question_settings(q, settings)
+    if cfg.hiddenAnswerPercentageMode == 'keep-original' and cfg.hiddenAnswers and q['kind'] in {'category', 'multiple', 'text'}:
+        original_settings = settings.model_copy(update={'questions': {**settings.questions, q['id']: cfg.model_copy(update={'hiddenAnswers': []})}})
+        result = question_result(q, records, original_settings, questions, lookup)
+        result['percentageRows'] = result['rows']
+        result['rows'] = [row for row in result['rows'] if row['id'] not in cfg.hiddenAnswers]
+        if result.get('trend'):
+            result['trend']['percentageSeries'] = result['trend']['series']
+            result['trend']['series'] = [series for series in result['trend']['series'] if series['id'] not in cfg.hiddenAnswers]
+        result['percentageBasis'] += ' · Hidden answers remain included in percentage totals.'
+        result['answerVisibility'] = answer_visibility_summary(q, records, cfg, questions, lookup)
+        from .kobo_chart_projection import project_chart
+        from .kobo_pivot_sort import apply_pivot_sort
+        result = apply_pivot_sort(result, cfg)
+        if not (result.get('chartProjection') or {}).get('axisOrder'):
+            result['chartProjection'] = project_chart(result, cfg, q)
+        return result
     cohort = question_cohort(q, records, cfg, questions, lookup)
     answered = [r for r in cohort if not missing(r['values'].get(q['id']))]
     denominator = len(answered)
@@ -862,7 +899,12 @@ def question_result(q: dict, records: list[dict], settings: KoboSettings, questi
     result = apply_pivot_percentages(result,cfg)
     result.update(filterMode=cfg.filterMode, filterScope=q['repeat'], cohortCount=len(cohort), filterSummary=question_filter_summary(q,cfg,settings,questions), chartTopN=cfg.chartTopN, chartOther=cfg.chartOther, percentageGroupLevel=cfg.percentageGroupLevel)
     from .kobo_chart_projection import project_chart
-    result['chartProjection'] = project_chart(result,cfg,q)
+    from .kobo_pivot_sort import apply_pivot_sort
+    result = apply_pivot_sort(result, cfg)
+    if not (result.get('chartProjection') or {}).get('axisOrder'):
+        result['chartProjection'] = project_chart(result,cfg,q)
+    visibility = answer_visibility_summary(q, records, cfg, questions, lookup)
+    if visibility is not None: result['answerVisibility'] = visibility
     return result
 
 

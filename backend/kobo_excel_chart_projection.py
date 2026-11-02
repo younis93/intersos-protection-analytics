@@ -70,7 +70,8 @@ def project_excel_chart(book,chart_object,result,support_sheet):
     selected=[r for r in projection['rows'] if r['id']!='__chart_other__']
     original=[r for r in result['rows'] if r['id']!='__blank__']
     chosen={r['id'] for r in selected}
-    kept=[i+1 for i,r in enumerate(original) if r['id'] in chosen]
+    indices={r['id']:i+1 for i,r in enumerate(original)}
+    kept=[indices[r['id']] for r in selected if r['id'] in indices]
     omitted=[i+1 for i,r in enumerate(original) if r['id'] not in chosen]
     if result.get('trend'):
         source=list(result['trend']['series']);entries=[]
@@ -120,5 +121,5 @@ def project_excel_chart(book,chart_object,result,support_sheet):
             if series.HasDataLabels:
                 series.HasDataLabels=False
                 if result.get('appearance',{}).get('labels')!='hidden':series.ApplyDataLabels()
-    if chart.HasTitle:chart.ChartTitle.Text=str(chart.ChartTitle.Text)[:180]+f" - Top {projection['topNShown']} of {projection['topNTotal']}"+(' + Other' if projection['topNOther'] else '')
+    if chart.HasTitle and not projection.get('axisOrder'):chart.ChartTitle.Text=str(chart.ChartTitle.Text)[:180]+f" - Top {projection['topNShown']} of {projection['topNTotal']}"+(' + Other' if projection['topNOther'] else '')
     chart.PlotVisibleOnly=False

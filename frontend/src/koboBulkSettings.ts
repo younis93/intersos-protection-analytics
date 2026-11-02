@@ -12,7 +12,7 @@ export function bulkQuestionSettings(question:KoboQuestion,settings:KoboSettings
  if(draft.appearance!==undefined)next.appearance={...current.appearance,...draft.appearance};
  if(draft.breakdowns!==undefined){next.pointColors={};next.breakdown='';next.breakdowns=draft.breakdowns.filter(id=>id!==question.id)}
  if(draft.breakdownDisplay!==undefined)next.breakdownDisplay=draft.breakdownDisplay;
- if(draft.answerSort!==undefined)next.answerSort=draft.answerSort;
+ if(draft.answerSort!==undefined){next.answerSort=draft.answerSort;if(draft.answerSort!==current.answerSort)next.pivotSort=null}
  if(question.kind==='number'){if(draft.numericMode!==undefined)next.numericMode=draft.numericMode;if(draft.bins!==undefined)next.bins=draft.bins}
  if(question.kind==='date'&&draft.dateUnit!==undefined)next.dateUnit=draft.dateUnit;
  if(draft.palette!==undefined){next.palette=draft.palette;next.pointColors={};next.colors={...draft.colors}}

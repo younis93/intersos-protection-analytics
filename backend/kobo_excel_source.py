@@ -88,11 +88,12 @@ def query_config(project, snapshot, settings, specs, layouts):
     for result in snapshot['questions']:
         q = by_id[result['id']]; cfg = settings.questions.get(q['id'])
         dimensions = breakdown_fields(cfg, by_id, q) if cfg else []
-        counts = Counter(row['label'] for row in result['rows'])
+        counts = Counter(row['label'] for row in result.get('percentageRows', result['rows']))
         results.append({'id': q['id'], 'label': result['label'], 'group': q['group'], 'groupLabel': next((g['label'] for g in snapshot['groups'] if g['id'] == q['group']), ''),
             'scope': q['repeat'], 'kind': q['kind'], 'dateUnit': cfg.dateUnit if cfg else 'month', 'trendDateField': cfg.trendDateField if cfg and result.get('trend') else '', 'trendUnit': cfg.trendUnit if cfg else 'month', 'dimensions': [f['id'] for f in dimensions],
-            'bins': result.get('bins', []), 'blank': not settings.hideBlanks and not (cfg and '__blank__' in cfg.hiddenAnswers), 'hiddenAnswers': cfg.hiddenAnswers if cfg and q['kind'] in {'category','multiple','text'} else [],
-            'answers': [{'id': a['id'], 'label': f"{a['label']} [{a['id']}]" if counts[a['label']] > 1 else a['label']} for a in result['rows'] if a['id'] != '__blank__'],
+            'bins': result.get('bins', []), 'blank': not settings.hideBlanks and not (cfg and cfg.hiddenAnswerPercentageMode == 'adjust' and '__blank__' in cfg.hiddenAnswers), 'hiddenAnswers': cfg.hiddenAnswers if cfg and cfg.hiddenAnswerPercentageMode == 'adjust' and q['kind'] in {'category','multiple','text'} else [],
+            'hiddenAnswerPercentageMode': cfg.hiddenAnswerPercentageMode if cfg else 'adjust',
+            'answers': [{'id': a['id'], 'label': f"{a['label']} [{a['id']}]" if counts[a['label']] > 1 else a['label']} for a in result.get('percentageRows', result['rows']) if a['id'] != '__blank__'],
             'blankLabel': 'Blank / unanswered' if settings.language == 'en' else 'فارغ / دون إجابة'})
     return {'tables': [{'name': l['table'], 'raw': f'KoboRaw{index:03d}', 'scope': l['scope'], 'parent': l['parent_scope']} for index, l in enumerate(layouts)], 'fields': fields, 'questions': results,
         'filters': [{'id': s['id'], 'header': s['header'], 'captions': s['captions']} for s in specs], 'headers': [*DATA_HEADERS, *(s['header'] for s in specs)]}

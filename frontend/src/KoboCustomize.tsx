@@ -1,3 +1,4 @@
+import {useKoboUnsavedChanges} from './useKoboUnsavedChanges';
 import KoboAppearanceControls from './KoboAppearanceControls';
 import {lazy,Suspense,useEffect,useId,useMemo,useRef,useState} from 'react';
 import {BarChart3,ChartColumn,ChartLine,Check,ChevronDown,Palette,PieChart,RotateCcw,SlidersHorizontal,X} from 'lucide-react';
@@ -40,7 +41,7 @@ export default function KoboCustomize({result,project,settings,onApply,onClose}:
  const[invalidColors,setInvalidColors]=useState<Set<string>>(new Set()),[colorRevision,setColorRevision]=useState(0),[colorLimit,setColorLimit]=useState(20),[selectedPalette,setSelectedPalette]=useState(initial.current.palette||'');
  const[customTopN,setCustomTopN]=useState(()=>!!initial.current.chartTopN&&![5,10,20].includes(initial.current.chartTopN));
  const key=calculationKey(draft),initialKey=calculationKey(initial.current),pending=busy||preview.key!==key;
- const patch=(change:Partial<KoboQuestionSettings>)=>setDraft(current=>({...current,...change,...(change.breakdowns!==undefined?{pointColors:{}}:{})}));
+ const patch=(change:Partial<KoboQuestionSettings>)=>setDraft(current=>({...current,...change,...(change.answerSort!==undefined&&change.answerSort!==current.answerSort?{pivotSort:null}:{}),...(change.breakdowns!==undefined?{pointColors:{}}:{})}));
  const changeCalculation=(operation:NonNullable<KoboQuestionSettings['calculation']>['operation'])=>{
   const field=project.form.questions.find(field=>field.id===draft.calculation?.field);
   const compatible=field&&field.kind!=='multiple'&&(operation==='unique'||field.kind==='number');
@@ -73,8 +74,9 @@ export default function KoboCustomize({result,project,settings,onApply,onClose}:
  };
  const dirty=JSON.stringify(draft)!==JSON.stringify(initial.current);
  const apply=()=>{if(!pending&&!error&&!invalidColors.size&&dirty)onApply(draft)};
- return <dialog ref={dialog} className="kobo-dialog glass kobo-customize" aria-label={`Customize ${result.name}`} dir="ltr" onCancel={event=>{event.preventDefault();onClose()}}>
-  <header><div><span className="eyebrow">CUSTOMIZE QUESTION · {result.name}</span><h2 dir="auto">{result.label}</h2><p>Answered: <strong>{shown.denominator}</strong> · Missing: {shown.missing} · Changes stay in preview until applied.</p></div><button type="button" className="soft" aria-label="Close customization" onClick={onClose}><X/></button></header>
+ const {requestClose,confirmation}=useKoboUnsavedChanges({dirty:dirty||!!invalidColors.size,canSave:dirty&&!pending&&!error&&!invalidColors.size,onSave:apply,onClose,reason:invalidColors.size?'Correct the invalid HEX color before saving.':pending?'Wait for the preview to finish updating.':error?'Resolve the preview error before saving.':''});
+ return <><dialog ref={dialog} className="kobo-dialog glass kobo-customize" aria-label={`Customize ${result.name}`} dir="ltr" onCancel={event=>{event.preventDefault();requestClose()}}>
+  <header><div><span className="eyebrow">CUSTOMIZE QUESTION · {result.name}</span><h2 dir="auto">{result.label}</h2><p>Answered: <strong>{shown.denominator}</strong> · Missing: {shown.missing} · Changes stay in preview until applied.</p></div><button type="button" className="soft" aria-label="Close customization" onClick={requestClose}><X/></button></header>
   <div className="kobo-customize-mobile-tabs" role="tablist" aria-label="Customization view">{(['settings','preview'] as const).map(pane=><button type="button" role="tab" id={`kobo-customize-${pane}-tab`} aria-controls={`kobo-customize-${pane}`} aria-selected={mobilePane===pane} tabIndex={mobilePane===pane?0:-1} key={pane} onClick={()=>setMobilePane(pane)} onKeyDown={event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?'settings':event.key==='End'?'preview':pane==='settings'?'preview':'settings';setMobilePane(next);document.getElementById(`kobo-customize-${next}-tab`)?.focus()}}}>{pane==='settings'?'Settings':'Preview'}</button>)}</div>
   <div className={`kobo-customize-body pane-${mobilePane}`}>
    <section id="kobo-customize-settings" className="kobo-customize-settings" aria-label="Question settings">
@@ -102,9 +104,9 @@ export default function KoboCustomize({result,project,settings,onApply,onClose}:
     {error&&<div className="kobo-preview-error" role="alert"><p>{error}</p><button type="button" className="soft" onClick={()=>setRetry(current=>current+1)}>Retry preview</button></div>}
     {shown?.chart==='line'&&shown.trend?.periods.length===1&&shown.trend.unit!=='day'&&!pending&&!error&&<button type="button" className="soft" onClick={()=>patch({trendUnit:'day'})}>{settings.language==='ar'?'التجميع حسب اليوم':'Group by day'}</button>}
     <KoboRendering enabled={false}><div className="kobo-customize-preview-chart"><Suspense fallback={<p role="status">Loading preview…</p>}><Chart result={shown} language={settings.language} colorSettings={draft}/></Suspense></div></KoboRendering>
-    <details className="kobo-customize-table"><summary>Table preview <ChevronDown aria-hidden="true"/></summary><KoboPivotTable result={shown} language={settings.language} limit={30} display={draft.breakdownDisplay||'both'}/>{shown.rows.length>30&&<p>First 30 answers shown. Totals include every answer.</p>}</details>
+    <details className="kobo-customize-table" open={section==='appearance'}><summary>Table preview <ChevronDown aria-hidden="true"/></summary><KoboPivotTable result={shown} language={settings.language} limit={30} display={draft.breakdownDisplay||'both'}/>{shown.rows.length>30&&<p>First 30 answers shown. Totals include every answer.</p>}</details>
    </section>
   </div>
-  <footer className="kobo-dialog-actions"><p role="status">{invalidColors.size?'Correct the invalid HEX color in Colors.':error?'Resolve the preview error before applying.':pending?'Updating question preview…':dirty?'Changes have not been applied.':'Your current question settings.'}</p><div className="kobo-dialog-action-buttons"><button type="button" className="soft" onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={!dirty||pending||!!error||!!invalidColors.size} onClick={apply}>Apply changes</button></div></footer>
- </dialog>;
+  <footer className="kobo-dialog-actions"><p role="status">{invalidColors.size?'Correct the invalid HEX color in Colors.':error?'Resolve the preview error before applying.':pending?'Updating question preview…':dirty?'Changes have not been applied.':'Your current question settings.'}</p><div className="kobo-dialog-action-buttons"><button type="button" className="soft" onClick={requestClose}>Cancel</button><button type="button" className="primary" disabled={!dirty||pending||!!error||!!invalidColors.size} onClick={apply}>Apply changes</button></div></footer>
+ </dialog>{confirmation}</>;
 }

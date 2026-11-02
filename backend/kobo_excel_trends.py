@@ -50,17 +50,20 @@ def trend_chart(book, report, cache, result, position, footer, left, top, metric
     from .kobo_excel_trend_projection import matrix_range,write_trend_series
     raw_sheet=support_sheet(book,'_Kobo trend raw values');raw_first=raw_sheet.UsedRange.Row+raw_sheet.UsedRange.Rows.Count+4
     quoted="'"+raw_sheet.Name.replace("'","''")+"'!"
-    refs=[[f'{quoted}${get_column_letter(2+ai)}${raw_first+pi}' for ai in range(len(trend['series']))] for pi in range(len(trend['periods']))]
-    result['_trendRawCells']={series['id']:[refs[pi][ai] for pi in range(len(refs))] for ai,series in enumerate(trend['series'])}
+    visible_ids={series['id'] for series in trend['series']}
+    basis_series=[*trend['series'],*[s for s in trend.get('percentageSeries',[]) if s['id'] not in visible_ids]]
+    refs=[[f'{quoted}${get_column_letter(2+ai)}${raw_first+pi}' for ai in range(len(basis_series))] for pi in range(len(trend['periods']))]
+    result['_trendRawCells']={series['id']:[refs[pi][ai] for pi in range(len(refs))] for ai,series in enumerate(basis_series)}
+    result['_trendBasisIds']=[series['id'] for series in basis_series]
     formulas = [];legacy_bases=[]
     for index, period in enumerate(trend['periods']):
         row = header + 1 + index
         base = f'IFERROR(N(GETPIVOTDATA("Dated responses",{base_ref},{period_field},{excel_literal(period)})),0)'
         legacy_bases.append(base)
         values = [excel_literal(period), '=' + base]
-        for ai,series in enumerate(trend['series']):
+        for ai,series in enumerate(basis_series):
             caption = series['label']
-            if sum(other['label'] == caption for other in result['rows']) > 1: caption += f' [{series["id"]}]'
+            if sum(other['label'] == caption for other in result.get('percentageRows',result['rows'])) > 1: caption += f' [{series["id"]}]'
             if binary:
                 option = next(option for option in result['_source']['options'] if option['id'] == series['id'])
                 count = f'IFERROR(N(GETPIVOTDATA({excel_literal(option.get("metric", option["caption"]))},{count_ref},{period_field},{excel_literal(period)})),0)'
@@ -71,6 +74,7 @@ def trend_chart(book, report, cache, result, position, footer, left, top, metric
             if mode!='legacy-respondents':
                 matrix=refs if mode=='grand-total' else [refs[index]] if mode in {'column-total','breakdown-group'} else [[row[ai]] for row in refs]
                 denominator='SUM('+matrix_range(matrix)+')'
+            if series['id'] not in visible_ids: continue
             values.extend(['=' + refs[index][ai], f'=IF({denominator}=0,"-",{count}/{denominator})'])
         formulas.append(tuple('='+value if column == 0 else value for column, value in enumerate(values)))
     if formulas:

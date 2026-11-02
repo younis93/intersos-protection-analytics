@@ -9,8 +9,8 @@ export async function buildKoboBulkCopy(analysis:KoboAnalysis,stores?:Map<string
  for(const [index,result] of analysis.questions.entries()){
   const display=analysis.settings.questions[result.id]?.breakdownDisplay||result.breakdownDisplay||'both';
   const retained=stores?.get(result.id)?.get('pivotSort') as PivotSort|null|undefined;
-  const sort=resolvePivotSort(result,display,retained);
-  const rows=sortPivotRows(result,sort,analysis.settings.language);
+  const sort=resolvePivotSort(result,display,result.pivotSort||retained);
+  const rows=result.pivotSort?result.rows:sortPivotRows(result,sort,analysis.settings.language);
   const notes=[questionFilterNote(result.filterMode)||'Uses page filters.',...(result.filterSummary||analysis.filterSummary),`Percentage basis: ${result.percentageBasis}`];
   const table=koboTableHtml(result,display,rows).match(/<body>([\s\S]*)<\/body>/)?.[1];
   if(!table)throw new Error(`Unable to format the pivot for ${result.label}. No tables were copied.`);

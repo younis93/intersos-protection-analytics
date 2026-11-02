@@ -20,12 +20,13 @@ def rounding_formulas(row, first, last, units, decimals, balance=True):
 def report_table(book, report, totals, result, row, metrics, support_sheet, language='en'):
     """Stable answer IDs own helper rows; display sort never determines rounding ties."""
     from .kobo_excel_slicers import pivot_value
+    from .kobo_excel_ratio import modern, ratio, selection_base
     decimals = result.get('percentageDecimals', 0)
     units = 100 * 10 ** decimals
     helper = support_sheet(book, '_Kobo rounding')
     columns = result.get('_excelBreakdowns', result['breakdowns']) or [{'id': '', 'labels': []}]
     answers = result['rows']
-    valid = [answer for answer in answers if answer['id'] != '__blank__']
+    valid = [answer for answer in result.get('percentageRows',answers) if answer['id'] != '__blank__']
     canonical = {key: index for index, key in enumerate(sorted(answer['id'] for answer in valid))}
     base = valid[0]['id'] if valid else '__blank__'
     cells = {}
@@ -37,7 +38,7 @@ def report_table(book, report, totals, result, row, metrics, support_sheet, lang
         if max(first, last) > 1048576: raise ValueError('Percentage display helpers exceed the Excel row limit. Export fewer questions or breakdowns.')
         quoted = "'" + helper.Name.replace("'", "''") + "'!"
         parts = column['labels']
-        denominator = pivot_value(totals, 'Answered total', base, parts, result)
+        denominator = selection_base(totals,result,parts) if modern(result) else pivot_value(totals, 'Answered total', base, parts, result)
         for index, answer in enumerate(valid):
             r = first + index
             helper.Cells(r, 1).Value = safe_spreadsheet_value(answer['id'])
@@ -46,6 +47,7 @@ def report_table(book, report, totals, result, row, metrics, support_sheet, lang
             formulas = rounding_formulas(r, first, last, units, decimals, result['kind'] != 'multiple')
             helper.Range(helper.Cells(r, 4), helper.Cells(r, 7)).Formula = (tuple(formulas),)
             helper.Cells(r, 8).Value = canonical[answer['id']]
+            if modern(result): helper.Cells(r, 7).Formula = '=' + ratio(totals,result,answer['id'],parts)
             helper.Cells(r, 7).NumberFormat = percent_format(decimals)
             cells[(answer['id'], column['id'])] = {'count': f'{quoted}$B${r}', 'percent': f'{quoted}$G${r}', 'denominator': f'{quoted}$C${r}'}
         if not valid:
@@ -104,7 +106,7 @@ def report_table(book, report, totals, result, row, metrics, support_sheet, lang
         denominator = column['_denominator']
         for offset, metric in enumerate(metrics):
             target = report.Cells(footer_row, 2 + c * metric_count + offset)
-            target.Formula = '=' + (denominator if metric == 'count' else f'IF({denominator}=0,"-",1)')
+            target.Formula = '=' + (denominator if metric == 'count' else ratio(totals,result,None,column['labels'],margin=True) if modern(result) else f'IF({denominator}=0,"-",1)')
             target.NumberFormat = '#,##0' if metric == 'count' else percent_format(decimals)
     footer = report.Range(report.Cells(footer_row, 1), report.Cells(footer_row, width))
     footer.Interior.Color = 0xEBDFD2; footer.Font.Bold = True; footer.RowHeight = 26

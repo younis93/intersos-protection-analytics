@@ -58,7 +58,7 @@ def measured_report(book, report, project, result, position, start, layouts, con
     # of Excel's column limit. Cell-specific membership remains an array mask.
     answer_values=helper_column('answer',f'IFERROR(IF(ISBLANK({answer_raw}),"",{answer_raw}),"")')
     series={}
-    for answer in result['rows']:
+    for answer in result.get('percentageRows',result['rows']):
         if answer['id']=='__blank__': condition=f'({answer_values}="")'
         elif result['kind']=='multiple':condition=f'ISNUMBER(FIND({excel_literal(" "+answer["id"]+" ")}," "&{answer_values}&" "))'
         elif result['kind']=='date':

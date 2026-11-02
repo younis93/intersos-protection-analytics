@@ -25,6 +25,9 @@ export default function KoboChoiceReview({question,baseQuestion,preview,mappings
    setLoading(false)}).catch(e=>{if(!controller.signal.aborted){setError(e instanceof Error?e.message:String(e));setLoading(false)}});
   return()=>controller.abort();
  },[preview.token,mappings,requestConfig,question.id,confirmedSeparator,separator,retry]);
+ const excludedQuestions=new Set(config.excludedQuestionIds||[]);
+ const includedNames=new Set(preview.form.questions.filter(q=>!excludedQuestions.has(q.id)).flatMap(q=>[q.id,q.name]));
+ const filterActive=!!baseQuestion.choiceFilter&&[...baseQuestion.choiceFilter.matchAll(/\$\{([^}]+)\}/g)].every(match=>includedNames.has(match[1]));
  const finalChoices=mode==='form'?baseQuestion.choices:choices;
  const finalCodes=new Set(finalChoices.map(c=>c.name));
  const choiceOptions:[string,string][]=finalChoices.map(c=>{const label=koboLabel(c,'en');return [c.name,finalChoices.filter(other=>koboLabel(other,'en')===label).length>1?`${label} · ${c.name}`:label]});
@@ -65,6 +68,7 @@ export default function KoboChoiceReview({question,baseQuestion,preview,mappings
  else if(splitBlocked)blockers.push({message:'Confirm the separator to prepare individual answer choices.',label:'Review separator',action:()=>{separatorInput.current?.scrollIntoView({block:'center'});separatorInput.current?.focus()}});
  else if(data){
   if(!finalChoices.length)blockers.push({message:'No final choices exist yet. Create choices to continue.',label:data.answers.length?'Create choices from data':'Add a choice',action:()=>{if(data.answers.length)addAnswers(data.answers);else{setMode('custom');setChoices([{name:'data_'+crypto.randomUUID().replace(/-/g,''),labels:{en:''}}]);requestAnimationFrame(focusChoices)}}});
+  if(filterActive&&finalChoices.some(c=>!baseQuestion.choices.some(original=>original.name===c.name)))blockers.push({message:'This question uses a choice filter. Keep the form choices and map source answers to an existing choice, or exclude them as blank.',label:'Use form choices',action:()=>changeMode('form')});
   if(invalidLabels)blockers.push({message:`${invalidLabels} ${invalidLabels===1?'choice needs a label':'choices need labels'}.`,label:'Edit choice labels',action:focusChoices});
   if(unresolved.length)blockers.push({message:`${unresolved.length} source ${unresolved.length===1?'answer needs':'answers need'} a destination choice or explicit exclusion.`,label:'Review unresolved answers',action:focusUnresolved});
   if(invalidOption)blockers.push({message:`The option column ${invalidOption.header} uses a removed choice. Restore the choice or remap the column.`});

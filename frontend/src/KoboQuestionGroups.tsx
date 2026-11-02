@@ -1,6 +1,6 @@
 import {analysisLabel} from './koboApi';
-import {useEffect,useLayoutEffect,useMemo,useRef,useState,type ReactNode} from 'react';
-import {ChartNoAxesCombined,ChevronDown,Layers,Search,Table2,X} from 'lucide-react';
+import {useEffect,useId,useLayoutEffect,useMemo,useRef,useState,type ReactNode} from 'react';
+import {ChartNoAxesCombined,ChevronDown,ChevronUp,Layers,Search,SlidersHorizontal,Table2,X} from 'lucide-react';
 import type {KoboAnalysis,KoboResult} from './koboTypes';
 import KoboActionMenu from './KoboActionMenu';
 import type {KoboGroupControls} from './KoboDisplayOptions';
@@ -55,6 +55,21 @@ export default function KoboQuestionGroups({analysis,renderQuestion,tools,tableO
  const effectiveExpanded=useMemo(()=>questionQuery?new Set(tree.list.filter(group=>searchCollapsed.query!==questionQuery||!searchCollapsed.ids.has(group.id)).map(group=>group.id)):expanded,[questionQuery,tree,expanded,searchCollapsed]);
  const host=useRef<HTMLDivElement>(null),toolbar=useRef<HTMLDivElement>(null);
  const sentinel=useRef<HTMLSpanElement>(null),[pinned,setPinned]=useState(false);
+ const[controlsMode,setControlsMode]=useState<'expanded'|'collapsed'>('expanded');
+ const controlsId=useId(),restoreButton=useRef<HTMLButtonElement>(null),focusRestore=useRef(false),focusShow=useRef(false);
+ const controlsCollapsed=controlsMode==='collapsed';
+ useLayoutEffect(()=>{
+  const bar=toolbar.current;if(!bar)return;
+  if(!controlsCollapsed){if(focusShow.current){bar.querySelector<HTMLButtonElement>('[aria-label="Hide analysis controls"]')?.focus({preventScroll:true});focusShow.current=false}return}
+  if(focusRestore.current){restoreButton.current?.focus({preventScroll:true});focusRestore.current=false}
+ },[controlsCollapsed,pinned]);
+ const hideControls=()=>{
+  focusRestore.current=true;
+  toolbar.current?.querySelectorAll<HTMLElement>(':popover-open').forEach(node=>node.hidePopover());
+  setControlsMode('collapsed');
+ };
+ const showControls=()=>{focusShow.current=true;setControlsMode('expanded')};
+
  const previousView=useRef(tableOnly);
  useLayoutEffect(()=>{if(previousView.current===tableOnly)return;previousView.current=tableOnly;host.current?.scrollIntoView({block:'start',behavior:'instant'})},[tableOnly]);
  const toggle=(id:string)=>{if(questionQuery){setSearchCollapsed(current=>{const ids=new Set(current.query===questionQuery?current.ids:[]);if(ids.has(id))ids.delete(id);else ids.add(id);return{query:questionQuery,ids}});return}toggleNormal(id)};
@@ -81,7 +96,7 @@ export default function KoboQuestionGroups({analysis,renderQuestion,tools,tableO
   const scrollSurface=root||document.documentElement,previousPaddingTop=scrollSurface.style.scrollPaddingTop,previousPaddingBottom=scrollSurface.style.scrollPaddingBottom;
   const headings=Array.from(node.querySelectorAll<HTMLElement>(tableOnly?'.kobo-no-heading':'.kobo-group-heading'));let observer:IntersectionObserver|undefined,pinObserver:IntersectionObserver|undefined;
   const observe=()=>{
-   const top=topbar?.getBoundingClientRect().height||0,offset=top+bar.getBoundingClientRect().height+24;
+   const top=topbar?.getBoundingClientRect().height||0,visibleHeight=bar.getBoundingClientRect().height,offset=top+visibleHeight+24;
    scrollSurface.style.scrollPaddingTop=`${offset}px`;scrollSurface.style.scrollPaddingBottom=window.innerWidth<=768?'140px':'24px';
    node.style.setProperty('--kobo-nav-top',`${top+8}px`);
    pinObserver?.disconnect();
@@ -103,10 +118,15 @@ export default function KoboQuestionGroups({analysis,renderQuestion,tools,tableO
  const setAllGroups=(open:boolean)=>{if(questionQuery)setSearchCollapsed({query:questionQuery,ids:new Set(open?[]:tree.list.map(group=>group.id))});else setExpanded(new Set(open?tree.list.map(group=>group.id):[]))};
  const groupControls:KoboGroupControls={expandAll:()=>setAllGroups(true),collapseAll:()=>setAllGroups(false),allExpanded:tree.list.every(group=>effectiveExpanded.has(group.id)),allCollapsed:tree.list.every(group=>!effectiveExpanded.has(group.id))};
  const query=search.trim().toLocaleLowerCase();
+ const restoreControls=<button ref={restoreButton} type="button" className="soft kobo-controls-restore" aria-label="Show analysis controls" aria-expanded="false" aria-controls={controlsId} onClick={showControls}><SlidersHorizontal aria-hidden="true"/><span>Show controls</span>{analysis.settings.filters.length>0&&<b aria-label={`${analysis.settings.filters.length} active response filters`}>{analysis.settings.filters.length}</b>}</button>;
+
  return <div ref={host} className="kobo-analysis-sections">
   <KoboSidebarGroups groups={tree.list} active={tableOnly?tableGroup:active} onNavigate={id=>{const group=tree.nodes.get(id);if(group)navigate(group)}} language={analysis.settings.language}/>
   <span ref={sentinel} className="kobo-controls-sentinel" aria-hidden="true"/>
-  <div ref={toolbar} className={`kobo-filter-surface kobo-sticky-controls${pinned?' is-pinned':''}`} aria-label="Analysis controls">
+  <div ref={toolbar} className={`kobo-filter-surface kobo-sticky-controls${pinned?' is-pinned':''}${controlsCollapsed?' controls-collapsed':''}`} data-controls-collapsed={controlsCollapsed} data-controls-pinned={pinned} aria-label="Analysis controls">
+   {controlsCollapsed&&<div className="kobo-controls-compact-row">{restoreControls}</div>}
+   <div id={controlsId} hidden={controlsCollapsed}>
+   <div className="kobo-controls-visibility"><span>Filters &amp; view controls</span><button type="button" className="soft" aria-label="Hide analysis controls" aria-expanded="true" aria-controls={controlsId} onClick={hideControls}><ChevronUp aria-hidden="true"/>Hide controls</button></div>
    {renderFilters&&<div className="kobo-sticky-filter-slot">{renderFilters(pinned)}</div>}
    <div className="kobo-analysis-toolbar" aria-label="Analysis navigation">
    <div className="kobo-analysis-toolbar-header">
@@ -125,6 +145,7 @@ export default function KoboQuestionGroups({analysis,renderQuestion,tools,tableO
     })}{query&&!tree.list.some(group=>group.label.toLocaleLowerCase().includes(query))&&!analysis.questions.some(question=>`${question.label} ${question.name}`.toLocaleLowerCase().includes(query))&&<p className="kobo-nav-empty" role="status">No matching questions or groups.</p>}</div>
    </KoboActionMenu>
    </div>
+  </div>
   </div>
   </div>
   {questionQuery&&<p className="kobo-search-scope" role="status">Exports include all enabled questions. Search only changes this view.</p>}

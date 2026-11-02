@@ -13,6 +13,7 @@ export function koboChartRows(result:KoboResult){
 /** Change crowded categorical comparisons to bars before dropping any value labels. */
 export function readableKoboChartType(result:KoboResult,exporting=false,containerWidth=900):KoboResult['chart']{
  const rows=koboChartRows(result),series=Math.max(1,result.breakdowns.length),appearance=resolveAppearance(result.appearance);
+ if(!exporting&&result.chart==='column')return 'column';
  if(['bar','line','histogram','heatmap'].includes(result.chart))return result.chart;
  if(result.chart==='pie'||result.chart==='donut')return result.breakdowns.length||rows.length>8?'bar':result.chart;
  const width=exporting?1300:Math.max(240,containerWidth),font=(appearance.fontSize||14)*(exporting?2.3:1);
@@ -25,7 +26,7 @@ export function readableKoboChartType(result:KoboResult,exporting=false,containe
 
 /** Dense screen views do not change saved answer order or export row selection. */
 export function isDenseKoboChart(result:KoboResult){
- if(['line','histogram','heatmap'].includes(result.chart)||result.kind==='date')return false;
+ if(['column','line','histogram','heatmap'].includes(result.chart)||result.kind==='date')return false;
  const count=result.rows.filter(row=>row.id!=='__blank__').length;
  if(count>12)return true;
  const appearance=resolveAppearance(result.appearance),series=appearance.bars==='stack'?1:result.breakdowns.length;
@@ -34,7 +35,7 @@ export function isDenseKoboChart(result:KoboResult){
 }
 export function koboScreenChartRows(result:KoboResult){
  result=projectKoboChart(result);
- if(!isDenseKoboChart(result))return koboChartRows(result);
+ if(!isDenseKoboChart(result)&&!(result.chart==='column'&&result.rows.filter(row=>row.id!=='__blank__').length>12))return koboChartRows(result);
  return result.rows.filter(row=>row.id!=='__blank__');
 }
 

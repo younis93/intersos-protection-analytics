@@ -37,7 +37,8 @@ export function chartSpec(result:KoboChartPanel,language:string,exporting=false,
  const categoryWidth=horizontal?Math.min(exporting?460:300,width*.38):exporting?90:55;
  const legendWidth=Math.min(width*.22,exporting?240:180);
  const left=categoryWidth+(showlegend&&legendLeft?legendWidth:0),right=showlegend&&legendRight?legendWidth:Math.max(25,labelFont*2);
- const usable=Math.max(80,width-left-right),stride=horizontal?1:Math.max(1,Math.ceil(shown.length*(font*5.5+12)/usable));
+ const columnWidth=!exporting&&type==='column'?Math.max(width,shown.length*Math.max(72,(stacked?1:seriesCount)*(labelFont*3+16))+left+right):undefined;
+ const usable=Math.max(80,(columnWidth||width)-left-right),stride=horizontal?1:Math.max(1,Math.ceil(shown.length*(font*5.5+12)/usable));
  const ticks=shown.filter((_,index)=>index%stride===0);
  const captionWidth=horizontal?categoryWidth-24:usable/Math.max(1,ticks.length)-12;
  const captions=ticks.map(row=>chartCaption(row.label,Math.min(horizontal?44:32,Math.max(5,captionWidth/(font*.57))),horizontal?5:4));
@@ -85,7 +86,7 @@ export function chartSpec(result:KoboChartPanel,language:string,exporting=false,
     customdata:entries.map((entry,index)=>[entry?.count??0,entry?.percent==null?'-':`${entry.percent}%`,shown[index].label,shown[index].id,column.id||null]),hovertext:entries.map((entry,index)=>hoverText(shown[index].label,entry?.count,displayPercent(entry),column.id?column.label:undefined)),hovertemplate:'%{hovertext}<extra></extra>'} as unknown as Data); // Plotly supports per-point positions and font colors beyond the bundled TS declarations.
   });
  }
- return {data,layout:{height,autosize:true,dragmode:false,
+ return {data,layout:{height,...(columnWidth&&columnWidth>width?{width:columnWidth}:{}),autosize:!columnWidth||columnWidth<=width,dragmode:false,
   hovermode:'closest',hoverlabel:{bgcolor:'#17324d',bordercolor:'#577997',font:{family:'Segoe UI, Arial, sans-serif',size:13,color:'#ffffff'},align:'left',namelength:0},
   paper_bgcolor:exporting?'#ffffff':'transparent',plot_bgcolor:exporting?'#ffffff':'transparent',font:{family:language==='ar'?'Noto Naskh Arabic, Segoe UI, sans-serif':'DM Sans, Segoe UI, sans-serif',color:ink,size:font},
   margin:{l:left,r:right,t:top,b:bottom},

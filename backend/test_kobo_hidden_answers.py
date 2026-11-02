@@ -120,3 +120,131 @@ def test_live_excel_config_and_seed_values_keep_exclusions(kind, engine):
         values = helper_values(layouts, config, sources, helpers)[0]
         index = list(helpers['']).index(included)
         assert [row[index] for row in values] == ['Included','Included','Excluded','Excluded','Included','Included','Excluded']
+
+
+@pytest.mark.parametrize('percentage', ['legacy-respondents', 'grand-total', 'column-total', 'row-total', 'breakdown-group'])
+@pytest.mark.parametrize('kind', ['category', 'multiple', 'text'])
+@pytest.mark.parametrize('operation', ['count', 'sum', 'average'])
+def test_original_percentages_preserve_complete_calculations(percentage, kind, operation):
+    project = fixture()
+    project['form']['questions'][0]['kind'] = kind
+    if kind == 'multiple':
+        for record in project['records']:
+            record['values']['answer'] = list(dict.fromkeys([record['values']['answer'], 'a']))
+    cfg = QuestionSettings(percentageMode=percentage, breakdowns=['region'], trendDateField='date', chart='line',
+        calculation={'operation':operation,'field':'number'} if operation != 'count' else None)
+    settings = KoboSettings(questions={'answer':cfg}, filters=[{'field':'region','values':['north']}])
+    before = deepcopy(project)
+    original = result(project, settings)
+    settings.questions['answer'] = cfg.model_copy(update={'hiddenAnswers':['b'], 'hiddenAnswerPercentageMode':'keep-original'})
+    actual = result(project, settings)
+    assert actual['rows'] == [row for row in original['rows'] if row['id'] != 'b']
+    for key in ['denominator','total','missing','breakdowns','pivotTotal','measureTotal','statistics']:
+        assert actual.get(key) == original.get(key)
+    assert actual['trend']['series'] == [series for series in original['trend']['series'] if series['id'] != 'b']
+    assert actual['trend']['percentageSeries'] == original['trend']['series']
+    assert project == before
+    assert 'Hidden answers remain included' in actual['percentageBasis']
+    assert len(data_rows(project, settings, '', ['answer'], drilldown={'question':'answer','answer':'a'})['rows']) == (4 if kind == 'multiple' else 1)
+
+
+def test_sixty_forty_and_restore_original_preference():
+    project = fixture()
+    project['records'] = project['records'][:5]
+    for index, record in enumerate(project['records']): record['values']['answer'] = 'a' if index < 3 else 'b'
+    cfg = QuestionSettings(percentageMode='grand-total',hiddenAnswers=['b'])
+    settings = KoboSettings(questions={'answer':cfg})
+    assert result(project, settings)['rows'][0]['percent'] == 100
+    cfg.hiddenAnswerPercentageMode = 'keep-original'
+    assert result(project, settings)['rows'][0]['percent'] == 60
+    cfg.hiddenAnswers = ['a','b','c','__blank__']
+    assert result(project, settings)['rows'] == []
+    assert result(project, settings)['denominator'] == 5
+    cfg.hiddenAnswers = []
+    restored = result(project, KoboSettings.model_validate_json(settings.model_dump_json()))
+    assert len(restored['rows']) == 2
+    assert cfg.hiddenAnswerPercentageMode == 'keep-original'
+    assert QuestionSettings().hiddenAnswerPercentageMode == 'adjust'
+
+
+@pytest.mark.parametrize('kind', ['category','multiple'])
+def test_original_live_excel_sources_keep_hidden_selections(kind):
+    from backend.kobo_excel_source import query_config, response_layout
+    from backend.kobo_excel_direct import direct_helpers
+    from backend.kobo_excel_ratio import selection_base
+    from backend.kobo_settings_share import export_settings, preview_settings
+    project = fixture()
+    project['form']['questions'][0]['kind'] = kind
+    if kind == 'multiple':
+        for record in project['records']: record['values']['answer'] = [record['values']['answer'], 'a']
+    cfg = QuestionSettings(hiddenAnswers=['b'],hiddenAnswerPercentageMode='keep-original',percentageMode='grand-total')
+    settings = KoboSettings(questions={'answer':cfg})
+    snapshot = analyze(project, settings, 'answer')
+    layouts = response_layout(project, settings)
+    config = query_config(project, snapshot, settings, [], layouts)
+    question = config['questions'][0]
+    assert question['hiddenAnswers'] == []
+    assert 'b' in {a['id'] for a in question['answers']}
+    config['excelMode'] = 'binary'
+    helpers, sources = direct_helpers(config, layouts)
+    assert 'AnswerAllowed' not in sources['answer']['fields']
+    local = {**snapshot['questions'][0], '_source':sources['answer'], '_countPivot':'Counts!A1'}
+    denominator = selection_base('Totals!A1',local)
+    assert 'b' in denominator
+    shared = preview_settings(project,KoboSettings(),export_settings(project,settings))
+    assert shared['settings']['questions']['answer']['hiddenAnswerPercentageMode'] == 'keep-original'
+
+
+@pytest.mark.parametrize('percentage', ['legacy-respondents','grand-total','column-total','row-total','breakdown-group'])
+def test_original_top_n_trend_other_excludes_hidden_series_but_keeps_their_base(percentage):
+    project = fixture()
+    cfg = QuestionSettings(percentageMode=percentage,trendDateField='date',chart='line',chartTopN=1,chartOther=True)
+    settings = KoboSettings(questions={'answer':cfg})
+    original = result(project,settings)
+    cfg.hiddenAnswers = ['b']
+    cfg.hiddenAnswerPercentageMode = 'keep-original'
+    actual = result(project,settings)
+    projection = actual['chartProjection']
+    assert {row['id'] for row in projection['rows']} == {'c','__chart_other__'}
+    other = next(series for series in projection['trend']['series'] if series['id']=='__chart_other__')
+    answer_a = next(series for series in original['trend']['series'] if series['id']=='a')
+    for expected,point in zip(answer_a['points'],other['points']):
+        assert point['count'] == expected['count']
+        assert point['percent'] == pytest.approx(expected['percent']) if expected['percent'] is not None else point['percent'] is None
+
+
+def test_original_hidden_blank_and_repeat_cohort():
+    project=fixture()
+    project['records'][0]['values']['answer']=None
+    cfg=QuestionSettings(hiddenAnswers=['__blank__','b'],hiddenAnswerPercentageMode='keep-original')
+    settings=KoboSettings(hideBlanks=False,questions={'answer':cfg})
+    actual=result(project,settings)
+    assert actual['missing']==1 and actual['total']==7
+    assert {row['id'] for row in actual['rows']}=={'c'}
+    question=project['form']['questions'][0];question['repeat']='children'
+    for record in project['records']:record.update(scope='children',parent='parent')
+    project['records'].append(dict(id='parent',parent='',scope='',row=1,sheet=0,values={}))
+    assert result(project,settings)['total']==7
+
+
+@pytest.mark.parametrize('mode', ['adjust', 'keep-original'])
+def test_visibility_summary_keeps_original_answered_missing_and_total(mode):
+    project = fixture()
+    project['records'][0]['values']['answer'] = None
+    settings = KoboSettings(hideBlanks=False, questions={'answer': QuestionSettings(hiddenAnswers=['b', '__blank__'], hiddenAnswerPercentageMode=mode)})
+    snapshot = result(project, settings)
+    original = result(project, KoboSettings(hideBlanks=False))
+    visible = result(project, KoboSettings(hideBlanks=False, questions={'answer': QuestionSettings(hiddenAnswers=['b', '__blank__'])}))
+    from backend.kobo_api import QuestionResult
+    assert QuestionResult.model_validate(snapshot).model_dump()['answerVisibility'] == snapshot['answerVisibility']
+    assert snapshot['answerVisibility'] == {'shown': visible['denominator'], 'answered': original['denominator'],
+        'missing': original['missing'], 'total': original['total'], 'hiddenCount': 2}
+    restored = result(project, KoboSettings(hideBlanks=False))
+    assert 'answerVisibility' not in restored
+
+
+def test_visibility_summary_respects_page_filters_and_all_answers_hidden():
+    project = fixture()
+    settings = KoboSettings(filters=[{'field':'region','values':['north']}], questions={'answer':QuestionSettings(hiddenAnswers=['a','b','c'])})
+    snapshot = result(project, settings)
+    assert snapshot['answerVisibility'] == {'shown':0, 'answered':4, 'missing':0, 'total':4, 'hiddenCount':3}

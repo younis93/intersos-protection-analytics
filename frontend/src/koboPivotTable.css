@@ -58,3 +58,11 @@
 
 .kobo-shell .kobo-pivot-wrap.is-windowed-columns .kobo-pivot-answer{position:sticky;inset-inline-start:0;z-index:1}
 .kobo-shell .kobo-pivot-wrap.is-windowed-columns thead .kobo-pivot-answer{z-index:2}
+
+.kobo-answer-column-heading{display:flex;flex-direction:column;align-items:center;gap:5px;padding:2px 0 5px}
+.kobo-answer-percentage-buttons{display:inline-flex;align-items:stretch;gap:3px;padding:3px;border:1px solid #ffffff40;border-radius:8px;background:#102f4926;max-width:100%;box-sizing:border-box}
+.kobo-shell .kobo-pivot-table .kobo-answer-percentage-buttons button{display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:5px;padding:6px 7px;min-height:30px;white-space:nowrap;background:transparent;color:#e0edfa;font:inherit;font-size:10px;font-weight:600;line-height:1.2;box-shadow:none;cursor:pointer;transition:background .15s,color .15s}
+.kobo-shell .kobo-pivot-table .kobo-answer-percentage-buttons button:hover{background:#ffffff20;color:#fff}
+.kobo-shell .kobo-pivot-table .kobo-answer-percentage-buttons button[aria-pressed=true]{background:#fff;color:#173f62;box-shadow:0 1px 3px #0002}
+.kobo-shell .kobo-pivot-table .kobo-answer-percentage-buttons button:focus-visible{outline:2px solid #fff;outline-offset:2px}
+@media(prefers-reduced-motion:reduce){.kobo-shell .kobo-pivot-table .kobo-answer-percentage-buttons button{transition:none}}

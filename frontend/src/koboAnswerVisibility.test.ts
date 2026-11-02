@@ -30,3 +30,11 @@ describe('answer visibility keeps the edited question in place',()=>{
   expect(retainAnswerVisibilityOrder(previous,{...next,settings:{...hidden(['removed']),filters:[{field:'a',kind:'category',values:['x']}]}}).questions.map(q=>q.id)).toEqual(['b','a']);
  });
 });
+
+
+it('keeps question order when the hidden answer percentage preference changes',()=>{
+ const previous=analysis([question('a',10),question('b',8)],hidden(['removed']));
+ const config=hidden(['removed']);config.questions.a={...config.questions.a,hiddenAnswerPercentageMode:'keep-original'};
+ const next=analysis([question('b',8),question('a',2)],config);
+ expect(retainAnswerVisibilityOrder(previous,next).questions.map(q=>q.id)).toEqual(['a','b']);
+});

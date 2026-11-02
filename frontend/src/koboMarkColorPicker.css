@@ -17,6 +17,9 @@
 .kobo-mark-color-inputs input[type=color]::-moz-color-swatch{border:0;border-radius:7px}
 .kobo-mark-color-picker .kobo-mark-color-swatches{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
 .kobo-mark-color-picker .kobo-mark-color-swatches>button{width:28px;height:28px;min-width:28px;padding:0;border:2px solid var(--panel-strong);border-radius:7px;box-shadow:0 0 0 1px var(--line)}
+.kobo-mark-recent-colors h3{font-size:12px;margin:12px 0 8px;color:var(--muted)}
+.kobo-mark-color-picker .kobo-mark-recent-colors .kobo-mark-color-swatches{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:5px;margin:8px 0 14px}
+.kobo-mark-color-picker .kobo-mark-recent-colors button{width:100%;min-width:0;height:auto;aspect-ratio:1}
 .kobo-mark-color-swatches>button[aria-pressed=true]{outline:2px solid var(--blue);outline-offset:2px}
 .kobo-mark-color-picker .kobo-mark-color-reset{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:7px 10px}
 .kobo-mark-color-reset svg{width:15px;height:15px}

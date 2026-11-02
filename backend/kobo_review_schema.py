@@ -2,6 +2,7 @@
 from collections import Counter
 from copy import deepcopy
 import hashlib
+import re
 
 from pydantic import BaseModel, Field
 from typing import Literal
@@ -88,18 +89,23 @@ def effective_form(base, config, sheets, allow_empty=False):
         questions[qid] = q
         result['questions'].append(q)
         if added.get('separator'): q['dataSeparator'] = added['separator']
+    excluded = set(config.get('excludedQuestionIds', []))
+    included_names = {value for q in result['questions'] if q['id'] not in excluded for value in (q['name'], q['id'])}
     for qid, override in config.get('choiceOverrides', {}).items():
+        if qid in excluded: continue
         q = questions.get(qid)
         if not q or q['kind'] not in {'category', 'multiple'}:
             raise ValueError('Choice edits require an existing categorical question.')
         original = {c['name']: c for c in q['choices']}
         choices = q['choices'] if override['mode'] == 'form' else override['choices']
         # Retain XLSForm attributes used by conditional choice filters.
-        if q.get('choiceFilter') and any(c['name'] not in original for c in choices):
+        filter_available = not (set(re.findall(r'\$\{([^}]+)\}', q.get('choiceFilter', ''))) - included_names)
+        if q.get('choiceFilter') and filter_available and any(c['name'] not in original for c in choices):
             raise ValueError('This question has a choice filter. New codes need filter attributes; use form choices or map data to existing codes.')
         q['choices'] = [{**deepcopy(original.get(c['name'], {})), **deepcopy(c)} for c in choices]
         if override.get('separator'): q['dataSeparator'] = override['separator']
     for q in result['questions']:
+        if q['id'] in excluded: continue
         if q['id'] in config.get('choiceOverrides', {}) or q.get('addedFromData'):
             validate_choices(q['choices'], allow_ambiguous=config.get('choiceOverrides', {}).get(q['id'], {}).get('mode') == 'form')
             if q['kind'] in {'category', 'multiple'} and not q['choices'] and not allow_empty:
@@ -109,7 +115,6 @@ def effective_form(base, config, sheets, allow_empty=False):
     if len(excluded) != len(config.get('excludedQuestionIds', [])):
         raise ValueError('Excluded question identifiers must be unique.')
     if excluded - questions.keys(): raise ValueError('Excluded question identifiers must reference known questions.')
-    import re
     excluded_names = {value for q in result['questions'] if q['id'] in excluded for value in (q['name'], q['id'])}
     for q in result['questions']:
         if q['id'] not in excluded and set(re.findall(r'\$\{([^}]+)\}', q.get('choiceFilter', ''))) & excluded_names:

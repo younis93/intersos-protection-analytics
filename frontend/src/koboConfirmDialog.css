@@ -61,3 +61,5 @@
 .kobo-dialog.kobo-confirm-dialog:not(.is-danger)>footer>.kobo-dialog-action-buttons{display:flex;align-items:center;justify-content:flex-end;gap:10px;width:100%;margin:0}
 .kobo-dialog.kobo-confirm-dialog:not(.is-danger)>footer>.kobo-dialog-action-buttons>button{height:44px;min-height:44px;margin:0;flex:none;white-space:nowrap}
 @media(max-width:480px){.kobo-dialog.kobo-confirm-dialog:not(.is-danger)>footer.kobo-dialog-actions{padding:10px}.kobo-dialog.kobo-confirm-dialog:not(.is-danger)>footer>.kobo-dialog-action-buttons>button{flex:1}}
+
+@media(max-width:540px){.kobo-dialog.kobo-unsaved-changes>footer>.kobo-dialog-action-buttons{flex-wrap:wrap}.kobo-dialog.kobo-unsaved-changes>footer>.kobo-dialog-action-buttons>button{flex:1 1 40%;min-width:0}.kobo-dialog.kobo-unsaved-changes>footer>.kobo-dialog-action-buttons>button.primary{flex-basis:100%}}

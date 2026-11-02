@@ -24,12 +24,13 @@ export function useKoboCopy(){
  const timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),cell=useRef<HTMLElement|null>(null),mounted=useRef(true),drag=useRef<{x:number;y:number;moved:boolean}|null>(null);
  const reset=useCallback(()=>{if(timer.current)clearTimeout(timer.current);timer.current=undefined;cell.current?.removeAttribute('data-kobo-copied');cell.current=null;if(mounted.current)setNotice(current=>current.message?{...current,message:''}:current)},[]);
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;reset();if(clearActive===reset)clearActive=undefined}},[reset]);
- const copy=useCallback(async(text:string,target?:HTMLElement,successMessage?:string,html?:string)=>{
+ const copyAction=useCallback(async(action:()=>Promise<void>,successMessage:string,target?:HTMLElement)=>{
   const request=++sequence;clearActive?.();clearActive=reset;reset();
-  try{await writeKoboClipboard(text,target,html);if(!mounted.current||request!==sequence)return;cell.current=target||null;target?.setAttribute('data-kobo-copied','true');setNotice({message:successMessage||text,variant:'success'})}
+  try{await action();if(!mounted.current||request!==sequence)return;cell.current=target||null;target?.setAttribute('data-kobo-copied','true');setNotice({message:successMessage,variant:'success'})}
   catch(error){if(!mounted.current||request!==sequence)return;setNotice({message:error instanceof Error?error.message:'Unable to copy this value.',variant:'error'})}
   if(mounted.current&&request===sequence)timer.current=setTimeout(()=>{reset();if(clearActive===reset)clearActive=undefined},1800);
  },[reset]);
+ const copy=useCallback((text:string,target?:HTMLElement,successMessage?:string,html?:string)=>copyAction(()=>writeKoboClipboard(text,target,html),successMessage||text,target),[copyAction]);
  const targetCell=(origin:EventTarget|null,container:HTMLElement)=>{if(!(origin instanceof Element)||origin.closest('button,a,input,select,textarea,summary'))return null;const target=origin.closest<HTMLElement>('[data-kobo-copy-value]');return target&&container.contains(target)?target:null};
  const events=useMemo(()=>({
   onPointerDown:(event:PointerEvent<HTMLElement>)=>{drag.current={x:event.clientX,y:event.clientY,moved:false}},
@@ -38,5 +39,5 @@ export function useKoboCopy(){
   onClick:(event:MouseEvent<HTMLElement>)=>{const target=targetCell(event.target,event.currentTarget);if(!target||drag.current?.moved||window.getSelection()?.toString())return;void copy(target.dataset.koboCopyValue??'',target)},
   onKeyDown:(event:KeyboardEvent<HTMLElement>)=>{if(event.defaultPrevented||event.ctrlKey||event.metaKey||event.altKey||!['Enter',' '].includes(event.key))return;const target=targetCell(event.target,event.currentTarget);if(target){event.preventDefault();void copy(target.dataset.koboCopyValue??'',target)}},
  }),[copy]);
- return {copy,events,notification:<NotificationToast message={notice.message} label={notice.variant==='error'?'Copy failed':'Copied'} variant={notice.variant}/>};
+ return {copy,copyAction,events,notification:<NotificationToast message={notice.message} label={notice.variant==='error'?'Copy failed':'Copied'} variant={notice.variant}/>};
 }

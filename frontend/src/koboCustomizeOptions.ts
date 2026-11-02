@@ -25,7 +25,7 @@ export function customizeDraft(result:KoboResult,settings:KoboSettings):KoboQues
  return {...cfg,percentageMode:settings.questions[result.id]?.percentageMode||result.percentageMode||'legacy-respondents',chart:cfg.chart||result.chart,breakdown:'',breakdowns:[...(cfg.breakdowns?.length?cfg.breakdowns:cfg.breakdown?[cfg.breakdown]:[])],colors:{...cfg.colors}};
 }
 export function calculationKey(cfg:KoboQuestionSettings){
- return JSON.stringify([cfg.chartTopN,cfg.chartOther,cfg.percentageGroupLevel,cfg.percentageMode,cfg.numericMode,cfg.bins,cfg.dateUnit,cfg.chart==='histogram',cfg.chart==='line'?cfg.trendDateField||'':'',cfg.trendUnit||'month',cfg.calculation||null,cfg.answerSort,cfg.breakdowns?.length?cfg.breakdowns:cfg.breakdown?[cfg.breakdown]:[]]);
+ return JSON.stringify([cfg.chartTopN,cfg.chartOther,cfg.percentageGroupLevel,cfg.percentageMode,cfg.numericMode,cfg.bins,cfg.dateUnit,cfg.chart,cfg.chart==='line'?cfg.trendDateField||'':'',cfg.trendUnit||'month',cfg.calculation||null,cfg.answerSort,cfg.breakdowns?.length?cfg.breakdowns:cfg.breakdown?[cfg.breakdown]:[]]);
 }
 export function colorEntries(result:KoboResult){
  return result.chart==='heatmap'?[{id:'series',label:'Heatmap high value'}]:result.chart==='line'&&result.trend?result.trend.series:result.breakdowns.length?result.breakdowns:result.chart==='line'?[{id:'series',label:'Line series'}]:result.rows.filter(row=>row.id!=='__blank__');

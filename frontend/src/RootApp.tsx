@@ -1,3 +1,4 @@
+import {allowKoboDraftNavigation} from './koboDraftNavigation';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import Welcome from './Welcome';
 import KoboExportTray from './KoboExportTray';
@@ -36,7 +37,7 @@ function WorkspaceApp(){
  const [startupPhase,setStartupPhase]=useState<StartupPhase>(()=>desktopStartup?'hidden':'visible');
  const startupBeganAt=useRef(performance.now());
  const [foxUnlocked,setFoxUnlocked]=useState(()=>{try{return localStorage.getItem(GUARDIAN_FOX_STORAGE_KEY)==='true'}catch{return false}});
- useEffect(()=>{const sync=()=>setWorkspace(workspaceFromUrl());window.addEventListener('hashchange',sync);return()=>window.removeEventListener('hashchange',sync)},[]);
+ useEffect(()=>{const sync=(event:HashChangeEvent)=>{if(allowKoboDraftNavigation(event))setWorkspace(workspaceFromUrl())};window.addEventListener('hashchange',sync);return()=>window.removeEventListener('hashchange',sync)},[]);
  useEffect(()=>{if(desktopStartup||workspace!=='legal'||startupReady)return;const timer=window.setTimeout(()=>setStartupReady(true),STARTUP_MAXIMUM_MS);return()=>window.clearTimeout(timer)},[desktopStartup,workspace,startupReady]);
  useEffect(()=>{
   if(desktopStartup||!startupReady)return;

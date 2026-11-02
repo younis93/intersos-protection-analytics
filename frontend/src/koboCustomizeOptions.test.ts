@@ -13,8 +13,9 @@ describe('customization drafts',()=>{
   expect(original).toEqual({hidden:'#123456'});
   expect(paletteColors(['c','b','a'],['#111111','#222222'])).toEqual({a:'#111111',b:'#222222',c:'#111111'});
  });
- it('does not include presentation settings in calculation requests',()=>{
-  expect(calculationKey(questionDefaults)).toBe(calculationKey({...questionDefaults,chart:'pie',colors:{a:'#112233'},breakdownDisplay:'count'}));
+ it('refreshes chart projections when chart type changes and ignores cosmetic settings',()=>{
+  expect(calculationKey(questionDefaults)).toBe(calculationKey({...questionDefaults,colors:{a:'#112233'},breakdownDisplay:'count'}));
+  expect(calculationKey({...questionDefaults,chart:'bar'})).not.toBe(calculationKey({...questionDefaults,chart:'pie'}));
   expect(calculationKey({...questionDefaults,bins:3})).not.toBe(calculationKey(questionDefaults));
   expect(calculationKey({...questionDefaults,breakdowns:['b','a']})).not.toBe(calculationKey({...questionDefaults,breakdowns:['a','b']}));
  });

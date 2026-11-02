@@ -224,3 +224,38 @@ def test_repair_selects_only_genuinely_new_added_filters_and_preserves_removal(c
     store.save(pid,settings)
     repaired=store.repair(pid,payload,*store.sources(pid))
     assert repaired['settings']['filterFields']==['gender']
+
+
+def test_filtered_new_choices_allowed_only_when_dependency_is_ignored():
+    form = parse_form(form_bytes())
+    question = form['questions'][0]
+    question['choiceFilter'] = 'region=${age}'
+    question['choices'][0]['attributes'] = {'region': '12'}
+    sheets = parse_data(b'gender,age\nOther,12\n', 'data.csv')
+    choices = [*deepcopy(question['choices']), {'name': 'other', 'labels': {'en': 'Other'}}]
+    config = {'excludedQuestionIds': ['age'], 'choiceOverrides': {'gender': {'mode': 'custom', 'choices': choices}}}
+    result = effective_form(form, config, sheets)
+    assert result['questions'][0]['choices'][-1]['name'] == 'other'
+    assert result['questions'][0]['choices'][0]['attributes'] == {'region': '12'}
+    mappings = propose_mapping(form, sheets)[0]
+    mappings = [m for m in mappings if m.get('question') != 'age']
+    records, issues = normalize(result, sheets, mappings)
+    assert records[0]['values']['gender'] == 'other'
+    assert not issues
+    assert any('ignored question' in warning for warning in result['warnings'])
+    config['excludedQuestionIds'] = []
+    with pytest.raises(ValueError, match='filter'):
+        effective_form(form, config, sheets)
+    assert form['questions'][0]['choices'][-1]['name'] != 'other'
+
+
+def test_ignored_question_does_not_block_checks_with_stale_choice_override():
+    form = parse_form(form_bytes())
+    form['questions'][0]['choiceFilter'] = 'region=1'
+    sheets = parse_data(b'gender\nOther\n', 'data.csv')
+    config = {'excludedQuestionIds': ['gender'], 'choiceOverrides': {'gender': {'mode': 'data', 'choices': [{'name': 'other', 'labels': {'en': 'Other'}}]}}}
+    result = effective_form(form, config, sheets)
+    assert all(q['id'] != 'gender' for q in result['questions'])
+    config['excludedQuestionIds'] = []
+    with pytest.raises(ValueError, match='filter'):
+        effective_form(form, config, sheets)

@@ -149,7 +149,7 @@ export const downloadExcelUrl = async (url:string, fallbackFilename="export.xlsx
   const response=await fetch(url);
   if(!response.ok)throw new Error(await response.text()||"Excel export failed");
   const disposition=response.headers.get("Content-Disposition")||"",match=disposition.match(/filename="?([^";]+)"?/i),blobUrl=URL.createObjectURL(await response.blob()),link=document.createElement("a");
-  link.href=blobUrl;link.download=match?.[1]||fallbackFilename;link.click();window.setTimeout(()=>URL.revokeObjectURL(blobUrl),1500);
+  const filename=(match?.[1]||fallbackFilename).trim();link.href=blobUrl;link.download=/\.xlsx$/i.test(filename)?filename:`${filename}.xlsx`;document.body.appendChild(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(blobUrl),1500);
 };
 export const checkForUpdates = () =>
   fetch(`${API}/update/check`, { cache: "no-store" }).then(parse<UpdateCheck>);

@@ -2,6 +2,20 @@ import type {KoboResult,KoboRow} from './koboTypes';
 
 export type PivotSort={id:string;label:string;metric:'answer'|'count'|'percent';series?:string[];direction:'asc'|'desc'};
 
+/** Apply the pending settings to both views before the analysis request completes. */
+export function resultWithPivotSort(result:KoboResult,manual:PivotSort|null|undefined,display:'count'|'percent'|'both',language:string):KoboResult{
+ const selected=resolvePivotSort(result,display,manual);
+ const rows=sortPivotRows(result,selected,language);
+ const order=new Map(rows.map((row,index)=>[row.id,index]));
+ const rank=(id:string)=>order.get(id)??rows.length;
+ const trend=(value:KoboResult['trend'])=>value?{...value,series:[...value.series].sort((a,b)=>rank(a.id)-rank(b.id))}:value;
+ const temporal=result.kind==='date'||result.chart==='histogram'||!!result.bins?.length;
+ const projection=result.chartProjection;
+ return {...result,rows,pivotSort:selected,trend:trend(result.trend),chartProjection:temporal
+  ?projection||{rows:result.rows,axisOrder:true,topNTotal:result.rows.length,topNShown:result.rows.length,topNOther:false}
+  :projection?{...projection,rows:[...projection.rows].sort((a,b)=>rank(a.id)-rank(b.id)),...(projection.trend?{trend:trend(projection.trend)!}:{})}:projection};
+}
+
 /** Surface the shared count/value default while respecting saved and natural order. */
 export function defaultPivotSort(result:Pick<KoboResult,'kind'|'chart'|'breakdowns'|'answerSort'|'bins'|'measure'>):PivotSort|null{
  if(result.kind==='date'||result.chart==='histogram'||result.bins?.length||result.answerSort&&result.answerSort!=='count-desc')return null;
