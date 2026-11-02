@@ -201,11 +201,15 @@ export function FindingTable({
     [helpOpen, setHelpOpen] = useState(false),
     [error, setError] = useState(""),
     [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
-  const [columnFilters,setColumnFilters]=useColumnFilters(JSON.stringify([dataset,rule,findingRevision]));
+  const [columnFilters,setColumnFilters]=useColumnFilters(JSON.stringify([dataset,rule]));
   const page=1;
+  const requestContext=JSON.stringify([dataset,rule,search,page,filters,fieldFilters,comparisonMonth,nameCompareChars,allowNameVariations,exactMatchesOnly]);
+  const previousRequestContext=useRef(requestContext);
   useEffect(() => {
     const controller = new AbortController();
-    setResult(null);
+    // Keep the table mounted when only its saved exclusions changed.
+    if(previousRequestContext.current!==requestContext)setResult(null);
+    previousRequestContext.current=requestContext;
     setError("");
     getLegalReview(
       dataset,
@@ -229,7 +233,7 @@ export function FindingTable({
         if (e.name !== "AbortError") setError(e.message);
       });
     return () => controller.abort();
-  }, [dataset, rule, search, page, filters, fieldFilters, comparisonMonth, nameCompareChars, allowNameVariations, exactMatchesOnly, findingRevision]);
+  }, [dataset, rule, search, page, filters, fieldFilters, comparisonMonth, nameCompareChars, allowNameVariations, exactMatchesOnly, findingRevision, requestContext]);
   const copyDuplicateName=async(name:string)=>{
     if(!name)return;
     try{await navigator.clipboard.writeText(name)}catch{const field=document.createElement("textarea");field.value=name;field.style.position="fixed";field.style.opacity="0";document.body.appendChild(field);field.select();document.execCommand("copy");field.remove()}
@@ -260,7 +264,7 @@ export function FindingTable({
     {rule === "Spouse below 18" && <><th>Spouse name</th><th>Spouse date of birth</th><th>Spouse current age</th></>}
     <th>Phone number</th>
     {dataset === "beneficiaries" && <th>Date of birth</th>}
-    {rule === "Beneficiary below 18 with legal counselling" && <><th>Date of birth</th><th>Current age</th><th>Type of Service Provided</th></>}
+    {rule === "Beneficiary below 18 with legal counselling" && <><th>Date of birth</th><th>Current age</th><th>Date of service</th><th>Type of Service Provided</th><th>Assessment service needed</th></>}
     {dataset === "legalhotlines" ? (
       <><th>Contact date</th><th>Caller name</th><th>Detained</th><th>Helpline referral</th><th>Priority</th>{hotlineSourceColumns.map((column) => <th key={column}>{column}</th>)}</>
     ) : dataset === "awareness" ? (
@@ -300,7 +304,7 @@ export function FindingTable({
       {rule === "Spouse below 18" && <><td><strong>{r.spouseName || "Not provided"}</strong></td><td>{r.spouseDateOfBirth || "-"}</td><td>{r.spouseAge ?? "-"}</td></>}
       <td>{r.phone || "-"}</td>
       {dataset === "beneficiaries" && <td>{r.dateOfBirth || "-"}{rule === "Marital status below 18" && r.beneficiaryAge !== null && r.beneficiaryAge !== undefined ? ` (${r.beneficiaryAge})` : ""}</td>}
-      {rule === "Beneficiary below 18 with legal counselling" && <><td>{r.dateOfBirth || "-"}</td><td>{r.beneficiaryAge ?? "-"}</td><td>{r.serviceTypeProvided || "-"}</td></>}
+      {rule === "Beneficiary below 18 with legal counselling" && <><td>{r.dateOfBirth || "-"}</td><td>{r.beneficiaryAge ?? "-"}</td><td>{r.serviceDate || "-"}</td><td>{r.serviceTypeProvided || "-"}</td><td>{r.requestedServiceTypes || "-"}</td></>}
       {dataset === "legalhotlines" ? (
         <><td>{r.contactDate}</td><td>{r.callerName}</td><td>{r.beneficiaryDetained}</td><td>{r.helplineReferral}</td><td>{r.priority || "-"}</td>{hotlineSourceColumns.map((column) => <td key={column}>{r.sourceFields?.[column] || "-"}</td>)}</>
       ) : dataset === "awareness" ? (
@@ -555,14 +559,23 @@ export function ReviewPageBody({
   const restoreExcludedEntries = async (selected: DuplicateExclusion[]) => {
     if (!selected.length) return;
     setExclusionBusy(true);
+    setError("");
+    const restored:DuplicateExclusion[]=[];
+    let latest:{rows:DuplicateExclusion[];count:number}|null=null;
     try {
-      let latest:{rows:DuplicateExclusion[];count:number}|null=null;
-      for (const entry of selected) latest=await restoreDuplicateExclusion(entry.identifierValue || entry.caseId,entry.rule,entry.dataset || "",entry.identifierType || "");
-      if (latest) setExcludedDuplicates(latest.rows);
+      for (const entry of selected) {
+        latest=await restoreDuplicateExclusion(entry.identifierValue || entry.caseId,entry.rule,entry.dataset || "",entry.identifierType || "");
+        restored.push(entry);
+      }
       setSelectedExcludedFindings([]);
-      setFindingRevisions((current)=>Object.fromEntries(selected.map((entry)=>[entry.rule,(current[entry.rule]||0)+1])));
       setRestoreConfirmation(null);
-    } finally { setExclusionBusy(false); }
+    } catch(reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to restore exclusions. Please try again.");
+    } finally {
+      if(latest)setExcludedDuplicates(latest.rows);
+      if(restored.length)setFindingRevisions((current)=>({...current,...Object.fromEntries(restored.map((entry)=>[entry.rule,(current[entry.rule]||0)+1]))}));
+      setExclusionBusy(false);
+    }
   };
   const excelAction=<ExcelDownloadButton disabled={selectedRules.length === 0} onClick={()=>downloadExcelUrl(legalReviewExportUrl(dataset, comparisonMonth, appliedNameCompareChars, allowNameVariations, exactMatchesOnly, selectedRules, filters, debouncedSearch, Object.entries(ignoreCourtVerdictByRule).filter(([,ignored])=>ignored).map(([rule])=>rule),fieldFilters),`${dataset}-review-findings.xlsx`)}/>;
   const toggleRule = (rule: string) =>
@@ -575,6 +588,7 @@ export function ReviewPageBody({
   const excludeFindings = async () => {
     if (!exclusionCandidates?.length) return;
     setExclusionBusy(true);
+    setError("");
     try {
       const records = exclusionCandidates.map((candidate) => {
         const [identifierType,identifierValue] = exclusionIdentity(candidate);
@@ -586,14 +600,19 @@ export function ReviewPageBody({
       setExcludedDuplicates(result.rows);
       setFindingRevisions((current) => ({ ...current, ...Object.fromEntries(exclusionCandidates.map((candidate) => [candidate.rule, (current[candidate.rule] || 0) + 1])) }));
       setExclusionCandidates(null);
+    } catch(reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to save exclusions. Please try again.");
     } finally { setExclusionBusy(false); }
   };
   const restoreExcludedFinding = async (caseId: string, rule: string, item?: DuplicateExclusion) => {
     setExclusionBusy(true);
+    setError("");
     try {
       const result = await restoreDuplicateExclusion(caseId, rule, item?.dataset || "", item?.identifierType || "");
       setExcludedDuplicates(result.rows);
       setFindingRevisions((current) => ({ ...current, [rule]: (current[rule] || 0) + 1 }));
+    } catch(reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to restore exclusions. Please try again.");
     } finally { setExclusionBusy(false); }
   };
   return (

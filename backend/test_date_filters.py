@@ -1,3 +1,4 @@
+from backend.test_update_helpers import skip_comparison
 import io
 
 import openpyxl
@@ -92,7 +93,7 @@ def test_current_modes_reopen_backup_reupload_and_clear_hidden_constraints(env):
     replacement = stage(client, b'Date,Other,Amount\n2026-02-15,2026-01-01,9\n', pid=project['id'])
     assert replacement['config']['dateFilterModes'] == updated['settings']['dateFilterModes']
     assert replacement['reuse']['eligible']
-    reused = client.post('/api/custom/columns/confirm', json={'token': replacement['token'], 'name': project['name'], 'config': replacement['config'], 'reuseOnly': True})
+    reused = client.post('/api/custom/columns/confirm', json={'token': replacement['token'], 'name': project['name'], 'config': replacement['config'], 'reuseOnly': True, 'matching':skip_comparison(client,'custom',replacement['token'],{'config':replacement['config']})})
     assert reused.status_code == 200, reused.text
     assert reused.json()['settings']['dateFilterModes'] == updated['settings']['dateFilterModes']
     edit = client.post(url+'/columns').json()

@@ -6,11 +6,12 @@ from backend.kobo_api import QuestionResult
 from backend.test_kobo import sample
 
 
-def test_appearance_roundtrip_preserves_results_and_settings_version(sample):
+@pytest.mark.parametrize('labels', ['both', 'hidden'])
+def test_appearance_roundtrip_preserves_results_and_settings_version(sample, labels):
     project = copy.deepcopy(sample[0])
     settings = KoboSettings(questions={'group/needs': QuestionSettings(breakdowns=['group/gender'])})
     before = analyze(project, settings)
-    settings.questions['group/needs'].appearance = ChartAppearance(metric='percent', labels='both', legend='right', fontSize=14, height=560, grid='hide', bars='stack')
+    settings.questions['group/needs'].appearance = ChartAppearance(metric='percent', labels=labels, legend='right', fontSize=14, height=560, grid='hide', bars='stack')
     after = analyze(project, settings)
     original = next(q for q in before['questions'] if q['id'] == 'group/needs')
     changed = next(q for q in after['questions'] if q['id'] == 'group/needs')
@@ -19,6 +20,7 @@ def test_appearance_roundtrip_preserves_results_and_settings_version(sample):
     assert changed['breakdownDisplay'] == original['breakdownDisplay']
     assert QuestionResult.model_validate(changed).appearance.metric == 'percent'
     assert KoboSettings.model_validate(settings.model_dump()).questions['group/needs'].appearance.height == 560
+    assert KoboSettings.model_validate_json(settings.model_dump_json()).questions['group/needs'].appearance.labels == labels
     assert settings.version == 1
 
 
@@ -104,3 +106,17 @@ def test_native_contrast_and_label_fit_use_actual_fill_and_font_size():
     assert _label_fits('145', 145, 150, 300, 50, 11, False)
     assert not _label_fits('1234567', 145, 150, 300, 30, 16, False)
     assert not _label_fits('1', 1, 150, 300, 50, 11, True)
+
+
+def test_hidden_labels_survive_kobo_project_reopen(sample, tmp_path):
+    from backend.kobo import ProjectStore
+    store = ProjectStore(tmp_path / 'labels.sqlite3')
+    saved = store.create('Hidden labels', sample[0], b'form', b'data')
+    settings = KoboSettings(questions={'group/needs': QuestionSettings(appearance=ChartAppearance(labels='hidden'))})
+    store.save(saved['id'], settings)
+    reopened = store.get(saved['id'])
+    settings = KoboSettings.model_validate(reopened['settings'])
+    assert settings.questions['group/needs'].appearance.labels == 'hidden'
+    panel = next(q for q in analyze(reopened, settings)['questions'] if q['id'] == 'group/needs')
+    assert panel['appearance']['labels'] == 'hidden'
+    assert panel['rows']

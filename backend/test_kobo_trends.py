@@ -39,7 +39,8 @@ def test_trends_preserve_pivot_and_multiple_answer_denominators(sample):
     assert trend['periods'] == ['2026-01', '2026-02', '2026-03']
     assert trend['denominators'] == [1, 0, 1]
     assert trend['excluded'] == 2
-    water, food = trend['series']
+    water = next(series for series in trend['series'] if series['id']=='water')
+    food = next(series for series in trend['series'] if series['id']=='food')
     assert water['points'] == [{'count': 1, 'percent': 100}, {'count': 0, 'percent': None}, {'count': 1, 'percent': 100}]
     assert food['points'][0]['percent'] == 100
     assert sum(s['points'][0]['percent'] for s in trend['series']) == 200

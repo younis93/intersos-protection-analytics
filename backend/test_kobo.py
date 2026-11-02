@@ -1,3 +1,4 @@
+from backend.test_update_helpers import skip_comparison
 import io
 import os
 from pathlib import Path
@@ -272,14 +273,14 @@ def test_saved_import_review_and_repair(tmp_path, monkeypatch):
     corrected = corrected.json()
     assert not corrected['issues'] and not corrected['warnings']
     assert store.sources(pid) == (original_form, original_data), 'Preview must not modify saved data'
-    applied = client.post('/api/kobo/imports/confirm', json={'token': corrected['token'], 'name': 'Existing project', 'mappings': corrected['mappings']})
+    applied = client.post('/api/kobo/imports/confirm', json={'token': corrected['token'], 'name': 'Existing project', 'mappings': corrected['mappings'], 'matching':skip_comparison(client,'kobo',corrected['token'],{'mappings':corrected['mappings']})})
     assert applied.status_code == 200, applied.text
     assert applied.json()['id'] == pid and len(store.list()) == 1
     assert not applied.json()['issues'] and not applied.json()['warnings']
     assert applied.json()['settings']['hideBlanks'] is False
     assert store.sources(pid) == (corrected_form, corrected_data)
     assert store.get(pid)['records'][0]['values']['age'] == 25
-    assert client.post('/api/kobo/imports/confirm', json={'token': corrected['token'], 'name': 'Existing project', 'mappings': corrected['mappings']}).status_code == 410
+    assert client.post('/api/kobo/imports/confirm', json={'token': corrected['token'], 'name': 'Existing project', 'mappings': corrected['mappings'], 'matching':skip_comparison(client,'kobo',corrected['token'],{'mappings':corrected['mappings']})}).status_code == 410
 
 
 def test_note_questions_are_ignored_with_grouped_export_headers():

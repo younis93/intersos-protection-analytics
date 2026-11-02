@@ -107,7 +107,10 @@ def helper_values(layouts, config, sources, helpers):
                         values[option['field']] = int(option['id'] in selected) if option['id'] != '__blank__' else int(not answered)
                 else: values[fields['Answer']] = answer
                 values[fields['Answered']] = int(answered)
-                values[fields['IncludeInPivot']] = 'Included' if answered or question['blank'] else 'Excluded'
+                codes = {'__blank__'} if not answered else set(value) if question['kind']=='multiple' else {str(value)}
+                excluded = bool(codes.intersection(question.get('hiddenAnswers', [])))
+                if 'AnswerAllowed' in fields: values[fields['AnswerAllowed']] = 'Excluded' if excluded else 'Included'
+                values[fields['IncludeInPivot']] = 'Included' if not excluded and (answered or question['blank']) else 'Excluded'
                 for level, qid in enumerate(question['dimensions'], 1):
                     values[fields[f'Breakdown{level}']] = caption(record, qid, 'Missing breakdown')
             rows.append([values[header] for header in helpers[layout['scope']]])
@@ -174,6 +177,7 @@ def materialize_multi(args):
     for record in cohort:
         value = raw(record, question['id'])
         selected = list(dict.fromkeys(value or []))
+        if set(selected or ['__blank__']).intersection(question.get('hiddenAnswers', [])): continue
         answered = bool(selected)
         dimensions = [caption(record, qid) for qid in question['dimensions']]
         dimensions += ['']*(3-len(dimensions))

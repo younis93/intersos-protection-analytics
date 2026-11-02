@@ -77,7 +77,7 @@ def test_exclusion_save_reopen_restore_and_replacement(client_store):
     assert removed['reviewConfig']['excludedQuestionIds'] == []
 
 
-def test_preserve_choice_edits_on_restore_and_block_choice_filter_dependencies():
+def test_preserve_choice_edits_on_restore_and_allow_ignored_choice_filter_dependencies():
     form = parse_form(form_bytes())
     form['questions'][1].update(kind='category', type='select_one x', choices=[{'name': 'a', 'labels': {'en': 'Original', 'ar': 'أ'}}])
     config = {'excludedQuestionIds': ['missing'], 'choiceOverrides': {'missing': {'mode': 'custom', 'choices': [{'name': 'a', 'labels': {'en': 'Edited', 'ar': 'أ'}}]}}}
@@ -86,7 +86,10 @@ def test_preserve_choice_edits_on_restore_and_block_choice_filter_dependencies()
     assert restored['questions'][1]['choices'][0]['labels'] == {'en': 'Edited', 'ar': 'أ'}
     dependent = deepcopy(form)
     dependent['questions'][0]['choiceFilter'] = 'district=${missing}'
-    with pytest.raises(ValueError, match='choice filter'): effective_form(dependent, config, [])
+    edited = effective_form(dependent, config, [])
+    assert [q['id'] for q in edited['questions']] == ['linked']
+    assert 'full choice list' in edited['warnings'][-1]
+    assert dependent['questions'][0]['choiceFilter'] == 'district=${missing}'
 
 
 def test_exclusion_reports_saved_configuration_dependencies(client_store):
@@ -106,3 +109,33 @@ def test_exclusion_reports_saved_configuration_dependencies(client_store):
     checked = client.post(f"/api/kobo/imports/{review['token']}/check", json=payload)
     assert checked.status_code == 200, checked.text
     assert any(item['name'] == 'Affected view' for item in checked.json()['questionImpacts'])
+
+
+def test_ignore_choice_filter_source_checks_full_choices_and_persists(client_store):
+    client, store = client_store
+    raw = workbook({
+        'survey': [['type', 'name', 'label', 'choice_filter'], ['select_one status', 'status', 'Current status', ''], ['select_one location', 'location', 'Location', 'status=${status}']],
+        'choices': [['list_name', 'name', 'label', 'status'], ['status', 'idp', 'IDP', ''], ['status', 'ref', 'Refugee', ''], ['location', 'north', 'North', 'idp'], ['location', 'south', 'South', 'ref']]})
+    p = stage(client, form=raw, data=b'location\nsouth\n')
+    candidate = body(p, ['status'])
+    checked = client.post(f"/api/kobo/imports/{p['token']}/check", json=candidate)
+    assert checked.status_code == 200, checked.text
+    assert checked.json()['issues'] == []
+    assert checked.json()['linkReview']['noSource'] == []
+    saved = client.post('/api/kobo/imports/confirm', json=candidate)
+    assert saved.status_code == 200, saved.text
+    saved = store.get(saved.json()['id'])
+    assert [q['id'] for q in saved['form']['questions']] == ['location']
+    assert saved['records'][0]['values']['location'] == 'south'
+    assert len(saved['baseForm']['questions']) == 2
+    assert store.sources(saved['id'])[0] == raw
+    assert any('full choice list' in message for message in saved['warnings'])
+    restored = effective_form(saved['baseForm'], {}, [])
+    from backend.kobo import filtered_choices
+    questions = {q['id']: q for q in restored['questions']}
+    assert [c['name'] for c in filtered_choices(questions['location'], {'status': 'idp'}, questions)['choices']] == ['north']
+    # Full choice validation still rejects answers not present in the form.
+    client.delete(f"/api/kobo/imports/{p['token']}")
+    invalid = stage(client, form=raw, data=b'location\nunknown\n')
+    checked = client.post(f"/api/kobo/imports/{invalid['token']}/check", json=body(invalid, ['status']))
+    assert checked.status_code == 200 and checked.json()['issues']

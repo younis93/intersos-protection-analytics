@@ -29,14 +29,14 @@ describe('Excel table serialization',()=>{
  });
  it('flattens nested headers and follows the selected metrics',()=>{
   const pivot={...result,breakdownFields:[{id:'sex',label:'Sex'},{id:'area',label:'Area'}],breakdowns:[{id:'f',label:'Female / North',labels:['Female','North'],denominator:3}],rows:[{id:'a',label:'A\nB\tC',count:1,percent:2.5,series:[{id:'f',count:1,percent:33.3333}]}]};
-  expect(koboTableData(pivot,'both')).toEqual([['Answer','Sex: Female / Area: North - Count','Sex: Female / Area: North - Percent'],['A B C','1','33%'],['Total','3','100%']]);
+  expect(koboTableData(pivot,'both')).toEqual([['Answer','Sex: Female / Area: North - Count','Sex: Female / Area: North - Percent'],['A B C','1','33%']]);
   expect(koboTableData(pivot,'percent')[0]).toHaveLength(2);
   expect(koboTableData(pivot,'count')[1]).toEqual(['A B C','1']);
   expect(koboTableText(pivot,'count')).toContain('Breakdowns: Sex / Area\r\nAnswer\tFemale / North - Count');
   expect(koboTableText(pivot,'count')).not.toContain('Sex: Female');
  });
  it('handles zero responses, missing series, and blank percentages',()=>{
-  expect(koboTableData({...result,denominator:0,rows:[]}).at(-1)).toEqual(['Total','0','-']);
+  expect(koboTableData({...result,denominator:0,rows:[]})).toEqual([['Answer','Count','Percent']]);
   expect(koboTableData({...result,breakdowns:[{id:'x',label:'X',denominator:0}],rows:[{id:'blank',label:'Blank',count:2,percent:null}]})[1]).toEqual(['Blank','-','-']);
  });
 });
@@ -76,7 +76,7 @@ describe('formatted pivot copy',()=>{
   expect(html.match(/Settlement type/g)).toHaveLength(1);
   expect(html.match(/>Female<\/th>/g)).toHaveLength(1);
   expect(html.match(/>Camp<\/th>/g)).toHaveLength(2);
-  expect(html.match(/<td /g)).toHaveLength(8*metrics);
+  expect(html.match(/<td /g)).toHaveLength(5*metrics);
   if(display!=='percent')expect(html).toContain("mso-number-format:'#,##0'");
   expect(html).not.toContain('#,##0.##');
   expect(html.includes('>#</th>')).toBe(display!=='percent');
@@ -95,5 +95,31 @@ describe('formatted pivot copy',()=>{
   expect(html).toContain('rowspan="3"');expect(html).toContain('Sex &amp; gender / مكان &lt;الإقامة&gt;');
   expect(html).not.toContain('Sex &amp; gender: Female');
   expect(koboTableData(pivot)[0][1]).toBe('Sex & gender: Female / مكان <الإقامة>: A & B - Count');
+ });
+});
+
+
+describe('conditional pivot totals',()=>{
+ it.each(['count','percent','both'] as const)('evaluates axes independently in %s mode',display=>{
+  const metrics=display==='both'?2:1;
+  for(const rowCount of [0,1,3])for(const categoryCount of [0,1,3]){
+   const pivot={...result,rows:result.rows.slice(0,rowCount),breakdowns:Array.from({length:categoryCount},(_,i)=>({id:String(i),label:`Category ${i}`,denominator:10}))};
+   const table=koboTableData(pivot,display);
+   expect(table.length).toBe(1+rowCount+Number(rowCount>1));
+   expect(table.every(row=>row.length===1+(Math.max(1,categoryCount)+Number(categoryCount>1))*metrics)).toBe(true);
+   const html=koboTableHtml(pivot,display);
+   expect(html.includes('border-top:2px solid #47759b')).toBe(rowCount>1);
+   expect(table[0].some(label=>label.startsWith('Total -'))).toBe(categoryCount>1);
+   expect(koboTableText(pivot,display).includes('Total -')).toBe(categoryCount>1);
+  }
+ });
+ it('uses overall values rather than adding overlapping category counts and percentages',()=>{
+  const pivot={...result,percentageDecimals:1 as const,breakdowns:[{id:'a',label:'A',denominator:30},{id:'b',label:'B',denominator:30}],rows:[{id:'x',label:'X',count:20,percent:50,displayPercent:49.9,series:[{id:'a',count:20,percent:66.7},{id:'b',count:20,percent:66.7}]},{id:'y',label:'Y',count:30,percent:75}]};
+  const data=koboTableData(pivot);
+  expect(data[1].slice(-2)).toEqual(['20','49.9%']);
+  expect(data.at(-1)?.slice(-2)).toEqual(['40','100.0%']);
+  const limited=koboTableData(pivot,'count',pivot.rows.slice(0,1));
+  expect(limited.at(-1)).toEqual(['Total','30','30','40']);
+  expect(koboTableHtml({...pivot,rows:pivot.rows.slice(0,1)})).not.toContain('border-top:2px solid #47759b');
  });
 });

@@ -91,6 +91,14 @@ def report_table(book, report, totals, result, row, metrics, support_sheet, lang
         report.Rows(r).AutoFit()
         if report.Rows(r).RowHeight < 22: report.Rows(r).RowHeight = 22
     footer_row = header_bottom + 1 + len(answers)
+    from .kobo_excel_totals import append_overall_totals, totals_policy
+    width = append_overall_totals(book, report, totals, result, metrics, support_sheet,
+                                 header_bottom + 1, 1, width, footer_row, language)
+    if not totals_policy(result)[0]:
+        bottom = max(header_bottom, footer_row - 1)
+        area = report.Range(report.Cells(row, 1), report.Cells(bottom, width))
+        area.Font.Name = 'Arial'; area.Font.Size = 10; area.Borders.Color = 0xEADACF
+        return area, report.Range(report.Cells(bottom, 1), report.Cells(bottom, width))
     report.Cells(footer_row, 1).Value = 'الإجمالي' if language == 'ar' else 'Total'
     for c, column in enumerate(columns):
         denominator = column['_denominator']

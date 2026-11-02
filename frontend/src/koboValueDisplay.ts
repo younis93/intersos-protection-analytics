@@ -1,4 +1,4 @@
-import {questionDefaults,type KoboQuestionSettings,type KoboSettings} from './koboTypes';
+import {questionDefaults,questionSettingsFor,type KoboQuestionSettings,type KoboSettings} from './koboTypes';
 import {resolveAppearance} from './koboAppearance';
 export type ValueDisplay='count'|'percent'|'both';
 export function withValueDisplay(settings:KoboQuestionSettings,display:ValueDisplay):KoboQuestionSettings{
@@ -15,5 +15,5 @@ export function sharedValueDisplay(settings:KoboSettings,questionIds:readonly st
  return values.length&&values[0]&&values.every(value=>value===values[0])?values[0]:null;
 }
 export function allQuestionValueDisplay(settings:KoboSettings,questionIds:readonly string[],display:ValueDisplay):KoboSettings{
- return {...settings,questions:{...settings.questions,...Object.fromEntries(questionIds.map(id=>[id,withValueDisplay({...questionDefaults,...settings.questions[id]},display)]))}};
+ return {...settings,questions:{...settings.questions,...Object.fromEntries(questionIds.map(id=>[id,withValueDisplay(questionSettingsFor({},settings.questions[id],settings.percentageDefault),display)]))}};
 }

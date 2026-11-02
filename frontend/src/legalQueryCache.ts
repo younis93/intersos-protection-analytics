@@ -8,13 +8,14 @@ const readable = /^\/api\/legal\/(send-issues\/findings|review|explorer|explorer
 const entries = new Map<string, Entry>();
 const pending = new Map<string, Pending>();
 const activityListeners = new Set<ActivityListener>();
-export type LegalQueryInvalidationReason = "manual" | "revision";
+export type LegalQueryInvalidationReason = "manual" | "revision" | "exclusion";
 const invalidationListeners = new Set<(reason:LegalQueryInvalidationReason) => void>();
 const MAX_BYTES = 32 * 1024 * 1024;
 const MAX_ENTRIES = 96;
 let bytes = 0;
 let revision: string | null = null;
 let generation = 0;
+let replacementGeneration = 0;
 let requestPriority: LegalFetchPriority = "foreground";
 const aborted = () => new DOMException("Request superseded", "AbortError");
 
@@ -38,7 +39,12 @@ export function invalidateLegalQueries(reason:LegalQueryInvalidationReason="manu
   generation++;
   entries.clear();
   bytes = 0;
-  for (const request of pending.values()) request.controller.abort();
+  // Exclusions detach old requests so fresh reads cannot share them, but let
+  // existing subscribers finish without disrupting unrelated pages.
+  if (reason !== "exclusion") {
+    replacementGeneration++;
+    for (const request of pending.values()) request.controller.abort();
+  }
   pending.clear();
   invalidationListeners.forEach((listener) => listener(reason));
 }
@@ -78,7 +84,7 @@ export async function legalFetch(url: string, init: RequestInit = {}): Promise<R
   const method = (init.method || "GET").toUpperCase();
   if (!readable.test(path) || !revision || !["GET", "POST"].includes(method) || (init.body && typeof init.body !== "string")) {
     const result = await globalThis.fetch(url, init);
-    if (result.ok && path.startsWith("/api/legal/duplicate-exclusions") && method !== "GET") invalidateLegalQueries();
+    if (result.ok && path.startsWith("/api/legal/duplicate-exclusions") && method !== "GET") invalidateLegalQueries("exclusion");
     return result;
   }
   if (init.signal?.aborted) throw aborted();
@@ -94,12 +100,13 @@ export async function legalFetch(url: string, init: RequestInit = {}): Promise<R
   if (!request) {
     const controller = new AbortController();
     const currentGeneration = generation;
+    const currentReplacementGeneration = replacementGeneration;
     request = {controller, users: 0, promise: Promise.resolve(null as unknown as Payload)};
     const owned = request;
     request.promise = globalThis.fetch(url, {...init, signal: controller.signal}).then(async result => {
       const payload = {body: await result.text(), status: result.status, statusText: result.statusText, headers: [...result.headers.entries()]};
-      if (controller.signal.aborted || currentGeneration !== generation) throw aborted();
-      if (result.ok) retain(key, payload);
+      if (controller.signal.aborted || currentReplacementGeneration !== replacementGeneration) throw aborted();
+      if (result.ok && currentGeneration === generation) retain(key, payload);
       return payload;
     }).finally(() => {if (pending.get(key) === owned) pending.delete(key)});
     pending.set(key, request);

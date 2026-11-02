@@ -31,6 +31,22 @@ describe('Kobo rendering scheduler',()=>{
   scheduler.register(element(target),'question',activate);expect(activate).not.toHaveBeenCalled();
   near([target]);near([target]);expect(activate).toHaveBeenCalledExactlyOnceWith(true);scheduler.dispose();
  });
+ it('releases distant cards, retains focused cards, and remounts when revisited',()=>{
+  const scheduler=new KoboRenderScheduler(),target=node(100),activate=vi.fn();
+  scheduler.register(element(target),'question',activate);near([target]);expect(activate).toHaveBeenLastCalledWith(true);
+  documentMock.activeElement=target;target.top=5000;near([target],false);expect(activate).toHaveBeenCalledTimes(1);
+  documentMock.activeElement=null;documentMock.dispatchEvent(new Event('focusout'));tick();expect(activate).toHaveBeenLastCalledWith(false);
+  target.top=100;near([target]);expect(activate).toHaveBeenLastCalledWith(true);scheduler.dispose();
+ });
+ it('releases an initially eager card if it starts outside the viewport',()=>{
+  const scheduler=new KoboRenderScheduler(),target=node(5000),activate=vi.fn();scheduler.register(element(target),'question',activate,true);near([target],false);expect(activate).toHaveBeenCalledExactlyOnceWith(false);scheduler.dispose();
+ });
+ it('waits for scrolling to settle before initializing charts and cancels the wait on disposal',()=>{
+  vi.useFakeTimers();try{const scheduler=new KoboRenderScheduler(),target=node(100),activate=vi.fn();scheduler.register(element(target),'chart',activate);
+   window.dispatchEvent(new Event('scroll'));near([target]);tick();expect(activate).not.toHaveBeenCalled();vi.advanceTimersByTime(150);tick();expect(activate).toHaveBeenCalledWith(true);
+   window.dispatchEvent(new Event('scroll'));tick();scheduler.dispose();expect(vi.getTimerCount()).toBe(0);
+  }finally{vi.useRealTimers()}
+ });
  it('prioritizes visible charts and waits for Plotly completion before starting another',()=>{
   const scheduler=new KoboRenderScheduler(),far=node(1200),visible=node(100),a=vi.fn(),b=vi.fn();
   scheduler.register(element(far),'chart',a);scheduler.register(element(visible),'chart',b);

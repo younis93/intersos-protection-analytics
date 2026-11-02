@@ -146,6 +146,24 @@ it('invalidates all old task ownership on data replacement',async()=>{
   scheduler.startTasks([task('a','a','main',async()=>{})],'a','new');await flush();old.resolve();await flush();expect(statuses.a).toBe('ready');
 });
 
+it('preserves completed pages and queued work after exclusions but restarts on manual refresh',async()=>{
+  vi.useFakeTimers();
+  const first=vi.fn(async()=>{}),second=vi.fn(async()=>{});
+  const scheduler=new LegalLoadScheduler();schedulers.push(scheduler);
+  let statuses:Record<string,LoadStatus>={};scheduler.subscribe(next=>{statuses=next});
+  scheduler.startTasks([task('a','a','main',first),task('b','b','main',second)],'a');
+  await flush();expect(statuses).toEqual({a:'ready',b:'queued'});
+  invalidateLegalQueries('exclusion');
+  expect(statuses).toEqual({a:'ready',b:'queued'});
+  expect(first).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(250);await flush();
+  expect(statuses).toEqual({a:'ready',b:'ready'});
+  invalidateLegalQueries('exclusion');await vi.advanceTimersByTimeAsync(500);
+  expect(first).toHaveBeenCalledOnce();expect(second).toHaveBeenCalledOnce();
+  invalidateLegalQueries();await flush();await vi.advanceTimersByTimeAsync(250);
+  expect(first).toHaveBeenCalledTimes(2);expect(second).toHaveBeenCalledTimes(2);
+});
+
 it('warms monthly analysis in one batch and reuses it when the tab opens',async()=>{
   setLegalRevision('monthly-preload');const bodies:Array<{url:string;body:any}>=[];
   const network=vi.fn(async(url:string,init:RequestInit)=>{bodies.push({url,body:JSON.parse(init.body as string)});return new Response(JSON.stringify(url.endsWith('/monthly')?{reports:[{month:'2026-01',report:{groups:['same']}}]}:{filterOptions:{months:['2026-01','2025-12','2026-03']}}));});vi.stubGlobal('fetch',network);

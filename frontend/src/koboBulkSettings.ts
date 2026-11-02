@@ -1,4 +1,4 @@
-import {questionDefaults,type KoboProject,type KoboQuestion,type KoboQuestionSettings,type KoboSettings} from './koboTypes';
+import {questionSettingsFor,type KoboProject,type KoboQuestion,type KoboQuestionSettings,type KoboSettings} from './koboTypes';
 export type KoboBulkDraft=Partial<Pick<KoboQuestionSettings,'appearance'|'chart'|'palette'|'colors'|'breakdowns'|'breakdownDisplay'|'answerSort'|'numericMode'|'bins'|'dateUnit'|'trendDateField'|'trendUnit'>>;
 export const enabledKoboQuestions=(project:KoboProject,settings:KoboSettings)=>project.form.questions.filter(question=>!settings.hidden.includes(question.id)&&(!question.metadata||settings.metadata));
 export const sharedBreakdownFields=(project:KoboProject,targets:KoboQuestion[])=>project.form.questions.filter(field=>['category','text'].includes(field.kind)&&targets.every(target=>!field.repeat||field.repeat===target.repeat));
@@ -6,7 +6,7 @@ export function sharedBulkValue<T>(values:T[]):{value:T|undefined;mixed:boolean}
  const value=values[0];return values.every(item=>JSON.stringify(item)===JSON.stringify(value))?{value,mixed:false}:{value:undefined,mixed:true};
 }
 export function bulkQuestionSettings(question:KoboQuestion,settings:KoboSettings,draft:KoboBulkDraft):KoboQuestionSettings{
- const current={...questionDefaults,...settings.questions[question.id]},next={...current};
+ const current=questionSettingsFor(question,settings.questions[question.id],settings.percentageDefault),next={...current};
  if(draft.chart!==undefined)next.chart=draft.chart;
  if(['category','multiple','number'].includes(question.kind)){if(draft.trendDateField!==undefined)next.trendDateField=draft.trendDateField;if(draft.trendUnit!==undefined)next.trendUnit=draft.trendUnit}
  if(draft.appearance!==undefined)next.appearance={...current.appearance,...draft.appearance};

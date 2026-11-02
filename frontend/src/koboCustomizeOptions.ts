@@ -1,7 +1,7 @@
 import {categoryPalette} from './ChartPrimitives';
 import {koboThemePalette,koboThemeColor,currentKoboTheme} from './koboThemeColors';
 import type {Theme} from './types';
-import {questionDefaults,type KoboQuestionSettings,type KoboResult,type KoboSettings} from './koboTypes';
+import {questionSettingsFor,type KoboQuestionSettings,type KoboResult,type KoboSettings} from './koboTypes';
 
 export const koboPalettes:{name:string;label?:string;description:string;colors:string[]}[]=[
  {name:'Balanced',description:"A versatile mix for everyday reporting",colors:categoryPalette},
@@ -21,11 +21,11 @@ export function normalizeHex(text:string){
  return '#'+(value.length===3?value.split('').map(c=>c+c).join(''):value).toUpperCase();
 }
 export function customizeDraft(result:KoboResult,settings:KoboSettings):KoboQuestionSettings{
- const cfg={...questionDefaults,...settings.questions[result.id]};
- return {...cfg,chart:cfg.chart||result.chart,breakdown:'',breakdowns:[...(cfg.breakdowns?.length?cfg.breakdowns:cfg.breakdown?[cfg.breakdown]:[])],colors:{...cfg.colors}};
+ const cfg=questionSettingsFor(result,settings.questions[result.id],settings.percentageDefault);
+ return {...cfg,percentageMode:settings.questions[result.id]?.percentageMode||result.percentageMode||'legacy-respondents',chart:cfg.chart||result.chart,breakdown:'',breakdowns:[...(cfg.breakdowns?.length?cfg.breakdowns:cfg.breakdown?[cfg.breakdown]:[])],colors:{...cfg.colors}};
 }
 export function calculationKey(cfg:KoboQuestionSettings){
- return JSON.stringify([cfg.numericMode,cfg.bins,cfg.dateUnit,cfg.chart==='histogram',cfg.chart==='line'?cfg.trendDateField||'':'',cfg.trendUnit||'month',cfg.answerSort,cfg.breakdowns?.length?cfg.breakdowns:cfg.breakdown?[cfg.breakdown]:[]]);
+ return JSON.stringify([cfg.chartTopN,cfg.chartOther,cfg.percentageGroupLevel,cfg.percentageMode,cfg.numericMode,cfg.bins,cfg.dateUnit,cfg.chart==='histogram',cfg.chart==='line'?cfg.trendDateField||'':'',cfg.trendUnit||'month',cfg.calculation||null,cfg.answerSort,cfg.breakdowns?.length?cfg.breakdowns:cfg.breakdown?[cfg.breakdown]:[]]);
 }
 export function colorEntries(result:KoboResult){
  return result.chart==='heatmap'?[{id:'series',label:'Heatmap high value'}]:result.chart==='line'&&result.trend?result.trend.series:result.breakdowns.length?result.breakdowns:result.chart==='line'?[{id:'series',label:'Line series'}]:result.rows.filter(row=>row.id!=='__blank__');

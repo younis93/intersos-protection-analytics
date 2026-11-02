@@ -34,8 +34,9 @@ describe('saved analysis view state',()=>{
  });
  it('compares server defaults and unordered filter values without false changes',()=>{
   const current=settings();current.filters=[{field:'q',kind:'category',values:['a','b']}];current.hidden=['b','a'];
-  const other=viewSnapshot(current);other.filters[0]={...other.filters[0],minimum:null,maximum:null,values:['b','a']};other.hidden=['a','b'];other.questions.q={colors:{},bins:10,numericMode:'auto',dateUnit:'month',breakdown:'',answerSort:'form'};
+  const other=viewSnapshot(current);other.filters[0]={...other.filters[0],minimum:null,maximum:null,values:['b','a']};other.hidden=['a','b'];other.questions.q={colors:{},bins:10,numericMode:'auto',dateUnit:'month',breakdown:'',answerSort:'count-desc'};
   expect(viewSignature(current)).toBe(viewSignature(other));
+  other.questions.q.answerSort='form';expect(viewSignature(current)).not.toBe(viewSignature(other));
  });
  it('ignores shared indicator and export changes when checking modifications',()=>{
   const current=settings(),view=createSavedView(project,current,'View');current.savedViews=[view];current.activeViewId=view.id;current.excelGroups=['changed'];current.indicators=[];

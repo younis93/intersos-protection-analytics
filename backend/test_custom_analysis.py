@@ -30,8 +30,47 @@ def stage(client, raw=b'Code,Age,Date,City\n001,20,04/05/2026,Mosul\n002,30,15/0
     return r.json()
 
 
+def test_exclusion_survives_candidate_previews_and_replacement_and_cancel(env):
+    client,store=env
+    preview=stage(client)
+    next(c for c in preview['config']['columns'] if c['header']=='Age')['included']=False
+    next(c for c in preview['config']['columns'] if c['header']=='Date')['dateFormat']='uk'
+    checked=client.post(f"/api/custom/columns/{preview['token']}/configure",json=preview['config'])
+    assert checked.status_code==200,checked.text
+    project=confirm(client,checked.json());before=store.get(project['id'])
+    replacement=stage(client,pid=project['id'])
+    assert not next(c for c in replacement['config']['columns'] if c['header']=='Age')['included']
+    next(c for c in replacement['config']['columns'] if c['header']=='City')['included']=False
+    checked=client.post(f"/api/custom/columns/{replacement['token']}/configure",json=replacement['config'])
+    assert checked.status_code==200,checked.text
+    repeated=client.post(f"/api/custom/columns/{replacement['token']}/configure",json=checked.json()['config'])
+    assert not next(c for c in repeated.json()['config']['columns'] if c['header']=='City')['included']
+    assert store.get(project['id'])==before
+    client.delete(f"/api/custom/columns/{replacement['token']}")
+    assert store.get(project['id'])==before
+
+
+def test_worksheet_switch_preserves_compatible_fields_but_not_other_sheet_exclusions(env):
+    from backend.test_kobo import workbook
+    client,store=env
+    raw=workbook({'First':[['Code','City'],['001','Mosul']],'Second':[['Code','City'],['002','Baghdad']]})
+    preview=stage(client,raw,'sheets.xlsx')
+    preview['config']['columns'][1]['included']=False
+    project=confirm(client,preview);before=store.get(project['id'])
+    replacement=stage(client,raw,'sheets.xlsx',project['id'])
+    old_ids={c['id'] for c in replacement['config']['columns']}
+    replacement['config']['worksheet']='Second'
+    checked=client.post(f"/api/custom/columns/{replacement['token']}/configure",json=replacement['config'])
+    assert checked.status_code==200,checked.text
+    assert old_ids=={c['id'] for c in checked.json()['config']['columns']}
+    assert all(c['included'] for c in checked.json()['config']['columns'])
+    assert store.get(project['id'])==before
+
+
 def confirm(client, p, expected=200):
-    r = client.post('/api/custom/columns/confirm', json={'token': p['token'], 'name': 'Custom dataset', 'config': p['config']})
+    comparison = client.post(f"/api/custom/columns/{p['token']}/update-preview",json={'config':p['config'],'matching':{'skip':True}})
+    matching = {'skip':True,'signature':comparison.json()['signature']} if comparison.status_code==200 else None
+    r = client.post('/api/custom/columns/confirm', json={'token': p['token'], 'name': 'Custom dataset', 'config': p['config'],'matching':matching})
     assert r.status_code == expected, r.text
     return r.json()
 
@@ -438,3 +477,54 @@ def test_multiple_choice_without_delimiter_can_be_reviewed_but_not_saved(env):
     confirm(client, p, 422)
     p['config']['columns'][0]['separator'] = ';'
     assert confirm(client, p)['id']
+
+
+@pytest.mark.parametrize('display', ['count', 'percent', 'both'])
+def test_custom_analysis_shared_order_and_conditional_totals(env, display):
+    from backend.kobo_excel_totals import totals_policy
+    client, store = env
+    preview = stage(client, b'Answer,Region,Single,Fixed,Needs\na,north,only,one,water;food\nc,north,only,one,food\nb,north,only,one,food\nb,north,only,one,water\nc,south,only,one,food\nc,south,only,one,water\nb,south,only,one,food\n')
+    for column in preview['config']['columns']:
+        column['kind'] = 'multiple' if column['header'] == 'Needs' else 'category'
+        if column['header'] == 'Needs': column['separator'] = ';'
+    saved = confirm(client, preview)
+    project = store.get(saved['id'])
+    ids = {q['name']:q['id'] for q in project['form']['questions']}
+    settings = saved['settings']
+    for name, breakdown in [('Answer','Region'),('Single','Region'),('Needs','Region'),('Region','Fixed')]:
+        settings['questions'][ids[name]].update(breakdowns=[ids[breakdown]],breakdownDisplay=display)
+    response = client.post(f"/api/custom/projects/{saved['id']}/analysis", json={'settings':settings})
+    assert response.status_code == 200, response.text
+    questions = {q['name']:q for q in response.json()['questions']}
+    assert [row['label'] for row in questions['Answer']['rows']] == ['c','b','a']
+    assert totals_policy(questions['Answer']) == (True,True)
+    assert totals_policy(questions['Single']) == (False,True)
+    assert totals_policy(questions['Region']) == (True,False)
+    assert totals_policy(questions['Fixed']) == (False,False)
+    assert totals_policy(questions['Needs']) == (True,True)
+    settings['hideEmpty'] = False
+    settings['filters'] = [{'field':ids['Region'],'values':['no-match']}]
+    empty = client.post(f"/api/custom/projects/{saved['id']}/analysis", json={'settings':settings})
+    assert empty.status_code == 200, empty.text
+    assert all(totals_policy(q) == (False,False) for q in empty.json()['questions'])
+
+
+def test_hidden_chart_labels_survive_custom_project_reopen(env):
+    client, store = env
+    preview = stage(client)
+    preview['config']['dateFormat'] = 'uk'
+    saved = confirm(client, preview)
+    root = '/api/custom/projects/' + saved['id']
+    question = saved['form']['questions'][0]['id']
+    settings = saved['settings']
+    settings.setdefault('questions', {})[question] = {'appearance': {'labels': 'hidden'}}
+    assert client.put(root + '/settings', json=settings).status_code == 200
+    reopened = client.get(root)
+    assert reopened.status_code == 200
+    settings = reopened.json()['settings']
+    assert settings['questions'][question]['appearance']['labels'] == 'hidden'
+    response = client.post(root + '/analysis', json={'settings': settings})
+    assert response.status_code == 200
+    panel = next(q for q in response.json()['questions'] if q['id'] == question)
+    assert panel['appearance']['labels'] == 'hidden'
+    assert panel['rows']

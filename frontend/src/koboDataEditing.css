@@ -1,0 +1,57 @@
+.kobo-edit-dialog{width:min(700px,calc(100vw - 32px));box-sizing:border-box}.kobo-edit-symbol{display:inline-flex;color:var(--blue);padding:10px;background:color-mix(in srgb,var(--blue) 8%,var(--panel));border-radius:12px}.kobo-edit-field{display:grid;gap:5px;padding:14px;border:1px solid var(--line);border-radius:12px;margin-bottom:16px}.kobo-edit-field>strong{font-size:16px;overflow-wrap:anywhere}.kobo-edit-search{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:10px;padding:10px 12px}.kobo-edit-search svg{width:18px;color:var(--muted)}.kobo-edit-search input{border:0;background:transparent;color:var(--ink);width:100%;min-width:0;outline:none}.kobo-edit-options,.kobo-answer-list{max-height:260px;overflow:auto;margin:12px 0;border:1px solid var(--line);border-radius:12px}.kobo-edit-options>button,.kobo-answer-list>label{display:flex;width:100%;align-items:center;gap:12px;padding:12px 14px;border:0;border-bottom:1px solid var(--line);background:var(--panel-strong);color:var(--ink);text-align:start;box-sizing:border-box}.kobo-edit-options>button[aria-pressed=true]{background:color-mix(in srgb,var(--blue) 10%,var(--panel))}.kobo-edit-options>button>span,.kobo-answer-list>label>span{flex:1;display:grid;gap:4px;min-width:0;overflow-wrap:anywhere}.kobo-edit-options small,.kobo-answer-list small{font-size:10px;color:var(--muted);overflow-wrap:anywhere}.kobo-edit-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}.kobo-edit-chips>span{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:8px;background:color-mix(in srgb,var(--blue) 10%,var(--panel));font-size:12px}.kobo-edit-chips button{padding:2px;border:0;background:transparent;color:inherit}.kobo-edit-chips svg{width:14px;height:14px}.kobo-edit-destination{display:grid;grid-template-columns:1fr 1fr;gap:12px;border:0;padding:0;margin:20px 0}.kobo-edit-destination legend{font-size:13px;font-weight:600;margin-bottom:10px}.kobo-edit-destination label{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:12px;border:1px solid var(--line);border-radius:10px;font-size:13px}.kobo-edit-destination small{display:block;width:100%;font-size:11px}.kobo-edit-warning{padding:12px;border:1px solid #dca04a55;border-radius:10px;background:#dca04a0c;margin:12px 0;font-size:12px}.kobo-edit-warning p{margin:4px 0}.kobo-edit-preview{border:1px solid color-mix(in srgb,var(--blue) 30%,var(--line));padding:16px;border-radius:12px;margin:16px 0}.kobo-edit-preview h3{display:flex;gap:8px;font-size:14px;margin:0}.kobo-edit-preview>div{max-height:200px;overflow:auto}.kobo-edit-preview p{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);padding:6px 0}.kobo-edit-notice{position:fixed;z-index:80;bottom:20px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);box-shadow:0 8px 30px #0002;font-size:13px;max-width:calc(100vw - 32px)}.kobo-edit-notice>svg{color:var(--blue);width:18px}.kobo-data-edit-action[aria-pressed=true]{color:var(--blue);background:color-mix(in srgb,var(--blue) 10%,var(--panel))}.kobo-data-edit-cell{display:block;width:100%;min-height:28px;text-align:start!important;justify-content:flex-start!important;color:var(--ink);background:transparent;border:1px dashed color-mix(in srgb,var(--blue) 35%,var(--line));border-radius:6px;padding:5px 8px;white-space:pre-wrap;overflow-wrap:anywhere}.kobo-data-edit-cell:hover{border-color:var(--blue);background:color-mix(in srgb,var(--blue) 6%,var(--panel))}.kobo-edit-spinner{animation:kobo-edit-spin 1s linear infinite}@keyframes kobo-edit-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.kobo-edit-spinner{animation:none}}@media(max-width:560px){.kobo-edit-dialog{padding:18px}.kobo-edit-destination{grid-template-columns:1fr}.kobo-answer-list>label{gap:8px;padding:10px}.kobo-answer-list>label button{font-size:11px}.kobo-edit-notice{gap:8px;width:max-content}}
+
+.kobo-answer-edit-shortcut{font:inherit;color:inherit;text-align:start;justify-content:flex-start!important;background:transparent;border:0;padding:0;white-space:normal;overflow-wrap:anywhere}.kobo-answer-edit-shortcut:hover{text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
+
+/* The single-response editor owns its layout without changing Manage answers. */
+.kobo-dialog.kobo-response-dialog{width:min(600px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0!important;overflow:hidden;background:var(--panel-strong)}
+.kobo-dialog.kobo-response-dialog[open]{display:flex;flex-direction:column}
+.kobo-dialog.kobo-response-dialog>header{flex-shrink:0;margin:0;padding:20px 24px 16px;border-bottom:1px solid var(--line);gap:12px}
+.kobo-dialog.kobo-response-dialog>header>div{display:grid;grid-template-columns:36px minmax(0,1fr);column-gap:12px;align-items:center}
+.kobo-dialog.kobo-response-dialog .kobo-edit-symbol{grid-row:1 / 3;padding:8px;border-radius:10px;align-self:start}
+.kobo-dialog.kobo-response-dialog .kobo-edit-symbol svg{width:20px;height:20px}
+.kobo-dialog.kobo-response-dialog h2{font-size:19px;line-height:1.4}
+.kobo-dialog.kobo-response-dialog>header p{grid-column:2;font-size:12px;line-height:1.5;margin:4px 0 0}
+.kobo-dialog.kobo-response-dialog>header>button{padding:8px;min-width:34px;min-height:34px;border-radius:9px}
+.kobo-dialog.kobo-response-dialog>form{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.kobo-response-body{padding:20px 24px;overflow:auto;min-height:0;overscroll-behavior:contain}
+.kobo-dialog.kobo-response-dialog .kobo-edit-field{padding:0 0 16px;border:0;border-bottom:1px solid var(--line);border-radius:0;margin:0 0 16px;gap:6px}
+.kobo-dialog.kobo-response-dialog .kobo-edit-field>strong{font-size:16px;line-height:1.5}
+.kobo-dialog.kobo-response-dialog .kobo-edit-field>small{font-size:11px}
+.kobo-response-current{padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:18px}
+.kobo-response-current h3{font-size:11px;color:var(--muted);font-weight:600;margin:0 0 5px}
+.kobo-response-current>div{font-size:14px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.kobo-response-controls{border:0;padding:0;margin:0;min-width:0}
+.kobo-response-controls>legend{padding:0;font-size:13px;font-weight:700;margin-bottom:4px}
+.kobo-dialog.kobo-response-dialog .kobo-response-hint{font-size:12px;line-height:1.5;margin:0 0 10px}
+.kobo-dialog.kobo-response-dialog .kobo-edit-search{padding:0 12px;min-height:42px;background:var(--panel-strong);gap:8px;transition:border-color .15s,box-shadow .15s}
+.kobo-dialog.kobo-response-dialog .kobo-edit-search:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 14%,transparent)}
+.kobo-dialog.kobo-response-dialog .kobo-edit-search input{font:inherit;font-size:13px;padding:10px 0;border:0!important;border-radius:0;outline:none!important;box-shadow:none!important;background:transparent}
+.kobo-dialog.kobo-response-dialog .kobo-edit-search svg{flex-shrink:0}
+.kobo-dialog.kobo-response-dialog .kobo-edit-options{max-height:220px;margin:10px 0;border-radius:10px}
+.kobo-dialog.kobo-response-dialog .kobo-edit-options:empty{display:none}
+.kobo-dialog.kobo-response-dialog .kobo-edit-options>button{border-radius:0;min-height:48px;padding:10px 12px;gap:10px;text-align:start;justify-content:flex-start;font-size:13px}
+.kobo-dialog.kobo-response-dialog .kobo-edit-options>button:last-child{border-bottom:0}
+.kobo-dialog.kobo-response-dialog .kobo-edit-options>button:hover{background:color-mix(in srgb,var(--blue) 5%,var(--panel-strong))}
+.kobo-dialog.kobo-response-dialog .kobo-edit-options>button[aria-pressed=true]{background:color-mix(in srgb,var(--blue) 10%,var(--panel-strong))}
+.kobo-dialog.kobo-response-dialog .kobo-edit-options>button:focus-visible{outline-offset:-3px}
+.kobo-dialog.kobo-response-dialog .kobo-edit-options .kobo-response-indicator{display:grid;place-items:center;flex:0 0 18px;width:18px;height:18px;box-sizing:border-box;border:1px solid var(--muted);border-radius:50%;color:var(--panel-strong)}
+.kobo-dialog.kobo-response-dialog .kobo-edit-options .kobo-response-indicator.is-multiple{border-radius:4px}
+.kobo-dialog.kobo-response-dialog .kobo-edit-options [aria-pressed=true] .kobo-response-indicator{background:var(--blue);border-color:var(--blue);color:#fff}
+.kobo-dialog.kobo-response-dialog .kobo-response-indicator svg{width:12px;height:12px}
+.kobo-dialog.kobo-response-dialog .kobo-response-custom,.kobo-dialog.kobo-response-dialog .kobo-response-empty{font-size:12px;margin:10px 0;padding:10px 12px;background:var(--panel);border-radius:8px;overflow-wrap:anywhere}
+.kobo-dialog.kobo-response-dialog .kobo-create-option{font-size:12px;max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:start;margin-bottom:8px}
+.kobo-response-scope{display:flex;align-items:flex-start;gap:10px;padding:14px 0 0;margin-top:16px;border-top:1px solid var(--line);cursor:pointer}
+.kobo-response-scope>input{margin:2px 0 0;accent-color:var(--blue);width:16px;height:16px;flex-shrink:0}
+.kobo-response-scope>span{display:grid;gap:4px;min-width:0}
+.kobo-response-scope strong{font-size:12px;line-height:1.5;font-weight:600}
+.kobo-response-scope small{font-size:11px;color:var(--muted)}
+.kobo-response-preview{padding:12px 14px;margin-top:14px;border:1px solid color-mix(in srgb,var(--blue) 30%,var(--line));border-radius:10px;background:color-mix(in srgb,var(--blue) 5%,var(--panel-strong));font-size:12px}
+.kobo-response-preview>div{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:10px}
+.kobo-response-preview span{display:grid;gap:4px;color:var(--muted);min-width:0}
+.kobo-response-preview b{color:var(--ink);font-weight:500;overflow-wrap:anywhere;white-space:pre-wrap}
+.kobo-response-footer{flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 24px;border-top:1px solid var(--line);background:var(--panel-strong)}
+.kobo-response-footer>div{display:flex;gap:8px;align-items:center}
+.kobo-response-footer button{min-height:38px;font-size:12px;padding:9px 12px;border-radius:9px;white-space:nowrap}
+.kobo-response-footer .kobo-response-clear{color:var(--muted);background:transparent;border-color:transparent;padding-inline:0}
+.kobo-dialog.kobo-response-dialog fieldset:disabled{opacity:.65}
+@media(max-width:560px){.kobo-dialog.kobo-response-dialog>header{padding:16px}.kobo-response-body{padding:16px}.kobo-response-footer{padding:12px 16px;flex-wrap:wrap}.kobo-response-footer>div{margin-inline-start:auto}.kobo-dialog.kobo-response-dialog>header>div{grid-template-columns:30px minmax(0,1fr);column-gap:8px}.kobo-dialog.kobo-response-dialog .kobo-edit-symbol{padding:6px}.kobo-dialog.kobo-response-dialog .kobo-edit-symbol svg{width:18px;height:18px}.kobo-dialog.kobo-response-dialog h2{font-size:18px}.kobo-response-preview>div{gap:10px}}

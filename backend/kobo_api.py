@@ -6,13 +6,16 @@ import time
 import uuid
 from typing import Any, Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from .project_encryption import ExportProtection, ProjectProtectionError, protect_backup, unlock_backup, MAX_UPLOAD
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import model_validator, BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .kobo import ChartAppearance, new_project_settings, KoboFilter, KoboSettings, ProjectStore, analyze, filtered_records, label, normalize, parse_data, parse_form, propose_mapping, question_result, data_worksheets
+from .kobo_import_notes import import_note_payload, preview_notes, note_key, warning_references
+from .kobo_edits import EditRequest, edit_preview, commit_edit, choices_for
+from .kobo_updates import UpdateMatching, review_update, paged_review, preview_update
+from .kobo import ChartAppearance, new_project_settings, KoboFilter, KoboSettings, ProjectStore, analyze, filtered_records, label, normalize, parse_data, parse_form, propose_mapping, question_result, question_cohort, resolved_question_settings, data_worksheets
 from .kobo_review_schema import ReviewConfig, effective_form, choice_comparison, choice_setting_impacts, validate_removed_answers
 from .kobo_import_links import review_details, reuse_links, form_changes, suggest_links, question_matches
 from .kobo_indicators import IndicatorDefinition, IndicatorResult, indicator_issues, calculate_indicator, filter_descriptions
@@ -45,6 +48,11 @@ class FormChoice(BaseModel):
 
 
 class FormQuestion(BaseModel):
+    choiceFilter: str = ''
+    relevant: str = ''
+    editable: bool = True
+    localDerived: bool = False
+    derivedFrom: str = ''
     addedFromData: bool = False
     id: str
     name: str
@@ -81,7 +89,38 @@ class ImportIssue(BaseModel):
     count: int
 
 
+class ImportNote(BaseModel):
+    id: str
+    fingerprint: str
+    kind: Literal['warning', 'issue']
+    question: str = ''
+    message: str
+    count: int | None = None
+    reviewed: bool = False
+
+
+class ReviewImportNotes(BaseModel):
+    reviewedImportNotes: list[str] = Field(default_factory=list, max_length=10000)
+
+
 class ProjectResponse(BaseModel):
+    @model_validator(mode='before')
+    @classmethod
+    def date_sort_defaults(cls, value):
+        if not isinstance(value, dict): return value
+        from .kobo_edits import editable
+        edits=value.get('dataEdits',{})
+        protected={field for entry in value.get('updateHistory',[])[:1] for keys in entry.get('keys',{}).values() for field in keys}
+        value={**value,'dataRevision':value.get('dataRevision',edits.get('revision',0)),'canUndoEdit':value.get('canUndoEdit',any(not batch.get('undone') for batch in edits.get('history',[])))}
+        if value.get('form'):value['form']={**value['form'],'questions':[{**q,'editable':editable(q) and q['id'] not in protected} for q in value['form']['questions']]}
+        settings = value.get('settings')
+        if not isinstance(settings, dict): return value
+        configured = dict(settings.get('questions', {}))
+        for question in value.get('form', {}).get('questions', []):
+            if question['kind'] == 'date' and 'answerSort' not in configured.get(question['id'], {}):
+                configured[question['id']] = {**configured.get(question['id'], {}), 'answerSort': 'form'}
+        return {**value, 'settings': {**settings, 'questions': configured}}
+
     id: str
     name: str
     updated: str
@@ -89,11 +128,17 @@ class ProjectResponse(BaseModel):
     settings: KoboSettings
     warnings: list[str] = Field(default_factory=list)
     issues: list[ImportIssue] = Field(default_factory=list)
-    source: dict[str, str] = Field(default_factory=dict)
+    source: dict[str, Any] = Field(default_factory=dict)
+    dataRevision: int = 0
+    canUndoEdit: bool = False
     customConfig: dict[str, Any] | None = None
+    importNotes: list[ImportNote] = Field(default_factory=list)
+    reviewedImportNotes: list[str] = Field(default_factory=list)
 
 
 class BreakdownCount(BaseModel):
+    value: float | None = None
+    contributingCount: int = 0
     id: str
     count: int
     percent: float | None
@@ -101,6 +146,8 @@ class BreakdownCount(BaseModel):
 
 
 class PivotRow(BaseModel):
+    value: float | None = None
+    contributingCount: int = 0
     id: str
     label: str
     count: int
@@ -110,6 +157,9 @@ class PivotRow(BaseModel):
 
 
 class TrendPoint(BaseModel):
+    displayPercent: float | None = None
+    value: float | None = None
+    contributingCount: int = 0
     count: int
     percent: float | None
 
@@ -130,6 +180,19 @@ class AnswerTrend(BaseModel):
 
 
 class QuestionResult(BaseModel):
+    filterMode: str = 'page'
+    filterScope: str = ''
+    cohortCount: int = 0
+    filterSummary: list[str] = Field(default_factory=list)
+    chartTopN: int | None = None
+    chartOther: bool = False
+    chartProjection: dict[str, Any] | None = None
+    percentageGroupLevel: int = 1
+    percentageMode: str = 'legacy-respondents'
+    pivotTotal: dict[str, Any] | None = None
+    answerSort: Literal['form', 'count-desc', 'count-asc', 'label-asc', 'label-desc'] = 'count-desc'
+    measure: dict[str, Any] | None = None
+    measureTotal: dict[str, Any] | None = None
     addedFromData: bool = False
     trend: AnswerTrend | None = None
     appearance: ChartAppearance = Field(default_factory=ChartAppearance)
@@ -172,6 +235,8 @@ class ExportStatus(BaseModel):
 
 
 class ConfirmImport(BaseModel):
+    reviewedImportNotes: list[str] = Field(default_factory=list, max_length=10000)
+    matching: UpdateMatching | None = None
     token: str
     name: str = Field(min_length=1, max_length=200)
     mappings: list[ColumnMapping]
@@ -381,7 +446,8 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
                 m['sourceRepeat'] = added.get('repeat', '')
             result.append(m)
         if any(m.get('question') in (config or {}).get('excludedQuestionIds', []) for m in result):
-            raise ValueError('Ignored questions must not have active source mappings.')
+            affected=[f"{item['sheets'][m['sheet']]['name']} · column {m['column']+1} · {m['header']}" for m in result if m.get('question') in (config or {}).get('excludedQuestionIds',[])]
+            raise ValueError('Ignored questions must not have active source mappings: '+ '; '.join(affected))
         return result
 
     @router.get('/projects')
@@ -406,7 +472,8 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
             question_ids = [q['id'] for q in payload['form']['questions']]
             if len(set(question_ids)) != len(question_ids):
                 raise ValueError('Duplicate question identifiers in backup.')
-            filtered_records(payload, settings)
+            from .kobo_edits import effective_project
+            filtered_records(effective_project(payload), settings)
             return await run_in_threadpool(store.create, name, payload, form_raw, data_raw, settings)
         except ProjectProtectionError as exc:
             raise HTTPException(400, exc.detail) from None
@@ -443,10 +510,46 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    @router.post('/projects/{pid}/import-notes/review', response_model=ProjectResponse)
+    def review_import_notes(pid: str, body: ReviewImportNotes):
+        try: return store.review_import_notes(pid, body.reviewedImportNotes)
+        except KeyError as exc: raise HTTPException(404, 'Project not found.') from exc
+        except ValueError as exc: raise HTTPException(409, str(exc)) from exc
+
     @router.get('/projects/{pid}', response_model=ProjectResponse)
     def project(pid: str):
         p = get(pid)
-        return {k: v for k, v in p.items() if k not in {'records', 'sheets'}}
+        from .kobo_edits import revision,editable
+        protected={field for entry in p.get('updateHistory',[])[:1] for keys in entry.get('keys',{}).values() for field in keys}
+        p={**p,'form':{**p['form'],'questions':[{**q,'editable':editable(q) and q['id'] not in protected} for q in p['form']['questions']]}}
+        return {**{k: v for k, v in p.items() if not k.startswith('_') and k not in {'records', 'sheets','dataEdits'}},'dataRevision':revision(p),'canUndoEdit':any(not b.get('undone') for b in p.get('dataEdits',{}).get('history',[]))}
+
+    @router.get('/projects/{pid}/answers/{field:path}')
+    def answer_options(pid: str, field: str, language: str = 'en'):
+        try: return choices_for(get(pid),field,language)
+        except ValueError as exc: raise HTTPException(400,str(exc)) from exc
+
+    @router.post('/projects/{pid}/edits/preview')
+    def preview_edit(pid: str, body: EditRequest):
+        get(pid)
+        try:return edit_preview(store.get(pid,raw=True),body)
+        except ValueError as exc:raise HTTPException(409,str(exc)) from exc
+
+    @router.post('/projects/{pid}/edits/apply')
+    def apply_edit(pid: str, body: EditRequest):
+        get(pid)
+        try:commit_edit(store,pid,body);return project(pid)
+        except ValueError as exc:raise HTTPException(409,str(exc)) from exc
+
+    @router.post('/projects/{pid}/edits/undo')
+    def undo_edit(pid: str, body: EditRequest):
+        get(pid)
+        try:commit_edit(store,pid,body,undo=True);return project(pid)
+        except ValueError as exc:raise HTTPException(409,str(exc)) from exc
+
+    @router.get('/projects/{pid}/edits/history')
+    def edit_history(pid: str):
+        return list(reversed(store.get(pid,raw=True).get('dataEdits',{}).get('history',[])))
 
     @router.put('/projects/{pid}/settings')
     def save(pid: str, settings: KoboSettings):
@@ -517,8 +620,8 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
                 for key in list(staged):
                     if time.monotonic() - staged[key]['created'] > 1800: del staged[key]
                 if len(staged) >= 3: raise HTTPException(409, 'Finish or cancel an existing import before starting another.')
-                staged[token] = {'created': time.monotonic(), 'form': parsed_form, 'sheets': sheets, 'formRaw': form_raw, 'dataRaw': data_raw, 'mappings': mappings, 'warnings': warnings, 'source': {'worksheet': worksheet}}
-            return {'token': token, 'form': parsed_form, 'sheets': [{'name': s['name'], 'rows': len(s['rows']), 'columns': len(s['headers'])} for s in sheets], 'mappings': mappings, 'issues': issues, 'linkReview': link_review, 'expectedVersion': str(parsed_form.get('settings', {}).get('version') or ''), 'warnings': parsed_form['warnings'] + warnings}
+                staged[token] = {'created': time.monotonic(), 'form': parsed_form, 'sheets': sheets, 'formRaw': form_raw, 'dataRaw': data_raw, 'mappings': mappings, 'warnings': warnings, 'source': {'worksheet': worksheet, 'filename': data.filename, 'formFilename': form.filename, 'tables': [{'name': s['name'], 'role': 'Main table' if i==0 else 'Repeat table'} for i,s in enumerate(sheets)]}, 'replacement': False}
+            return preview_notes({'token': token, 'source':staged[token]['source'], 'form': parsed_form, 'sheets': [{'name': s['name'], 'rows': len(s['rows']), 'columns': len(s['headers'])} for s in sheets], 'mappings': mappings, 'issues': issues, 'linkReview': link_review, 'expectedVersion': str(parsed_form.get('settings', {}).get('version') or ''), 'warnings': parsed_form['warnings'] + warnings}, staged[token])
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
         except (OSError, KeyError, TypeError) as exc: raise HTTPException(400, 'Unable to read this workbook. Check that it is a valid Kobo XLSX export.') from exc
         finally: await form.close(); await data.close()
@@ -529,7 +632,7 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
         return {'cancelled': True}
 
     @router.post('/projects/{pid}/review')
-    async def review_project(pid: str, form: UploadFile | None = File(None), data: UploadFile | None = File(None)):
+    async def review_project(pid: str, request: Request, form: UploadFile | None = File(None), data: UploadFile | None = File(None), worksheet: str | None = Form(None)):
         p = await run_in_threadpool(get, pid)
         try:
             form_raw, data_raw = await run_in_threadpool(store.sources, pid)
@@ -539,12 +642,17 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
                 from .main import read_upload_limited
                 filename = data.filename or ''
                 data_raw = await read_upload_limited(data)
-            worksheet = p.get('source', {}).get('worksheet', '') if not filename.lower().endswith('.csv') else ''
-            if data and worksheet:
+            # FastAPI treats empty optional form strings as None. An explicit empty
+            # selection means all worksheets, while omission keeps the saved choice.
+            explicit_worksheet = 'worksheet' in await request.form()
+            if explicit_worksheet: worksheet = worksheet or ''
+            worksheet = worksheet if explicit_worksheet else p.get('source', {}).get('worksheet', '') if not filename.lower().endswith('.csv') else ''
+            if data and worksheet and not explicit_worksheet:
                 available = await run_in_threadpool(data_worksheets, data_raw, filename)
-                if worksheet not in available: worksheet = available[0] if available else ''
+                if worksheet not in available:
+                    raise ValueError(f'The saved worksheet "{worksheet}" is not available. Choose a replacement worksheet.')
             sheets = await run_in_threadpool(parse_data, data_raw, filename, worksheet)
-            parsed_form = p.get('baseForm', p['form'])
+            parsed_form = p.get('baseForm', p.get('_sourceForm', p['form']))
             review_config = ReviewConfig.model_validate(p.get('reviewConfig', {})).model_dump()
             if form:
                 from .main import read_upload_limited
@@ -566,7 +674,7 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
             for added in review_config['addedQuestions']:
                 retain_group(added.get('repeat', ''))
                 retain_group(added.get('group') or '')
-            matches = question_matches(p.get('baseForm', p['form']), base_form)
+            matches = question_matches(p.get('baseForm', p.get('_sourceForm', p['form'])), base_form)
             review_config['choiceOverrides'] = {matches.get(k, k): v for k, v in review_config['choiceOverrides'].items() if k in matches or any(q['id'] == k for q in review_config['addedQuestions'])}
             known = {q['id'] for q in base_form['questions']} | {q['id'] for q in review_config['addedQuestions']}
             review_config['choiceOverrides'] = {k: v for k, v in review_config['choiceOverrides'].items() if k in known}
@@ -574,6 +682,7 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
             parsed_form = effective_form(base_form, review_config, sheets)
             proposed, warnings = await run_in_threadpool(propose_mapping, parsed_form, sheets)
             old_sheets = await run_in_threadpool(parse_data, original_data_raw, 'data.xlsx' if original_data_raw.startswith(b'PK') else 'data.csv', p.get('source', {}).get('worksheet', '')) if data else sheets
+            p={**p,'source':{**p.get('source',{}),'tables':[{'name':s['name'],'role':'Main table' if i==0 else 'Repeat table'} for i,s in enumerate(old_sheets)]}}
             mappings, reuse_warnings = await run_in_threadpool(reuse_links, p, parsed_form, sheets, old_sheets, proposed)
             warnings += reuse_warnings
             mappings = await run_in_threadpool(suggest_links, parsed_form, sheets, mappings)
@@ -594,7 +703,7 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
                 for key in list(staged):
                     if time.monotonic() - staged[key]['created'] > 1800: del staged[key]
                 if len(staged) >= 3: raise HTTPException(409, 'Finish or cancel an existing import before starting another.')
-                staged[token] = {'created': time.monotonic(), 'projectId': pid, 'projectUpdated': p['updated'], 'reuse': reuse, 'policies': policies, 'form': base_form, 'reviewConfig': review_config, 'settings': p['settings'], 'sheets': sheets, 'formRaw': form_raw, 'dataRaw': data_raw, 'mappings': mappings, 'warnings': warnings, 'source': {'worksheet': worksheet}}
+                staged[token] = {'created': time.monotonic(), 'projectId': pid, 'projectUpdated': p['updated'], 'reuse': reuse, 'policies': policies, 'form': base_form, 'reviewConfig': review_config, 'settings': p['settings'], 'sheets': sheets, 'formRaw': form_raw, 'dataRaw': data_raw, 'mappings': mappings, 'warnings': warnings, 'source': {'worksheet': worksheet, 'filename': data.filename if data else p.get('source',{}).get('filename','Saved source'), 'formFilename': form.filename if form else p.get('source',{}).get('formFilename','Saved form workbook'), 'tables': [{'name': s['name'], 'role': 'Main table' if i==0 else 'Repeat table'} for i,s in enumerate(sheets)]}, 'replacement': bool(form or data)}
             version_counts = {}
             for sheet in sheets:
                 for index, header in enumerate(sheet['headers']):
@@ -602,11 +711,39 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
                         for row in sheet['rows']:
                             value = str(row[index]) if index < len(row) and row[index] is not None else ''
                             if value: version_counts[value] = version_counts.get(value, 0) + 1
-            return {'token': token, 'reuse': reuse, 'form': base_form, 'reviewConfig': review_config, 'sheets': [{'name': s['name'], 'rows': len(s['rows']), 'columns': len(s['headers'])} for s in sheets], 'mappings': mappings, 'policies': policies, 'issues': issues, 'examples': examples, 'warnings': parsed_form['warnings'] + warnings, 'linkReview': link_review, 'formChanges': form_changes(p['form'], parsed_form), 'sourceVersions': version_counts, 'expectedVersion': str(parsed_form.get('settings', {}).get('version', ''))}
+            staged[token]['reviewedImportNotes'] = p.get('reviewedImportNotes', [])
+            staged[token]['noteWarningReferences'] = warning_references(p, old_sheets, warnings)
+            return preview_notes({'token': token, 'source':staged[token]['source'], 'reuse': reuse, 'form': base_form, 'reviewConfig': review_config, 'sheets': [{'name': s['name'], 'rows': len(s['rows']), 'columns': len(s['headers'])} for s in sheets], 'mappings': mappings, 'policies': policies, 'issues': issues, 'examples': examples, 'warnings': parsed_form['warnings'] + warnings, 'linkReview': link_review, 'formChanges': form_changes(p['form'], parsed_form), 'sourceVersions': version_counts, 'expectedVersion': str(parsed_form.get('settings', {}).get('version', ''))}, staged[token], parsed_form, review_config)
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
         finally:
             if form: await form.close()
             if data: await data.close()
+
+    @router.post('/imports/{token}/update-preview')
+    def update_preview(token: str, body: dict):
+        with lock: item = staged.get(token)
+        if not item or time.monotonic()-item['created']>1800: raise HTTPException(410,'Import preview expired.')
+        if not item.get('projectId'): raise HTTPException(400,'Update comparison requires an existing project.')
+        try:
+            checked = CheckImport.model_validate(body)
+            form = effective_form(item['form'],checked.reviewConfig.model_dump(),item['sheets'])
+            mappings = mapping_payload(item,checked.mappings,checked.reviewConfig.model_dump())
+            records,issues = normalize(form,item['sheets'],mappings,checked.policies)
+            payload = import_note_payload(item, form, mappings, checked.policies, issues, checked.reviewConfig.model_dump(), records)
+            return paged_review(preview_update(get(item['projectId']),payload,body),max(1,int(body.get('page',1))),25,body.get('kind',''),body.get('field',''))
+        except ValueError as exc: raise HTTPException(400,str(exc)) from exc
+
+    @router.get('/projects/{pid}/updates')
+    def update_history(pid: str):
+        history = get(pid).get('updateHistory',[])
+        return [{k:v for k,v in entry.items() if k not in {'details','fields'}} for entry in history]
+
+    @router.get('/projects/{pid}/updates/{update_id}')
+    def update_detail(pid: str, update_id: str, page: int = 1, kind: str = '', field: str = ''):
+        history = get(pid).get('updateHistory',[])
+        entry = next((entry for entry in history if entry['id']==update_id),None)
+        if entry is None: raise HTTPException(404,'Update history entry not found.')
+        return paged_review(entry,max(1,page),25,kind,field)
 
     @router.post('/imports/{token}/check')
     def check_import(token: str, body: CheckImport):
@@ -630,7 +767,8 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
             for view in settings.get('savedViews', []):
                 problems = saved_view_issues(context, SavedAnalysisView.model_validate(view))
                 if problems: impacts.append({'name': view['name'], 'issues': problems})
-            return {'issues': issues, 'examples': examples, 'linkReview': link_review, 'questionImpacts': impacts, 'choiceImpacts': choice_setting_impacts(item.get('settings'), item['form'], form)}
+            notes = import_note_payload(item, form, mappings, body.policies, issues, body.reviewConfig.model_dump())
+            return {'issues': issues, 'examples': examples, 'linkReview': link_review, 'questionImpacts': impacts, 'choiceImpacts': choice_setting_impacts(item.get('settings'), item['form'], form), 'warnings': notes['warnings'], 'importNotes': notes['importNotes'], 'reviewedImportNotes': notes['reviewedImportNotes']}
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
     @router.post('/imports/{token}/choices')
@@ -686,7 +824,10 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
         if any('conflicting mapped columns' in issue['message'] for issue in issues):
             raise HTTPException(422, {'message': 'Choose a source priority or explicitly leave conflicting merged answers blank before applying.', 'issues': issues})
         if issues and not body.acceptInvalid: raise HTTPException(422, {'message': 'Review normalization issues. Choose an encoding or explicitly accept invalid answers as blank.', 'issues': issues})
-        payload = {'form': form, 'baseForm': item['form'], 'reviewConfig': body.reviewConfig.model_dump(), 'records': records, 'mappings': mappings, 'policies': body.policies, 'warnings': item['warnings'] + item['form']['warnings'], 'issues': issues, 'source': item.get('source', {})}
+        payload = import_note_payload(item, form, mappings, body.policies, issues, body.reviewConfig.model_dump(), records)
+        accepted = set(payload.get('reviewedImportNotes', [])) | set(body.reviewedImportNotes)
+        payload['reviewedImportNotes'] = [note_key(note) for note in payload['importNotes']
+                                        if note_key(note) in accepted or (body.acceptInvalid and note['kind'] == 'issue')]
         if body.reuseOnly:
             reasons = settings_reuse_reasons(get(item['projectId']), payload)
             if reasons: raise HTTPException(409, '; '.join(reasons))
@@ -697,7 +838,13 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
             try: initial_settings = KoboSettings.model_validate(preview_settings(payload, defaults, body.settingsPackage)['settings'])
             except ValueError as exc: raise HTTPException(400, str(exc)) from exc
         try:
-            p = store.repair(item['projectId'], payload, item['formRaw'], item['dataRaw'], preserve_settings=body.reuseOnly, expected_updated=item.get('projectUpdated') if body.reuseOnly else None) if item.get('projectId') else store.create(body.name, payload, item['formRaw'], item['dataRaw'], settings=initial_settings)
+            entry = None
+            if item.get('replacement'):
+                if body.matching is None: raise ValueError('Review the source update before applying.')
+                previous = get(item['projectId'])
+                if previous['updated'] != item['projectUpdated']: raise ValueError('The project changed since this preview. Reopen the upload.')
+                entry = review_update(previous,payload,body.matching)
+            p = store.repair(item['projectId'], payload, item['formRaw'], item['dataRaw'], preserve_settings=body.reuseOnly, expected_updated=item.get('projectUpdated'), update_entry=entry) if item.get('projectId') else store.create(body.name, payload, item['formRaw'], item['dataRaw'], settings=initial_settings)
         except KeyError as exc: raise HTTPException(404, 'Project not found.') from exc
         except ValueError as exc: raise HTTPException(409, str(exc)) from exc
         with lock: staged.pop(body.token, None)
@@ -789,6 +936,7 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
         if not q: raise HTTPException(404, 'Question not found.')
         try: records = filtered_records(p, body.settings)
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+        records=question_cohort(q,records,resolved_question_settings(q,body.settings),{q['id']:q for q in p['form']['questions']},{r['id']:r for r in p['records']})
         captions = {choice['name']: label(choice, body.settings.language) for choice in q['choices']}
         query = body.search.strip().casefold()
         rows = []

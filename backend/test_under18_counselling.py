@@ -42,7 +42,7 @@ def store(monkeypatch, request):
     })
     payload = {
         "beneficiaries": beneficiaries,
-        "assessments": pd.DataFrame({"Assessment ID": ["A1"], "Beneficiary ID": ["B1"]}),
+        "assessments": pd.DataFrame({"Assessment ID": ["A1", "A2"], "Beneficiary ID": ["B1", "B1"], "Type of Legal Service Needed": ["Legal Representation", "Legal Counselling"]}),
         "legalservices": services,
     }
     return LegalStore.from_files({key: frame.to_csv(index=False).encode("utf-8") for key, frame in payload.items()}, "test")
@@ -59,6 +59,8 @@ def test_current_age_and_linked_birth_dates(store):
     assert rows["S1"]["dateOfBirth"] == "22/10/2008"
     assert rows["S1"]["caseId"] == "B1"
     assert rows["S1"]["assessmentId"] == "A1"
+    assert rows["S1"]["requestedServiceTypes"] == "Legal Representation"
+    assert rows["S1"]["serviceDate"] == "01/01/2020"
     assert rows["S1"]["action"].startswith("Verify the beneficiary date of birth")
 
 
@@ -85,6 +87,9 @@ def test_export_includes_age_evidence_and_obeys_filters(store):
     records = list(sheet.values)
     headers = list(records[0])
     rows = [dict(zip(headers, values)) for values in records[1:]]
+    assert headers[headers.index("Current age") + 1:headers.index("Current age") + 4] == ["Date of service", "Type of Service Provided", "Assessment service needed"]
+    assert all(row["Assessment service needed"] == "Legal Representation" for row in rows)
+    assert {row["Date of service"].strftime("%d/%m/%Y") for row in rows} == {"01/02/2026", "01/03/2026"}
     assert len(rows) == 2
     assert {row["Service"] for row in rows} == {"S8", "S9"}
     assert all(str(row["Current age"]) == "17" for row in rows)
@@ -92,3 +97,10 @@ def test_export_includes_age_evidence_and_obeys_filters(store):
     assert all(row["Type of Service Provided"] for row in rows)
     assert all(row["Date of birth"] for row in rows)
     assert all(row["Lawyer"] == "Lawyer A" and row["Project location"] == "Erbil" for row in rows)
+
+
+def test_missing_linked_assessment_need_is_blank(store):
+    store.frames["legalservices"].loc[:, "Assessment ID"] = "missing"
+    rows = [row for row in store._service_flags() if row["rule"] == RULE]
+    assert rows
+    assert all(row["requestedServiceTypes"] == "" for row in rows)

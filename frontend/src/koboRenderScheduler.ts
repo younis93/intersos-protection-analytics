@@ -8,27 +8,30 @@ export class KoboRenderScheduler{
  private root:HTMLElement|null=null;
  private listening=false;
  private clock=0;
+ private lastScroll=0;
+ private settle:ReturnType<typeof setTimeout>|null=null;
  private frame=0;
  private task:number|null=null;
  private idle=false;
  private initializing:HTMLElement|null=null;
  private timeout:ReturnType<typeof setTimeout>|null=null;
  constructor(private capacity=8){}
+ resume=()=>{const bounds=this.root?.getBoundingClientRect(),top=bounds?.top||0,bottom=bounds?.bottom||window.innerHeight;for(const entry of this.entries.values()){const rect=entry.node.getBoundingClientRect();entry.near=rect.bottom>top-800&&rect.top<bottom+800}this.refresh()};
 
- register(node:HTMLElement,kind:Kind,activate:(active:boolean)=>void){
+ register(node:HTMLElement,kind:Kind,activate:(active:boolean)=>void,initialActive=false){
   if(!this.observer){
    let root=node.parentElement;
    while(root&&!(root.scrollHeight>root.clientHeight+1&&/auto|scroll/.test(getComputedStyle(root).overflowY)))root=root.parentElement;
    this.root=root;
    this.observer=new IntersectionObserver(entries=>{
     for(const event of entries){const entry=this.entries.get(event.target as HTMLElement);if(!entry)continue;entry.near=event.isIntersecting;
-     if(entry.kind==='question'&&entry.near){entry.activate(true);this.observer?.unobserve(entry.node);this.entries.delete(entry.node)}
+     // Question hosts stay observed so distant content can be released.
     }
     this.refresh();
    },{root,rootMargin:'800px 0px'});
    this.startListeners();
   }
-  this.entries.set(node,{node,kind,activate,near:false,visible:false,active:false,used:++this.clock,distance:Infinity});
+  this.entries.set(node,{node,kind,activate,near:false,visible:false,active:initialActive,used:++this.clock,distance:Infinity});
   this.observer.observe(node);
   return()=>{
    this.observer?.unobserve(node);this.entries.delete(node);
@@ -48,10 +51,14 @@ export class KoboRenderScheduler{
   window.addEventListener('resize',this.onScroll,{passive:true});
   document.addEventListener('focusin',this.onScroll);document.addEventListener('focusout',this.onScroll);
  }
- private onScroll=()=>{if(!this.frame)this.frame=requestAnimationFrame(()=>{this.frame=0;this.refresh()})};
+ private onScroll=()=>{this.lastScroll=Date.now();if(!this.frame)this.frame=requestAnimationFrame(()=>{this.frame=0;this.refresh()})};
  private focused(entry:Entry){return entry.node.contains(document.activeElement)}
  private refresh(){
   const bounds=this.root?.getBoundingClientRect();const top=bounds?.top||0,bottom=bounds?.bottom||window.innerHeight;
+  for(const entry of this.entries.values())if(entry.kind==='question'){
+   const active=entry.near||this.focused(entry);
+   if(active!==entry.active){entry.active=active;entry.activate(active)}
+  }
   for(const entry of this.entries.values())if(entry.kind==='chart'&&(entry.near||entry.active)){
    const rect=entry.node.getBoundingClientRect();entry.visible=rect.bottom>top&&rect.top<bottom;
    entry.distance=Math.max(top-rect.bottom,rect.top-bottom,0);
@@ -61,12 +68,15 @@ export class KoboRenderScheduler{
  }
  private schedule(){
   if(this.task!==null||this.initializing)return;
+  const wait=150-(Date.now()-this.lastScroll);
+  if(wait>0){if(this.settle)clearTimeout(this.settle);this.settle=setTimeout(()=>{this.settle=null;this.schedule()},wait);return;}
   if(![...this.entries.values()].some(entry=>entry.kind==='chart'&&!entry.active&&entry.near))return;
   const run=()=>{this.task=null;this.flush()};
   if(typeof window.requestIdleCallback==='function'){this.idle=true;this.task=window.requestIdleCallback(run,{timeout:120})}
   else{this.idle=false;this.task=window.setTimeout(run,16)}
  }
  private flush(){
+  if(Date.now()-this.lastScroll<150){this.schedule();return;}
   const charts=[...this.entries.values()].filter(entry=>entry.kind==='chart');
   const next=charts.filter(entry=>!entry.active&&entry.near).sort((a,b)=>Number(b.visible)-Number(a.visible)||a.distance-b.distance||b.used-a.used)[0];
   if(!next)return;
@@ -88,6 +98,7 @@ export class KoboRenderScheduler{
   if(this.frame)cancelAnimationFrame(this.frame);
   if(this.task!==null){if(this.idle)window.cancelIdleCallback(this.task);else clearTimeout(this.task)}
   if(this.timeout)clearTimeout(this.timeout);
+  if(this.settle)clearTimeout(this.settle);this.settle=null;
   this.entries.clear();this.frame=0;this.task=null;this.timeout=null;this.initializing=null;this.listening=false;this.root=null;
  }
 }

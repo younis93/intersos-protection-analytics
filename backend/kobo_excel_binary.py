@@ -1,3 +1,4 @@
+from .kobo_excel_ratio import modern,selection_base,ratio
 """Multi-select pivots over one calculated 0/1 column per answer, without row expansion."""
 from .kobo_excel_layout import excel_literal
 from .kobo_excel_ranges import excel_cell, excel_range
@@ -58,14 +59,18 @@ def binary_report(book, report, pivot, totals, result, metrics, support_sheet, l
     right = area.Column + area.Columns.Count - 1
     bottom = area.Row + area.Rows.Count - 1
     denominators = []
+    planned=None
+    if modern(result):
+        from .kobo_excel_count_cells import plan_count_cells
+        planned=plan_count_cells(result,helper,columns,options,2)
     for index, column in enumerate(columns):
-        start = helper.UsedRange.Row + helper.UsedRange.Rows.Count + 3
+        start = planned+index*(len(options)+4) if planned is not None else helper.UsedRange.Row + helper.UsedRange.Rows.Count + 3
         denominator = pivot_value(totals, 'Answered total', '', column['labels'], result)
         denominators.append(denominator)
         rows = []
         for option in options:
             count = pivot_value(totals, 'Responses', option['id'], column['labels'], result)
-            percentage = '"-"' if option['id'] == '__blank__' else f'IF({denominator}=0,"-",{count}/{denominator})'
+            percentage = ratio(totals,result,option['id'],column['labels']) if modern(result) else '"-"' if option['id'] == '__blank__' else f'IF({denominator}=0,"-",{count}/{denominator})'
             rows.append(('='+excel_literal(option['caption']), '='+count, '='+percentage))
         if rows:
             if start + len(rows) > 1048576: raise ValueError('Chart values exceed the Excel row limit.')
@@ -83,19 +88,27 @@ def binary_report(book, report, pivot, totals, result, metrics, support_sheet, l
                 target = excel_range(report, body.Row, col, body.Row+len(formulas)-1, col)
                 target.Formula = tuple(formulas); target.NumberFormat = percent_format(result.get('percentageDecimals', 0))
             excel_cell(report, body.Row-1, col).Font.Bold = True
+    from .kobo_excel_totals import append_overall_totals, totals_policy
+    native_right = right
+    if 'percent' in metrics:
+        right += 1 + len(columns)
     footer_row = bottom+2
-    excel_cell(report, footer_row, 1).Value = 'إجمالي الإجابات' if language == 'ar' else 'Total answered'
+    right = append_overall_totals(book, report, totals, result, metrics, support_sheet,
+                                 body.Row if body is not None else bottom + 1, area.Column,
+                                 right, footer_row, language)
+    if not totals_policy(result)[0]:
+        return excel_range(report, area.Row, area.Column, bottom, right), excel_range(report, bottom, 1, bottom, right)
+    excel_cell(report, footer_row, 1).Value = 'إجمالي الإجابات' if language == 'ar' else 'Total' if modern(result) else 'Total answered'
     if body is not None:
         for index in range(1, body.Columns.Count+1):
             items = body.Cells(1, index).PivotCell.ColumnItems
             parts = {str(items.Item(i).Parent.SourceName): str(items.Item(i).Name) for i in range(1, items.Count+1)}
             labels = [parts[field_name(result, f'Breakdown{level+1}')] for level in range(len(result.get('breakdownFields', [])))]
-            excel_cell(report, footer_row, body.Column+index-1).Formula = '='+pivot_value(totals, 'Answered total', '', labels, result)
+            excel_cell(report, footer_row, body.Column+index-1).Formula = '='+(selection_base(totals,result,labels) if modern(result) else pivot_value(totals, 'Answered total', '', labels, result))
     if 'percent' in metrics:
         for index, denominator in enumerate(denominators):
-            cell = excel_cell(report, footer_row, right+2+index)
-            cell.Formula = f'=IF({denominator}=0,"-",1)'; cell.NumberFormat = percent_format(result.get('percentageDecimals', 0))
-        right += 1+len(columns)
+            cell = excel_cell(report, footer_row, native_right+2+index)
+            cell.Formula = '='+ratio(totals,result,None,columns[index]['labels'],margin=True) if modern(result) else f'=IF({denominator}=0,"-",1)'; cell.NumberFormat = percent_format(result.get('percentageDecimals', 0))
     footer = excel_range(report, footer_row, 1, footer_row, right)
     footer.Font.Bold = True; footer.Interior.Color = 0xEBDFD2; footer.RowHeight = 26
     return excel_range(report, area.Row, area.Column, footer_row, right), footer

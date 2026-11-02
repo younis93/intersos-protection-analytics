@@ -22,7 +22,7 @@ import pandas as pd
 from .version import APP_VERSION
 from .import_progress import ImportCancelled
 
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024
 MAGIC = b"INTERSOS-LEGAL-CACHE-1\n"
 _lock = RLock()

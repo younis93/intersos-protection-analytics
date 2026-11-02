@@ -46,19 +46,32 @@ def trend_chart(book, report, cache, result, position, footer, left, top, metric
     period_field = excel_literal(field_name(result, 'TrendPeriod'))
     answer_field = excel_literal(field_name(result, 'Answer'))
     binary = result['_source'].get('binary')
-    formulas = []
+    from openpyxl.utils import get_column_letter
+    from .kobo_excel_trend_projection import matrix_range,write_trend_series
+    raw_sheet=support_sheet(book,'_Kobo trend raw values');raw_first=raw_sheet.UsedRange.Row+raw_sheet.UsedRange.Rows.Count+4
+    quoted="'"+raw_sheet.Name.replace("'","''")+"'!"
+    refs=[[f'{quoted}${get_column_letter(2+ai)}${raw_first+pi}' for ai in range(len(trend['series']))] for pi in range(len(trend['periods']))]
+    result['_trendRawCells']={series['id']:[refs[pi][ai] for pi in range(len(refs))] for ai,series in enumerate(trend['series'])}
+    formulas = [];legacy_bases=[]
     for index, period in enumerate(trend['periods']):
         row = header + 1 + index
         base = f'IFERROR(N(GETPIVOTDATA("Dated responses",{base_ref},{period_field},{excel_literal(period)})),0)'
+        legacy_bases.append(base)
         values = [excel_literal(period), '=' + base]
-        for series in trend['series']:
+        for ai,series in enumerate(trend['series']):
             caption = series['label']
             if sum(other['label'] == caption for other in result['rows']) > 1: caption += f' [{series["id"]}]'
             if binary:
                 option = next(option for option in result['_source']['options'] if option['id'] == series['id'])
                 count = f'IFERROR(N(GETPIVOTDATA({excel_literal(option.get("metric", option["caption"]))},{count_ref},{period_field},{excel_literal(period)})),0)'
             else: count = f'IFERROR(N(GETPIVOTDATA("Trend count",{count_ref},{period_field},{excel_literal(period)},{answer_field},{excel_literal(caption)})),0)'
-            values.extend(['=' + count, f'=IF({base}=0,NA(),{count}/{base})'])
+            excel_cell(raw_sheet,raw_first+index,ai+2).Formula='='+count
+            mode=result.get('percentageMode','legacy-respondents')
+            denominator=base
+            if mode!='legacy-respondents':
+                matrix=refs if mode=='grand-total' else [refs[index]] if mode in {'column-total','breakdown-group'} else [[row[ai]] for row in refs]
+                denominator='SUM('+matrix_range(matrix)+')'
+            values.extend(['=' + refs[index][ai], f'=IF({denominator}=0,"-",{count}/{denominator})'])
         formulas.append(tuple('='+value if column == 0 else value for column, value in enumerate(values)))
     if formulas:
         excel_range(report, header + 1, 1, header + len(formulas), len(headers)).Formula = tuple(formulas)
@@ -73,13 +86,7 @@ def trend_chart(book, report, cache, result, position, footer, left, top, metric
     chart = chart_object.Chart; chart.ChartType = 4
     chart.HasTitle = True; chart.ChartTitle.Text = result['label'][:255]
     chart.HasLegend = result.get('appearance', {}).get('legend') != 'hidden'
-    for index, series in enumerate(trend['series']):
-        for metric in metrics:
-            native = chart.SeriesCollection().NewSeries()
-            native.Name = safe_spreadsheet_value(series['label'] + (' %' if metric == 'percent' else ' #'))
-            native.XValues = excel_range(report, header + 1, 1, header + len(formulas), 1)
-            column = 3 + index*2 + (metric == 'percent')
-            native.Values = excel_range(report, header + 1, column, header + len(formulas), column)
+    write_trend_series(book,chart,result,refs,metrics,support_sheet,legacy_bases)
     if metrics == ['percent']: chart.Axes(2).TickLabels.NumberFormat = percent_format(result.get('percentageDecimals', 0))
     for axis in (1, 2):
         chart.Axes(axis).HasMajorGridlines = False; chart.Axes(axis).HasMinorGridlines = False
@@ -90,7 +97,8 @@ def trend_chart(book, report, cache, result, position, footer, left, top, metric
 def native_heatmap(report, result, area, footer):
     """A formula matrix of pivot values keeps color rules stable on Refresh All."""
     columns = result.get('_excelBreakdowns', result['breakdowns'])
-    answers = [answer for answer in result['rows'] if answer['id'] != '__blank__']
+    answers = (result.get('chartProjection') or result)['rows']
+    answers = [answer for answer in answers if answer['id'] != '__blank__']
     first = area.Column + area.Columns.Count + 2
     top = area.Row
     metric = result.get('appearance', {}).get('metric', 'count')
@@ -105,7 +113,8 @@ def native_heatmap(report, result, area, footer):
     for answer in answers:
         values = ['=' + excel_literal(answer['label'])]
         for column in columns:
-            cell = result['_displayCells'][(answer['id'], column['id'])][metric]
+            from .kobo_excel_chart_projection import projected_cell
+            cell = projected_cell(result,answer['id'],column['id'],metric)
             values.append('=' + cell)
         formulas.append(tuple(values))
     ranges = []

@@ -1,1 +1,1 @@
-Added filter headers to the table.
+adding password protection to export project, improvement to Kobo and Custom Analysis

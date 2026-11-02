@@ -42,10 +42,11 @@ def verify(language):
                 assert normalized(row['label']) in text, row['label']
     # Reassemble row fragments across continuation pages using original marked text.
     long_answer = fixture['results'][3]['rows'][2]['label']
-    fragments = [value for page in pages for value in page if normalized(value) in normalized(long_answer)]
+    fragments = [value for page in pages for value in page if normalized(value) in normalized(long_answer) and (len(value)>30 or 'END_OF_LONG_RESPONSE' in value)]
     assert ''.join(''.join(fragments).split()) == ''.join(long_answer.split()), 'Oversized answer was changed or truncated'
     total_label = 'الإجمالي' if language == 'ar' else 'Total'
-    assert sum(page.count(total_label) for page in pages) == 8
+    expected_totals = sum((max(1, math.ceil(len(result['breakdowns'])/5)) * (int(len(result['rows']) > 1) + int(len(result['breakdowns']) > 1))) for result in fixture['results'] if result['rows'])
+    assert sum(page.count(total_label) for page in pages) == expected_totals
     image_count = 0
     with pdfplumber.open(source) as pdf:
         for index, page in enumerate(pdf.pages):
@@ -89,5 +90,5 @@ for language in ['en', 'ar']:
     verify(language)
 single = PdfReader(ROOT / 'tmp/pdfs/single-question.pdf')
 single_text = ' '.join(value for page in single.pages for value in actual_text(single, page))
-assert len(single.pages) == 2 and 'Sex of the respondent' in single_text and 'Age of the respondent' not in single_text
-print('PASS single-question PDF: clean overview and one question, with other questions excluded.')
+assert len(single.pages) == 1 and 'Sex of the respondent' in single_text and 'Age of the respondent' not in single_text
+print('PASS single-question PDF: one question without an introduction, with other questions excluded.')

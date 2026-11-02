@@ -1,3 +1,4 @@
+from backend.test_update_helpers import skip_comparison
 from copy import deepcopy
 
 import pytest
@@ -171,6 +172,7 @@ def test_reupload_changed_options_review_and_atomic_apply(client_store):
     body={'token':preview['token'],'name':'Version 1','mappings':mappings,'reviewConfig':preview['reviewConfig']}
     assert not client.post(f"/api/kobo/imports/{preview['token']}/check",json=body).json()['issues']
     assert store.get(pid)==before
+    body['matching']=skip_comparison(client,'kobo',preview['token'],body)
     response=client.post('/api/kobo/imports/confirm',json=body)
     assert response.status_code==200,response.text
     assert store.get(pid)['records'][0]['values']['gender']=='female'

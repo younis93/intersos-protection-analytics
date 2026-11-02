@@ -12,6 +12,7 @@ vi.mock("react", async (importOriginal) => {
     useState: (initial: unknown) => [initial === null ? {
       total: 1, rows: [{ recordId: "S1", row: 2, caseId: "B1", assessmentId: "A1", serviceId: "S1",
         name: "Child Example", dateOfBirth: "22/10/2008", beneficiaryAge: 17,
+        serviceDate: "01/02/2026", requestedServiceTypes: "Legal Representation",
         serviceTypeProvided: "Legal Counselling", lawyer: "Lawyer A", project: "P1", location: "Erbil" }],
     } : initial, vi.fn()],
   };
@@ -27,12 +28,15 @@ describe("Under-18 counselling review", () => {
       onIgnoreCourtVerdictChange={() => {}} filters={{}} fieldFilters={{}} comparisonMonth=""
       onOpenCase={() => {}} findingRevision={0} onFindingContextMenu={() => {}} onBulkExclude={() => {}}
     />);
-    for (const header of ["Date of birth", "Current age", "Type of Service Provided", "Beneficiary ID", "Assessment ID", "Service ID", "Name", "Lawyer", "Project", "Project location"]) {
+    for (const header of ["Date of birth", "Current age", "Date of service", "Type of Service Provided", "Assessment service needed", "Beneficiary ID", "Assessment ID", "Service ID", "Name", "Lawyer", "Project", "Project location"]) {
       expect(markup).toContain(`class="column-header-label">${header}</div>`);
     }
     expect(markup.indexOf('>Date of birth</div>')).toBeLessThan(markup.indexOf('>Beneficiary ID</div>'));
     expect(markup.indexOf('>Current age</div>')).toBeLessThan(markup.indexOf('>Beneficiary ID</div>'));
-    for (const value of ["22/10/2008", "17", "Legal Counselling", "B1", "A1", "S1", "P1", "Erbil"]) {
+    const headers = [...markup.matchAll(/class="column-header-label">([^<]*)<\/div>/g)].map(match => match[1]);
+    expect(headers.slice(headers.indexOf("Current age"), headers.indexOf("Current age") + 4))
+      .toEqual(["Current age", "Date of service", "Type of Service Provided", "Assessment service needed"]);
+    for (const value of ["01/02/2026", "Legal Representation", "22/10/2008", "17", "Legal Counselling", "B1", "A1", "S1", "P1", "Erbil"]) {
       expect(markup).toContain(`>${value}</td>`);
     }
     expect(markup).toContain("<strong>Lawyer A</strong>");

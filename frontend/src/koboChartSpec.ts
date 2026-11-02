@@ -1,3 +1,6 @@
+import {projectKoboChart} from './koboChartDensity';
+import {measured} from './koboMeasures';
+import {measureChartSpec} from './koboMeasureChartSpec';
 import {advancedChartSpec} from './koboAdvancedChartSpec';
 import {displayPercent,formatPercent,percentageDecimals} from './koboPercentages';
 import {resultWithColors,markColor} from './koboMarkColors';
@@ -12,6 +15,8 @@ import {chartLabel,resolveAppearance} from './koboAppearance';
 import {koboChartRows,koboScreenChartRows,isDenseKoboChart,readableKoboChartType,type KoboChartPanel} from './koboChartDensity';
 
 export function chartSpec(result:KoboChartPanel,language:string,exporting=false,themeOverride?:Theme,containerWidth=900,colorSettings?:KoboQuestionSettings):{data:Data[];layout:Partial<Layout>}{
+ result=projectKoboChart(result);
+ if(measured(result))return measureChartSpec(result,language,exporting);
  const appearance=resolveAppearance(result.appearance),shown=exporting?koboChartRows(result):koboScreenChartRows(result);
  const dense=!exporting&&isDenseKoboChart(result);
  const type=dense?'bar':readableKoboChartType(result,exporting,containerWidth);
@@ -25,7 +30,7 @@ export function chartSpec(result:KoboChartPanel,language:string,exporting=false,
  const legendPosition=appearance.legend,legendRight=legendPosition==='right',legendLeft=legendPosition==='left',legendTop=legendPosition==='top';
  const showlegend=legendPosition==='hidden'?false:legendPosition==='auto'?result.breakdowns.length>0||pie:true;
  const axis={fixedrange:true,automargin:true,gridcolor:grid,rangemode:'tozero' as const,...(appearance.grid!=='auto'?{showgrid:appearance.grid==='show'}:{})};
- const metricAxis=percentage?{ticksuffix:'%',tickformat:`.${percentageDecimals(result)}f`,title:{text:'%'}}:{};
+ const metricAxis={...(percentage?{ticksuffix:'%',tickformat:`.${percentageDecimals(result)}f`,title:{text:'%'}}:{}),...(appearance.valueAxis==='hide'?{showticklabels:false,ticks:'' as const,showline:false,zeroline:false,title:{text:''}}:{})};
  const font=appearance.fontSize?Math.max(dense?12:0,appearance.fontSize)*scale:exporting?28:12,width=exporting?1300:Math.max(240,containerWidth);
  const labelFont=(appearance.fontSize||14)*scale;
  const seriesCount=Math.max(1,result.breakdowns.length),stacked=appearance.bars==='stack'&&result.breakdowns.length>0;

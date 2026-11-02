@@ -1,0 +1,65 @@
+.kobo-dialog.kobo-question-filter-dialog{width:min(700px,calc(100vw - 24px));max-height:calc(100dvh - 32px);padding:0;overflow:hidden}
+.kobo-question-filter-dialog[open]{display:flex;flex-direction:column}
+.kobo-dialog.kobo-question-filter-dialog>header{display:flex;align-items:flex-start;gap:12px;flex:none;padding:18px 20px;margin:0;border-bottom:1px solid var(--line)}
+.kobo-question-filter-icon{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;background:color-mix(in srgb,var(--blue) 9%,var(--panel));color:var(--blue);flex:none}
+.kobo-question-filter-icon svg{width:18px;height:18px}
+.kobo-question-filter-dialog>header>div{flex:1;min-width:0}
+.kobo-question-filter-dialog>header h2{font-size:18px;line-height:1.4;margin:0}
+.kobo-question-filter-dialog>header p{font-size:12px;color:var(--muted);line-height:1.6;overflow-wrap:anywhere;margin:5px 0 0}
+.kobo-question-filter-dialog>header>button{width:32px;height:32px;min-height:32px;padding:7px;flex:none}
+.kobo-question-filter-body{min-height:0;overflow:auto;padding:16px 20px;overscroll-behavior:contain;scroll-padding-block:12px}
+.kobo-question-filter-search{display:flex;align-items:center;gap:8px;min-height:42px;padding:0 11px;border:1px solid var(--line);border-radius:9px;background:var(--panel-strong)}
+.kobo-question-filter-search>svg{width:17px;height:17px;color:var(--muted);flex:none}
+.kobo-question-filter-search:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 12%,transparent)}
+.kobo-dialog .kobo-question-filter-search>input{width:100%;min-width:0;margin:0;padding:10px 0;font:inherit;font-size:12px;border:0!important;outline:none!important;box-shadow:none!important;background:transparent;border-radius:0;color:var(--ink)}
+.kobo-question-filter-search>button{display:grid;place-items:center;width:26px;height:26px;border:0;background:transparent;color:var(--muted);padding:5px}
+.kobo-question-filter-search>button svg{width:14px;height:14px}
+.kobo-question-filter-toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:14px 0}
+.kobo-question-filter-toolbar>div{display:flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:9px;background:var(--panel)}
+.kobo-question-filter-toolbar>div>button{display:flex;align-items:center;justify-content:center;gap:7px;min-height:32px;padding:6px 11px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted);font-size:12px}
+.kobo-question-filter-toolbar>div>button[aria-pressed=true]{background:color-mix(in srgb,var(--blue) 8%,var(--panel-strong));color:var(--blue);border-color:color-mix(in srgb,var(--blue) 22%,var(--line));font-weight:600}
+.kobo-question-filter-toolbar>div>button>span{font-size:10px;background:var(--panel-strong);border-radius:5px;padding:2px 5px}
+.kobo-question-filter-toolbar>.soft{font-size:11px;min-height:32px;padding:7px 9px;box-shadow:none}
+.kobo-question-filter-fields{max-height:480px;overflow:auto;display:grid;gap:8px;scroll-padding-block:8px}
+.kobo-question-filter-field{min-width:0;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.kobo-question-filter-field.is-selected{border-color:color-mix(in srgb,var(--blue) 28%,var(--line))}
+.kobo-question-filter-field>label{display:flex;gap:10px;align-items:center;padding:12px;cursor:pointer;min-height:64px;box-sizing:border-box}
+.kobo-question-filter-field>label>input{accent-color:var(--blue);width:16px;height:16px;margin:0;flex:none}
+.kobo-question-filter-field>label>span:first-of-type{min-width:0;flex:1;display:grid;gap:4px}
+.kobo-question-filter-field strong{font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.kobo-question-filter-field small{font-size:10px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.kobo-question-filter-selected{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--muted);flex:none}
+.is-selected .kobo-question-filter-selected{color:var(--blue)}
+.kobo-question-filter-selected svg{width:13px;height:13px}
+.kobo-question-filter-controls{border-top:1px solid var(--line);padding:12px;min-width:0;background:color-mix(in srgb,var(--blue) 2%,var(--panel))}
+.kobo-question-filter-controls .kobo-range{margin:0}
+.kobo-question-filter-controls .kobo-range>legend{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.kobo-question-filter-controls .multi-select{min-width:0}
+.kobo-question-filter-controls input{min-width:0;box-sizing:border-box}
+.kobo-question-filter-unavailable{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;font-size:12px;overflow-wrap:anywhere}
+.kobo-question-filter-empty{padding:24px 12px;text-align:center;color:var(--muted);font-size:12px;line-height:1.7}
+.kobo-dialog.kobo-question-filter-dialog>.kobo-dialog-actions{flex:none;margin:0;padding:12px 20px;gap:12px}
+.kobo-question-filter-dialog>.kobo-dialog-actions>span{font-size:11px;color:var(--muted)}
+.kobo-shell .kobo-question-filter-action.has-question-filters{border:1px solid color-mix(in srgb,var(--blue) 28%,transparent);background:color-mix(in srgb,var(--blue) 7%,var(--panel));color:var(--blue)}
+.kobo-question-filter-action>small{display:grid;place-items:center;min-width:18px;height:18px;padding:0 4px;border-radius:6px;background:color-mix(in srgb,var(--blue) 12%,transparent);font-size:10px;font-weight:700}
+.update-sources>span>small{display:block;line-height:1.6;margin-top:5px;overflow-wrap:anywhere}
+@media(max-width:560px){.kobo-dialog.kobo-question-filter-dialog{width:calc(100vw - 16px);max-height:calc(100dvh - 16px)}.kobo-dialog.kobo-question-filter-dialog>header{padding:14px 16px}.kobo-question-filter-body{padding:14px 16px}.kobo-dialog.kobo-question-filter-dialog>.kobo-dialog-actions{padding:12px 16px;flex-direction:row;flex-wrap:wrap}.kobo-question-filter-dialog>.kobo-dialog-actions>.kobo-dialog-action-buttons{width:auto;flex-direction:row;margin-inline-start:auto}.kobo-question-filter-dialog>.kobo-dialog-actions>.kobo-dialog-action-buttons>button{width:auto;flex:initial}.kobo-question-filter-chip>button:first-child>span{max-width:220px}.kobo-question-filter-field>label{gap:8px}.kobo-question-filter-toolbar>div>button{padding:6px 9px}}
+
+.kobo-question-filters-bar{margin:0 0 16px;padding:0 0 16px;border-bottom:1px solid var(--line);min-width:0}
+.kobo-question-filters-bar>header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 10px}
+.kobo-question-filters-bar>header>span{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--muted)}
+.kobo-question-filters-bar>header svg{width:15px;height:15px}
+.kobo-question-filters-bar>header>button{font-size:11px;min-height:30px;padding:6px 9px;box-shadow:none}
+.kobo-question-filter-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(280px,100%),1fr));gap:12px;min-width:0}
+.kobo-question-filter-control{min-width:0;display:flex;flex-direction:column;gap:7px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:color-mix(in srgb,var(--blue) 3%,var(--panel))}
+.kobo-question-filter-control-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;min-width:0}
+.kobo-question-filter-control-heading strong{font-size:11px;font-weight:600;line-height:1.6;overflow-wrap:anywhere;min-width:0}
+.kobo-shell .kobo-question-filter-control-heading>button{display:grid;place-items:center;width:24px;height:24px;min-height:24px;flex:none;padding:5px;border:0;border-radius:6px;background:transparent;color:var(--muted);box-shadow:none}
+.kobo-question-filter-control-heading button:hover{color:var(--blue);background:var(--panel-strong)}
+.kobo-question-filter-control-heading svg{width:13px;height:13px}
+.kobo-question-filter-control .app-select{width:100%;min-width:0;margin:0}
+.kobo-question-filter-control .kobo-range{margin:0;min-width:0}
+.kobo-question-filter-control .kobo-range>legend{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.kobo-question-filter-control input{min-width:0;box-sizing:border-box}
+.kobo-question-filter-control .kobo-range label{min-width:0}
+@media(max-width:560px){.kobo-question-filter-grid{grid-template-columns:minmax(0,1fr)}.kobo-question-filters-bar{margin-bottom:14px;padding-bottom:14px}}

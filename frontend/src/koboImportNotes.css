@@ -5,6 +5,12 @@
 .kobo-import-notes-list>li{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
 .kobo-import-note-dot{width:6px;height:6px;flex-shrink:0;border-radius:50%;background:#bc8429;margin-top:6px}
 .kobo-import-notes-list>li>div{min-width:0;overflow-wrap:anywhere}
+.kobo-note-review{min-height:0;display:flex;flex-direction:column;gap:12px}
+.kobo-note-review>.kobo-import-notes-actions{flex-wrap:wrap;margin-bottom:0}
+.kobo-note-review>.kobo-import-notes-actions>label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.kobo-note-review .kobo-note-mark{margin-top:8px;font-size:12px;min-height:32px}
+.kobo-mapping-review>.kobo-note-review{margin:16px 0;padding:16px;border:1px solid var(--line);border-radius:12px}
+.kobo-mapping-review>.kobo-note-review .kobo-import-notes-list{max-height:320px}
 .kobo-import-notes-list strong{font-size:12px;line-height:1.5;font-weight:650;color:var(--ink)}
 .kobo-import-notes-list p{font-size:12px;line-height:1.7;color:var(--muted);margin:4px 0 0}
 .kobo-import-note-rows{display:inline-block;margin-top:8px;font-size:10px;font-weight:600;color:var(--muted)}
@@ -30,3 +36,20 @@
 .kobo-import-notes-dialog>header>button svg{width:17px;height:17px}
 .kobo-import-notes-dialog .kobo-import-notes-body{padding:0;display:flex;flex-direction:column;min-height:0}
 @media(max-width:600px){.kobo-import-notes-dialog{padding:18px}.kobo-import-notes-heading h2{font-size:18px}}
+
+.kobo-note-review>.kobo-import-notes-actions>strong{display:flex;align-items:center;gap:8px;font-size:13px}
+.kobo-note-count{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 5px;border-radius:6px;background:color-mix(in srgb,#ad710d 10%,var(--panel));color:#ad710d;font-size:11px}
+.kobo-note-review-controls{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:10px 14px}
+.kobo-note-review-controls label{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:11px}
+.kobo-note-review-controls button{min-height:32px;font-size:11px;box-shadow:none}
+.kobo-import-notes-list .kobo-note-content{flex:1;min-width:0}
+.kobo-note-heading{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px}
+.kobo-note-heading .kobo-import-note-rows{margin:0;padding:2px 6px;border:1px solid var(--line);border-radius:5px}
+.kobo-import-notes-list .kobo-note-action{flex:none;align-self:flex-start}
+.kobo-import-notes-list .kobo-note-mark{margin:0;white-space:nowrap}
+.kobo-note-technical{font-size:10px;margin-top:9px;color:var(--muted)}
+.kobo-note-technical summary{cursor:pointer;font-weight:600}
+.kobo-note-technical p{overflow-wrap:anywhere}
+.kobo-note-reviewed{display:inline-block;padding:4px 7px;border-radius:6px;background:color-mix(in srgb,#23846d 8%,var(--panel));color:#23846d;font-size:10px}
+.kobo-import-notes-list>li.is-reviewed .kobo-import-note-dot{background:#23846d}
+@media(max-width:600px){.kobo-import-notes-list>li{flex-wrap:wrap;gap:8px}.kobo-import-notes-list .kobo-note-content{flex-basis:calc(100% - 20px)}.kobo-import-notes-list .kobo-note-action{margin-inline-start:14px}.kobo-note-review-controls{justify-content:flex-start}.kobo-note-review>.kobo-import-notes-actions{align-items:flex-start}}

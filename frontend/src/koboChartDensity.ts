@@ -1,11 +1,14 @@
 import type {KoboResult} from './koboTypes';
 import {chartLabel,resolveAppearance} from './koboAppearance';
 
+export const projectKoboChart=(result:KoboResult):KoboResult=>result.chartProjection?{...result,...result.chartProjection,chartProjection:null}:result;
+
 export type KoboChartPanel=KoboResult&{chartMaximum?:number};
 
 export function koboChartRows(result:KoboResult){
+ result=projectKoboChart(result);
  const rows=result.rows.filter(row=>row.id!=='__blank__');
- return result.kind==='text'?[...rows].sort((a,b)=>b.count-a.count).slice(0,20):rows;
+ return result.kind==='text'&&!result.chartTopN?rows.slice(0,20):rows;
 }
 /** Change crowded categorical comparisons to bars before dropping any value labels. */
 export function readableKoboChartType(result:KoboResult,exporting=false,containerWidth=900):KoboResult['chart']{
@@ -30,12 +33,14 @@ export function isDenseKoboChart(result:KoboResult){
  return result.breakdowns.length>0&&readableKoboChartType(result)==='bar'&&count*band+110>720;
 }
 export function koboScreenChartRows(result:KoboResult){
+ result=projectKoboChart(result);
  if(!isDenseKoboChart(result))return koboChartRows(result);
- return result.rows.filter(row=>row.id!=='__blank__').slice().sort((a,b)=>b.count-a.count||(a.id<b.id?-1:a.id>b.id?1:0));
+ return result.rows.filter(row=>row.id!=='__blank__');
 }
 
 /** Bound a single live plot as well as the number of cached plots. Exports use the full result. */
 export function koboScreenChartPage(result:KoboResult,rows:KoboResult['rows'],requestedPage=0){
+ result=projectKoboChart(result);
  const pageSize=Math.max(1,Math.min(100,Math.floor(1000/Math.max(1,result.breakdowns.length))));
  const paged=!result.trend&&rows.length>pageSize;
  const pages=paged?Math.ceil(rows.length/pageSize):1;
@@ -46,6 +51,7 @@ export function koboScreenChartPage(result:KoboResult,rows:KoboResult['rows'],re
 
 /** Bound printed panels so labels stay legible after proportional page placement. */
 export function koboPdfChartPanels(result:KoboResult){
+ result=projectKoboChart(result);
  if(result.chart==='line'&&result.trend)return [result as KoboChartPanel];
  const rows=koboChartRows(result),chart=readableKoboChartType(result,true);
  const limit=chart==='heatmap'?8:chart==='bar'?Math.max(1,Math.min(8,Math.floor(20/Math.max(1,result.breakdowns.length)))):Math.max(1,rows.length);

@@ -29,9 +29,9 @@ describe('crowded chart presentation',()=>{
 
 
 describe('dense screen views',()=>{
- it.each([15,45,200,1000])('keeps all %s categories, ranks counts, and never mutates pivot/export order',count=>{
+ it.each([15,45,200,1000])('keeps all %s categories in the shared answer order without mutating it',count=>{
   const source=fixture(count,0),before=source.rows.map(row=>row.id),screen=koboScreenChartRows(source);
-  expect(isDenseKoboChart(source)).toBe(true);expect(screen).toHaveLength(count);expect(screen[0].id).toBe(`r${count-1}`);
+  expect(isDenseKoboChart(source)).toBe(true);expect(screen).toHaveLength(count);expect(screen.map(row=>row.id)).toEqual(before);
   expect(source.rows.map(row=>row.id)).toEqual(before);expect(koboChartRows(source).map(row=>row.id)).toEqual(before);
   expect(koboPdfChartPanels(source).flatMap(panel=>panel.rows).map(row=>row.id)).toEqual(before);
   const spec=chartSpec(source,'en');expect(spec.data[0]).toMatchObject({orientation:'h'});expect(spec.layout.height).toBeGreaterThanOrEqual(count*40);
@@ -49,5 +49,22 @@ describe('dense screen views',()=>{
  it('respects hidden values, grows grouped rows and never changes count/percentage/color data',()=>{
   const source=fixture(10,4),before=JSON.stringify(source);expect(isDenseKoboChart(source)).toBe(true);
   const spec=chartSpec({...source,appearance:{labels:'hidden',height:320}},'ar');expect(spec.data[0]).toMatchObject({text:undefined});expect(spec.layout.height).toBeGreaterThan(720);expect(JSON.stringify(source)).toBe(before);
+ });
+});
+
+
+describe('shared chart ordering',()=>{
+ it.each([3,24])('shows largest counts at the top of horizontal charts with %s answers',count=>{
+  const source=fixture(count,0);source.chart='bar';source.rows.reverse();
+  for(const exporting of [false,true]){
+   const spec=chartSpec(source,'en',exporting);
+   expect((spec.data[0] as any).x).toEqual(source.rows.map(row=>row.count));
+   expect(spec.layout.yaxis?.autorange).toBe('reversed');
+  }
+ });
+ it('preserves a saved ascending order for text charts as well as dense charts',()=>{
+  const source={...fixture(30,0),kind:'text' as const};
+  expect(koboChartRows(source)).toEqual(source.rows.slice(0,20));
+  expect(koboScreenChartRows(source)).toEqual(source.rows);
  });
 });

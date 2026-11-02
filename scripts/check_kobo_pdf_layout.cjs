@@ -18,6 +18,8 @@ const {mock}=require('./benchmark_kobo_scroll.cjs');
     if(i===1||i===2){r.breakdowns=Array.from({length:i===1?2:8},(_,j)=>({id:'b'+j,label:ar?`المجموعة ${j+1} - احتياجات الأسر`:`Category ${j+1} - Household needs`,denominator:40}));r.rows.forEach((row,j)=>row.series=r.breakdowns.map((b,k)=>({id:b.id,count:10+j+k,percent:(10+j+k)/40*100})));r.chart='column';f.settings.questions[r.id]={breakdownDisplay:i===1?'count':'both'};}
     if(i===3){r.rows[2].label=(ar?'ملاحظة مطولة حول الوصول إلى الخدمات والحماية ومتابعة الاحتياجات المتعددة للأسرة. ':'A detailed response about access to services, protection concerns and follow-up for household needs. ').repeat(48)+' END_OF_LONG_RESPONSE';r.denominator=34;}
     if(i===4){r.statistics={count:320,mean:4.25,median:4,min:1,max:9,standardDeviation:1.3};r.rows=r.rows.map((row,j)=>({...row,label:String(j+1)}));}
+    if(i===1||i===5)r.rows=r.rows.slice(0,1);
+    if(i===7){r.breakdowns=[{id:'one',label:ar?'مجموعة واحدة':'One category',denominator:320}];r.rows.forEach(row=>row.series=[{id:'one',count:row.count,percent:row.percent}]);}
     if(i===6){r.rows=[];r.denominator=0;}
     f.questions[i].labels={en:titles[i],ar:titles[i]};f.questions[i].group=r.group;f.questions[i].kind=r.kind;
    });

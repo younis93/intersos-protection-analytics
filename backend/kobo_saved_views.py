@@ -19,8 +19,11 @@ def snapshot_issues(project, snapshot):
         if rule.kind == 'category' and q['kind'] in {'category', 'multiple'}:
             codes = {c['name'] for c in q['choices']} | {'__blank__'}
             if not set(rule.values) <= codes: issues.append(f'{q["name"]}: saved filter includes unavailable answer codes.')
+    from .kobo import question_cohort
     for qid, cfg in snapshot.questions.items():
         if qid not in questions: continue
+        try: question_cohort(questions[qid],[],cfg,questions,{})
+        except ValueError as exc: issues.append(f'{questions[qid]["name"]}: {exc}')
         try: breakdown_fields(cfg, questions, questions[qid])
         except ValueError as exc: issues.append(f'{questions[qid]["name"]}: {exc}')
     try: validate_chart_settings(questions, snapshot)

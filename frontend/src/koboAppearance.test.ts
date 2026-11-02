@@ -14,3 +14,41 @@ describe('Kobo reporting appearance',()=>{
  it('merges only selected bulk appearance settings and excludes them from calculation keys',()=>{const settings={questions:{q:{...questionDefaults,appearance:{legend:'left',fontSize:16}}}} as unknown as KoboSettings;const cfg=bulkQuestionSettings({id:'q',kind:'multiple'} as KoboQuestion,settings,{appearance:{metric:'percent'}});expect(cfg.appearance).toEqual({legend:'left',fontSize:16,metric:'percent'});expect(calculationKey(cfg)).toBe(calculationKey({...questionDefaults}));expect(settings.questions.q.appearance?.metric).toBeUndefined()});
  it('handles empty charts, hidden legends, horizontal bars and line labels',()=>{expect(chartSpec({...result,rows:[],appearance:{legend:'hidden'}},'ar').layout.showlegend).toBe(false);expect(chartSpec({...result,chart:'bar',appearance:{metric:'percent'}},'en').data[0]).toMatchObject({x:[50,100],orientation:'h'});expect(chartSpec({...result,chart:'line',appearance:{labels:'count'}},'en').data[0]).toMatchObject({mode:'text+lines+markers',text:['1','2']})});
 });
+
+
+describe('optional chart labels',()=>{
+ for(const chart of ['bar','column','line','pie','donut','heatmap'] as const){
+  for(const exporting of [false,true]){
+   it(`hides ${chart} labels for ${exporting?'export':'preview'} while preserving data and hover details`,()=>{
+    const shown={...result,chart,breakdowns:chart==='pie'||chart==='donut'?[]:result.breakdowns,appearance:{labels:'both' as const}};
+    const before=structuredClone(shown);
+    const visible=chartSpec(shown,'en',exporting);
+    const hidden=chartSpec({...shown,appearance:{labels:'hidden'}},'en',exporting);
+    if(chart==='pie'||chart==='donut')expect(hidden.data[0]).toMatchObject({textinfo:'none'});
+    else if(chart==='heatmap')expect(hidden.data[0]).toMatchObject({texttemplate:''});
+    else if(chart==='line')expect(hidden.data[0]).toMatchObject({mode:'lines+markers',text:undefined});
+    else expect(hidden.data[0]).toMatchObject({text:undefined,textposition:'none'});
+    for(const key of ['x','y','z','values','labels','hovertext','hovertemplate','customdata'] as const){
+     expect(Reflect.get(hidden.data[0],key)).toEqual(Reflect.get(visible.data[0],key));
+    }
+    expect(hidden.layout.xaxis?.ticktext).toEqual(visible.layout.xaxis?.ticktext);
+    expect(hidden.layout.yaxis?.ticktext).toEqual(visible.layout.yaxis?.ticktext);
+    expect(shown).toEqual(before);
+    for(const labels of ['auto','count','percent','both'] as const){
+     const restored=chartSpec({...shown,appearance:{labels}},'en',exporting).data[0];
+     if(chart==='pie'||chart==='donut')expect(restored).toMatchObject({textinfo:'text'});
+     else if(chart==='heatmap')expect(restored).toMatchObject({texttemplate:'%{text}'});
+     else expect(Reflect.get(restored,'text')).toEqual(expect.arrayContaining([expect.stringMatching(/\d/)]));
+    }
+   });
+  }
+ }
+ it('applies hidden labels in bulk without changing other appearance settings',()=>{
+  const settings={questions:{q:{...questionDefaults,appearance:{metric:'percent',legend:'left'}}}} as unknown as KoboSettings;
+  const cfg=bulkQuestionSettings({id:'q',kind:'multiple'} as KoboQuestion,settings,{appearance:{labels:'hidden'}});
+  expect(cfg.appearance).toEqual({metric:'percent',legend:'left',labels:'hidden'});
+  expect(settings.questions.q.appearance?.labels).toBeUndefined();
+ });
+});
+
+describe('value axis visibility',()=>{for(const chart of ['bar','column'] as const)it('hides only the value scale for '+chart,()=>{const spec=chartSpec({...result,chart,appearance:{valueAxis:'hide'}},'en');expect(spec.layout[chart==='bar'?'xaxis':'yaxis']?.showticklabels).toBe(false);expect(spec.layout[chart==='bar'?'yaxis':'xaxis']?.showticklabels).not.toBe(false);expect(spec.data).toEqual(chartSpec({...result,chart},'en').data)});});

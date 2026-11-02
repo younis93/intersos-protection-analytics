@@ -33,6 +33,9 @@ export function reviewColumnIndices(dataset: string, rule: string, labels: strin
     : dataset === "assessments" ? ["Case ID", "Assessment ID"]
     : dataset === "beneficiaries" ? ["Case ID"] : [];
   const issueLabels = checkedFields.flatMap((field) => fieldLabels[field] || [field]);
+  if (rule === "Beneficiary below 18 with legal counselling") {
+    issueLabels.splice(0, issueLabels.length, "Date of birth", "Current age", "Date of service", "Type of Service Provided", "Assessment service needed");
+  }
   if (rule === "Type of document in Assessments vs Services") issueLabels.push("Finding");
   const order: number[] = [];
   const usedLabels = new Set<string>();

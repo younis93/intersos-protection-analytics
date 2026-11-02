@@ -1,5 +1,5 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
-import {invalidateLegalQueries, legalFetch, setLegalRevision} from "./legalQueryCache";
+import {invalidateLegalQueries, legalFetch, setLegalRevision, subscribeLegalQueryInvalidation} from "./legalQueryCache";
 
 const url = "/api/legal/explorer";
 const query = (body = {dataset: "beneficiaries", page: 1}) => ({method: "POST", body: JSON.stringify(body)});
@@ -69,6 +69,53 @@ describe("legal query cache", () => {
     resolve(json({rows: [2]}));
     expect(await (await second).json()).toEqual({rows: [2]});
     expect(network).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["/api/legal/duplicate-exclusions", "POST"],
+    ["/api/legal/duplicate-exclusions/bulk", "POST"],
+    ["/api/legal/duplicate-exclusions/import", "POST"],
+    ["/api/legal/duplicate-exclusions/B1?rule=Invalid%20age", "DELETE"],
+  ])("uses exclusion invalidation for successful %s %s only", async (path, method) => {
+    const network=vi.fn(async()=>json({rows:[]}));vi.stubGlobal("fetch",network);
+    const listener=vi.fn(),unsubscribe=subscribeLegalQueryInvalidation(listener);
+    try {
+      await legalFetch(url,query());
+      network.mockResolvedValueOnce(json({detail:"Failed"},500));
+      await legalFetch(path,{method});
+      expect(listener).not.toHaveBeenCalled();
+      await legalFetch(url,query());expect(network).toHaveBeenCalledTimes(2);
+      await legalFetch(path,{method});
+      expect(listener).toHaveBeenCalledExactlyOnceWith("exclusion");
+      await legalFetch(url,query());expect(network).toHaveBeenCalledTimes(4);
+    } finally {unsubscribe()}
+  });
+
+  it("lets existing readers finish after exclusions without sharing or caching their stale results", async () => {
+    let resolve!:(response:Response)=>void;
+    let signal!:AbortSignal;
+    const network=vi.fn(async(_url:string,init:RequestInit)=>json({rows:["fresh"]}));
+    network.mockImplementationOnce((_url,init)=>{signal=init.signal as AbortSignal;return new Promise<Response>(done=>{resolve=done})});
+    vi.stubGlobal("fetch",network);
+    const existing=legalFetch(url,query());
+    await legalFetch("/api/legal/duplicate-exclusions",{method:"POST"});
+    expect(signal.aborted).toBe(false);
+    expect(await (await legalFetch(url,query())).json()).toEqual({rows:["fresh"]});
+    resolve(json({rows:["old"]}));
+    expect(await (await existing).json()).toEqual({rows:["old"]});
+    expect(await (await legalFetch(url,query())).json()).toEqual({rows:["fresh"]});
+    expect(network).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(["manual","revision"] as const)("rejects detached exclusion readers after %s invalidation",async reason=>{
+    let resolve!:(response:Response)=>void;
+    vi.stubGlobal("fetch",vi.fn(()=>new Promise<Response>(done=>{resolve=done})));
+    const existing=legalFetch(url,query());
+    const rejected=expect(existing).rejects.toMatchObject({name:"AbortError"});
+    invalidateLegalQueries("exclusion");
+    invalidateLegalQueries(reason);
+    resolve(json({rows:["old source"]}));
+    await rejected;
   });
 
   it("cancels abandoned requests and rejects late results after replacement", async () => {

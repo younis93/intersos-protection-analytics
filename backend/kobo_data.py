@@ -1,5 +1,5 @@
 """Read-only, paged Kobo response grids. Repeat scopes remain separate tables."""
-from .kobo import KoboFilter, filtered_records, label, missing, question_result, question_categories, QuestionSettings, breakdown_fields, breakdown_values
+from .kobo import KoboFilter, filtered_records, label, missing, question_result, question_categories, QuestionSettings, question_cohort, breakdown_fields, breakdown_values
 
 
 def pivot_records(project, settings, scope, records, selection):
@@ -10,6 +10,7 @@ def pivot_records(project, settings, scope, records, selection):
     if question['repeat'] != scope:
         raise ValueError('The selected question belongs to a different response table.')
     lookup = {record['id']: record for record in project['records']}
+    records = question_cohort(question, records, settings.questions.get(question['id'], QuestionSettings()), questions, lookup)
     snapshot = question_result(question, records, settings, questions, lookup)
     answer, breakdown = selection.get('answer'), selection.get('breakdown')
     if answer is not None and not any(row['id'] == answer for row in snapshot['rows']):
@@ -29,11 +30,23 @@ def pivot_records(project, settings, scope, records, selection):
         matches = missing(value) if answer == '__blank__' else not missing(value) and (answer is None or answer in categories(value))
         if matches and (column is None or list(breakdown_values(record, dimensions, lookup)) == column['values']):
             selected.append(record)
+    if snapshot.get('measure'):
+        from .kobo_measures import value_field, record_value
+        field = value_field(question, cfg, questions)
+        selected = [r for r in selected if not missing(record_value(r, field, lookup))]
     return selected
 
 
 def data_rows(project, settings, scope, columns, search='', sort_column='', direction='asc', drilldown=None, column_filters=None):
     questions = {q['id']: q for q in project['form']['questions'] if q['repeat'] == scope}
+    measure_field = None
+    if drilldown:
+        from .kobo_measures import value_field,record_value
+        all_questions={q['id']:q for q in project['form']['questions']}
+        target=all_questions.get(drilldown.get('question'))
+        if target:
+            measure_field=value_field(target,settings.questions.get(target['id'],QuestionSettings()),all_questions)
+            if measure_field:questions[measure_field['id']]=measure_field
     if scope and not questions:
         raise ValueError('Response table not found.')
     if any(column not in questions for column in columns):
@@ -58,13 +71,16 @@ def data_rows(project, settings, scope, columns, search='', sort_column='', dire
             records = [record for record in records if record['id'] in selected_ids]
         else:
             records = pivot_records(project, settings, scope, records, drilldown)
+    if measure_field:
+        lookup={r['id']:r for r in project['records']}
+        records=[{**r,'values':{**r['values'],measure_field['id']:record_value(r,measure_field,lookup)}} for r in records]
     query = search.strip().casefold()
     rows = []
     for record in records:
         values = {qid: display(qid, record['values'].get(qid)) for qid in columns}
         if query and not any(query in text.casefold() for text in [str(record['row']), *values.values(), *(str(record['values'].get(qid, '')) for qid in columns)]):
             continue
-        rows.append((record, {'id': record['id'], 'row': record['row'], 'values': values}))
+        rows.append((record, {'id': record['id'], 'row': record['row'], 'values': values, 'rawValues': {key:record['values'].get(key) for key in columns}}))
     if sort_column:
         if sort_column == '__row__':
             rows.sort(key=lambda item: item[0]['row'], reverse=direction == 'desc')

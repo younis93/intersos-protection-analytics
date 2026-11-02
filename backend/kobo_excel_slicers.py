@@ -44,8 +44,9 @@ def slicer_specs(project, settings):
             base = caption; suffix = 2
             while caption.casefold() in used: caption = f'{base} ({suffix})'; suffix += 1
             used.add(caption.casefold()); captions[key] = caption
-        rule = next((f for f in settings.filters if f.field == q['id']), None)
-        selected = {captions[key] for key, value in raw.items() if matches(value, rule)} if rule else None
+        rules = [f for f in settings.filters if f.field == q['id']]
+        rule = rules[0] if rules else None
+        selected = {captions[key] for key, value in raw.items() if all(matches(value, f) for f in rules)} if rules else None
         if rule and not selected:
             raise ValueError(f'The filter "{label(q, settings.language)}" has no matching values to select in Excel. Adjust or reset this filter before exporting.')
         caption = label(q, settings.language)
@@ -122,6 +123,8 @@ def totals_pivot(book, cache, result, position):
     sparse = result.get('_source', {}).get('sparse')
     if not direct:
         field = pivot.PivotFields('QuestionId'); field.Orientation = 3; field.CurrentPage = result['id']
+    if direct and 'AnswerAllowed' in result.get('_source', {}).get('fields', {}):
+        field = pivot.PivotFields(field_name(result, 'AnswerAllowed')); field.Orientation = 3; field.CurrentPage = 'Included'
     if sparse:
         field = pivot.PivotFields('IncludeInPivot'); field.Orientation = 3; field.CurrentPage = 'Denominator'
     elif not result.get('_source', {}).get('binary'):

@@ -10,8 +10,9 @@ export async function writeKoboClipboard(text:string,host?:HTMLElement|null,html
  const field=document.createElement('textarea');field.value=text;field.readOnly=true;field.setAttribute('aria-hidden','true');field.style.cssText='position:fixed;opacity:0;pointer-events:none;top:0;left:0';
  const container=host?.closest<HTMLElement>('dialog[open]')||focus?.closest<HTMLElement>('dialog[open]')||document.body;
  container.appendChild(field);
- const formattedCopy=(event:ClipboardEvent)=>{if(html&&event.clipboardData){event.clipboardData.setData('text/plain',text);event.clipboardData.setData('text/html',html);event.preventDefault()}};
- try{field.select();document.addEventListener('copy',formattedCopy,true);if(!document.execCommand('copy')){if(html&&navigator.clipboard?.writeText)await navigator.clipboard.writeText(text);else throw new Error('Unable to copy. Select the text and copy it manually.')}}finally{document.removeEventListener('copy',formattedCopy,true);field.remove();if(focus?.isConnected)focus.focus({preventScroll:true});if(selection){selection.removeAllRanges();for(const range of ranges)selection.addRange(range)}}
+ let formattedWritten=false;
+ const formattedCopy=(event:ClipboardEvent)=>{if(html&&event.clipboardData){event.clipboardData.setData('text/plain',text);event.clipboardData.setData('text/html',html);event.preventDefault();formattedWritten=true}};
+ try{field.select();document.addEventListener('copy',formattedCopy,true);if(!document.execCommand('copy')||html&&!formattedWritten){throw new Error('Unable to copy. Select the text and copy it manually.')}}finally{document.removeEventListener('copy',formattedCopy,true);field.remove();if(focus?.isConnected)focus.focus({preventScroll:true});if(selection){selection.removeAllRanges();for(const range of ranges)selection.addRange(range)}}
 }
 
 export function koboCopyCell(value:string,language='en'){

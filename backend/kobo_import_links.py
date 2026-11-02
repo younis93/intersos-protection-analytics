@@ -87,10 +87,17 @@ def reuse_links(project, form, sheets, old_sheets, proposed):
                 warnings.append(f"Saved link for {m['header']} could not be reused safely.")
         elif previous:
             m.update(question='', option='', status='ambiguous', reason='Duplicate source identities prevent safely reusing the saved link.')
+        if m.get('question'):
+            try: validate_links(form,sheets,[m])
+            except ValueError as exc:
+                source=f"{sheets[m['sheet']]['name']} · column {m['column']+1} · {m['header']}"
+                m.update(question='',option='',answerMap={},mergeMode='',status='unmatched',sourceKind=proposed_link.get('sourceKind',''),sourceRepeat=proposed_link.get('sourceRepeat'),reason=f'Worksheet context changed. Review this source: {source}.')
+                warnings.append(f'Saved link for {source} could not be reused: {exc}')
         m.setdefault('reason', 'Exact question path, name, or label' if m['status'] == 'matched' else 'Review this source column')
         result.append(m)
     for key, links in prior.items():
-        if key not in counts and any(link.get('question') for link in links):
+        if key not in counts and any(link.get('question') and link.get('status') == 'matched'
+                                     and link['question'] not in project.get('reviewConfig', {}).get('excludedQuestionIds', []) for link in links):
             warnings.append(f'Saved source column {key[1]} is absent from the replacement data. Its previous link was not applied.')
     return result, warnings
 

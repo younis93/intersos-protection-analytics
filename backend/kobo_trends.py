@@ -22,6 +22,8 @@ def validate_chart_settings(questions, settings):
         target = questions.get(qid)
         if target is None:
             continue
+        from .kobo_measures import value_field
+        value_field(target, cfg, questions)
         trend_date_field(target, cfg, questions)
         if cfg.chart == 'histogram' and target['kind'] != 'number':
             raise ValueError('Histogram requires a numeric question.')

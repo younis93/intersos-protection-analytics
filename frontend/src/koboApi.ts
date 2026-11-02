@@ -20,6 +20,7 @@ export function createKoboApi(workspace?:AnalysisWorkspace){
  const exportBlob=async(id:string,signal?:AbortSignal)=>{const r=await fetch(`${analysisBase(workspace)}/exports/${id}/download`,{credentials:'include',signal});if(!r.ok)throw new Error('Excel download failed. Please retry.');return r.blob()};
  const request=<T,>(path:string,body?:unknown,method=body===undefined?'GET':'POST',signal?:AbortSignal,transport?:{keepalive:boolean})=>koboRequest<T>(path,body,method,signal,transport,workspace);
  return {
+ reviewNotes:(id:string,reviewedImportNotes:string[])=>request<KoboProject>(`/projects/${id}/import-notes/review`,{reviewedImportNotes}),
  exportSettings:async(id:string,name:string,settings:KoboSettings)=>{const file=await request<unknown>(`/projects/${id}/settings/export`,settings);downloadBlob(new Blob([JSON.stringify(file,null,2)],{type:'application/json'}),`${name.replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')||'Kobo'}.kobo-settings.json`)},
  previewSettings:(id:string,settings:KoboSettings,pack:unknown)=>request<KoboSettingsReview>(`/projects/${id}/settings/import-preview`,{settings,package:pack}),
  rename:(id:string,name:string)=>request<{id:string;name:string;updated:string}>(`/projects/${encodeURIComponent(id)}`,{name},'PATCH'),
@@ -29,8 +30,8 @@ export function createKoboApi(workspace?:AnalysisWorkspace){
   downloadBlob(await response.blob(),'kobo-response-data.xlsx');
  },
  list:()=>request<{id:string;name:string;updated:string}[]>('/projects'),
- review:(id:string,form?:File,data?:File)=>{const body=new FormData();if(form)body.append('form',form);if(data)body.append('data',data);return request<KoboPreview>(`/projects/${id}/review`,body)},
- check:(token:string,mappings:KoboMapping[],policies:Record<string,string>,signal?:AbortSignal,reviewConfig?:KoboReviewConfig)=>request<{questionImpacts?:{name:string;issues:string[]}[];choiceImpacts?:KoboChoiceImpact[];issues:KoboPreview['issues'];examples:KoboPreview['examples'];linkReview:KoboPreview['linkReview']}>(`/imports/${token}/check`,{mappings,policies,reviewConfig},'POST',signal),
+ review:(id:string,form?:File,data?:File,worksheet?:string)=>{const body=new FormData();if(form)body.append('form',form);if(data)body.append('data',data);if(worksheet!==undefined)body.append('worksheet',worksheet);return request<KoboPreview>(`/projects/${id}/review`,body)},
+ check:(token:string,mappings:KoboMapping[],policies:Record<string,string>,signal?:AbortSignal,reviewConfig?:KoboReviewConfig)=>request<{warnings:string[];importNotes:import('./koboTypes').KoboImportNote[];reviewedImportNotes:string[];questionImpacts?:{name:string;issues:string[]}[];choiceImpacts?:KoboChoiceImpact[];issues:KoboPreview['issues'];examples:KoboPreview['examples'];linkReview:KoboPreview['linkReview']}>(`/imports/${token}/check`,{mappings,policies,reviewConfig},'POST',signal),
  get:(id:string)=>request<KoboProject>(`/projects/${id}`),
  remove:(id:string)=>request(`/projects/${id}`,undefined,'DELETE'),
  save:(id:string,settings:KoboSettings)=>request(`/projects/${id}/settings`,settings,'PUT'),
@@ -42,7 +43,7 @@ export function createKoboApi(workspace?:AnalysisWorkspace){
  },
  worksheets:(data:File,signal?:AbortSignal)=>{const body=new FormData();body.append('data',data);return request<{worksheets:string[]}>('/imports/worksheets',body,'POST',signal)},
  preview:(form:File,data:File,worksheet='')=>{const body=new FormData();body.append('form',form);body.append('data',data);if(worksheet)body.append('worksheet',worksheet);return request<KoboPreview>('/imports/preview',body)},
- confirm:(token:string,name:string,mappings:KoboMapping[],policies:Record<string,string>,acceptInvalid:boolean,settingsPackage?:unknown,reviewConfig?:KoboReviewConfig,reuseOnly=false)=>request<KoboProject>('/imports/confirm',{token,name,mappings,policies,acceptInvalid,settingsPackage,reviewConfig,reuseOnly}),
+ confirm:(token:string,name:string,mappings:KoboMapping[],policies:Record<string,string>,acceptInvalid:boolean,settingsPackage?:unknown,reviewConfig?:KoboReviewConfig,reuseOnly=false,matching?:import('./KoboUpdateReview').UpdateMatching,reviewedImportNotes:string[]=[])=>request<KoboProject>('/imports/confirm',{token,name,mappings,policies,acceptInvalid,settingsPackage,reviewConfig,reuseOnly,matching,reviewedImportNotes}),
  previewImportSettings:(token:string,mappings:KoboMapping[],policies:Record<string,string>,pack:unknown,reviewConfig?:KoboReviewConfig)=>request<KoboSettingsReview>(`/imports/${token}/settings-preview`,{mappings,policies,package:pack,reviewConfig}),
  reviewChoices:(token:string,mappings:KoboMapping[],reviewConfig:KoboReviewConfig,question:string,separator:string,signal?:AbortSignal)=>request<KoboChoiceComparison>(`/imports/${token}/choices`,{mappings,reviewConfig,question,separator},'POST',signal),
  cancelImport:(token:string)=>request(`/imports/${token}`,undefined,'DELETE'),

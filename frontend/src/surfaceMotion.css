@@ -11,3 +11,9 @@
 @keyframes surface-notice-enter{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}
 @keyframes surface-notice-exit{from{transform:translateY(0);opacity:1}to{transform:translateY(6px);opacity:0}}
 @media(prefers-reduced-motion:reduce){.shared-filter-drawer,.filter-backdrop.surface-backdrop,.legal-copy-toast{animation:none!important}}
+
+.legal-copy-toast-progress{border-color:color-mix(in srgb,var(--blue) 38%,var(--line))}
+.legal-copy-toast-progress>svg,.legal-copy-toast-progress>span{color:var(--blue)}
+.legal-copy-toast-progress>svg{animation:surface-notice-spin 1s linear infinite}
+@keyframes surface-notice-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.legal-copy-toast-progress>svg{animation:none}}

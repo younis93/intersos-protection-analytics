@@ -100,7 +100,7 @@ def preview_settings(project, current, package):
 
     incoming = package.settings.model_dump()
     result = deepcopy(current.model_dump())
-    for key in ('language', 'metadata', 'hideBlanks', 'hideZero', 'hideEmpty', 'questionSort', 'percentageDecimals', 'viewMode'):
+    for key in ('percentageDefault', 'language', 'metadata', 'hideBlanks', 'hideZero', 'hideEmpty', 'questionSort', 'percentageDecimals', 'viewMode'):
         result[key] = incoming[key]
     result['hidden'] = [qid for qid in result['hidden'] if qid not in used] + remap(incoming['hidden'], 'Question visibility')
     result['filterFields'] = remap(incoming['filterFields'], 'Filter fields')
@@ -130,6 +130,21 @@ def preview_settings(project, current, package):
         if qid not in mapping:
             warnings.append(f'Question settings: skipped {qid}.'); continue
         target = destination[mapping[qid]]
+        codes = {c['name'] for c in target['choices']} | {'__blank__'}
+        if target['kind'] == 'text':
+            codes |= {str(r['values'][target['id']]) for r in project['records'] if r['values'].get(target['id']) is not None}
+        hidden = config.get('hiddenAnswers', [])
+        config['hiddenAnswers'] = [code for code in hidden if code in codes] if target['kind'] in {'category','multiple','text'} else []
+        if len(config['hiddenAnswers']) != len(hidden): warnings.append(f'Unavailable hidden answers skipped: {qid}.')
+        own = []
+        for rule in config.get('ownFilters', []):
+            field = mapping.get(rule['field'])
+            if not field:
+                warnings.append(f"Question filter unavailable: {rule['field']}. Review {qid} before use.")
+                # Retain the reference so compatibility checks require repair, not a broader cohort.
+                own.append(rule)
+            else: own.append({**rule,'field':field})
+        config['ownFilters'] = own
         fields = remap(config['breakdowns'] or ([config['breakdown']] if config['breakdown'] else []), f'Breakdowns for {qid}')
         valid = []
         for field in fields:
@@ -166,6 +181,10 @@ def preview_settings(project, current, package):
             if removed: warnings.append(f'Unsupported color overrides skipped: {qid}.')
             config['colors'] = {k: v for k, v in config['colors'].items() if k not in removed}
         retained_points = {}
+        calculation = config.get('calculation')
+        if calculation and calculation.get('operation') != 'count':
+            field = mapping.get(calculation.get('field'))
+            config['calculation'] = {**calculation,'field':field} if field else None
         for key, color in config.get('pointColors', {}).items():
             fields_in_key, column_id, answer_id = json.loads(key)
             remapped_fields = [mapping.get(field) for field in fields_in_key]

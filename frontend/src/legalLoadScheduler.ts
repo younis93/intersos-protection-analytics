@@ -132,7 +132,7 @@ export class LegalLoadScheduler {
       if(active){this.clearTimer();this.pauseUnrelated();}
       else if(!this.foregroundRequests){this.resumeAt=Date.now()+250;this.schedule();}
     }));
-    this.cleanups.push(subscribeLegalQueryInvalidation((reason)=>{if(reason==="revision")this.invalidate();else if(this.metadata||this.sourceTasks)this.restart()}));
+    this.cleanups.push(subscribeLegalQueryInvalidation((reason)=>{if(reason==="revision")this.invalidate();else if(reason==="manual"&&(this.metadata||this.sourceTasks))this.restart()}));
     if(typeof document!=="undefined"){
       const visible=()=>{if(document.hidden)this.clearTimer();else this.schedule()};document.addEventListener("visibilitychange",visible);this.cleanups.push(()=>document.removeEventListener("visibilitychange",visible));
     }

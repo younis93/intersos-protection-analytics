@@ -38,6 +38,8 @@ export default function KoboQuestionGroups({analysis,renderQuestion,tools,tableO
   return{roots,nodes,list,defaults};
  },[analysis]);
  const[expanded,setExpanded]=useState(()=>tree.defaults),[search,setSearch]=useState(''),[active,setActive]=useState(tree.roots[0]?.id||''),[jump,setJump]=useState<{kind:'group'|'question';id:string;serial:number}|null>(null);
+ const hadQuestions=useRef(analysis.questions.length>0);
+ useEffect(()=>{const hasQuestions=analysis.questions.length>0;if(hasQuestions&&!hadQuestions.current)setExpanded(current=>new Set([...current,...tree.defaults]));hadQuestions.current=hasQuestions},[analysis.questions.length,tree]);
  const seenAdded=useRef(new Set(analysis.questions.filter(q=>q.addedFromData).map(q=>q.id)));
  useEffect(()=>{const added=analysis.questions.filter(q=>q.addedFromData&&!seenAdded.current.has(q.id));if(!added.length)return;added.forEach(q=>seenAdded.current.add(q.id));setExpanded(current=>{const next=new Set(current);for(const q of added){const node=tree.nodes.get(q.group||GENERAL);if(node){next.add(node.id);node.ancestors.forEach(id=>next.add(id))}}return next})},[analysis,tree]);
  const[tableGroup,setTableGroup]=useState('@all');
@@ -76,9 +78,11 @@ export default function KoboQuestionGroups({analysis,renderQuestion,tools,tableO
   const node=host.current,bar=toolbar.current;if(!node||!bar)return;
   const topbar=node.closest('.kobo-shell')?.querySelector<HTMLElement>('.topbar');
   let root:HTMLElement|null=node.parentElement;while(root&&!(root.scrollHeight>root.clientHeight+1&&/auto|scroll/.test(getComputedStyle(root).overflowY)))root=root.parentElement;
+  const scrollSurface=root||document.documentElement,previousPaddingTop=scrollSurface.style.scrollPaddingTop,previousPaddingBottom=scrollSurface.style.scrollPaddingBottom;
   const headings=Array.from(node.querySelectorAll<HTMLElement>(tableOnly?'.kobo-no-heading':'.kobo-group-heading'));let observer:IntersectionObserver|undefined,pinObserver:IntersectionObserver|undefined;
   const observe=()=>{
    const top=topbar?.getBoundingClientRect().height||0,offset=top+bar.getBoundingClientRect().height+24;
+   scrollSurface.style.scrollPaddingTop=`${offset}px`;scrollSurface.style.scrollPaddingBottom=window.innerWidth<=768?'140px':'24px';
    node.style.setProperty('--kobo-nav-top',`${top+8}px`);
    pinObserver?.disconnect();
    pinObserver=new IntersectionObserver(([entry])=>setPinned(!entry.isIntersecting&&entry.boundingClientRect.top<(entry.rootBounds?.top??top+8)),{root,rootMargin:`-${top+8}px 0px 0px 0px`,threshold:0});
@@ -94,7 +98,7 @@ export default function KoboQuestionGroups({analysis,renderQuestion,tools,tableO
    headings.forEach(heading=>observer!.observe(heading));
   };
   observe();const resize=new ResizeObserver(observe);resize.observe(bar);if(topbar)resize.observe(topbar);
-  return()=>{resize.disconnect();observer?.disconnect();pinObserver?.disconnect()};
+  return()=>{scrollSurface.style.scrollPaddingTop=previousPaddingTop;scrollSurface.style.scrollPaddingBottom=previousPaddingBottom;resize.disconnect();observer?.disconnect();pinObserver?.disconnect()};
  },[tree,effectiveExpanded,questionQuery,tableOnly]);
  const setAllGroups=(open:boolean)=>{if(questionQuery)setSearchCollapsed({query:questionQuery,ids:new Set(open?[]:tree.list.map(group=>group.id))});else setExpanded(new Set(open?tree.list.map(group=>group.id):[]))};
  const groupControls:KoboGroupControls={expandAll:()=>setAllGroups(true),collapseAll:()=>setAllGroups(false),allExpanded:tree.list.every(group=>effectiveExpanded.has(group.id)),allCollapsed:tree.list.every(group=>!effectiveExpanded.has(group.id))};

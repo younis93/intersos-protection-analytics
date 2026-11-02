@@ -12,6 +12,40 @@ from backend.kobo_excel_source import response_layout, query_config
 from backend.test_kobo import sample
 
 
+def test_save_retries_only_excel_busy_rejections_and_honors_cancellation(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from backend import kobo_excel_runtime as runtime
+    class ComError(Exception):
+        def __init__(self,hresult):self.hresult=hresult
+    pump=Mock();monkeypatch.setitem(sys.modules,'pythoncom',SimpleNamespace(PumpWaitingMessages=pump))
+    monkeypatch.setitem(sys.modules,'pywintypes',SimpleNamespace(com_error=ComError))
+    monkeypatch.setattr(runtime.time,'sleep',lambda _:None)
+    book=Mock();book.SaveAs.side_effect=[ComError(-2147418111),ComError(-2147417846),None]
+    assert runtime.save_workbook(book,'report.xlsx')
+    assert book.SaveAs.call_count==3 and pump.call_count==2
+    cancelled=threading.Event();cancelled.set();book.reset_mock()
+    assert not runtime.save_workbook(book,'report.xlsx',cancelled)
+    book.SaveAs.assert_not_called()
+
+
+def test_save_failure_and_busy_timeout_do_not_claim_success(monkeypatch):
+    import sys,pytest
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from backend import kobo_excel_runtime as runtime
+    class ComError(Exception):
+        def __init__(self,hresult):self.hresult=hresult
+    monkeypatch.setitem(sys.modules,'pythoncom',SimpleNamespace(PumpWaitingMessages=Mock()))
+    monkeypatch.setitem(sys.modules,'pywintypes',SimpleNamespace(com_error=ComError))
+    book=Mock();book.SaveAs.side_effect=ComError(-1)
+    with pytest.raises(ComError):runtime.save_workbook(book,'report.xlsx')
+    assert book.SaveAs.call_count==1
+    book.SaveAs.side_effect=ComError(-2147418111)
+    with pytest.raises(RuntimeError,match='not completed'):runtime.save_workbook(book,'report.xlsx',timeout=0)
+
+
 def test_resource_budget_reserves_memory_and_limits_workers():
     gib = 1024**3
     assert worker_count(100, 32*gib, 16) == 1

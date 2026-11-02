@@ -8,7 +8,15 @@
 .kobo-shell .kobo-response-table .detention-table-search input:focus-visible{border:0;border-radius:0;outline:none;outline-offset:0;box-shadow:none;background:transparent}
 .kobo-response-table .legal-table-wrap{max-height:62vh;min-height:150px;overscroll-behavior:contain}
 .kobo-response-table table{width:max-content;min-width:100%;table-layout:auto}
-.kobo-response-table th,.kobo-response-table td{white-space:nowrap;max-width:260px}
+.kobo-response-table td{white-space:nowrap;max-width:260px}
+.kobo-response-table thead th{padding-top:16px;padding-bottom:16px;white-space:normal;font-size:13px;line-height:1.5;color:var(--ink);border-bottom:2px solid var(--line);border-inline-end:1px solid var(--line)}
+.kobo-response-table thead th:last-child{border-inline-end:0}
+/* Bound each heading so long questions wrap inside their own column. */
+.kobo-response-table .column-header-content{width:260px;max-width:100%;gap:12px;align-items:center}
+.kobo-response-table th:nth-child(2) .column-header-content{width:116px}
+.kobo-response-table .column-header-label>button{min-height:44px;gap:10px;line-height:1.5;white-space:normal}
+.kobo-response-table .column-header-label>button>span{flex:1;min-width:0;overflow-wrap:anywhere}
+.kobo-response-table .column-header-label>button>b{flex:none}
 .kobo-response-table td{overflow:hidden;text-overflow:ellipsis}
 .kobo-response-table th>button{text-align:inherit}
 .kobo-response-table .kobo-row-selection{width:40px;min-width:40px;padding-inline:13px}

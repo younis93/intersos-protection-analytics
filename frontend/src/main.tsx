@@ -1,4 +1,5 @@
 import React from 'react';
+import './desktopRendererDiagnostics';
 import ReactDOM from 'react-dom/client';
 import RootApp from './RootApp';
 import './styles.css';

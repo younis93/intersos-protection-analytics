@@ -12,6 +12,7 @@ function ComparisonTable({result,analysis,group,onDrilldown}:{onDrilldown:(resul
   <div className="kobo-compare-question"><span className="eyebrow" dir="auto">{result.name}{result.id!==result.name?` · ${result.id}`:''}</span><h3 dir="auto">{result.label}</h3><p className="kobo-compare-group" dir="auto">{group}</p>
    <div className="kobo-compare-counts"><span>{'Answered'} <strong>{result.denominator.toLocaleString(analysis.settings.language)}</strong></span><span>{'Missing'} <strong>{result.missing.toLocaleString(analysis.settings.language)}</strong></span><span>{'Total'} <strong>{result.total.toLocaleString(analysis.settings.language)}</strong></span></div>
   </div>
+  {result.filterMode&&result.filterMode!=='page'&&<p className="kobo-notice">Filters: {result.filterSummary?.join('; ')||'All eligible records'}</p>}
   {!result.denominator&&<p className="kobo-compare-message" role="status">{'No answered responses under the current filters.'}</p>}
   <KoboPivotTable onDrilldown={selection=>onDrilldown(result,selection)} result={result} language={analysis.settings.language} limit={count} display={display} onDisplayChange={setDisplay} showDisplaySelector/>
   {result.rows.length>count&&<button type="button" className="soft kobo-compare-more" onClick={()=>setCount(value=>value+100)}>{'Show more answers'} ({result.rows.length-count})</button>}

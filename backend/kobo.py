@@ -20,6 +20,7 @@ from typing import Any, Literal
 import openpyxl
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .kobo_measures import Calculation
 from .kobo_geography import GeographyConfig
 from .kobo_indicators import IndicatorDefinition
 from .file_security import validate_xlsx_archive
@@ -60,6 +61,7 @@ class KoboFilter(BaseModel):
 
 
 class ChartAppearance(BaseModel):
+    valueAxis: Literal['show', 'hide'] = 'show'
     metric: Literal['auto', 'count', 'percent'] = 'auto'
     labels: Literal['auto', 'hidden', 'count', 'percent', 'both'] = 'auto'
     legend: Literal['auto', 'hidden', 'top', 'bottom', 'left', 'right'] = 'auto'
@@ -70,6 +72,14 @@ class ChartAppearance(BaseModel):
 
 
 class QuestionSettings(BaseModel):
+    filterMode: Literal['page', 'own', 'additional'] = 'page'
+    ownFilters: list[KoboFilter] = Field(default_factory=list)
+    hiddenAnswers: list[str] = Field(default_factory=list)
+    chartTopN: int | None = Field(None, ge=1, le=1000000)
+    chartOther: bool = False
+    percentageMode: Literal['legacy-respondents', 'grand-total', 'column-total', 'row-total', 'breakdown-group'] = 'legacy-respondents'
+    percentageGroupLevel: int = Field(1, ge=1, le=3)
+    calculation: Calculation | None = None
     appearance: ChartAppearance = Field(default_factory=ChartAppearance)
     palette: Literal['Balanced', 'Blue', 'Teal', 'Warm', 'Solid blue', 'Ocean', 'Botanical', 'Jewel', 'Contrast'] | None = None
     chart: Literal['bar', 'column', 'pie', 'donut', 'line', 'histogram', 'heatmap'] | None = None
@@ -83,7 +93,7 @@ class QuestionSettings(BaseModel):
     breakdown: str = ''
     breakdowns: list[str] = Field(default_factory=list, max_length=3)
     breakdownDisplay: Literal['count', 'percent', 'both'] = 'both'
-    answerSort: Literal['form', 'count-desc', 'count-asc', 'label-asc', 'label-desc'] = 'form'
+    answerSort: Literal['form', 'count-desc', 'count-asc', 'label-asc', 'label-desc'] = 'count-desc'
 
     @field_validator('pointColors')
     @classmethod
@@ -106,6 +116,7 @@ class QuestionSettings(BaseModel):
 
 
 class AnalysisViewSettings(BaseModel):
+    percentageDefault: Literal['legacy-respondents', 'grand-total', 'column-total', 'row-total', 'breakdown-group'] | None = None
     language: Literal['en', 'ar'] = 'en'
     filters: list[KoboFilter] = Field(default_factory=list)
     filterFields: list[str] = Field(default_factory=list)
@@ -184,7 +195,7 @@ def new_project_settings(form: dict, records=None) -> KoboSettings:
                 del distinct[qid]  # Stop retaining/counting answers once the threshold is known.
     hidden = [q['id'] for q in form['questions'] if q['identifying'] or q['id'] in large_text]
     return KoboSettings(language='en', filterFields=[q['id'] for q in form['questions'] if q.get('addedFromData') and q['id'] not in hidden], hidden=hidden,
-                        questions={q['id']: QuestionSettings(palette='Blue') for q in form['questions']})
+                        questions={q['id']: QuestionSettings(percentageMode='grand-total', palette='Blue', answerSort='form' if q['kind'] == 'date' else 'count-desc') for q in form['questions']})
 
 
 def norm(value: Any) -> str:
@@ -412,6 +423,10 @@ def filtered_choices(q: dict, values: dict, questions: dict) -> dict:
     """Interpret only simple XLSForm choice filters, never execute form code."""
     expression = q.get('choiceFilter', '')
     if not expression: return q
+    # Ignoring a question excludes its context as well. Keep the full original
+    # choice list when that context is unavailable, rather than rejecting answers.
+    names = {value for question in questions.values() for value in (question['name'], question['id'])}
+    if set(re.findall(r'\$\{([^}]+)\}', expression)) - names: return q
     expression = re.sub(r'\$\{([^}]+)\}', lambda m: '__q_' + m[1], expression)
     expression = re.sub(r'(?<![<>!=])=(?!=)', '==', expression)
     context = {'__q_' + question['name']: values.get(question['id']) for question in questions.values()}
@@ -509,11 +524,42 @@ class ProjectStore:
             db.execute('INSERT INTO projects VALUES (?,?,?,?,?,?,?)', (pid, name.strip() or 'Untitled Kobo project', datetime.now().isoformat(), json.dumps(payload, ensure_ascii=False), json.dumps(settings), form_raw, data_raw))
         return self.get(pid)
 
-    def get(self, pid):
+    def get(self, pid, *, raw=False):
         with self.connect() as db:
             row = db.execute('SELECT name,payload,settings,updated FROM projects WHERE id=?', (pid,)).fetchone()
         if not row: raise KeyError('Project not found.')
-        return {'id': pid, 'name': row[0], **json.loads(row[1]), 'settings': json.loads(row[2]), 'updated': row[3]}
+        project = {'id': pid, 'name': row[0], **json.loads(row[1]), 'settings': json.loads(row[2]), 'updated': row[3]}
+        from .kobo_edits import effective_project
+        if raw: return project
+        project = effective_project(project)
+        from .kobo_import_notes import refresh_notes
+        sheets = None
+        if 'noteSourceContexts' not in project and not project.get('customConfig') and (project.get('warnings') or project.get('issues')):
+            source_raw = self.sources(pid)[1]
+            sheets = parse_data(source_raw, 'data.xlsx' if source_raw.startswith(b'PK') else 'data.csv', project.get('source', {}).get('worksheet', ''))
+        refresh_notes(project, sheets)
+        return project
+
+    def review_import_notes(self, pid, keys):
+        from .kobo_import_notes import refresh_notes, note_key
+        from .kobo_edits import effective_project
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT payload,data FROM projects WHERE id=?', (pid,)).fetchone()
+            if not row: raise KeyError('Project not found.')
+            payload = json.loads(row[0])
+            # Bootstrap source fingerprints for projects created before note review.
+            if 'noteSourceContexts' not in payload and not payload.get('customConfig'):
+                raw = bytes(row[1])
+                sheets = parse_data(raw, 'data.xlsx' if raw.startswith(b'PK') else 'data.csv', payload.get('source', {}).get('worksheet', ''))
+                refresh_notes(payload, sheets)
+            effective = effective_project(payload)
+            notes = refresh_notes(effective)
+            valid = {note_key(note) for note in notes}
+            if set(keys) - valid: raise ValueError('The import notes changed. Refresh the project and review them again.')
+            payload['reviewedImportNotes'] = sorted((set(payload.get('reviewedImportNotes', [])) | set(keys)) & valid)
+            db.execute('UPDATE projects SET payload=?,updated=? WHERE id=?', (json.dumps(payload, ensure_ascii=False), datetime.now().isoformat(), pid))
+        return self.get(pid)
 
     def save(self, pid, settings: KoboSettings):
         with self.connect() as db:
@@ -536,39 +582,59 @@ class ProjectStore:
         if not row: raise KeyError('Project not found.')
         return bytes(row[0]), bytes(row[1])
 
-    def repair(self, pid, payload, form_raw, data_raw, *, preserve_settings=False, expected_updated=None):
+    def repair(self, pid, payload, form_raw, data_raw, *, preserve_settings=False, expected_updated=None, update_entry=None):
         # Keep the project identity, latest display settings until the reviewed sources are applied.
         with self.connect() as db:
             if expected_updated is not None: db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT settings,payload,updated FROM projects WHERE id=?', (pid,)).fetchone()
             if not row: raise KeyError('Project not found.')
             settings = json.loads(row[0])
+            previous_payload=json.loads(row[1])
+            if 'dataEdits' in previous_payload and 'dataEdits' not in payload:
+                if data_raw!=self.sources(pid)[1]: raise ValueError('Review local edits before replacing this source.')
+                payload['dataEdits']={**previous_payload['dataEdits'],'revision':previous_payload['dataEdits'].get('revision',0)+1}
+                from .kobo_edits import effective_project
+                effective_project(payload)
             if expected_updated is not None and row[2] != expected_updated:
                 raise ValueError('The project changed since this upload was read. Reopen the upload to use the latest settings.')
             if not preserve_settings:
-                known = {q['id'] for q in payload['form']['questions']}
+                from .kobo_edits import effective_project
+                effective_payload=effective_project(payload)
+                known = {q['id'] for q in effective_payload['form']['questions']}
                 settings['hidden'] = list(set(settings.get('hidden', [])) | {q['id'] for q in payload['form']['questions'] if q['identifying'] and q['id'] not in {old['id'] for old in json.loads(row[1])['form']['questions']}})
                 settings['hidden'] = [qid for qid in settings['hidden'] if qid in known]
                 previous_ids = {q['id'] for q in json.loads(row[1])['form']['questions']}
+                settings.setdefault('questions',{}).update({q['id']:QuestionSettings(percentageMode=settings.get('percentageDefault') or 'grand-total').model_dump() for q in payload['form']['questions'] if q['id'] not in previous_ids and q['id'] not in settings.get('questions',{})})
                 new_filter_ids = [q['id'] for q in payload['form']['questions'] if q.get('addedFromData') and not q.get('identifying') and q['id'] not in previous_ids]
                 settings['filterFields'] = list(dict.fromkeys([*[qid for qid in settings.get('filterFields', []) if qid in known], *new_filter_ids]))
                 settings['filters'] = [f for f in settings.get('filters', []) if f['field'] in known]
                 settings['questions'] = {qid: {**cfg, 'breakdown': cfg.get('breakdown', '') if cfg.get('breakdown', '') in known else '', 'breakdowns': [field for field in cfg.get('breakdowns', []) if field in known]} for qid, cfg in settings.get('questions', {}).items() if qid in known}
+                from .kobo_measures import value_field
+                repaired_settings = KoboSettings.model_validate(settings)
+                questions = {q['id']:q for q in effective_payload['form']['questions']}
+                for qid,cfg in repaired_settings.questions.items():
+                    try: value_field(questions[qid],cfg,questions)
+                    except ValueError: settings['questions'][qid]['calculation'] = None
                 from .kobo_indicators import indicator_issues
                 for definition in settings.get('indicators', []):
                     item = IndicatorDefinition.model_validate({**definition, 'reviewIssues': []})
-                    definition['reviewIssues'] = indicator_issues(payload, item)
+                    definition['reviewIssues'] = indicator_issues(effective_payload, item)
                 from .kobo_saved_views import saved_view_issues
                 for view in settings.get('savedViews', []):
                     if view.get('questionKinds'):
                         added = known - view['questionKinds'].keys()
                         view['snapshot']['hidden'] = list(dict.fromkeys([*view['snapshot'].get('hidden', []), *sorted(added)]))
                         view['questionKinds'].update({q['id']: q['kind'] for q in payload['form']['questions'] if q['id'] in added})
-                    view['reviewIssues'] = saved_view_issues(payload, SavedAnalysisView.model_validate(view))
+                    view['reviewIssues'] = saved_view_issues(effective_payload, SavedAnalysisView.model_validate(view))
                 if any(view['id'] == settings.get('activeViewId') and view['reviewIssues'] for view in settings.get('savedViews', [])): settings['activeViewId'] = ''
                 if payload.get('customConfig'):
                     from .custom_analysis import reconcile_settings
-                    settings = reconcile_settings(json.loads(row[1]), payload, settings)
+                    settings = reconcile_settings(effective_project(json.loads(row[1])), effective_payload, settings)
+            payload.setdefault('dataEdits',{'revision':previous_payload.get('dataEdits',{}).get('revision',0)+1,'history':[]})
+            if update_entry is not None:
+                payload['updateHistory'] = [update_entry, *json.loads(row[1]).get('updateHistory', [])][:20]
+            else:
+                payload['updateHistory'] = json.loads(row[1]).get('updateHistory', [])
             db.execute('UPDATE projects SET payload=?,form=?,data=?,settings=?,updated=? WHERE id=?', (json.dumps(payload, ensure_ascii=False), form_raw, data_raw, json.dumps(settings), datetime.now().isoformat(), pid))
         return self.get(pid)
 
@@ -609,6 +675,8 @@ def filtered_records(project: dict, settings: KoboSettings):
     validate_chart_settings({q['id']: q for q in project['form']['questions']}, settings)
     records = project['records']; lookup = {r['id']: r for r in records}
     questions = {q['id']: q for q in project['form']['questions']}
+    for qid,cfg in settings.questions.items():
+        if qid in questions:question_cohort(questions[qid],[],cfg,questions,{})
     for rule in settings.filters:
         if rule.field not in questions: raise ValueError('Filter references an unknown question.')
     def passes(record, rules):
@@ -702,9 +770,51 @@ def question_categories(q: dict, answered: list[dict], cfg):
     return stats, bins, categories
 
 
+def resolved_question_settings(q, settings):
+    cfg = settings.questions.get(q['id'], QuestionSettings(percentageMode=settings.percentageDefault) if settings.percentageDefault else QuestionSettings())
+    if q['kind'] == 'date' and 'answerSort' not in cfg.model_fields_set:
+        return cfg.model_copy(update={'answerSort': 'form'})
+    return cfg
+
+
+def active_question_filters(cfg):
+    if cfg.filterMode != 'additional': return cfg.ownFilters
+    return [rule for rule in cfg.ownFilters if (bool(rule.values) if rule.kind == 'category' else rule.minimum is not None or rule.maximum is not None or bool(rule.months))]
+
+
+def question_cohort(question, records, cfg, questions, lookup):
+    """Resolve a question cohort once, using ancestor values for repeat filters."""
+    hidden = set(cfg.hiddenAnswers) if question['kind'] in {'category', 'multiple', 'text'} else set()
+    def visible(record):
+        value = record['values'].get(question['id'])
+        codes = {'__blank__'} if missing(value) else set(value) if question['kind'] == 'multiple' else {str(value)}
+        return not hidden.intersection(codes)
+    if cfg.filterMode not in {'own', 'additional'}: return [r for r in records if r['scope'] == question['repeat'] and visible(r)]
+    from .kobo_measures import record_value
+    for rule in cfg.ownFilters:
+        field = questions.get(rule.field)
+        if not field: raise ValueError('Question filter references an unavailable field.')
+        expected = field['kind'] if field['kind'] in {'number','date'} else 'category'
+        if rule.kind != expected: raise ValueError('Question filter type is incompatible with its field.')
+        if rule.kind=='category' and field['kind'] in {'category','multiple'} and not set(rule.values)<={c['name'] for c in field['choices']}|{'__blank__'}:
+            raise ValueError('Question filter includes unavailable answer codes.')
+        scope = field['repeat']
+        if scope and scope != question['repeat'] and not question['repeat'].startswith(scope + '/'):
+            raise ValueError('Question filters must use this response table or an ancestor table.')
+    candidates = records if cfg.filterMode == 'additional' else lookup.values()
+    active_rules = active_question_filters(cfg)
+    return [r for r in candidates if r['scope'] == question['repeat'] and visible(r) and all(matches(record_value(r, questions[f.field], lookup), f) for f in active_rules)]
+
+
+def question_filter_summary(question, cfg, settings, questions):
+    local = active_question_filters(cfg)
+    rules = local if cfg.filterMode == 'own' else [*settings.filters, *local] if cfg.filterMode == 'additional' else settings.filters
+    return [f"{label(questions[f.field], settings.language)}: {filter_rule_summary(f, {c['name']: label(c, settings.language) for c in questions[f.field]['choices']})}" for f in rules if f.field in questions]
+
+
 def question_result(q: dict, records: list[dict], settings: KoboSettings, questions: dict, lookup: dict):
-    cfg = settings.questions.get(q['id'], QuestionSettings())
-    cohort = [r for r in records if r['scope'] == q['repeat']]
+    cfg = resolved_question_settings(q, settings)
+    cohort = question_cohort(q, records, cfg, questions, lookup)
     answered = [r for r in cohort if not missing(r['values'].get(q['id']))]
     denominator = len(answered)
     stats, bins, categories = question_categories(q, answered, cfg)
@@ -712,6 +822,8 @@ def question_result(q: dict, records: list[dict], settings: KoboSettings, questi
     answer_labels = {c['name']: label(c, settings.language) for c in q['choices']}
     answer_labels.update({b['id']: b['label'] for b in bins})
     universe = list(answer_labels) if q['choices'] or bins else sorted(counts, key=lambda v: float(v) if q['kind'] == 'number' else v)
+    if q['kind']=='text' and q['choices']:universe=list(dict.fromkeys([*answer_labels,*counts]))
+    if q['kind'] in {'category', 'multiple', 'text'}: universe = [c for c in universe if c not in cfg.hiddenAnswers]
     rows = [{'id': c, 'label': answer_labels.get(c, c), 'count': counts[c], 'percent': counts[c] / denominator * 100 if denominator else None} for c in universe]
     breakdowns = []
     dimensions = breakdown_fields(cfg, questions, q)
@@ -731,18 +843,31 @@ def question_result(q: dict, records: list[dict], settings: KoboSettings, questi
                 row['series'].append({'id': b['id'], 'count': n, 'percent': n / b['denominator'] * 100 if b['denominator'] else None})
     apply_display_percentages(rows, breakdowns, denominator, q['kind'], settings.percentageDecimals)
     if settings.hideZero and cfg.chart != 'histogram': rows = [r for r in rows if r['count']]
-    if cfg.answerSort != 'form' and cfg.chart != 'histogram':
+    if cfg.answerSort != 'form' and cfg.chart != 'histogram' and not bins and not (cfg.calculation and cfg.calculation.operation!='count'):
         by_count = cfg.answerSort.startswith('count')
-        rows.sort(key=lambda r: (r['count'], r['label']) if by_count else r['label'].casefold(), reverse=cfg.answerSort.endswith('desc'))
+        rows.sort(key=lambda r: r['count'] if by_count else r['label'].casefold(), reverse=cfg.answerSort.endswith('desc'))
     if not settings.hideBlanks and len(cohort) > denominator: rows.append({'id': '__blank__', 'label': 'Blank / unanswered' if settings.language == 'en' else 'فارغ / دون إجابة', 'count': len(cohort) - denominator, 'percent': None, 'displayPercent': None})
     colors = {key: palette_color(cfg.palette, key) for key in [*[row['id'] for row in rows], *[column['id'] for column in breakdowns], 'series']} if cfg.palette else {}
     colors.update(cfg.colors)
     from .kobo_trends import answer_trend
     trend = answer_trend(q, cfg, questions, answered, lookup, categories, rows)
-    return {'addedFromData': bool(q.get('addedFromData')), 'trend': trend, 'id': q['id'], 'name': q['name'], 'label': label(q, settings.language), 'group': q['group'], 'kind': q['kind'], 'repeat': q['repeat'], 'denominator': denominator, 'missing': len(cohort) - denominator, 'total': len(cohort), 'rows': rows, 'statistics': stats, 'bins': bins, 'breakdowns': breakdowns, 'breakdownDisplay': cfg.breakdownDisplay, 'breakdownFields': [{'id': dim['id'], 'label': label(dim, settings.language)} for dim in dimensions], 'percentageBasis': ('Records with a value within each breakdown category' if breakdowns else 'Records with a value in this column') if q.get('customColumn') else ('Answered respondents within each breakdown category' if breakdowns else 'Respondents who answered this question'), 'percentageDecimals': settings.percentageDecimals, 'chart': cfg.chart or ('line' if q['kind'] == 'date' else 'column'), 'colors': colors, 'pointColors': cfg.pointColors, 'appearance': cfg.appearance.model_dump()}
+    result = {'answerSort': cfg.answerSort, 'addedFromData': bool(q.get('addedFromData')), 'trend': trend, 'id': q['id'], 'name': q['name'], 'label': label(q, settings.language), 'group': q['group'], 'kind': q['kind'], 'repeat': q['repeat'], 'denominator': denominator, 'missing': len(cohort) - denominator, 'total': len(cohort), 'rows': rows, 'statistics': stats, 'bins': bins, 'breakdowns': breakdowns, 'breakdownDisplay': cfg.breakdownDisplay, 'breakdownFields': [{'id': dim['id'], 'label': label(dim, settings.language)} for dim in dimensions], 'percentageBasis': ('Records with a value within each breakdown category' if breakdowns else 'Records with a value in this column') if q.get('customColumn') else ('Answered respondents within each breakdown category' if breakdowns else 'Respondents who answered this question'), 'percentageDecimals': settings.percentageDecimals, 'chart': cfg.chart or ('line' if q['kind'] == 'date' else 'column'), 'colors': colors, 'pointColors': cfg.pointColors, 'appearance': cfg.appearance.model_dump()}
+
+    from .kobo_measures import apply_measure
+    if cfg.percentageMode!='legacy-respondents' and any(r['id']=='__blank__' for r in rows):
+        blank=next(r for r in rows if r['id']=='__blank__')
+        blank['series']=[{'id':b['id'],'count':sum(missing(r['values'].get(q['id'])) and list(breakdown_values(r,dimensions,lookup))==b['values'] for r in cohort),'percent':None} for b in breakdowns]
+    result=apply_measure(result, q, cfg, questions, answered, lookup, categories, dimensions, cohort)
+    from .kobo_pivot_percentages import apply_pivot_percentages
+    result = apply_pivot_percentages(result,cfg)
+    result.update(filterMode=cfg.filterMode, filterScope=q['repeat'], cohortCount=len(cohort), filterSummary=question_filter_summary(q,cfg,settings,questions), chartTopN=cfg.chartTopN, chartOther=cfg.chartOther, percentageGroupLevel=cfg.percentageGroupLevel)
+    from .kobo_chart_projection import project_chart
+    result['chartProjection'] = project_chart(result,cfg,q)
+    return result
 
 
 def analyze(project: dict, settings: KoboSettings, question: str = ''):
+    settings = settings.model_copy(update={'questions': {q['id']: resolved_question_settings(q, settings) for q in project['form']['questions']}})
     records = filtered_records(project, settings)
     questions = {q['id']: q for q in project['form']['questions']}
     lookup = {r['id']: r for r in project['records']}
@@ -751,13 +876,21 @@ def analyze(project: dict, settings: KoboSettings, question: str = ''):
         if question and q['id'] != question: continue
         if q['id'] in settings.hidden or (q['metadata'] and not settings.metadata): continue
         result = question_result(q, records, settings, questions, lookup)
-        if not settings.hideEmpty or result['denominator']: results.append(result)
+        if not settings.hideEmpty or result['denominator'] or result.get('filterMode') in {'own', 'additional'} or settings.questions[q['id']].hiddenAnswers or settings.questions[q['id']].ownFilters: results.append(result)
     if settings.questionSort != 'form':
         by_count = settings.questionSort.startswith('answered')
         # Sorting only within groups preserves the original group hierarchy.
+        sort_counts = {}
+        if by_count:
+            for item in results:
+                cfg = settings.questions[item['id']]
+                if cfg.filterMode == 'additional':
+                    page_cfg = cfg.model_copy(update={'filterMode': 'page'})
+                    cohort = question_cohort(questions[item['id']], records, page_cfg, questions, lookup)
+                    sort_counts[item['id']] = sum(not missing(record['values'].get(item['id'])) for record in cohort)
         groups = defaultdict(list)
         for result in results: groups[result['group']].append(result)
-        for group in groups.values(): group.sort(key=lambda r: (r['denominator'], r['name']) if by_count else r['name'].casefold(), reverse=settings.questionSort.endswith('desc'))
+        for group in groups.values(): group.sort(key=lambda r: (sort_counts.get(r['id'], r['denominator']), r['name']) if by_count else r['name'].casefold(), reverse=settings.questionSort.endswith('desc'))
         iterators = {g: iter(rs) for g, rs in groups.items()}
         results = [next(iterators[r['group']]) for r in results]
     filter_summary = []

@@ -37,6 +37,23 @@ def create_excel():
         return win32com.client.dynamic.Dispatch(excel._oleobj_)
 
 
+def save_workbook(book,target,cancel_event=None,timeout=60):
+    """Excel can reject a save while automatic calculation is finishing."""
+    import pythoncom
+    import pywintypes
+    deadline=time.monotonic()+timeout
+    while True:
+        if cancel_event is not None and cancel_event.is_set():return False
+        try:
+            book.SaveAs(str(target),FileFormat=51)
+            return True
+        except pywintypes.com_error as exc:
+            if exc.hresult not in {-2147418111,-2147417846}:raise
+            if time.monotonic()>=deadline:raise RuntimeError('Excel stayed busy while saving. The export was not completed. Retry after other Excel work finishes.') from exc
+            pythoncom.PumpWaitingMessages()
+            time.sleep(.2)
+
+
 def peak_memory_bytes():
     if os.name != 'nt': return 0
     import win32api

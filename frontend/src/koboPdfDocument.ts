@@ -1,3 +1,7 @@
+import {questionFilterNote} from './koboQuestionFilterState';
+import {pivotColumnTotal,pivotGrandTotal,pivotBottomPercent,additiveMeasure} from './koboPivotValues';
+import {measured,measureNumber} from './koboMeasures';
+import {koboPivotTotals} from './koboTableData';
 import {displayPercent,formatPercent} from './koboPercentages';
 import {jsPDF} from 'jspdf';
 import {koboPdfChartPanels} from './koboChartDensity';
@@ -85,12 +89,15 @@ export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,lo
  else for(const summary of snapshot.filterSummary)paragraph(summary,10);
  y+=10;
  paragraph(rtl?'قراءة هذا التقرير':'Reading this report',12,true,navy);
- paragraph(rtl?'تعتمد النسب على المستجيبين الذين أجابوا عن كل سؤال ضمن عوامل التصفية المحددة. قد يتجاوز مجموع نسب أسئلة الاختيار المتعدد 100٪. تُعرض الإجابات الفارغة بشكل منفصل عند تضمينها. تستخدم الأقسام المتكررة عدد إدخالاتها كأساس للحساب.':'Percentages use respondents who answered each question within the selected filters. Multi-select percentages may total more than 100%. Blank answers are shown separately when included. Repeat sections use repeat-entry denominators.',10,false,muted);
+ paragraph(rtl?'تعتمد النسب على الأساس المحدد لكل جدول: الإجمالي العام أو إجمالي العمود أو الصف. تستخدم الحسابات الجديدة مجموع الاختيارات أو القيم، وتستخدم الطريقة القديمة المستجيبين. قد يساهم الشخص بأكثر من اختيار.':'Percentage bases are stated for each pivot. Grand, column and row percentages use additive answer selections or sums of values; legacy percentages use answered respondents and can exceed 100% for multiple-choice answers. Blank answers follow the visibility settings.',10,false,muted);
  }
  const groups=new Map(snapshot.groups.map(g=>[g.id,g]));
  const statisticLabels:Record<string,[string,string]>={mean:['Mean','المتوسط'],median:['Median','الوسيط'],min:['Minimum','الحد الأدنى'],max:['Maximum','الحد الأقصى'],standardDeviation:['Standard deviation','الانحراف المعياري']};
  let completed=0;
- for(const result of snapshot.questions){
+ for(const sourceResult of snapshot.questions){
+  const isMeasure=measured(sourceResult);
+  const result=isMeasure?{...sourceResult,rows:sourceResult.rows.map(row=>({...row,count:row.value??NaN,series:row.series?.map(cell=>({...cell,count:cell.value??NaN}))})),denominator:pivotGrandTotal(sourceResult)??NaN,breakdowns:sourceResult.breakdowns.map(column=>({...column,denominator:pivotColumnTotal(sourceResult,column)??NaN}))}:{...sourceResult,denominator:pivotGrandTotal(sourceResult)??0,breakdowns:sourceResult.breakdowns.map(column=>({...column,denominator:pivotColumnTotal(sourceResult,column)??0}))};
+  const number=(value:number)=>Number.isFinite(value)?isMeasure?measureNumber(sourceResult,value,rtl?'ar':'en'):new Intl.NumberFormat(rtl?'ar':'en',{maximumFractionDigits:1}).format(value):'-';
   progress(completed++,snapshot.questions.length);
   const chain:string[]=[],seen=new Set<string>();let gid=result.group;
   while(gid&&!seen.has(gid)){seen.add(gid);const group=groups.get(gid);if(!group)break;chain.unshift(group.label||group.name);gid=group.parent}
@@ -109,7 +116,7 @@ export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,lo
   const stats=Object.entries(result.statistics).filter(([key,value])=>key!=='count'&&Number.isFinite(value)).map(([key,value])=>`${statisticLabels[key]?.[rtl?1:0]||key.replace(/([A-Z])/g,' $1')}: ${number(value)}`);
   if(stats.length)paragraph(stats.join('   |   '),9,false,muted);
   if(!result.rows.length){paragraph(rtl?'لا توجد إجابات ضمن عوامل التصفية الحالية.':'No answered responses under the current filters.',10,false,muted);continue}
-  const chartPanels=result.denominator?koboPdfChartPanels(result):[];
+  const chartPanels=sourceResult.denominator?koboPdfChartPanels(sourceResult):[];
   if(chartPanels.length>1){
    let offset=0;
    for(let index=0;index<chartPanels.length;index++){
@@ -123,15 +130,20 @@ export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,lo
    }
    questionPage(true);
   }
-  const breakdownDisplay=snapshot.settings.questions[result.id]?.breakdownDisplay||'both';
+  const breakdownDisplay=isMeasure&&!additiveMeasure(sourceResult)?'count':snapshot.settings.questions[result.id]?.breakdownDisplay||'both';
+  if(questionFilterNote(sourceResult.filterMode)){paragraph(questionFilterNote(sourceResult.filterMode),10,true);for(const note of sourceResult.filterSummary||[])paragraph(note,9,false,muted)}
+  paragraph(sourceResult.percentageBasis,9,false,muted);
+  if(isMeasure)paragraph(`${sourceResult.measure!.label} · ${sourceResult.measure!.unit}${sourceResult.measure!.parentValuesRepeated?' · Parent values are repeated once per matching repeat entry.':''}`,10,true);
   const metrics=breakdownDisplay==='both'?['count','percent']:[breakdownDisplay];
-  const breakdownMetric=breakdownDisplay==='count'?'#':breakdownDisplay==='percent'?'%':'# / %';
+  const breakdownMetric=isMeasure?sourceResult.measure!.label+(additiveMeasure(sourceResult)&&breakdownDisplay!=='count'?' / %':''):breakdownDisplay==='count'?'#':breakdownDisplay==='percent'?'%':'# / %';
+  const totalsPolicy=koboPivotTotals(result);
   const hasBreakdown=result.breakdowns.length>0,tableWidth=hasBreakdown||chartPanels.length>1?available:(available-24)*.5;
   const panels=hasBreakdown?Array.from({length:Math.ceil(result.breakdowns.length/5)},(_,i)=>result.breakdowns.slice(i*5,i*5+5)):[[]];
   for(let panelIndex=0;panelIndex<panels.length;panelIndex++){
    const panel=panels[panelIndex];if(panelIndex)questionPage(true);
-   const headings=[rtl?'الإجابة':'Answer',...panel.map(b=>`${b.label}\n${breakdownMetric}`),...(!hasBreakdown?metrics.map(metric=>metric==='count'?'#':'%'):[])];
-   const numericWidth=panel.length?(tableWidth-Math.max(180,tableWidth*.36))/panel.length:54;
+   const showTotalColumn=totalsPolicy.column;
+   const headings=[rtl?'الإجابة':'Answer',...panel.map(b=>`${b.label}\n${breakdownMetric}`),...(showTotalColumn?[`${rtl?'الإجمالي':'Total'}\n${breakdownMetric}`]:[]),...(!hasBreakdown?metrics.map(metric=>metric==='count'?(sourceResult.measure?.label||'#'):'%'):[])];
+   const numericWidth=panel.length?(tableWidth-Math.max(180,tableWidth*.36))/(panel.length+Number(showTotalColumn)):54;
    const widths=[tableWidth-numericWidth*(headings.length-1),...headings.slice(1).map(()=>numericWidth)];
    const fontSize=9,leading=13,padding=7;
    const textCells=(values:string[],bold=false)=>values.map((value,index)=>wrap(value,widths[index]-2*padding,fontSize,bold));
@@ -157,9 +169,9 @@ export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,lo
     drawCells(headerCells,headerHeight,'header');
    }
    function nextTablePage(){questionPage(true);tableHeader()}
-   const rowValues=(row:KoboRow)=>[row.label,...panel.map(b=>{const series=row.series?.find(series=>series.id===b.id);return series?(breakdownDisplay==='count'?number(series.count):breakdownDisplay==='percent'?percent(series):`${number(series.count)} / ${percent(series)}`):'-'}),...(!hasBreakdown?metrics.map(metric=>metric==='count'?number(row.count):percent(row)):[])];
-   const totals=[rtl?'الإجمالي':'Total',...panel.map(column=>breakdownDisplay==='count'?number(column.denominator):breakdownDisplay==='percent'?(column.denominator?totalPercent:'-'):`${number(column.denominator)} / ${column.denominator?totalPercent:'-'}`),...(!hasBreakdown?metrics.map(metric=>metric==='count'?number(result.denominator):result.denominator?totalPercent:'-'):[])];
-   const totalCells=textCells(totals,true),totalHeight=rowHeight(totalCells);
+   const rowValues=(row:KoboRow)=>[row.label,...panel.map(b=>{const series=row.series?.find(series=>series.id===b.id);return series?(breakdownDisplay==='count'?number(series.count):breakdownDisplay==='percent'?percent(series):`${number(series.count)} / ${percent(series)}`):'-'}),...(showTotalColumn?[breakdownDisplay==='count'?number(row.count):breakdownDisplay==='percent'?percent(row):`${number(row.count)} / ${percent(row)}`]:[]),...(!hasBreakdown?metrics.map(metric=>metric==='count'?number(row.count):percent(row)):[])];
+   const totals=[rtl?'الإجمالي':'Total',...panel.map(column=>breakdownDisplay==='count'?number(column.denominator):breakdownDisplay==='percent'?(formatPercent(pivotBottomPercent(sourceResult,column),sourceResult.percentageDecimals??0,rtl?'ar':'en')):`${number(column.denominator)} / ${formatPercent(pivotBottomPercent(sourceResult,column),sourceResult.percentageDecimals??0,rtl?'ar':'en')}`),...(showTotalColumn?[breakdownDisplay==='count'?number(result.denominator):breakdownDisplay==='percent'?(formatPercent(pivotBottomPercent(sourceResult),sourceResult.percentageDecimals??0,rtl?'ar':'en')):`${number(result.denominator)} / ${formatPercent(pivotBottomPercent(sourceResult),sourceResult.percentageDecimals??0,rtl?'ar':'en')}`]:[]),...(!hasBreakdown?metrics.map(metric=>metric==='count'?number(result.denominator):formatPercent(pivotBottomPercent(sourceResult),sourceResult.percentageDecimals??0,rtl?'ar':'en')):[])];
+   const totalCells=textCells(totals,true),totalHeight=totalsPolicy.row?rowHeight(totalCells):0;
    if(panelIndex===0&&chartPanels.length===1){
     if(bottom-y<180)questionPage(true);
     const image=await imageFor(chartPanels[0]),properties=pdf.getImageProperties(image);
@@ -186,7 +198,7 @@ export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,lo
     }
    }
    for(let index=0;index<result.rows.length;index++)tableRow(textCells(rowValues(result.rows[index])),index%2?'alternate':'normal',index===result.rows.length-1?totalHeight:0);
-   tableRow(totalCells,'total');
+   if(totalsPolicy.row)tableRow(totalCells,'total');
   }
  }
  const pages=pdf.getNumberOfPages();

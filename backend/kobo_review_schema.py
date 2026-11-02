@@ -110,10 +110,10 @@ def effective_form(base, config, sheets, allow_empty=False):
         raise ValueError('Excluded question identifiers must be unique.')
     if excluded - questions.keys(): raise ValueError('Excluded question identifiers must reference known questions.')
     import re
-    excluded_names = {value for q in result['questions'] if q['id'] in excluded for value in [q['name'], q['id']]}
+    excluded_names = {value for q in result['questions'] if q['id'] in excluded for value in (q['name'], q['id'])}
     for q in result['questions']:
         if q['id'] not in excluded and set(re.findall(r'\$\{([^}]+)\}', q.get('choiceFilter', ''))) & excluded_names:
-            raise ValueError(f"Cannot ignore question: {q.get('labels', {}).get('en', q['id'])} has a choice filter that depends on it. Link the question or resolve this dependency first.")
+            result.setdefault('warnings', []).append(f"{q.get('labels', {}).get('en', q['id'])}: choice filter depends on an ignored question. Answers are checked against the full choice list.")
     result['questions'] = [q for q in result['questions'] if q['id'] not in excluded]
     return result
 

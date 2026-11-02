@@ -50,7 +50,7 @@ describe('general survey report prompts',()=>{
   expect(tables).toContain('| :--- | ---: |');
   expect(tables).toContain('0 | - |');
   expect(tables).not.toContain('\t');
-  expect(Math.max(...tables.split('\n').map(line=>line.split('|').length-2))).toBe(7);
+  expect(Math.max(...tables.split('\n').map(line=>line.split('|').length-2))).toBe(9);
   const percentOnly=reportPivotTables(pivot,'percent');
   expect(percentOnly).toContain('Region 0 - Percent');expect(percentOnly).not.toContain(' - Count');
  });

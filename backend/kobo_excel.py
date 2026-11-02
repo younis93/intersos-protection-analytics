@@ -23,12 +23,25 @@ from .kobo_excel_direct import field_name, page_fields, add_metric
 from .file_security import safe_spreadsheet_value
 from .kobo_excel_ranges import excel_cell, excel_range
 from .kobo_excel_layout import CHART_GAP, BLOCK_GAP, unique_sheet_name, group_sections, answered_formula, excel_literal, count_criterion
-from .kobo import KoboSettings, analyze, breakdown_fields, breakdown_values, filtered_records, label, missing
+from .kobo import KoboSettings, resolved_question_settings, analyze, breakdown_fields, breakdown_values, filtered_records, label, missing, question_cohort, QuestionSettings
 from .kobo_excel_slicers import slicer_fields, slicer_specs, totals_pivot, pivot_value, pivot_reference, add_sheet_slicers, initial_filter_summary
 
 
 PALETTE = ['#1877c9', '#2f9e68', '#d97706', '#7c5cc4', '#d9485f', '#168a91', '#9a6b35', '#536d88', '#b85c9e', '#6d8f38', '#e06b3c', '#3f73a8']
 EXPORT_TIMEOUT_SECONDS = 3600
+
+
+def order_export_answers(result, visible, cfg):
+    """Rank the complete export universe by the active filtered counts."""
+    if cfg.chart == 'histogram' or result.get('bins'): return
+    if cfg.answerSort.startswith('count'):
+        counts = {row['id']: (row.get('value') if result.get('measure') else row['count']) for row in (visible or {}).get('rows', [])}
+        answers = [row for row in result['rows'] if row['id'] != '__blank__']
+        answers.sort(key=lambda row: counts.get(row['id']) or 0, reverse=cfg.answerSort == 'count-desc')
+        result['rows'] = answers + [row for row in result['rows'] if row['id'] == '__blank__']
+        if result.get('trend'):
+            order={row['id']:index for index,row in enumerate(result['rows'])}
+            result['trend']['series'].sort(key=lambda series:order.get(series['id'],len(order)))
 
 
 def answer_label(result, answer):
@@ -88,7 +101,7 @@ def iter_source_rows(project, result, settings, context=None):
     """
     context = context or source_context(project, settings)
     q = context['questions'][result['id']]
-    records = context['records'][q['repeat']]
+    records = question_cohort(q, context['records'][q['repeat']], settings.questions.get(q['id'],QuestionSettings()), context['questions'], context['lookup'])
     cfg = settings.questions.get(q['id'])
     dimensions = breakdown_fields(cfg, context['questions'], q) if cfg else []
     lookup = context['lookup']
@@ -186,7 +199,7 @@ def _style_pivot(pivot, report, result, totals=None):
         except Exception:
             # Excel exposes no DataField for a sparse, empty PivotCell.
             continue
-        if not percentage: continue
+        if not percentage or result.get('percentageMode','legacy-respondents')!='legacy-respondents': continue
         target = report.Range(first, body.Cells(body.Rows.Count, index))
         # A blank answer has no denominator; numeric zero on an answered option is valid.
         blank_label = answer_label(result, next((row for row in result['rows'] if row['id'] == '__blank__'), {'id': '__blank__', 'label': 'Blank / unanswered'}))
@@ -433,6 +446,9 @@ def _chart(report, pivot, result, left, top, metrics, project, settings, totals=
     stacked = appearance.get('bars') == 'stack' and bool(result['breakdowns'])
     chart.ChartType = {'histogram': 52 if stacked else 51, 'bar': 58 if stacked else 57, 'column': 52 if stacked else 51, 'pie': 5, 'donut': -4120, 'line': 4}.get(kind, 57)
     if kind == 'histogram': chart.ChartGroups(1).GapWidth = 0
+    if kind == 'bar':
+        chart.Axes(1).ReversePlotOrder = True
+        chart.Axes(1).Crosses = 2  # xlMaximum keeps the value axis below reversed categories.
     chart.HasTitle = True; chart.ChartTitle.Text = result['label'][:255]
     chart.ChartTitle.Font.Name = 'Arial'; chart.ChartTitle.Font.Size = 12
     legend = appearance.get('legend', 'auto')
@@ -490,9 +506,38 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
         settings = KoboSettings.model_validate(settings_dict)
         validate_export_fields(project, settings, question)
         specs = slicer_specs(project, settings)
-        source_settings = settings.model_copy(update={'filters': [], 'hideZero': False, 'hideEmpty': False})
+        own_specs = {}
+        all_specs = list(specs)
+        for qid,cfg in settings.questions.items():
+            if cfg.filterMode not in {'own','additional'}: continue
+            from .kobo import active_question_filters
+            local_rules = [*settings.filters, *active_question_filters(cfg)] if cfg.filterMode == 'additional' else cfg.ownFilters
+            local_settings=settings.model_copy(update={'filters':local_rules,'filterFields':list(dict.fromkeys([*(settings.filterFields if cfg.filterMode=='additional' else []), *(f.field for f in local_rules)]))})
+            local=slicer_specs(project,local_settings)
+            for spec in local:
+                existing=next((item for item in all_specs if item['id']==spec['id']),None)
+                if existing is None:
+                    spec['header']=f'Filter{len(all_specs)+1:03d}';all_specs.append(spec)
+                else:spec['header']=existing['header']
+            own_specs[qid]=local
+        # Start count-ranked exports from form order so filtered ties stay stable.
+        source_questions = {}
+        for q in project['form']['questions']:
+            cfg = resolved_question_settings(q, settings)
+            source_questions[q['id']] = cfg.model_copy(update={**({'answerSort':'form'} if cfg.answerSort.startswith('count') else {}),'filterMode':'page'})
+        source_settings = settings.model_copy(update={'filters': [], 'hideZero': False, 'hideEmpty': False, 'questions': source_questions})
         telemetry.begin('analysis', 0, 'Calculating export results')
         snapshot = analyze(project, source_settings, question)
+        # Export sources retain all answers for refresh; total visibility follows
+        # the same filtered analysis the user sees on screen.
+        visible = {result['id']: result for result in analyze(project, settings, question)['questions']}
+        questions = {q['id']: q for q in project['form']['questions']}
+        for result in snapshot['questions']:
+            shown = visible.get(result['id'])
+            if shown:
+                for key in ('chartProjection','filterMode','filterSummary','cohortCount'): result[key]=shown.get(key)
+            result['_totalsPolicy'] = (len(shown['rows']) > 1, len(shown['breakdowns']) > 1) if shown else (False, False)
+            order_export_answers(result, shown, resolved_question_settings(questions[result['id']], settings))
         if not snapshot['questions']: raise ValueError('There are no visible questions to export.')
         messages.put({'progress': 0, 'message': 'Preparing response data and question references'})
         sections = group_sections(snapshot, separate_groups)
@@ -507,7 +552,7 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
         telemetry.total = len(snapshot['questions'])
         telemetry.begin('preparation', 1, 'Preparing editable workbook tables')
         layouts = response_layout(project, source_settings)
-        config = query_config(project, snapshot, source_settings, specs, layouts)
+        config = query_config(project, snapshot, source_settings, all_specs, layouts)
         config['excelMode'] = excel_mode
         preparation = prepare_workbook(prepared_path, layouts, config, source_settings, messages)
         import gc
@@ -542,20 +587,20 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
 
         def source_progress(index, total):
             messages.put({'progress': 5+round(index/max(total, 1)*15), 'message': f'Preparing multi-select reference: {index}/{total}'})
-        sources, response_sheet_names = create_response_source(book, excel, project, snapshot, source_settings, specs, source_progress, prepared=(layouts, config, preparation['sources'], preparation['multi']), progress=telemetry)
+        sources, response_sheet_names = create_response_source(book, excel, project, snapshot, source_settings, all_specs, source_progress, prepared=(layouts, config, preparation['sources'], preparation['multi']), progress=telemetry)
         scope_counts = Counter(record['scope'] for record in project['records'])
         question_rows = {result['id']: scope_counts[result['repeat']] for result in snapshot['questions']}
         for result in snapshot['questions']:
             result['_source'] = sources[result['id']]
             result['_excelBreakdowns'] = native_breakdown_columns(project, result, source_settings)
             if result['_source'].get('binary'): result['breakdowns'] = result['_excelBreakdowns']
-            result['appearance'] = {**result.get('appearance', {}), 'metric': 'percent' if chart_metric == 'percent' else 'count', 'labels': chart_metric, 'grid': 'hide'}
-        used_names = response_sheet_names | {'_kobo chart pivots', '_kobo chart labels', '_kobo slicer totals', '_kobo chart values', '_kobo trend pivots'}; first_report = None; completed = 0
+            result['appearance'] = {**result.get('appearance', {}), 'metric': 'percent' if chart_metric == 'percent' else 'count', 'labels': 'hidden' if result.get('appearance', {}).get('labels') == 'hidden' else chart_metric, 'grid': 'hide'}
+        used_names = response_sheet_names | {'_kobo chart pivots', '_kobo chart labels', '_kobo slicer totals', '_kobo chart values', '_kobo trend pivots', '_kobo overall totals', '_kobo overall pivots'}; first_report = None; completed = 0
         final_label_styles = []; final_heatmaps = []
         caches = {}
         telemetry.begin('layout', 20, 'Preparing analysis worksheets')
         for sheet_number, section in enumerate(sections, 1):
-            control_scopes = list(dict.fromkeys(item['result']['repeat'] for item in section['questions'] if excel_mode == 'binary' or item['result']['kind'] != 'multiple'))
+            control_scopes = list(dict.fromkeys(item['result']['repeat'] for item in section['questions'] if item['result'].get('measure') or excel_mode == 'binary' or item['result']['kind'] != 'multiple'))
             has_sheet_controls = bool(specs and control_scopes)
             sheet_pivots = defaultdict(list)
             report = book.Worksheets.Add(After=book.Worksheets(book.Worksheets.Count)); report.Name = unique_sheet_name(section['label'], used_names)
@@ -581,8 +626,23 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                 result = item['result']; position = item['position']; start = next_row; completed += 1
                 telemetry.completed = completed-1
                 telemetry.begin('pivots', 20+round(completed / len(snapshot['questions']) * 75), f'Building question {completed}/{len(snapshot["questions"])}')
+                if result.get('measure'):
+                    from .kobo_excel_measures import measured_report
+                    layout = next(value for value in layouts if value['scope']==result['repeat'])
+                    key = ('measure',result['repeat'],sheet_number,result['id'] if result.get('filterMode') in {'own','additional'} else '')
+                    if key not in caches: caches[key]=book.PivotCaches().Create(1,layout['table'])
+                    area,footer,chart,pivot = measured_report(book,report,project,result,position,start,layouts,config,caches[key],_support_sheet)
+                    if result.get('filterMode') in {'own','additional'}:
+                        add_sheet_slicers(book,report,[pivot],own_specs.get(result['id'],[]),f'own{position}',top_row=start+4)
+                    else:sheet_pivots[result['repeat']].append(pivot)
+                    from .kobo_excel_chart_projection import project_excel_chart
+                    project_excel_chart(book,chart,result,_support_sheet)
+                    required=max(footer.Top+footer.Height,chart.Top+chart.Height if chart is not None else 0)+BLOCK_GAP
+                    next_row=max(footer.Row+5,start+int(required/15))
+                    while excel_cell(report,next_row,1).Top<required:next_row+=1
+                    continue
                 source = sources[result['id']]
-                independent = result['kind'] == 'multiple' and not source.get('binary')
+                independent = result.get('filterMode') in {'own','additional'} or result['kind'] == 'multiple' and not source.get('binary')
                 block_pivots = [] if independent else sheet_pivots[source['scope']]
                 active_cache = None
                 if question_rows[result['id']]:
@@ -625,7 +685,7 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                     from .kobo_excel_binary import add_binary_metrics
                     add_binary_metrics(pivot, result)
                 else:
-                    for metric in (['count'] if independent else metrics): add_metric(pivot, result, metric, _percentage_field)
+                    for metric in (['count'] if source.get('sparse') or result.get('percentageMode')=='breakdown-group' else metrics): add_metric(pivot, result, metric, _percentage_field)
                 pivot.DisplayErrorString = True; pivot.ErrorString = '-'; pivot.RowGrand = False; pivot.ColumnGrand = False; pivot.PreserveFormatting = True; pivot.RowAxisLayout(1)
                 pivot.DisplayNullString = True; pivot.NullString = '0'
                 pivot.MergeLabels = True
@@ -639,6 +699,9 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                         except Exception: pass
                 pivot.ManualUpdate = False
                 result['_countPivot'] = pivot_reference(pivot)
+                from .kobo_excel_totals import overall_count_pivot, totals_policy
+                if (totals_policy(result)[1] or result.get('percentageMode','legacy-respondents')!='legacy-respondents') and (source.get('sparse') or source.get('binary')):
+                    block_pivots.append(overall_count_pivot(book, active_cache, result, position, _support_sheet))
                 totals = totals_pivot(book, active_cache, result, position)
                 if totals is not None:
                     block_pivots.extend([pivot, totals])
@@ -664,11 +727,13 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                 else:
                     chart = _chart(report, chart_pivot, result, area.Left+area.Width+CHART_GAP, area.Top, chart_metrics or metrics, project, settings, totals, final_label_styles) if result['denominator'] else None
                     if chart is None: excel_cell(report, start + 3, 1).Value = 'No answered responses available for a chart.'
+                from .kobo_excel_chart_projection import project_excel_chart
+                project_excel_chart(book,chart,result,_support_sheet)
                 if source.get('binary'):
                     from .kobo_excel_binary import DRILLDOWN_NOTE
                     note = excel_range(report, start+3, 1, start+3, 10); note.Merge(); note.Value = DRILLDOWN_NOTE; note.WrapText = True; note.RowHeight = 34
                 telemetry.begin('slicers', message=f'Connecting question filters: {completed}/{len(snapshot["questions"])}')
-                if independent: add_sheet_slicers(book, report, block_pivots, specs, f'q{position}', top_row=start+4)
+                if independent: add_sheet_slicers(book, report, block_pivots, own_specs.get(result['id'],[]) if result.get('filterMode') in {'own','additional'} else specs, f'q{position}', top_row=start+4)
                 telemetry.completed = completed
                 telemetry.begin('layout')
                 required = max(footer.Top+footer.Height, chart.Top+chart.Height if chart is not None else 0) + BLOCK_GAP
@@ -690,6 +755,10 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
         for connection in book.Connections:
             connection.OLEDBConnection.BackgroundQuery = False
             connection.RefreshWithRefreshAll = True
+        # Finalize deferred native pivot layouts after connecting slicers. Some
+        # Excel builds leave report cells and membership helpers empty until this refresh.
+        for worksheet in book.Worksheets:
+            for live_pivot in worksheet.PivotTables():live_pivot.RefreshTable()
         excel.CalculateFull()
         telemetry.begin('chart_styles', 97, 'Finishing chart labels')
         series_cache = {}
@@ -700,7 +769,8 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
         excel.PrintCommunication = True
         excel.Calculation = -4105; excel.CalculateBeforeSave = False
         ranges = final_heatmaps
-        book.SaveAs(str(target), FileFormat=51)
+        from .kobo_excel_runtime import save_workbook
+        if not save_workbook(book,target,cancel_event):return
         if ranges:
             book.Close(False); book = None
             write_heatmap_formats(target, ranges)

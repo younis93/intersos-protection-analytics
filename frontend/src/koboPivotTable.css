@@ -49,3 +49,12 @@
 .kobo-shell .kobo-pivot-wrap .kobo-pivot-table .kobo-pivot-sort:focus-visible{outline:2px solid currentColor;outline-offset:3px}
 .kobo-shell .kobo-pivot-wrap .kobo-pivot-table tfoot th,.kobo-shell .kobo-pivot-wrap .kobo-pivot-table tfoot td{background:#dbe8f4;color:#173651;border-top:3px solid #476e91;font-weight:750}
 :root[data-theme=glass-dark] .kobo-shell .kobo-pivot-wrap .kobo-pivot-table tfoot th,:root[data-theme=glass-dark] .kobo-shell .kobo-pivot-wrap .kobo-pivot-table tfoot td{background:#27445d;color:#f3f8ff;border-top-color:#8fb9df}
+
+/* Wide pivots use deterministic geometry so offscreen columns can be represented by gaps. */
+.kobo-shell .kobo-pivot-wrap.is-windowed-columns .kobo-pivot-table th,.kobo-shell .kobo-pivot-wrap.is-windowed-columns .kobo-pivot-table td{box-sizing:border-box;min-width:0;overflow-wrap:anywhere;white-space:normal;overflow:hidden}
+.kobo-shell .kobo-pivot-wrap.is-windowed-columns .kobo-pivot-table .kobo-pivot-answer{width:220px;min-width:220px;max-width:220px}
+.kobo-shell .kobo-pivot-wrap .kobo-pivot-gap{padding:0;border:0;background:transparent;box-shadow:none}
+.kobo-shell .kobo-pivot-wrap{overflow-anchor:none}
+
+.kobo-shell .kobo-pivot-wrap.is-windowed-columns .kobo-pivot-answer{position:sticky;inset-inline-start:0;z-index:1}
+.kobo-shell .kobo-pivot-wrap.is-windowed-columns thead .kobo-pivot-answer{z-index:2}

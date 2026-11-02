@@ -16,16 +16,33 @@ def page_fields(pivot, result):
 
 def add_metric(pivot, result, metric, percentage_field=None):
     direct = result.get('_source', {}).get('direct')
-    source = pivot.PivotFields(field_name(result, 'Selected' if metric == 'count' else 'Answered')) if direct else (
+    modern=result.get('percentageMode','legacy-respondents')!='legacy-respondents'
+    if modern and metric=='percent':
+        source=pivot.PivotFields(field_name(result,'Selected'))
+    else:source = pivot.PivotFields(field_name(result, 'Selected' if metric == 'count' else 'Answered')) if direct else (
         pivot.PivotFields('Selected') if metric == 'count' else percentage_field(pivot))
     field = pivot.AddDataField(source, '#' if metric == 'count' else '%', -4157)
-    if direct and metric == 'percent': field.Calculation = 7  # xlPercentOfColumn
+    if modern and metric=='percent':field.Calculation={'row-total':6,'column-total':7,'grand-total':8,'breakdown-group':7}[result['percentageMode']]
+    elif direct and metric == 'percent': field.Calculation = 7  # xlPercentOfColumn
     field.NumberFormat = '#,##0' if metric == 'count' else percent_format(result.get('percentageDecimals', 0))
 
 
 def structured_column(header):
     # Excel structured references escape these characters with a single quote.
     return ''.join("'" + c if c in "[]#'@" else c for c in header)
+
+
+def hidden_answer_formula(question, value):
+    """Live Excel predicate for whole-record answer exclusions."""
+    if question['kind'] not in {'category', 'multiple', 'text'}: return 'FALSE'
+    conditions = []
+    for code in question.get('hiddenAnswers', []):
+        if code == '__blank__': conditions.append(f'({value}="")')
+        elif question['kind'] == 'multiple':
+            normalized = f'TRIM(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE({value},CHAR(9)," "),CHAR(10)," "),CHAR(13)," "))'
+            conditions.append(f'ISNUMBER(FIND({excel_literal(" "+code+" ")}," "&{normalized}&" "))')
+        else: conditions.append(f'EXACT({value}&"",{excel_literal(code)})')
+    return 'OR('+','.join(conditions)+')' if conditions else 'FALSE'
 
 
 def direct_helpers(config, layouts):
@@ -106,6 +123,11 @@ def direct_helpers(config, layouts):
                 options[0]['metric'] = '#'
                 sources[q['id']]['single'] = True
                 helpers[scope][fields['Answer']] = '='+excel_literal(options[0]['caption'])
+        if q.get('hiddenAnswers'):
+            fields['AnswerAllowed'] = prefix+'answer allowed'
+            helpers[scope][fields['AnswerAllowed']] = f'=IF({hidden_answer_formula(q,value)},"Excluded","Included")'
+            original = helpers[scope][fields['IncludeInPivot']][1:]
+            helpers[scope][fields['IncludeInPivot']] = f'=IF({hidden_answer_formula(q,value)},"Excluded",{original})'
     return helpers, sources
 
 

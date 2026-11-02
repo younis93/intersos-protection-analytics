@@ -23,7 +23,9 @@ def validate_export_fields(project, settings, question=''):
     for qid in requested:
         if qid in questions:
             cfg = settings.questions.get(qid)
+            if cfg: dependencies.update(f.field for f in cfg.ownFilters)
             if cfg and cfg.trendDateField: dependencies.add(cfg.trendDateField)
+            if cfg and cfg.calculation and cfg.calculation.operation!='count': dependencies.add(cfg.calculation.field)
             if cfg: dependencies.update(q['id'] for q in breakdown_fields(cfg, questions, questions[qid]))
     blocked = (requested | dependencies) & identifying
     if blocked:
@@ -89,7 +91,7 @@ def query_config(project, snapshot, settings, specs, layouts):
         counts = Counter(row['label'] for row in result['rows'])
         results.append({'id': q['id'], 'label': result['label'], 'group': q['group'], 'groupLabel': next((g['label'] for g in snapshot['groups'] if g['id'] == q['group']), ''),
             'scope': q['repeat'], 'kind': q['kind'], 'dateUnit': cfg.dateUnit if cfg else 'month', 'trendDateField': cfg.trendDateField if cfg and result.get('trend') else '', 'trendUnit': cfg.trendUnit if cfg else 'month', 'dimensions': [f['id'] for f in dimensions],
-            'bins': result.get('bins', []), 'blank': not settings.hideBlanks,
+            'bins': result.get('bins', []), 'blank': not settings.hideBlanks and not (cfg and '__blank__' in cfg.hiddenAnswers), 'hiddenAnswers': cfg.hiddenAnswers if cfg and q['kind'] in {'category','multiple','text'} else [],
             'answers': [{'id': a['id'], 'label': f"{a['label']} [{a['id']}]" if counts[a['label']] > 1 else a['label']} for a in result['rows'] if a['id'] != '__blank__'],
             'blankLabel': 'Blank / unanswered' if settings.language == 'en' else 'فارغ / دون إجابة'})
     return {'tables': [{'name': l['table'], 'raw': f'KoboRaw{index:03d}', 'scope': l['scope'], 'parent': l['parent_scope']} for index, l in enumerate(layouts)], 'fields': fields, 'questions': results,
@@ -149,7 +151,7 @@ QUERY_BODY = r'''
 
  FilterValues = (r as record) as list => List.Transform(Config[filters], (f) => let v = FieldValue(r, f[id]) in Record.FieldOrDefault(f[captions], if v = "" then "__blank__" else v, if v = "" then "Blank / unanswered" else Caption(f[id], v))),
  QuestionRows = (q as record) as list => let
-   Cohort = List.Select(Records, each [_Scope] = q[scope]),
+   Cohort = List.Select(Records, (r) => r[_Scope] = q[scope] and (let v = FieldValue(r, q[id]), codes = if v = "" then {"__blank__"} else Text.Split(v, " ") in List.IsEmpty(List.Intersect({codes, Record.FieldOrDefault(q, "hiddenAnswers", {})})))),
    Options = q[answers] & (if q[blank] then {[id="__blank__", label=q[blankLabel]]} else {}),
    Expanded = List.Combine(List.Transform(Cohort, (r) => let
      value = FieldValue(r, q[id]), selected = List.Distinct(List.Select(Text.Split(value, " "), each _ <> "")), answered = if List.IsEmpty(selected) then 0 else 1,

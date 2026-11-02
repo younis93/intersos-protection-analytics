@@ -682,6 +682,7 @@ class NativeFullscreenController:
         self._state_force = False
         self._state_pending = False
         self._closed = False
+        self._resume = None
 
     def attach_window(self, window: Any, startup_theme: str | None = None) -> None:
         self.window = window
@@ -812,6 +813,9 @@ class NativeFullscreenController:
             if self._frame is None:
                 from windows_window_frame import WindowsWindowFrame
                 self._frame = WindowsWindowFrame(native, self)
+                from desktop_resume import DesktopResume
+                self._resume = DesktopResume(self)
+                self._resume.attach(native)
         self.on_native_ui(configure)
 
     def refresh_work_area(self) -> None:
@@ -887,6 +891,8 @@ class NativeFullscreenController:
             if again: self.publish_state()
 
     def cancel_state_updates(self, *_args) -> None:
+        if self._resume is not None:
+            self.on_native_ui(lambda _native: self._resume.dispose())
         with self._state_lock:
             self._closed = True
             if self._state_timer is not None: self._state_timer.cancel()
@@ -981,6 +987,12 @@ class DesktopApi:
         # graph forever after a window is attached.
         self._fullscreen = fullscreen
         self._legal_import_progress = 0
+
+    def record_renderer_event(self, kind: str) -> bool:
+        if kind not in {'error','unhandledrejection'}:return False
+        resume=getattr(self._fullscreen,'_resume',None)
+        if resume is not None:resume.log('frontend-event',kind=kind)
+        return True
 
     def get_legal_import_progress(self) -> int:
         from backend.import_progress import legal_import_tracker

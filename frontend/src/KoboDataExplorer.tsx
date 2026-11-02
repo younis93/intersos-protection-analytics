@@ -1,33 +1,36 @@
+import {KoboCellEditor,editableField,undoDataEdit} from './KoboDataEditing';
 import {useColumnFilters} from './ColumnFilterControls';
 import {recordColumnType,type ValuePage,type FilterColumn} from './columnFilters';
 import {useEffect,useMemo,useState} from 'react';
-import {Columns3,RotateCcw,Search} from 'lucide-react';
+import {Columns3,RotateCcw,Search,Pencil} from 'lucide-react';
 import {AppSelect} from './SelectionControls';
 import {Pager,RowSelectionCheckbox,SearchField,SortableHeader} from './TableControls';
 import {ValueTable} from './ValueTable';
 import {useQueryPage} from './useQueryPage';
 import {koboApi,koboRequest} from './koboApi';
-import {koboLabel,type KoboProject,type KoboSettings,type KoboPivotDrilldown} from './koboTypes';
+import {koboLabel,type KoboProject,type KoboQuestion,type KoboSettings,type KoboPivotDrilldown} from './koboTypes';
 import {visibilityGroups} from './koboVisibility';
 import KoboActionMenu from './KoboActionMenu';
 import {koboCopyCell,useKoboCopy} from './koboClipboard';
 import {TableSelectionActions} from './TableSelectionActions';
 import './koboDataExplorer.css';
 
-type DataPage={total:number;matched:number;rows:{id:string;row:number;values:Record<string,string>}[]};
+type DataPage={total:number;matched:number;rows:{id:string;row:number;values:Record<string,string>;rawValues?:Record<string,unknown>}[]};
 export default function KoboDataExplorer({project,settings,groupId,questionSearch,drilldown,initialScope=''}:{project:KoboProject;settings:KoboSettings;groupId:string;questionSearch:string;drilldown?:KoboPivotDrilldown;initialScope?:string}){
+ const[editing,setEditing]=useState(false),[cell,setCell]=useState<{question:KoboQuestion;record:string;row:number;value:unknown}|null>(null);
  const[scope,setScope]=useState(initialScope),[searchInput,setSearchInput]=useState(''),[search,setSearch]=useState(''),[columnSearch,setColumnSearch]=useState('');
  const[columns,setColumns]=useState<Record<string,boolean>>({}),[sort,setSort]=useState({column:'',direction:'asc' as 'asc'|'desc'}),[data,setData]=useState<DataPage|null>(null),[busy,setBusy]=useState(true),[error,setError]=useState('');
  const[selectedState,setSelectedState]=useState<{key:string;rows:Map<string,Record<string,unknown>>}>({key:'',rows:new Map()});
  const [columnFilters,setColumnFilters]=useColumnFilters(JSON.stringify([project.id,scope,drilldown,settings.language]));
- useEffect(()=>setColumnFilters([]),[project.form]);
+ const schemaKey=JSON.stringify(project.form.questions.map(q=>[q.id,q.kind]));
+ useEffect(()=>{const known=new Map(project.form.questions.map(q=>[q.id,recordColumnType(q.name,q.kind==='number'?'number':q.kind==='date'?'date':'text')]));const valid=columnFilters.filter(f=>f.column==='__row__'||known.get(f.column)===f.type);if(valid.length!==columnFilters.length)setColumnFilters(valid)},[schemaKey]);
  const copy=useKoboCopy();
  const showAllFields=Boolean(drilldown);
  const eligible=useMemo(()=>project.form.questions.filter(q=>showAllFields||!settings.hidden.includes(q.id)&&(!q.metadata||settings.metadata)),[project.form,settings.hidden,settings.metadata,showAllFields]);
  const scopes=useMemo(()=>[...new Set(['',...eligible.map(q=>q.repeat)])],[eligible]);
  useEffect(()=>{if(!drilldown&&!scopes.includes(scope))setScope('')},[scopes,scope,drilldown]);
  const groups=useMemo(()=>visibilityGroups(project,settings.language),[project.form,settings.language]);
- const candidates=useMemo(()=>{const ids=groupId==='@all'?null:new Set(groups.find(g=>g.id===groupId)?.questionIds||[]);return eligible.filter(q=>q.repeat===scope&&(!ids||ids.has(q.id)))},[eligible,scope,groupId,groups]);
+ const candidates=useMemo(()=>{const ids=groupId==='@all'?null:new Set(groups.find(g=>g.id===groupId)?.questionIds||[]);return eligible.filter(q=>(q.repeat===scope||!!drilldown&&q.id===settings.questions[drilldown.question]?.calculation?.field)&&(!ids||ids.has(q.id)))},[eligible,scope,groupId,groups,drilldown,settings.questions]);
  const query=questionSearch.trim().normalize('NFC').toLocaleLowerCase();
  const visible=useMemo(()=>candidates.filter(q=>query?`${q.name} ${q.id} ${koboLabel(q,settings.language)}`.normalize('NFC').toLocaleLowerCase().includes(query):(columns[q.id]??true)),[candidates,columns,query,settings.language]);
  const columnMatches=candidates.filter(q=>`${q.name} ${koboLabel(q,settings.language)}`.toLocaleLowerCase().includes(columnSearch.toLocaleLowerCase()));
@@ -38,7 +41,7 @@ export default function KoboDataExplorer({project,settings,groupId,questionSearc
  const setSelected=(update:(current:Map<string,Record<string,unknown>>)=>Map<string,Record<string,unknown>>)=>setSelectedState(current=>({key:selectionKey,rows:update(current.key===selectionKey?current.rows:new Map())}));
  const[page,setPage]=useQueryPage(JSON.stringify([project.id,drilldown,scope,ids,search,sortColumn,sort.direction,settings.filters,settings.language,columnFilters]));
  useEffect(()=>{const timer=setTimeout(()=>setSearch(searchInput),250);return()=>clearTimeout(timer)},[searchInput]);
- const requestKey=JSON.stringify({drilldown,scope,columns:ids,search,sortColumn,sortDirection:sort.direction,columnFilters,page,pageSize:50,filters:settings.filters,language:settings.language});
+ const requestKey=JSON.stringify({revision:project.dataRevision||0,drilldown,scope,columns:ids,search,sortColumn,sortDirection:sort.direction,columnFilters,page,pageSize:50,filters:settings.filters,language:settings.language});
  useEffect(()=>{
   if(!ids.length){setBusy(false);setData(null);setError('');return}
   const controller=new AbortController();setBusy(true);setError('');setData(null);
@@ -58,6 +61,8 @@ export default function KoboDataExplorer({project,settings,groupId,questionSearc
   <div className="legal-table-card records-table-card kobo-response-table glass">
    <div className="legal-card-heading">
    {!drilldown&&scopes.length>1&&<AppSelect label="Response table" value={scope} onChange={value=>{setScope(value);setColumns({});setSort({column:'',direction:'asc'})}} options={scopes.map(id=>[id,id?`${koboLabel(project.form.groups.find(g=>g.id===id)||{name:id,labels:{}},settings.language)} · Repeat entries`:'Main responses'])}/>} 
+   <button type="button" className="soft kobo-data-edit-action" aria-pressed={editing} onClick={()=>setEditing(value=>!value)}><Pencil aria-hidden="true"/>{editing?'Finish editing':'Edit data'}</button>
+   {project.canUndoEdit&&<button type="button" className="soft" onClick={()=>void undoDataEdit(project).catch(e=>setError(e.message))}><RotateCcw/>Undo last edit</button>}
    <button type="button" className="soft" disabled={!searchInput&&!sort.column&&!Object.keys(columns).length&&!columnFilters.length} onClick={reset}><RotateCcw aria-hidden="true"/>{'Reset table'}</button>
    <KoboActionMenu className="kobo-data-columns-menu" label="Columns" icon={<Columns3 aria-hidden="true"/>} closeOnSelect={false}><div className="kobo-data-column-picker"><label className="kobo-navigator-search"><Search aria-hidden="true"/><input aria-label="Find table columns" placeholder="Find a column…" value={columnSearch} onChange={event=>setColumnSearch(event.target.value)}/></label><div className="kobo-data-column-actions"><button type="button" className="soft" onClick={()=>setColumns(current=>({...current,...Object.fromEntries(candidates.map(q=>[q.id,true]))}))}>Show all</button><button type="button" className="soft" onClick={()=>setColumns({})}>Reset columns</button></div><div className="kobo-data-column-options">{columnMatches.map(q=><label key={q.id}><input type="checkbox" aria-label={`Show column ${q.name}`} checked={ids.includes(q.id)} disabled={Boolean(query)||ids.length===1&&ids[0]===q.id} onChange={event=>setColumns(current=>({...current,[q.id]:event.target.checked}))}/><span dir="auto">{koboLabel(q,settings.language)}<small>{q.name}</small></span></label>)}{!columnMatches.length&&<p className="kobo-data-column-empty" role="status">No matching columns.</p>}</div></div></KoboActionMenu>
 
@@ -74,8 +79,8 @@ export default function KoboDataExplorer({project,settings,groupId,questionSearc
     {visible.map(q=><SortableHeader key={q.id} direction={sortColumn===q.id?sort.direction:undefined} onSort={()=>order(q.id)} buttonProps={{'aria-label':`Sort by ${q.name}`,title:`${koboLabel(q,settings.language)} (${q.name})`,className:sortColumn===q.id?'active':''}}><span dir="auto">{koboLabel(q,settings.language)}</span><b>{sortColumn===q.id?(sort.direction==='asc'?'▲':'▼'):'↕'}</b></SortableHeader>)}
    </tr></thead><tbody>{data?.rows.map(row=><tr key={row.id} className={selected.has(row.id)?'case-row-selected':''}>
     <td className="kobo-row-selection"><input type="checkbox" disabled={busy||searchInput!==search} aria-label={`Select response ${row.row}`} checked={selected.has(row.id)} onChange={()=>setSelected(current=>{const next=new Map(current);if(next.has(row.id))next.delete(row.id);else next.set(row.id,{__rowKey:row.id});return next})}/></td>
-    <td {...koboCopyCell(String(row.row),settings.language)}>{row.row}</td>{visible.map(q=><td key={q.id} {...koboCopyCell(row.values[q.id]||'',settings.language)}>{row.values[q.id]||''}</td>)}
+    <td {...koboCopyCell(String(row.row),settings.language)}>{row.row}</td>{visible.map(q=><td key={q.id} {...koboCopyCell(row.values[q.id]||'',settings.language)}>{editing&&editableField(q)&&q.repeat===scope?<button type="button" className="kobo-data-edit-cell" disabled={busy||searchInput!==search} aria-label={`Edit ${koboLabel(q,settings.language)}, source row ${row.row}`} onClick={()=>setCell({question:q,record:row.id,row:row.row,value:row.rawValues?.[q.id]})}>{row.values[q.id]||'Add value'}</button>:row.values[q.id]||''}</td>)}
    </tr>)}</tbody></ValueTable>{!busy&&!data?.rows.length&&<p className="kobo-data-empty" role="status">No responses match the current search and filters.</p>}</div>}
-  </div>{copy.notification}
+  </div>{cell&&<KoboCellEditor project={project} {...cell} onClose={()=>setCell(null)} onSaved={()=>{}}/>}{copy.notification}
  </section>;
 }

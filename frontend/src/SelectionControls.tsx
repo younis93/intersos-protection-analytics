@@ -179,7 +179,7 @@ export function AppSelect({
           {searchable && <label className="app-select-menu-search"><Search/><input aria-label={`Search ${label.toLowerCase()}`} autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${label.toLowerCase()}`}/></label>}
           {value&&!options.some(([option])=>option===value)&&<p className="filter-empty">{displayCaption(value)} - Unavailable</p>}
           <VirtualRows items={visibleOptions} enabled={visibleOptions.length>60} resetKey={search} initialFocusIndex={searchable?null:Math.max(0,visibleOptions.findIndex(([option])=>option===value))} render={([option, caption]) => (
-            <button key={option} type="button" role="option" data-theme-option={variant==='theme'?option:undefined} aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); root.current?.querySelector<HTMLButtonElement>(".app-select-trigger")?.focus(); }}>
+            <button key={option} type="button" role="option" data-theme-option={variant==='theme'?option:undefined} aria-selected={option === value} className={option === value ? "selected" : ""} onClick={() => { onChange(option); setOpen(false); root.current?.querySelector<HTMLButtonElement>(".app-select-trigger")?.focus({preventScroll:true}); }}>
               <span>{displayCaption(caption)}</span>{option === value && <Check />}
             </button>
           )}/>
@@ -213,7 +213,7 @@ export function CheckboxMultiSelect({label,values,selected,onChange,hideLabel=fa
       <UnavailableSelections values={values} selected={selected} onChange={onChange} formatCaption={displayItem}/>
       <VirtualRows items={visible} enabled={visible.length>60} resetKey={search} render={item=><FilterOption allowExclude={allowExclude} values={values} key={item} value={item} caption={displayItem(item)} selected={selected} checked={checkedSet.has(item)} onChange={onChange}/>}/>
       {!visible.length&&<p>{values.length?"No matching options":"No available options"}</p>}
-      <footer><FilterSelectAllButton values={search.trim()?visible:values} matching={Boolean(search.trim())} selected={selected} onChange={onChange}/><button type="button" disabled={!selected.length} onClick={()=>onChange([])}>Reset</button><button type="button" onClick={()=>{setOpen(false);root.current?.querySelector<HTMLButtonElement>(".app-select-trigger")?.focus()}}>Done</button></footer>
+      <footer><FilterSelectAllButton values={search.trim()?visible:values} matching={Boolean(search.trim())} selected={selected} onChange={onChange}/><button type="button" disabled={!selected.length} onClick={()=>onChange([])}>Reset</button><button type="button" onClick={()=>{setOpen(false);root.current?.querySelector<HTMLButtonElement>(".app-select-trigger")?.focus({preventScroll:true})}}>Done</button></footer>
     </div>}
   </div>;
 }

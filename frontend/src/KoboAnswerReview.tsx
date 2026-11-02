@@ -1,5 +1,5 @@
 import {ValueTable} from './ValueTable';
-import {AlertTriangle,CheckCircle2,ArrowRight,LoaderCircle} from 'lucide-react';
+import {AlertTriangle,CheckCircle2,ArrowRight,LoaderCircle,Minus} from 'lucide-react';
 import {koboLabel,type KoboPreview} from './koboTypes';
 
 export function answerIssuePresentation(message:string){
@@ -14,9 +14,9 @@ export function answerIssuePresentation(message:string){
  return {kind:'source',title:'Source answers need review',description:descriptions[message]||'Some source answers could not be interpreted for this question. Review the original values and source mapping.'};
 }
 export const answerReviewId=(qid:string)=>`kobo-answer-${encodeURIComponent(qid)}`;
-type Props={preview:KoboPreview;search:string;busy:boolean;checking:boolean;checkError:string;acceptInvalid:boolean;onAccept:(v:boolean)=>void;onRetry:()=>void;onChoices:(id:string)=>void;onSources:(id:string,combined:boolean)=>void};
+type Props={onIgnoreQuestion?:(id:string)=>void;preview:KoboPreview;search:string;busy:boolean;checking:boolean;checkError:string;acceptInvalid:boolean;onAccept:(v:boolean)=>void;onRetry:()=>void;onChoices:(id:string)=>void;onSources:(id:string,combined:boolean)=>void};
 
-export default function KoboAnswerReview({preview,search,busy,checking,checkError,acceptInvalid,onAccept,onRetry,onChoices,onSources}:Props){
+export default function KoboAnswerReview({onIgnoreQuestion,preview,search,busy,checking,checkError,acceptInvalid,onAccept,onRetry,onChoices,onSources}:Props){
  const groups=new Map<string,KoboPreview['issues']>();
  for(const issue of preview.issues)groups.set(issue.question,[...(groups.get(issue.question)||[]),issue]);
  const query=search.toLocaleLowerCase();
@@ -30,7 +30,7 @@ export default function KoboAnswerReview({preview,search,busy,checking,checkErro
   {visible.map(([qid,issues])=>{
    const question=preview.form.questions.find(q=>q.id===qid),examples=preview.examples?.[qid]||preview.linkReview?.conflicts?.[qid]?.examples||[];
    return <article className="kobo-answer-question" id={answerReviewId(qid)} tabIndex={-1} key={qid}>
-    <header><AlertTriangle aria-hidden="true"/><h4 dir="auto">{question?koboLabel(question,'en'):qid}</h4><span>{issues.length} {issues.length===1?'issue':'issues'}</span></header>
+    <header><span className="kobo-answer-question-icon"><AlertTriangle aria-hidden="true"/></span><div className="kobo-answer-question-title"><span className="eyebrow">ANSWER CHECK</span><h4 dir="auto">{question?koboLabel(question,'en'):qid}</h4><span className="kobo-answer-issue-count">{issues.length} {issues.length===1?'issue':'issues'}</span></div>{question&&onIgnoreQuestion&&<button type="button" className="soft kobo-ignore-question" disabled={busy||checking} onClick={()=>onIgnoreQuestion(qid)}><Minus aria-hidden="true"/>Ignore question</button>}</header>
     {issues.map((issue,index)=>{const info=answerIssuePresentation(issue.message);return <section className="kobo-answer-issue" key={index}><div><h5>{info.title}</h5><span className="kobo-answer-row-count">{issue.count.toLocaleString()} affected {issue.count===1?'row':'rows'}</span></div><p>{info.description}</p>
      {info.kind==='choices'&&question&&['category','multiple'].includes(question.kind)?<button className="soft" disabled={busy||checking} onClick={()=>onChoices(qid)}>Review answer choices<ArrowRight/></button>:info.kind==='conflict'?<button className="soft" disabled={busy||checking} onClick={()=>onSources(qid,true)}>Review source conflicts<ArrowRight/></button>:<button className="soft" disabled={busy||checking} onClick={()=>onSources(qid,false)}>Review source columns<ArrowRight/></button>}
     </section>})}

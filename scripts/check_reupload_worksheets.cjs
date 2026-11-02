@@ -1,0 +1,72 @@
+// Start scripts/serve_reupload_worksheets_fixture.py after building frontend, then run this check.
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const base='http://127.0.0.1:5399',root=path.resolve('output/reupload-sheets'),ids=JSON.parse(fs.readFileSync(path.join(root,'projects.json')));
+(async()=>{
+ const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
+ try{
+  for(const width of [1440,390]){
+   const page=await browser.newPage({viewport:{width,height:1000}}),errors=[];
+   page.on('pageerror',e=>errors.push(String(e)));
+   await page.route('**/api/app/**',route=>route.fulfill({json:{available:false}}));
+   await page.goto(`${base}/#/kobo/${ids.kobo}`);
+   await page.getByRole('button',{name:'Data source',exact:true}).click();
+   await page.getByRole('button',{name:'Re-upload data',exact:true}).click();
+   const d=page.getByRole('dialog',{name:'Review and correct import',exact:true});
+   assert(await d.getByRole('radio',{name:'Keep previous settings',exact:false}).isChecked());
+   let failDiscovery=true;
+   await page.route('**/imports/worksheets',route=>failDiscovery?route.fulfill({status:400,json:{detail:'Worksheet discovery failed'}}):route.continue());
+   await d.getByLabel('Replacement response data',{exact:true}).setInputFiles(path.join(root,'reordered.xlsx'));
+   await d.getByText('Worksheet discovery failed',{exact:false}).waitFor();
+   assert(await d.getByRole('button',{name:'Update data',exact:true}).isDisabled());
+   failDiscovery=false;await d.getByRole('button',{name:'Retry worksheet list',exact:true}).click();
+   const sheet=d.getByRole('button',{name:'Worksheet',exact:true});
+   await sheet.filter({hasText:'Data'}).waitFor();
+   await sheet.click();await page.getByRole('option',{name:'Other',exact:true}).click();
+   const reviewRequest=page.waitForRequest(r=>r.url().endsWith(`/projects/${ids.kobo}/review`));
+   await d.getByRole('button',{name:'Update data',exact:true}).click();
+   assert((await reviewRequest).postData().includes('Other'));
+   await d.getByText('Replacement files ready for review',{exact:true}).waitFor();
+   await sheet.click();await page.getByRole('option',{name:'Data',exact:true}).click();
+   assert.equal(await d.getByRole('button',{name:'Apply update',exact:true}).count(),0,'Old preview must be discarded');
+   await d.getByLabel('Replacement response data',{exact:true}).setInputFiles(path.join(root,'missing.xlsx'));
+   await d.getByText('The saved worksheet "Data" is missing. Choose a replacement worksheet.',{exact:true}).waitFor();
+   assert(await d.getByRole('button',{name:'Update data',exact:true}).isDisabled());
+   await sheet.click();await page.getByRole('option',{name:'Other',exact:true}).click();
+   assert(await d.getByRole('button',{name:'Update data',exact:true}).isEnabled());
+   await d.getByLabel('Replacement response data',{exact:true}).setInputFiles({name:'data.csv',mimeType:'text/csv',buffer:Buffer.from('Code,Amount\n001,10\n')});
+   assert.equal(await sheet.count(),0);
+   await d.getByRole('button',{name:'Close review',exact:true}).click();
+   await page.goto(`${base}/#/custom/${ids.custom}`);
+   await page.getByRole('button',{name:'Manage data',exact:true}).click();
+   await page.getByRole('button',{name:'Replace source file',exact:true}).click();
+   const c=page.getByRole('dialog',{name:'Prepare data',exact:true});
+   assert(await c.getByRole('radio',{name:'Keep previous settings',exact:false}).isChecked());
+   await c.getByLabel('Choose analysis data',{exact:true}).setInputFiles(path.join(root,'reordered.xlsx'));
+   await c.getByRole('button',{name:'Update data',exact:true}).click();
+   await c.getByRole('heading',{name:'Select your data table',exact:true}).waitFor();
+   await c.getByRole('button',{name:'Worksheet',exact:true}).filter({hasText:'Data'}).waitFor();
+   await c.getByRole('button',{name:'Continue with saved settings',exact:true}).click();
+   await c.getByRole('heading',{name:'Review source update',exact:true}).waitFor();
+   const before=await(await page.request.get(`${base}/api/custom/projects/${ids.custom}`)).json();
+   await c.getByRole('checkbox',{name:'Update without record comparison',exact:true}).check();
+   await c.getByRole('button',{name:'Apply update',exact:true}).click();
+   await c.waitFor({state:'detached'});
+   const after=await(await page.request.get(`${base}/api/custom/projects/${ids.custom}`)).json();
+   assert.equal(after.customConfig.worksheet,'Data');assert.deepEqual(after.settings,before.settings);
+   await page.getByRole('button',{name:'Manage data',exact:true}).click();
+   await page.getByRole('button',{name:'Replace source file',exact:true}).click();
+   await c.getByLabel('Choose analysis data',{exact:true}).setInputFiles(path.join(root,'missing.xlsx'));
+   await c.getByRole('button',{name:'Update data',exact:true}).click();
+   await c.getByText('The saved worksheet "Data" is missing. Choose a replacement worksheet.',{exact:true}).waitFor();
+   assert(await c.getByRole('button',{name:'Continue with saved settings',exact:true}).isDisabled());
+   await c.getByRole('button',{name:'Worksheet',exact:true}).click();await page.getByRole('option',{name:'Other',exact:true}).click();
+   await c.getByRole('button',{name:'Continue with saved settings',exact:true}).click();
+   await c.getByRole('heading',{name:'Prepare your data',exact:true}).waitFor();
+   assert(await c.evaluate(node=>node.scrollWidth<=node.clientWidth+1));
+   await page.screenshot({path:path.join(root,`custom-${width}.png`)});
+   await c.getByRole('button',{name:'Close prepare data',exact:true}).click();
+   assert.deepEqual(errors,[]);await page.close();console.log(`PASS reupload sheet selection and settings default at ${width}px`);
+  }
+ }finally{await browser.close()}
+})().catch(e=>{console.error(e);process.exitCode=1});

@@ -1,3 +1,4 @@
+from backend.test_update_helpers import skip_comparison
 """Data-only updates must preserve setup or leave the saved project untouched."""
 from copy import deepcopy
 from types import SimpleNamespace
@@ -12,7 +13,7 @@ from backend.test_kobo import workbook
 
 def custom_update(client, preview, reuse=True):
     return client.post('/api/custom/columns/confirm', json={
-        'token': preview['token'], 'name': 'Custom dataset', 'config': preview['config'], 'reuseOnly': reuse})
+        'token': preview['token'], 'name': 'Custom dataset', 'config': preview['config'], 'reuseOnly': reuse, 'matching':skip_comparison(client,'custom',preview['token'],{'config':preview['config']})})
 
 
 def kobo_create(client):
@@ -34,7 +35,7 @@ def kobo_stage(client, pid, raw=None, form=None):
 
 
 def kobo_update(client, p, reuse=True):
-    return client.post('/api/kobo/imports/confirm', json={'token': p['token'], 'name': 'Reuse', 'mappings': p['mappings'], 'policies': p['policies'], 'reviewConfig': p['reviewConfig'], 'reuseOnly': reuse})
+    return client.post('/api/kobo/imports/confirm', json={'token': p['token'], 'name': 'Reuse', 'mappings': p['mappings'], 'policies': p['policies'], 'reviewConfig': p['reviewConfig'], 'reuseOnly': reuse, 'matching':skip_comparison(client,'kobo',p['token'],{'mappings':p['mappings'],'policies':p['policies'],'reviewConfig':p['reviewConfig']})})
 
 
 def customize(store, saved, field):
@@ -251,7 +252,7 @@ def test_kobo_reuse_retains_answer_links_and_multiselect_policy(client_store):
     assert store.get(saved['id'])['records'][0]['values'] == {'gender': 'f', 'age': 40.0, 'needs': ['water']}
 
 
-def test_kobo_missing_selected_worksheet_opens_staged_review(client_store):
+def test_kobo_missing_selected_worksheet_requires_explicit_selection(client_store):
     client, store = client_store
     raw = workbook({'Data': [['gender', 'age'], ['f', 20]]})
     p = client.post('/api/kobo/imports/preview', files={'form': ('form.xlsx', form_bytes()), 'data': ('data.xlsx', raw)}, data={'worksheet': 'Data'}).json()
@@ -260,6 +261,9 @@ def test_kobo_missing_selected_worksheet_opens_staged_review(client_store):
     before = store.get(saved['id'])
     raw = workbook({'Renamed': [['gender', 'age'], ['m', 40]]})
     response = client.post(f'/api/kobo/projects/{saved["id"]}/review', files={'data': ('data.xlsx', raw)})
+    assert response.status_code == 400, response.text
+    assert store.get(saved['id']) == before
+    response = client.post(f'/api/kobo/projects/{saved["id"]}/review', files={'data': ('data.xlsx', raw)}, data={'worksheet': 'Renamed'})
     assert response.status_code == 200, response.text
     p = response.json()
     assert not p['reuse']['eligible']
@@ -278,3 +282,49 @@ def test_custom_explicit_invalid_as_missing_policy_is_reused(env):
     assert p['reuse']['eligible'], p['reuse']
     assert custom_update(client, p).status_code == 200
     assert store.get(saved['id'])['records'][1]['values'][p['config']['columns'][0]['id']] is None
+
+
+def test_custom_switch_worksheet_keeps_compatible_column_setup(env):
+    client, store = env
+    raw = workbook({'Data': [['Code', 'Amount'], ['001', 10]], 'Other': [['Amount', 'Code'], [30, '003']]})
+    p = stage(client, raw, filename='data.xlsx')
+    code, amount = p['config']['columns']
+    code['label'] = 'Reference code'
+    amount['preparation']['trim'] = True
+    p['config']['filterFields'] = [code['id']]
+    saved = confirm(client, p)
+    before = customize(store, saved, code['id'])
+    p = stage(client, raw, filename='new.xlsx', pid=saved['id'])
+    assert p['config']['worksheet'] == 'Data'
+    p['config']['worksheet'] = 'Other'
+    response = client.post(f"/api/custom/columns/{p['token']}/configure", json=p['config'])
+    assert response.status_code == 200, response.text
+    p = response.json()
+    assert [c['id'] for c in p['config']['columns']] == [amount['id'], code['id']]
+    assert p['config']['columns'][1]['label'] == 'Reference code'
+    assert p['config']['columns'][0]['preparation']['trim'] is True
+    assert p['config']['filterFields'] == [code['id']]
+    assert not p['reuse']['eligible']
+    assert store.get(saved['id']) == before
+    response = custom_update(client, p, reuse=False)
+    assert response.status_code == 200, response.text
+    after = store.get(saved['id'])
+    assert after['customConfig']['worksheet'] == 'Other'
+    assert after['settings']['language'] == before['settings']['language']
+    assert after['settings']['questions'][code['id']] == before['settings']['questions'][code['id']]
+    assert after['records'][0]['values'][code['id']] == '003'
+
+
+def test_custom_reordered_sheets_preserve_saved_header_and_setup(env):
+    client, _ = env
+    raw = workbook({'Data': [['Report'], ['Code', 'Amount'], ['001', 10]], 'Other': [['Code'], ['wrong']]})
+    p = stage(client, raw, filename='data.xlsx')
+    p['config']['headerRow'] = 2
+    p = client.post(f"/api/custom/columns/{p['token']}/configure", json=p['config']).json()
+    saved = confirm(client, p)
+    reordered = workbook({'Other': [['Code'], ['wrong']], 'Data': [['Report'], ['Code', 'Amount'], ['002', 20]]})
+    p = stage(client, reordered, filename='new.xlsx', pid=saved['id'])
+    assert p['config']['worksheet'] == 'Data'
+    assert p['config']['headerRow'] == 2
+    assert p['reuse']['eligible'], p['reuse']
+    assert custom_update(client, p).status_code == 200

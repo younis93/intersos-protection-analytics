@@ -2,7 +2,7 @@ import {questionDefaults,type KoboSettings,type KoboProject} from './koboTypes';
 import {appearanceDefaults} from './koboAppearance';
 import type {KoboSavedView,KoboViewSnapshot} from './koboSavedViewTypes';
 
-const defaults={dateFilterModes:{},language:'en',filters:[],filterFields:[],hidden:[],metadata:false,hideBlanks:true,hideZero:true,hideEmpty:true,percentageDecimals:0,questionSort:'form',questions:{},viewMode:'charts'} as const;
+const defaults={percentageDefault:null,dateFilterModes:{},language:'en',filters:[],filterFields:[],hidden:[],metadata:false,hideBlanks:true,hideZero:true,hideEmpty:true,percentageDecimals:0,questionSort:'form',questions:{},viewMode:'charts'} as const;
 const questionDefault={...questionDefaults,palette:null,chart:null,pointColors:{},trendDateField:'',trendUnit:'month' as const,appearance:appearanceDefaults};
 export function viewSnapshot(settings:KoboSettings|KoboViewSnapshot):KoboViewSnapshot{
  const snapshot=Object.fromEntries(Object.entries(defaults).map(([key,value])=>[key,settings[key as keyof KoboViewSnapshot]??value])) as KoboViewSnapshot;

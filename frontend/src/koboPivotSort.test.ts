@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {sortPivotRows,type PivotSort} from './koboPivotSort';
+import {defaultPivotSort,sortPivotRows,type PivotSort} from './koboPivotSort';
 import type {KoboRow} from './koboTypes';
 
 const row=(label:string,count:number,percent:number|null,series?:KoboRow['series']):KoboRow=>({id:label,label,count,percent,series});
@@ -29,4 +29,29 @@ describe('pivot header sorting',()=>{
   const grouped={rows:[row('A',5,50,[{id:'x',count:2,percent:20},{id:'y',count:3,percent:30}]),row('B',4,40,[{id:'x',count:4,percent:40},{id:'y',count:0,percent:0}])],breakdowns:[{id:'x',label:'X',denominator:10},{id:'y',label:'Y',denominator:10}]};
   expect(sortPivotRows(grouped,sort('count','desc',['x','y']),'en')[0].label).toBe('A');
  });
+});
+
+
+it('keeps unanswered entries last during manual sorting',()=>{
+ const pivot={breakdowns:[],rows:[{id:'a',label:'A',count:2,percent:50},{id:'b',label:'B',count:1,percent:25},{id:'__blank__',label:'Blank',count:100,percent:null}]};
+ for(const direction of ['asc','desc'] as const){
+  const sorted=sortPivotRows(pivot,{id:'total:count',label:'Count',metric:'count',direction},'en');
+  expect(sorted.at(-1)?.id).toBe('__blank__');
+ }
+});
+
+
+it('sorts count API rows even when optional measured values are null',()=>{
+ const result={breakdowns:[],rows:[{id:'a',label:'A',count:1,percent:25,value:null},{id:'b',label:'B',count:3,percent:75,value:null}]};
+ expect(sortPivotRows(result,{id:'total:count',label:'Count',metric:'count',direction:'desc'},'en').map(row=>row.id)).toEqual(['b','a']);
+});
+
+
+it('keeps saved sort choices and natural date and bin order',()=>{
+ const base={kind:'category' as const,chart:'bar' as const,breakdowns:[]};
+ expect(defaultPivotSort(base)?.direction).toBe('desc');
+ for(const answerSort of ['form','count-asc','label-asc','label-desc'] as const)expect(defaultPivotSort({...base,answerSort})).toBeNull();
+ expect(defaultPivotSort({...base,kind:'date'})).toBeNull();
+ expect(defaultPivotSort({...base,chart:'histogram'})).toBeNull();
+ expect(defaultPivotSort({...base,bins:[{id:'bin:0'}]})).toBeNull();
 });

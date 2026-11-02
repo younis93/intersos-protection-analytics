@@ -20,6 +20,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
+from .kobo_updates import UpdateMatching, review_update, paged_review, preview_update
 from .custom_preparation import Preparation, CalculatedColumn, ValidationRule, active_preparation, clean_value, prepared_number, calculated_columns, validate_rules
 from .custom_duplicates import DuplicateReview, review_duplicates
 from .file_security import validate_xlsx_archive
@@ -57,6 +58,7 @@ class Configuration(BaseModel):
 
 
 class Confirm(BaseModel):
+    matching: UpdateMatching | None = None
     token: str
     name: str = Field(min_length=1, max_length=200)
     config: Configuration
@@ -161,6 +163,12 @@ def infer(header, values):
     if any(looks_date(v) or succeeds(number, v) for v in filled): return 'text'
     unique = len({str(v) for v in filled})
     return 'category' if unique <= 30 and (len(filled) < 20 or unique <= len(filled) / 2) else 'text'
+
+
+def worksheet_column_setup(previous, worksheet):
+    """Retain compatible field definitions, while exclusions belong to their source sheet."""
+    if not previous or previous.get('worksheet')==worksheet:return previous
+    return {**previous,'columns':[{**column,'included':True} for column in previous.get('columns',[])]}
 
 
 def initial_columns(headers, data, previous=None):
@@ -274,7 +282,7 @@ def reconcile_settings(previous, payload, stored):
     settings.filters = [f for f in settings.filters if f.field in questions and f.field not in changed and (f.kind != 'category' or questions[f.field]['kind'] not in {'category', 'multiple'} or set(f.values) <= {c['name'] for c in questions[f.field]['choices']} | {'__blank__'})]
     for qid, cfg in settings.questions.items():
         if qid in changed:
-            settings.questions[qid] = QuestionSettings(palette=cfg.palette)
+            settings.questions[qid] = QuestionSettings(palette=cfg.palette,percentageMode=cfg.percentageMode,percentageGroupLevel=cfg.percentageGroupLevel,filterMode=cfg.filterMode,ownFilters=cfg.ownFilters,chartTopN=cfg.chartTopN,chartOther=cfg.chartOther)
             continue
         cfg.breakdowns = [field for field in cfg.breakdowns if field in questions and questions[field]['kind'] in {'category', 'text'}]
         if cfg.breakdown not in questions or questions[cfg.breakdown]['kind'] not in {'category', 'text'}: cfg.breakdown = ''
@@ -292,7 +300,7 @@ def reconcile_settings(previous, payload, stored):
             if mode == 'month': rule.minimum = rule.maximum = None
     settings.filters = [f for f in settings.filters if f.values or f.months or f.minimum is not None or f.maximum is not None]
     for qid in questions:
-        if qid not in settings.questions: settings.questions[qid] = QuestionSettings(palette='Blue')
+        if qid not in settings.questions: settings.questions[qid] = QuestionSettings(palette='Blue', percentageMode=settings.percentageDefault or 'grand-total')
     settings.dashboardQuestions = [qid for qid in settings.dashboardQuestions if qid in questions]
     settings.report.questions = [qid for qid in settings.report.questions if qid in questions]
     if settings.geographyField not in questions or settings.geographyField in changed: settings.geographyField = ''
@@ -320,7 +328,7 @@ def make_custom_router(store=None):
         except ValueError:
             config.headerRow = 1
             headers = []; data = []
-        config.columns = initial_columns(headers, data, previous) if data else []
+        config.columns = initial_columns(headers, data, worksheet_column_setup(previous,config.worksheet)) if data else []
         config.filterFields = [qid for qid in previous.get('filterFields', []) if qid in available_filter_ids(config)]
         date_ids = {c.id for c in config.columns if c.included and c.kind == 'date'} & set(config.filterFields)
         config.dateFilterModes = {qid: mode for qid, mode in previous.get('dateFilterModes', {}).items() if qid in date_ids}
@@ -329,7 +337,7 @@ def make_custom_router(store=None):
             for key in list(staged):
                 if time.monotonic() - staged[key]['created'] > 1800: del staged[key]
             if len(staged) >= 3: raise ValueError('Finish or cancel an existing import first.')
-            staged[token] = {'raw': raw, 'filename': filename, 'tables': tables, 'config': config, 'reuseConfig': config.model_dump(), 'previous': previous, 'project': project, 'pid': pid, 'created': time.monotonic()}
+            staged[token] = {'raw': raw, 'filename': filename, 'tables': tables, 'config': config, 'reuseConfig': config.model_dump(), 'previous': previous, 'project': project, 'pid': pid, 'created': time.monotonic(), 'replacement': bool(pid)}
         return describe(token, staged[token], config)
 
     def reuse_check(item, config, payload, review):
@@ -381,20 +389,40 @@ def make_custom_router(store=None):
     def edit_columns(pid: str):
         project = get_project(pid)
         _, raw = store.sources(pid)
-        return stage(raw, 'source.xlsx' if raw.startswith(b'PK') else 'source.csv', pid, project=project)
+        response = stage(raw, 'source.xlsx' if raw.startswith(b'PK') else 'source.csv', pid, project=project)
+        staged[response['token']]['replacement'] = False
+        staged[response['token']]['filename'] = project.get('source',{}).get('filename','Saved source')
+        return response
 
     @router.post('/columns/{token}/configure')
     def configure(token: str, config: Configuration):
         with lock:
             item = item_for(token)
             try:
+                baseline=item['config'].columns
                 if (config.worksheet, config.headerRow) != (item['config'].worksheet, item['config'].headerRow) or not item['config'].columns:
                     headers, data = table_data(item['tables'], config)
-                    config.columns = initial_columns(headers, data, item['previous'])
+                    config.columns = initial_columns(headers, data, worksheet_column_setup(item['previous'],config.worksheet))
                     config.filterFields = [qid for qid in config.filterFields if qid in available_filter_ids(config)]
-                    item['config'] = config
-                return describe(token, item, config)
+                    baseline=config.columns
+                build(item['tables'],config,baseline,allow_empty=True)
+                candidate={**item,'config':config}
+                result=describe(token,candidate,config)
+                item['config']=config
+                return result
             except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
+    @router.post('/columns/{token}/update-preview')
+    def update_preview(token: str, body: dict):
+        with lock:
+            item = item_for(token)
+            if not item['project']: raise HTTPException(400, 'Update comparison requires an existing project.')
+            try:
+                config = Configuration.model_validate(body['config'])
+                payload, _ = build(item['tables'], config, item['config'].columns, allow_empty=True)
+                payload.setdefault('source',{})['filename']=item['filename']
+                return paged_review(preview_update(item['project'],payload,body,item['filename']),max(1,int(body.get('page',1))),25,body.get('kind',''),body.get('field',''))
+            except (ValueError,KeyError) as exc: raise HTTPException(400,str(exc)) from exc
 
     @router.delete('/columns/{token}')
     def cancel(token: str):
@@ -413,8 +441,14 @@ def make_custom_router(store=None):
                     reuse = reuse_check(item, body.config, payload, review)
                     if not reuse['eligible']: raise HTTPException(409, {'message': 'Review is needed before updating data.', 'issues': [{'question': '', 'message': reason, 'count': 1} for reason in reuse['reasons']]})
                 if review['issues']: raise HTTPException(422, {'message': 'Resolve column setup issues before saving.', 'issues': review['issues']})
+                entry = None
+                if item.get('replacement'):
+                    if body.matching is None: raise ValueError('Review the source update before applying.')
+                    payload.setdefault('source',{})['filename']=item['filename']
+                    entry = review_update(item['project'],payload,body.matching,item['filename'])
+                payload.setdefault('source',{})['filename'] = item['filename']
                 if item['pid']:
-                    p = store.repair(item['pid'], payload, b'', item['raw'], preserve_settings=body.reuseOnly, expected_updated=item['project']['updated'] if body.reuseOnly else None)
+                    p = store.repair(item['pid'], payload, b'', item['raw'], preserve_settings=body.reuseOnly, expected_updated=item['project']['updated'], update_entry=entry)
                 else:
                     settings = new_project_settings(payload['form'])
                     settings.filterFields = list(body.config.filterFields)

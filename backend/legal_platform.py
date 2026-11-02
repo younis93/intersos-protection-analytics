@@ -1904,11 +1904,16 @@ class LegalStore:
         beneficiary=_find(list(df.columns),"Beneficiary ID"); aid=_find(list(df.columns),"Assessment ID"); provided=_find(list(df.columns),"Type of Service Provided"); document_type=_find(list(df.columns),"Type of Document")
         dob=_find(list(df.columns),"Date of Birth","DoB")
         if dob and provided:
+            assessments=self.frames.get("assessments",pd.DataFrame())
+            assessment_id=_find(list(assessments.columns),"Assessment ID")
+            assessment_need=_find(list(assessments.columns),"Type of Legal Service Needed")
+            needs_by_assessment={clean_id(row.get(assessment_id,"")):clean_id(row.get(assessment_need,"")) for _,row in source_records(assessments)} if assessment_id and assessment_need else {}
             for i,row in source_records(df):
                 age=age_from_date(row.get(dob,""))
                 counselling=any(normalize_legal_service_type(value)=="legal counselling" for value in split_multi_value(row.get(provided,"")))
                 if age is not None and 0 <= age < 18 and counselling:
                     self._flag(out,"legalservices","Beneficiary below 18 with legal counselling","Warning",i,row,f"Current age is {age} based on date of birth; Type of Service Provided includes legal counselling")
+                    out[-1]["requestedServiceTypes"]=needs_by_assessment.get(clean_id(row.get(aid,"")),"") if aid else ""
         if beneficiary and provided and document_type:
             keys={}; keys_without_assessment={}
             for i,row in source_records(df):
@@ -2171,7 +2176,7 @@ class LegalStore:
                 if rule=="Detention/immigration inconsistency": page_columns.extend([("Is the beneficiary detained","beneficiaryDetained",("Is the beneficiary detained",)),("Is it an immigration related charge?","immigrationRelatedCharge",("Is it an immigration related charge",))])
                 if rule=="Detained beneficiary below 10 years": page_columns.extend([("Is the beneficiary detained","beneficiaryDetained",("Is the beneficiary detained",)),("Date of birth","dateOfBirth",("Date of Birth","DoB")),("Current age","beneficiaryAge",())])
                 if rule=="Selected month with previous assessment": page_columns.append(("Created On","createdOn",("Created On",)))
-                if rule=="Beneficiary below 18 with legal counselling": page_columns.extend([("Date of birth","dateOfBirth",("Date of Birth","DoB")),("Current age","beneficiaryAge",()),("Type of Service Provided","serviceTypeProvided",("Type of Service Provided",))])
+                if rule=="Beneficiary below 18 with legal counselling": page_columns.extend([("Date of birth","dateOfBirth",("Date of Birth","DoB")),("Current age","beneficiaryAge",()),("Date of service","serviceDate",("Date of Service Provision",)),("Type of Service Provided","serviceTypeProvided",("Type of Service Provided",)),("Assessment service needed","requestedServiceTypes",())])
                 if rule=="Representation while not detained": page_columns.append(("Type of documents to be issued","typeOfDocument",("Type of documents to be issued","Type of Document")))
                 if rule=="Type of document in Assessments vs Services": page_columns.extend([("Finding","comparisonFinding",()),("Assessment documents","assessmentDocuments",()),("Service documents","serviceDocuments",())])
                 if rule=="Type of Legal Service in Assessment vs Services": page_columns.extend([("Assessment service needed","requestedServiceTypes",()),("Service type provided","providedServiceTypes",())])
