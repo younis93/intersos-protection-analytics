@@ -13,7 +13,10 @@ class ReviewChoice(BaseModel):
     labels: dict[str, str]
 
 
+from .kobo_placement import FieldPlacement, place_questions
+
 class AddedQuestion(BaseModel):
+    placement: FieldPlacement | None = None
     id: str = Field(pattern=r'^added_[a-zA-Z0-9_]+$')
     label: str = Field(min_length=1, max_length=1000)
     kind: Literal['text', 'number', 'date', 'category', 'multiple']
@@ -52,7 +55,7 @@ def validate_choices(choices, allow_ambiguous=False):
         raise ValueError('Choice codes must be unique.')
 
 
-def effective_form(base, config, sheets, allow_empty=False):
+def effective_form(base, config, sheets, allow_empty=False, allow_invalid_placement=False):
     """Never mutate the staged form or uploaded source files."""
     result = deepcopy(base)
     questions = {q['id']: q for q in result['questions']}
@@ -85,7 +88,7 @@ def effective_form(base, config, sheets, allow_empty=False):
              'kind': kind, 'type': {'category': 'select_one', 'multiple': 'select_multiple', 'number': 'decimal'}.get(kind, kind),
              'group': group_id, 'repeat': repeat, 'metadata': False, 'identifying': False,
              'choices': deepcopy(added.get('choices', [])), 'order': len(questions),
-             'addedFromData': True, 'sourceColumn': {'sheet': si, 'column': ci}}
+             'placement': deepcopy(added.get('placement')), 'addedFromData': True, 'sourceColumn': {'sheet': si, 'column': ci}}
         questions[qid] = q
         result['questions'].append(q)
         if added.get('separator'): q['dataSeparator'] = added['separator']
@@ -120,6 +123,10 @@ def effective_form(base, config, sheets, allow_empty=False):
         if q['id'] not in excluded and set(re.findall(r'\$\{([^}]+)\}', q.get('choiceFilter', ''))) & excluded_names:
             result.setdefault('warnings', []).append(f"{q.get('labels', {}).get('en', q['id'])}: choice filter depends on an ignored question. Answers are checked against the full choice list.")
     result['questions'] = [q for q in result['questions'] if q['id'] not in excluded]
+    try: result['questions'] = place_questions(result['questions'])
+    except ValueError as exc:
+        if not allow_invalid_placement: raise
+        result.setdefault('warnings', []).append(str(exc))
     return result
 
 

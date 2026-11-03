@@ -8,7 +8,7 @@ from collections import Counter
 from datetime import datetime
 
 from .file_security import safe_spreadsheet_value
-from .kobo import label, breakdown_fields
+from .kobo import label, breakdown_fields, resolved_question_settings
 from .kobo_excel_layout import DATA_HEADERS, EXCEL_DATA_ROWS, unique_sheet_name
 from .kobo_excel_direct import direct_helpers, choice_lookup_rows, structured_column
 
@@ -16,15 +16,23 @@ EXCEL_COLUMNS = 16_384
 
 
 def validate_export_fields(project, settings, question=''):
-    questions = {q['id']: q for q in project['form']['questions']}
+    from .kobo_connections import form_question_index
+    questions = form_question_index(project['form'])
     identifying = {qid for qid, q in questions.items() if q['identifying']}
     requested = {question} if question else {qid for qid, q in questions.items() if qid not in settings.hidden and (not q['metadata'] or settings.metadata)}
     dependencies = set(settings.filterFields) | {f.field for f in settings.filters}
     for qid in requested:
         if qid in questions:
-            cfg = settings.questions.get(qid)
+            cfg = resolved_question_settings(questions[qid],settings)
             if cfg: dependencies.update(f.field for f in cfg.ownFilters)
             if cfg and cfg.trendDateField: dependencies.add(cfg.trendDateField)
+            if cfg:
+                from .kobo_connections import connection_plan
+                plan = connection_plan(questions[qid],cfg,questions)
+                if plan['enabled']:
+                    if plan['issue']: raise ValueError('Review the connected question percentage base before exporting: ' + qid)
+                    dependencies.update(plan['fields'])
+                    if plan['parentId']: dependencies.add(plan['parentId'])
             if cfg and cfg.calculation and cfg.calculation.operation!='count': dependencies.add(cfg.calculation.field)
             if cfg: dependencies.update(q['id'] for q in breakdown_fields(cfg, questions, questions[qid]))
     blocked = (requested | dependencies) & identifying
@@ -76,7 +84,8 @@ def response_values(layout, record, escape=True):
 
 
 def query_config(project, snapshot, settings, specs, layouts):
-    by_id = {q['id']: q for q in project['form']['questions']}
+    from .kobo_connections import form_question_index
+    by_id = form_question_index(project['form'])
     fields = {}
     for layout in layouts:
         for q in layout['fields']:
@@ -86,13 +95,17 @@ def query_config(project, snapshot, settings, specs, layouts):
                 'captions': {code: f'{caption} [{code}]' if duplicates[caption] > 1 else caption for code, caption in captions.items()}}
     results = []
     for result in snapshot['questions']:
-        q = by_id[result['id']]; cfg = settings.questions.get(q['id'])
+        q = by_id[result['id']]; cfg = resolved_question_settings(q,settings)
+        from .kobo_connections import connection_plan
+        plan = connection_plan(q,cfg,by_id) if cfg else {'enabled':False}
         dimensions = breakdown_fields(cfg, by_id, q) if cfg else []
         counts = Counter(row['label'] for row in result.get('percentageRows', result['rows']))
         results.append({'id': q['id'], 'label': result['label'], 'group': q['group'], 'groupLabel': next((g['label'] for g in snapshot['groups'] if g['id'] == q['group']), ''),
             'scope': q['repeat'], 'kind': q['kind'], 'dateUnit': cfg.dateUnit if cfg else 'month', 'trendDateField': cfg.trendDateField if cfg and result.get('trend') else '', 'trendUnit': cfg.trendUnit if cfg else 'month', 'dimensions': [f['id'] for f in dimensions],
-            'bins': result.get('bins', []), 'blank': not settings.hideBlanks and not (cfg and cfg.hiddenAnswerPercentageMode == 'adjust' and '__blank__' in cfg.hiddenAnswers), 'hiddenAnswers': cfg.hiddenAnswers if cfg and cfg.hiddenAnswerPercentageMode == 'adjust' and q['kind'] in {'category','multiple','text'} else [],
+            'bins': result.get('bins', []), 'blank': not settings.hideBlanks and not (cfg and (plan['enabled'] or cfg.hiddenAnswerPercentageMode == 'adjust') and '__blank__' in cfg.hiddenAnswers), 'hiddenAnswers': cfg.hiddenAnswers if cfg and (plan['enabled'] or cfg.hiddenAnswerPercentageMode == 'adjust') and q['kind'] in {'category','multiple','text'} else [],
             'hiddenAnswerPercentageMode': cfg.hiddenAnswerPercentageMode if cfg else 'adjust',
+            'percentageParent': plan['parentId'] if plan['enabled'] and plan['mode']=='keep-original' else '',
+            'connected':plan['enabled'], 'connectionTree':plan.get('tree') if not plan.get('reviewIssues') else None,
             'answers': [{'id': a['id'], 'label': f"{a['label']} [{a['id']}]" if counts[a['label']] > 1 else a['label']} for a in result.get('percentageRows', result['rows']) if a['id'] != '__blank__'],
             'blankLabel': 'Blank / unanswered' if settings.language == 'en' else 'فارغ / دون إجابة'})
     return {'tables': [{'name': l['table'], 'raw': f'KoboRaw{index:03d}', 'scope': l['scope'], 'parent': l['parent_scope']} for index, l in enumerate(layouts)], 'fields': fields, 'questions': results,
@@ -113,7 +126,7 @@ def multi_config(config, question):
         if not scope: break
         scope = tables[scope]['parent']
     fields = {qid: field for qid, field in config['fields'].items() if field['scope'] in scopes}
-    used = {header.casefold() for header in [*config['headers'], 'TrendPeriod', 'Response ID', 'Parent ID', 'Source row']}
+    used = {header.casefold() for header in [*config['headers'], 'TrendPeriod', 'Response ID', 'Parent ID', 'Source row', 'FollowupAnswered']}
     details = []
     for qid, field in fields.items():
         original = field['column']; header = original[:255]; suffix = 2
@@ -121,6 +134,7 @@ def multi_config(config, question):
             tag = f' [{suffix}]'; header = original[:255-len(tag)] + tag; suffix += 1
         used.add(header.casefold()); details.append({'id': qid, 'header': header})
     headers = [*config['headers'], *(['TrendPeriod'] if question.get('trendDateField') else []), 'Response ID', 'Parent ID', 'Source row', *(field['header'] for field in details)]
+    if question.get('percentageParent'): headers.append('FollowupAnswered')
     # Reserve technical keys before choosing user-field headers.
     if len({header.casefold() for header in headers}) != len(headers):
         raise ValueError('Multi-select reference headers conflict with response keys.')
@@ -150,21 +164,40 @@ QUERY_BODY = r'''
    if f[kind] = "number" then (try Text.From(Number.From(raw, "en-US"), "en-US") otherwise error ("Invalid number in " & f[column])) else TextValue(raw),
  Caption = (id as text, value as text) as text => if value = "" then "Missing breakdown" else Record.FieldOrDefault(Record.Field(Config[fields], id)[captions], value, value),
 
+ MatchNode = (node as any, r as record) as logical => if node = null then true else if node[type] = "group" then
+   let values = List.Transform(node[rules], each @MatchNode(_, r)) in if node[match] = "all" then List.AllTrue(values) else List.AnyTrue(values)
+   else let actual = FieldValue(r, node[field]), expected = Text.From(Record.FieldOrDefault(node, "value", ""), "en-US"), op = node[operator],
+     kind = Record.Field(Config[fields], node[field])[kind], numeric = kind = "number", x = try Number.FromText(actual, "en-US") otherwise null, y = try Number.FromText(expected, "en-US") otherwise null,
+     equal = if numeric then x <> null and y <> null and x = y else actual = expected,
+     selected = List.Contains(Text.Split(actual, " "), expected),
+     upper = Text.From(Record.FieldOrDefault(node, "value2", ""), "en-US"),
+     z = try Number.FromText(upper, "en-US") otherwise null,
+     lowerActual = Text.Lower(actual, "en-US"), lowerExpected = Text.Lower(expected, "en-US"),
+     within = if numeric then x <> null and y <> null and z <> null and x >= y and x <= z else actual >= expected and actual <= upper
+   in if op = "blank" then actual = "" else if op = "not-blank" then actual <> "" else if op = "selected" then selected else if op = "not-selected" then not selected
+     else if op = "eq" then equal else if op = "neq" then not equal else if Text.Trim(actual) = "" then false
+     else if op = "contains" then Text.Contains(lowerActual, lowerExpected) else if op = "not-contains" then not Text.Contains(lowerActual, lowerExpected)
+     else if op = "starts-with" then Text.StartsWith(lowerActual, lowerExpected) else if op = "ends-with" then Text.EndsWith(lowerActual, lowerExpected)
+     else if op = "between" then within else if op = "not-between" then not within
+     else if kind = "date" then (if op = "gt" then actual > expected else if op = "gte" then actual >= expected else if op = "lt" then actual < expected else if op = "lte" then actual <= expected else false)
+     else if x = null or y = null then false else if op = "gt" then x > y else if op = "gte" then x >= y else if op = "lt" then x < y else if op = "lte" then x <= y else false,
  FilterValues = (r as record) as list => List.Transform(Config[filters], (f) => let v = FieldValue(r, f[id]) in Record.FieldOrDefault(f[captions], if v = "" then "__blank__" else v, if v = "" then "Blank / unanswered" else Caption(f[id], v))),
  QuestionRows = (q as record) as list => let
-   Cohort = List.Select(Records, (r) => r[_Scope] = q[scope] and (let v = FieldValue(r, q[id]), codes = if v = "" then {"__blank__"} else Text.Split(v, " ") in List.IsEmpty(List.Intersect({codes, Record.FieldOrDefault(q, "hiddenAnswers", {})})))),
+   Cohort = List.Select(Records, (r) => r[_Scope] = q[scope]),
    Options = q[answers] & (if q[blank] then {[id="__blank__", label=q[blankLabel]]} else {}),
    Expanded = List.Combine(List.Transform(Cohort, (r) => let
      value = FieldValue(r, q[id]), selected = List.Distinct(List.Select(Text.Split(value, " "), each _ <> "")), answered = if List.IsEmpty(selected) then 0 else 1,
+     parentBase = Record.FieldOrDefault(q, "percentageParent", "") <> "", parentAnswered = if parentBase then FieldValue(r,q[percentageParent]) <> "" else false,
+     eligible = MatchNode(Record.FieldOrDefault(q, "connectionTree", null), r) and List.IsEmpty(List.Intersect({if value = "" then {"__blank__"} else selected, Record.FieldOrDefault(q, "hiddenAnswers", {})})) and (not parentBase or parentAnswered),
      dimensions = List.Transform(q[dimensions], (id) => Caption(id, FieldValue(r, id))),
      filters = FilterValues(r),
      trend = if Record.FieldOrDefault(q, "trendDateField", "") = "" then {} else {try Date.ToText(Date.From(FieldValue(r, q[trendDateField])), if q[trendUnit] = "year" then "yyyy" else if q[trendUnit] = "month" then "yyyy-MM" else "yyyy-MM-dd") otherwise ""},
      details = {TextValue(Record.Field(r, "Response ID")), TextValue(Record.FieldOrDefault(r, "Parent ID")), Record.FieldOrDefault(r, "Source row")} & List.Transform(Config[details], (f) => let field = Record.Field(Config[fields], f[id]), owner = Resolve(r, field[scope]) in if owner = null then null else Record.Field(owner, field[column])),
-     row = (code as text, caption as text, count as number, base as number, role as text) => {q[id], q[label], q[group], q[groupLabel], TextValue(Record.Field(r, "Response ID")), code, caption, count, base} & List.FirstN(dimensions & {"", "", ""}, 3) & {role} & filters & trend & details,
-     chosen = if answered = 0 then (if q[blank] then {"__blank__"} else {}) else selected,
+     row = (code as text, caption as text, count as number, base as number, role as text) => {q[id], q[label], q[group], q[groupLabel], TextValue(Record.Field(r, "Response ID")), code, caption, count, base} & List.FirstN(dimensions & {"", "", ""}, 3) & {role} & filters & trend & details & (if Record.FieldOrDefault(q, "percentageParent", "") = "" then {} else {if role = "Denominator" then (if eligible then answered else 0) else 0}),
+     chosen = if not eligible then {} else if answered = 0 then (if q[blank] then {"__blank__"} else {}) else selected,
      selections = List.Transform(chosen, (code) => let known = List.Select(Options, each [id] = code) in row(code, if List.IsEmpty(known) then code else known{0}[label], 1, 0, "Included"))
-     in {row("__base__", "Respondent base", 0, answered, "Denominator")} & selections)),
-   Seeds = List.Transform(Options, (a) => {q[id], q[label], q[group], q[groupLabel], null, a[id], a[label], 0, 0, "", "", "", "Category seed"} & (if List.IsEmpty(Cohort) then List.Repeat({null}, List.Count(Config[filters])) else FilterValues(Cohort{0})) & (if Record.FieldOrDefault(q, "trendDateField", "") = "" then {} else {null}) & List.Repeat({null}, 3 + List.Count(Config[details])))
+     in if not parentBase and not eligible then {} else {row("__base__", "Respondent base", 0, if parentBase then (if parentAnswered then 1 else 0) else if eligible then answered else 0, "Denominator")} & selections)),
+   Seeds = List.Transform(Options, (a) => {q[id], q[label], q[group], q[groupLabel], null, a[id], a[label], 0, 0, "", "", "", "Category seed"} & (if List.IsEmpty(Cohort) then List.Repeat({null}, List.Count(Config[filters])) else FilterValues(Cohort{0})) & (if Record.FieldOrDefault(q, "trendDateField", "") = "" then {} else {null}) & List.Repeat({null}, 3 + List.Count(Config[details])) & (if Record.FieldOrDefault(q, "percentageParent", "") = "" then {} else {0}))
  in Expanded & Seeds,
  Rows = List.Combine(List.Transform(Config[questions], each QuestionRows(_))),
  Result = if List.Count(Ids) <> List.Count(List.Distinct(Ids)) then error "Response IDs must be unique across all Data tables." else if List.AnyTrue(List.Transform(Records, each [_Scope] <> "" and not Record.HasFields(Lookup, TextValue(Record.FieldOrDefault(_, "Parent ID"))))) then error "Repeat entries must have a valid Parent ID from a Data table." else

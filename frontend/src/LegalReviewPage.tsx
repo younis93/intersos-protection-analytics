@@ -241,6 +241,17 @@ export function FindingTable({
   };
   const sourceRows=(result?.rows||[]).filter((row)=>(!ignoreCourtVerdict || !/court verdict|\bother\b|اخرى/i.test(row.typeOfDocument||"")) && (closureRequestGroup === undefined || ((row.requestForClosedStatus || "").trim().toLowerCase() === "yes") === closureRequestGroup));
   const visibleRows=filterRecords(sourceRows,columnFilters,reviewFilterValue);
+  const contactKey = (phone: string) => phone.replace(/[٠-٩۰-۹]/g, digit => String(digit.charCodeAt(0) - (digit <= "٩" ? 0x660 : 0x6f0))).replace(/\D/g, "");
+  const contactRecords = new Map<string, Set<string>>();
+  if (rule === "Possible duplicate name") {
+    for (const row of sourceRows) {
+      const phone = contactKey(row.phone || "");
+      if (phone.length < 2) continue;
+      const records = contactRecords.get(phone) || new Set<string>();
+      records.add(row.caseId || row.recordId || String(row.row));
+      contactRecords.set(phone, records);
+    }
+  }
   const recordFilterControl:RecordFilterControl={showClearAll:false,filters:columnFilters,onChange:setColumnFilters,loadValues:localValueLoader(sourceRows,columnFilters,reviewFilterValue)};
   const tableTitle = closureRequestGroup === undefined ? displayReviewRule(rule) : closureRequestGroup ? "Open assessment with all services closed (Closure requested by lawyer)" : "Open assessment with all services closed (Closure not requested by lawyer)";
   const tableGroups = [{title: "", rows: visibleRows.map((row, index) => ({row, index}))}];
@@ -302,7 +313,10 @@ export function FindingTable({
       </td>
       {(rule === "Marital status below 18" || rule === "Spouse below 18") && <td>{r.maritalStatus || "-"}</td>}
       {rule === "Spouse below 18" && <><td><strong>{r.spouseName || "Not provided"}</strong></td><td>{r.spouseDateOfBirth || "-"}</td><td>{r.spouseAge ?? "-"}</td></>}
-      <td>{r.phone || "-"}</td>
+      <td className={(contactRecords.get(contactKey(r.phone || ""))?.size || 0) > 1 ? "duplicate-contact-cell exact-duplicate-name" : undefined}>
+        {r.phone || "-"}
+        {(contactRecords.get(contactKey(r.phone || ""))?.size || 0) > 1 && <span className="exact-duplicate-badge">Duplicate contact</span>}
+      </td>
       {dataset === "beneficiaries" && <td>{r.dateOfBirth || "-"}{rule === "Marital status below 18" && r.beneficiaryAge !== null && r.beneficiaryAge !== undefined ? ` (${r.beneficiaryAge})` : ""}</td>}
       {rule === "Beneficiary below 18 with legal counselling" && <><td>{r.dateOfBirth || "-"}</td><td>{r.beneficiaryAge ?? "-"}</td><td>{r.serviceDate || "-"}</td><td>{r.serviceTypeProvided || "-"}</td><td>{r.requestedServiceTypes || "-"}</td></>}
       {dataset === "legalhotlines" ? (

@@ -111,6 +111,17 @@ def helper_values(layouts, config, sources, helpers):
                 excluded = bool(codes.intersection(question.get('hiddenAnswers', [])))
                 if 'AnswerAllowed' in fields: values[fields['AnswerAllowed']] = 'Excluded' if excluded else 'Included'
                 values[fields['IncludeInPivot']] = 'Included' if not excluded and (answered or question['blank']) else 'Excluded'
+                if question.get('connected'):
+                    from .kobo_connection_rules import matches_tree
+                    eligible = not excluded and matches_tree(question.get('connectionTree'),lambda key:raw(record,key),{key:field['kind'] for key,field in config['fields'].items()})
+                    parent_answered = not missing(raw(record,question['percentageParent'])) if question.get('percentageParent') else False
+                    if question.get('percentageParent'): eligible = eligible and parent_answered
+                    values[fields['Selected']] = int(eligible)
+                    values[fields['AnswerAllowed']] = 'Included' if (parent_answered if question.get('percentageParent') else eligible) else 'Excluded'
+                    if not eligible: values[fields['IncludeInPivot']] = 'Excluded'
+                    if question.get('percentageParent'):
+                        values[fields['FollowupAnswered']] = int(answered and eligible)
+                        values[fields['Answered']] = int(parent_answered)
                 for level, qid in enumerate(question['dimensions'], 1):
                     values[fields[f'Breakdown{level}']] = caption(record, qid, 'Missing breakdown')
             rows.append([values[header] for header in helpers[layout['scope']]])
@@ -177,8 +188,12 @@ def materialize_multi(args):
     for record in cohort:
         value = raw(record, question['id'])
         selected = list(dict.fromkeys(value or []))
-        if set(selected or ['__blank__']).intersection(question.get('hiddenAnswers', [])): continue
+        from .kobo_connection_rules import matches_tree
+        eligible = not set(selected or ['__blank__']).intersection(question.get('hiddenAnswers', [])) and matches_tree(question.get('connectionTree'),lambda key:raw(record,key),{key:field['kind'] for key,field in config['fields'].items()})
         answered = bool(selected)
+        parent_base = bool(question.get('percentageParent'))
+        if not parent_base and not eligible: continue
+        if parent_base and missing(raw(record, question['percentageParent'])): continue
         dimensions = [caption(record, qid) for qid in question['dimensions']]
         dimensions += ['']*(3-len(dimensions))
         details = [record['id'], record.get('parent') or '', record['row']]
@@ -193,13 +208,13 @@ def materialize_multi(args):
             except (ValueError, TypeError): period = ''
             trend = [period]
         suffix = filters(record)+trend+details
-        rows.append([*prefix, record['id'], '__base__', 'Respondent base', 0, int(answered), *dimensions, 'Denominator', *suffix])
-        for code in selected if answered else (['__blank__'] if question['blank'] else []):
-            rows.append([*prefix, record['id'], code, options.get(code, code), 1, 0, *dimensions, 'Included', *suffix])
+        rows.append([*prefix, record['id'], '__base__', 'Respondent base', 0, 1 if parent_base else int(answered and eligible), *dimensions, 'Denominator', *suffix, *([int(answered and eligible)] if parent_base else [])])
+        for code in (selected if answered else (['__blank__'] if question['blank'] else [])) if eligible else []:
+            rows.append([*prefix, record['id'], code, options.get(code, code), 1, 0, *dimensions, 'Included', *suffix, *([0] if parent_base else [])])
     seed_filters = filters(cohort[0]) if cohort else [None]*len(config['filters'])
     for code, caption_value in options.items():
         rows.append([*prefix, None, code, caption_value, 0, 0, '', '', '', 'Category seed',
-                     *seed_filters, *([None] if question.get('trendDateField') else []), *([None]*(3+len(config['details'])))])
+                     *seed_filters, *([None] if question.get('trendDateField') else []), *([None]*(3+len(config['details']))), *([0] if question.get('percentageParent') else [])])
     if len(rows) > 1_048_575: raise ValueError('Pivot support data exceeds the Excel row limit.')
     return rows
 

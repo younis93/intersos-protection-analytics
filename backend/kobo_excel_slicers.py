@@ -132,6 +132,7 @@ def totals_pivot(book, cache, result, position):
     for level in range(len(result.get('breakdownFields', []))):
         field = pivot.PivotFields(field_name(result, f'Breakdown{level+1}')); field.Orientation = 2; field.Position = level+1; field.Subtotals = (False,)*12
     metrics = [('Answered', 'Answered total', -4157), ('Respondent', 'Cohort size', -4112)]
+    if (result.get('respondentBasis') or {}).get('kind') == 'parent': metrics.append(('FollowupAnswered', 'Follow-up answered total', -4157))
     if not sparse and not result.get('_source', {}).get('binary'): metrics.insert(0, ('Selected', 'Responses', -4157))
     for source, caption, aggregation in metrics:
         pivot.AddDataField(pivot.PivotFields(field_name(result, source)), caption, aggregation)

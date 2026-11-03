@@ -117,7 +117,92 @@ def test_own_filters_follow_merges_and_undo_and_new_fields_inherit_percentage_de
     assert undone['settings']['questions']['answer']['ownFilters'][0]['values']==['a']
     created=apply(store,undone,dict(kind='answers',field='answer',sources=['a','b'],label='Combined',destination='new',name='Derived'))
     qid=next(q['id'] for q in created['form']['questions'] if q.get('localDerived'))
-    assert created['settings']['questions'][qid]['percentageMode']=='column-total'
+    assert created['settings']['questions'][qid]['percentageMode']==undone['settings']['questions']['answer']['percentageMode']
+
+
+@pytest.mark.parametrize('custom',[False,True])
+@pytest.mark.parametrize('multiple',[False,True])
+def test_new_field_inherits_current_settings_and_order_persists_and_undoes(saved,custom,multiple):
+    from backend.kobo import AnalysisViewSettings,SavedAnalysisView
+    store,p=saved
+    if custom or multiple:
+        raw=store.get(p['id'],raw=True)
+        if custom:raw['customConfig']={'worksheet':'CSV','columns':[],'calculatedColumns':[]}
+        if multiple:
+            raw['form']['questions'][0]['kind']='multiple'
+            for record in raw['records']:record['values']['answer']=['a','b','c']
+        for key in ['id','name','updated','settings']:raw.pop(key,None)
+        p=store.create('Inherited',raw,b'form',b'source',KoboSettings())
+    cfg=QuestionSettings(filterMode='additional',ownFilters=[dict(field='answer',kind='category',values=['a','b','c']),dict(field='region',kind='category',values=['north'])],
+                         hiddenAnswers=['a','c'],hiddenAnswerPercentageMode='keep-original',percentageMode='row-total',
+                         breakdowns=['region'],chart='bar',palette='Teal',answerSort='label-desc',chartTopN=8,chartOther=True,
+                         colors={'a':'#112233','b':'#445566','c':'#778899'},
+                         pointColors={'[["region"],"north","a"]':'#112233','[["region"],"north","b"]':'#445566'})
+    settings=KoboSettings(questions={'answer':cfg},filters=[dict(field='answer',kind='category',values=['a'])],
+                          savedViews=[SavedAnalysisView(id='v',name='Saved',snapshot=AnalysisViewSettings(questions={'answer':cfg}))])
+    store.save(p['id'],settings);p=store.get(p['id'])
+    original=copy.deepcopy(p['settings']);order=[q['id'] for q in p['form']['questions']]
+    op=dict(kind='answers',field='answer',sources=['a','b'],label='Combined',target='b',destination='new',name='Recoded')
+    preview=edit_preview(store.get(p['id'],raw=True),EditRequest(revision=0,operation=EditOperation(**op)))
+    assert any('directly after' in impact for impact in preview['impacts'])
+    changed=apply(store,p,op);qid=preview['field']
+    assert [q['id'] for q in changed['form']['questions']]==[order[0],qid,*order[1:]]
+    assert [q['order'] for q in changed['form']['questions']]==list(range(len(order)+1))
+    new=changed['settings']['questions'][qid]
+    assert new['hiddenAnswers']==['b','c']
+    assert new['ownFilters'][0]['field']==qid and new['ownFilters'][0]['values']==['b','c']
+    assert new['ownFilters'][1]==original['questions']['answer']['ownFilters'][1]
+    assert new['colors']=={'b':'#445566','c':'#778899'}
+    assert new['pointColors']=={'[["region"],"north","b"]':'#445566'}
+    for key in ['filterMode','hiddenAnswerPercentageMode','percentageMode','breakdowns','chart','palette','answerSort','chartTopN','chartOther','appearance']:
+        assert new[key]==original['questions']['answer'][key]
+    assert changed['settings']['questions']['answer']==original['questions']['answer']
+    assert changed['settings']['filters']==original['filters']
+    assert changed['settings']['savedViews']==original['savedViews']
+    assert [q['id'] for q in analyze(changed,KoboSettings())['questions']][:2]==['answer',qid]
+    sorted_results=analyze(changed,KoboSettings(questionSort='name-asc'))['questions']
+    assert [q['name'] for q in sorted_results]==sorted([q['name'] for q in sorted_results],key=str.casefold)
+    # The copied filters and hidden answer settings remain valid for analysis.
+    analyzed=analyze(changed,KoboSettings.model_validate(changed['settings']))
+    assert next(q for q in analyzed['questions'] if q['id']==qid)['rows']==[]
+    reopened=store.get(p['id'])
+    assert reopened['settings']['questions'][qid]==new
+    assert [q['id'] for q in reopened['form']['questions']]==[order[0],qid,*order[1:]]
+    if multiple:assert all(record['values'][qid]==['b','c'] for record in reopened['records'])
+    edited=KoboSettings.model_validate(reopened['settings']);edited.questions[qid].hiddenAnswers=[];edited.questions[qid].palette='Warm'
+    store.save(p['id'],edited)
+    assert store.get(p['id'])['settings']['questions']['answer']==original['questions']['answer']
+    undone=commit_edit(store,p['id'],EditRequest(revision=1,operation=EditOperation(kind='cells')),undo=True)
+    assert [q['id'] for q in undone['form']['questions']]==order
+    assert qid not in undone['settings']['questions']
+    assert undone['settings']['questions']['answer']==original['questions']['answer']
+
+
+def test_new_field_rename_and_color_fallback_and_legacy_position(saved):
+    store,p=saved
+    store.save(p['id'],KoboSettings(questions={'answer':QuestionSettings(hiddenAnswers=['a'],colors={'a':'#123456'})}))
+    p=store.get(p['id'])
+    changed=apply(store,p,dict(kind='answers',field='answer',sources=['a'],label='Renamed',destination='new',name='Renamed field'))
+    q=changed['form']['questions'][1];cfg=changed['settings']['questions'][q['id']]
+    assert q['derivedFrom']=='answer' and cfg['colors']=={'a':'#123456'} and cfg['hiddenAnswers']==['a']
+    raw=store.get(p['id'],raw=True)
+    raw['dataEdits']['history'][0].pop('inheritSourceSettings')
+    legacy=effective_project(raw)
+    assert legacy['form']['questions'][-1]['id']==q['id']
+
+
+def test_new_merge_color_fallback_and_group_scope(saved):
+    from backend.kobo_edits import apply_operation,inherit_new_field_settings
+    _,p=saved
+    p['form']['questions'][0].update(group='group',repeat='repeat')
+    op=dict(kind='answers',field='answer',sources=['b','a'],label='Combined',destination='new',name='Combined field')
+    apply_operation(p,op)
+    q=p['form']['questions'][1]
+    assert q['group']=='group' and q['repeat']=='repeat'
+    settings=KoboSettings(hidden=['answer'],questions={'answer':QuestionSettings(colors={'a':'#112233','b':'#445566'})}).model_dump()
+    inherit_new_field_settings(settings,op,p)
+    assert next(iter(settings['questions'][q['id']]['colors'].values()))=='#445566'
+    assert settings['hidden']==['answer',q['id']]
 
 
 def test_dependent_calculated_columns_recompute_and_date_validation_is_atomic(saved):

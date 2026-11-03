@@ -32,8 +32,9 @@ def prepared_recordset(config, rows, cache):
     headers = config['headers']; kinds = [202]*len(headers)
     kinds[headers.index('Selected')] = kinds[headers.index('Answered')] = 3
     kinds[headers.index('Source row')] = 5
-    first_detail = len(headers)-len(config['details'])
-    for index, detail in enumerate(config['details'], first_detail):
+    if 'FollowupAnswered' in headers: kinds[headers.index('FollowupAnswered')] = 3
+    for detail in config['details']:
+        index = headers.index(detail['header'])
         kind = config['fields'][detail['id']]['kind']
         if kind == 'number': kinds[index] = 5
         elif kind == 'date': kinds[index] = 135

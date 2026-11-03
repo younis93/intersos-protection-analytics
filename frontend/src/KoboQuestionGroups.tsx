@@ -75,6 +75,8 @@ export default function KoboQuestionGroups({analysis,renderQuestion,tools,tableO
  const toggle=(id:string)=>{if(questionQuery){setSearchCollapsed(current=>{const ids=new Set(current.query===questionQuery?current.ids:[]);if(ids.has(id))ids.delete(id);else ids.add(id);return{query:questionQuery,ids}});return}toggleNormal(id)};
  const toggleNormal=(id:string)=>setExpanded(current=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next});
  const navigate=(group:GroupNode,question?:KoboResult)=>{if(tableOnly){setTableGroup(group.id);setQuestionSearch('');return}setQuestionSearch('');setExpanded(current=>new Set([...current,...group.ancestors,group.id]));setActive(group.id);setJump(current=>({kind:question?'question':'group',id:question?.id||group.id,serial:(current?.serial||0)+1}));setSearch('')};
+ useEffect(()=>{const jumpToQuestion=(event:Event)=>{const question=analysis.questions.find(q=>q.id===(event as CustomEvent<string>).detail);const group=question&&tree.nodes.get(question.group||GENERAL);if(question&&group)navigate(group,question)};window.addEventListener('kobo-question-navigate',jumpToQuestion);return()=>window.removeEventListener('kobo-question-navigate',jumpToQuestion)},[analysis,tree,tableOnly]);
+
  useLayoutEffect(()=>{
   if(!jump||tableOnly)return;const node=document.getElementById(targetId(jump.kind,jump.id));
   const align=()=>node?.scrollIntoView({block:'start',behavior:'instant'});

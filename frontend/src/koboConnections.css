@@ -1,0 +1,134 @@
+.kobo-connections-trigger{display:inline-flex;align-items:center;gap:6px;padding:4px 0;margin:4px 0;border:0;background:transparent;color:var(--muted);font:inherit;font-size:11px;cursor:pointer;text-align:start}
+.kobo-connections-trigger svg{width:14px;height:14px;flex:none}
+.kobo-connections-trigger:hover,.kobo-connection-link:hover{color:var(--blue);text-decoration:underline}
+.kobo-connections-trigger small,.kobo-connection-status{font-size:10px;background:var(--panel);border:1px solid var(--line);padding:2px 6px;border-radius:6px;color:var(--muted)}
+.kobo-basis-summary{font-size:11px;line-height:1.7;color:var(--muted);margin:8px 0;overflow-wrap:anywhere}
+.kobo-basis-summary.has-issue,.kobo-connection-review{color:var(--ink);border-inline-start:3px solid var(--blue);padding-inline-start:10px}
+.kobo-dialog.kobo-connections-dialog{width:min(620px,calc(100vw - 24px));max-height:calc(100dvh - 32px);padding:22px;box-sizing:border-box;overflow:auto}
+.kobo-connections-dialog>header{display:flex;gap:16px;align-items:start;justify-content:space-between}
+.kobo-connections-dialog h2{font-size:18px;margin:5px 0;line-height:1.5}
+.kobo-connections-dialog h3{font-size:13px;margin:0 0 10px}
+.kobo-connections-dialog>header button{display:grid;place-items:center;padding:6px;flex:none}
+.kobo-connections-dialog>header svg{width:18px;height:18px}
+.kobo-connections-dialog section{border-top:1px solid var(--line);padding:16px 0}
+.kobo-connections-dialog p{font-size:12px;line-height:1.8;overflow-wrap:anywhere}
+.kobo-connections-dialog ul{list-style:none;padding:0;margin:0;display:grid;gap:12px}
+.kobo-connections-dialog li>div{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px}
+.kobo-connections-dialog li small{display:block;color:var(--muted);margin-top:4px}
+.kobo-connections-dialog code{font-size:10px;color:var(--muted);overflow-wrap:anywhere}
+.kobo-connection-link{padding:0;background:transparent;border:0;color:var(--blue);font:inherit;text-align:start;cursor:pointer}
+.kobo-connection-condition{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+.kobo-connection-condition small,.kobo-connections-dialog section>small{color:var(--muted);font-size:11px;line-height:1.7}
+.kobo-connection-condition p{margin:5px 0}
+.kobo-connection-condition summary{font-size:11px;cursor:pointer;color:var(--muted)}
+.kobo-connection-condition details code{display:block;white-space:pre-wrap;margin-top:8px;text-align:start}
+.kobo-connection-formula{display:flex;flex-direction:column;gap:6px;background:var(--panel);padding:12px;border-radius:10px}
+.kobo-connections-dialog>footer{display:flex;justify-content:flex-end;border-top:1px solid var(--line);padding-top:14px}
+.kobo-connection-settings{margin:16px 0;padding:12px;border:1px solid var(--line);border-radius:10px;min-width:0}
+.kobo-connection-settings legend{font-size:12px;font-weight:600;padding:0 5px}
+.kobo-connection-settings small{display:block;font-size:11px;color:var(--muted);line-height:1.7;margin-top:8px}
+.kobo-connection-settings .app-select{margin:8px 0}
+.kobo-connection-rule-group{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px;margin:10px 0;min-width:0}
+.kobo-connection-rule-item{display:flex;gap:6px;align-items:start;border-top:1px solid var(--line);padding-top:10px;margin-top:8px;min-width:0}
+.kobo-connection-rule-item>div:first-child{flex:1;min-width:0}
+.kobo-connection-rule-item .kobo-connection-remove{padding:6px;margin-top:28px;flex:none}
+.kobo-connection-remove svg,.kobo-connection-rule-actions svg{width:14px;height:14px}
+.kobo-connection-rule-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.kobo-connection-rule-actions button{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:6px 9px}
+.kobo-connection-rule-fields>.app-select{width:100%}
+.kobo-connection-settings>.kobo-answer-percentage-buttons{margin:12px 0}
+.kobo-detected-conditions{margin:12px 0;font-size:11px;color:var(--muted)}
+.kobo-detected-conditions summary{cursor:pointer}
+.kobo-detected-conditions p{overflow-wrap:anywhere}
+.kobo-original-connections{margin:4px 0 14px;padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--panel);min-width:0;scroll-margin-top:100px}
+.kobo-original-connections h4{font-size:12px;margin:0 0 8px;color:var(--ink)}
+.kobo-original-connections p{font-size:11px;line-height:1.7;margin:6px 0;overflow-wrap:anywhere}
+.kobo-original-reference{display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+.kobo-original-connections code{display:block;font-size:10px;line-height:1.7;color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere;text-align:start}
+.kobo-original-reference code{color:var(--muted)}
+.kobo-original-condition{border-top:1px solid var(--line);padding-top:8px;margin-top:8px}
+.kobo-original-missing{display:flex;flex-wrap:wrap;gap:5px;color:var(--muted);border-inline-start:2px solid var(--blue);padding-inline-start:8px}
+.kobo-manual-connection>summary{font-size:12px;color:var(--muted);cursor:pointer;margin:12px 0}
+.kobo-connections-trigger:focus-visible,.kobo-connection-link:focus-visible{outline:2px solid var(--blue);outline-offset:4px;border-radius:3px}
+@media(max-width:480px){.kobo-dialog.kobo-connections-dialog{padding:16px}.kobo-connections-dialog h2{font-size:16px}}
+
+.kobo-connection-overview{margin:8px 0;max-width:100%;min-width:0}
+.kobo-connection-status-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px}
+.kobo-connection-health{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:20px;padding:4px 8px;font-size:11px;color:var(--muted);background:var(--panel)}
+.kobo-connection-health svg{width:13px;height:13px;flex:none}
+.kobo-connection-health.is-connected{color:var(--blue);background:color-mix(in srgb,var(--blue) 8%,var(--panel))}
+.kobo-connection-health.is-broken,.kobo-connection-health.is-review{color:var(--ink);border-color:#d99532;background:color-mix(in srgb,#d99532 12%,var(--panel))}
+.kobo-condition-card{display:flex;align-items:start;gap:12px;margin-top:5px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--panel);font-size:11px;line-height:1.7}
+.kobo-condition-card p{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;margin:0;flex:1;min-width:0;color:var(--muted)}
+.kobo-condition-card button{flex:none;font-size:11px}
+.kobo-connection-card-issue,.kobo-rule-error{font-size:11px;line-height:1.7;color:var(--ink);border-inline-start:3px solid #d99532;padding-inline-start:9px;overflow-wrap:anywhere}
+.kobo-connection-modes{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--panel);margin:12px 0}
+.kobo-connection-modes>button{font:inherit;font-size:11px;line-height:1.5;padding:10px 8px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted);cursor:pointer}
+.kobo-connection-modes>button[aria-pressed=true]{color:var(--blue);border-color:var(--line);background:var(--panel-strong)}
+.kobo-connection-modes>button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.kobo-condition-preview{padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:11px;overflow-wrap:anywhere}
+.kobo-condition-preview p{margin:6px 0 0;line-height:1.8;color:var(--muted)}
+.kobo-connection-diagnostics{font-size:11px;overflow-wrap:anywhere}
+.kobo-connection-diagnostics code,.kobo-rule-error code{margin-inline:4px}
+.kobo-repair-suggestions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.kobo-repair-suggestions small{flex-basis:100%}
+.kobo-repair-suggestions button{max-width:100%;white-space:normal;text-align:start;font-size:11px;padding:7px 9px}
+.kobo-connection-rule-fields{min-width:0}
+@media(max-width:540px){.kobo-condition-card{flex-direction:column;gap:5px}.kobo-connection-rule-group{padding:8px}.kobo-connection-rule-item{gap:4px}}
+
+.kobo-shell .kobo-connections-trigger.kobo-connection-edit{gap:8px;min-height:36px;box-sizing:border-box;padding:8px 11px;border:1px solid color-mix(in srgb,var(--blue) 42%,var(--line));border-radius:11px;background:color-mix(in srgb,var(--blue) 7%,var(--panel-strong));color:var(--ink);font-weight:600;box-shadow:0 1px 2px #00000008;text-decoration:none;line-height:1.4;transition:background .15s,border-color .15s}
+.kobo-connection-edit .kobo-connection-edit-label{display:inline-flex;align-items:center;gap:5px;padding-inline-start:9px;border-inline-start:1px solid var(--line);color:var(--blue)}
+.kobo-connection-edit-label svg{width:12px;height:12px}
+.kobo-connection-edit.is-connected>svg{color:var(--blue)}
+.kobo-shell .kobo-connection-edit.is-broken,.kobo-shell .kobo-connection-edit.is-review{border-color:#d99532;background:color-mix(in srgb,#d99532 9%,var(--panel));color:var(--ink)}
+.kobo-shell .kobo-connections-trigger.kobo-connection-edit:hover{border-color:var(--blue);background:color-mix(in srgb,var(--blue) 7%,var(--panel));text-decoration:none}
+.kobo-connection-count{font-variant-numeric:tabular-nums}
+@media(prefers-reduced-motion:reduce){.kobo-connections-trigger.kobo-connection-edit{transition:none}}
+
+.kobo-customize .kobo-values-section{gap:18px}
+.kobo-customize .kobo-values-section>h3{margin:0;font-size:17px;line-height:1.5}
+.kobo-customize .kobo-values-card{display:grid;gap:12px;min-width:0;margin:0;padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+.kobo-values-card>header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.kobo-values-card>header>h4{margin:0;font-size:14px;font-weight:650;line-height:1.5;color:var(--ink)}
+.kobo-values-card>.app-select{width:100%;min-width:0;margin:0}
+.kobo-values-card>p,.kobo-values-card>.kobo-values-hint{margin:0;color:var(--muted);font-size:12px;line-height:1.75}
+.kobo-values-card .kobo-condition-preview{padding:11px 12px;font-size:11px;background:var(--panel-strong)}
+.kobo-values-card .kobo-connection-modes{margin:0}
+.kobo-values-card .kobo-connection-modes>button{min-height:40px;font-size:12px}
+.kobo-values-card .kobo-connection-modes>button[aria-pressed=true]{border-color:color-mix(in srgb,var(--blue) 30%,var(--line));background:color-mix(in srgb,var(--blue) 9%,var(--panel-strong))}
+.kobo-connection-empty{display:grid;justify-items:start;gap:8px;padding:14px;border:1px dashed var(--line);border-radius:11px;background:var(--panel-strong)}
+.kobo-connection-empty>svg{width:20px;height:20px;color:var(--muted)}
+.kobo-connection-empty>strong{font-size:13px;color:var(--ink)}
+.kobo-connection-empty>p{margin:0;font-size:12px;line-height:1.75;color:var(--muted)}
+.kobo-connection-empty>button{display:inline-flex;gap:7px;align-items:center;font-size:12px;padding:9px 12px}
+.kobo-connection-empty>button>svg{width:14px;height:14px}
+.kobo-original-logic{border-top:1px solid var(--line);padding-top:12px;min-width:0}
+.kobo-original-logic>summary{font-size:12px;color:var(--muted);cursor:pointer;line-height:1.7}
+.kobo-original-logic>summary:focus-visible{outline:2px solid var(--blue);outline-offset:4px;border-radius:4px}
+.kobo-original-logic>.kobo-original-connections{border:0;padding:10px 0 0;margin:0;background:transparent}
+.kobo-original-logic .kobo-original-connections>h4{display:none}
+.kobo-connection-percentages>.kobo-answer-percentage-buttons{display:flex;width:100%;margin:0}
+.kobo-connection-percentages>small{font-size:12px;color:var(--muted);line-height:1.75}
+.kobo-values-card .kobo-connection-rule-group{margin:0;background:var(--panel-strong)}
+.kobo-values-card .kobo-connection-rule-group .kobo-connection-rule-group{margin-top:8px;background:var(--panel)}
+.kobo-values-card .kobo-connection-diagnostics p{font-size:12px;line-height:1.75;margin:0 0 8px}
+.kobo-values-card .kobo-connection-diagnostics{padding-inline-start:10px;border-inline-start:3px solid #d99532}
+.kobo-customize .kobo-customize-tabs{overflow-x:auto;scrollbar-width:thin}
+.kobo-dialog.kobo-customize .kobo-customize-tabs>button{flex:1 0 64px;min-width:64px;overflow-wrap:normal;word-break:normal;line-height:1.4;font-size:10px;padding:9px 5px}
+.kobo-dialog.kobo-customize .kobo-customize-tabs>button:first-child{flex-basis:84px;min-width:84px}
+.kobo-customize [data-connection-section]{scroll-margin-top:110px}
+@media(max-width:540px){.kobo-customize .kobo-values-card{padding:14px;gap:11px}.kobo-customize .kobo-values-section>h3{font-size:16px}.kobo-values-card .kobo-connection-modes>button{font-size:11px}}
+
+.kobo-connection-rule-fields{display:grid;gap:10px}
+.kobo-connection-rule-fields>.app-select{margin:0}
+.kobo-connection-rule-fields>.kobo-field{display:grid;gap:6px;margin:0;font-size:12px;min-width:0}
+.kobo-connection-rule-fields>small{margin:0;line-height:1.7;color:var(--muted);font-size:11px}
+.kobo-connection-rule-fields>.kobo-rule-error{margin:0}
+
+.kobo-dialog .kobo-connection-rule-fields>.kobo-field{gap:8px;color:var(--ink);font-weight:600}
+.kobo-dialog .kobo-connection-rule-fields>.kobo-field>input{display:block;width:100%;min-height:46px;box-sizing:border-box;margin:0;padding:12px 13px;border:1px solid color-mix(in srgb,var(--blue) 42%,var(--line));border-radius:10px;background:var(--panel-strong);color:var(--ink);font:inherit;font-size:14px;font-weight:400;line-height:1.5;box-shadow:0 1px 3px #00000008;transition:border-color .15s,box-shadow .15s}
+.kobo-dialog .kobo-connection-rule-fields>.kobo-field>input::placeholder{color:var(--muted);opacity:1;font-size:12px}
+.kobo-dialog .kobo-connection-rule-fields>.kobo-field>input:hover:not(:disabled){border-color:var(--blue)}
+.kobo-dialog .kobo-connection-rule-fields>.kobo-field>input:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-color:var(--blue);box-shadow:0 0 0 4px color-mix(in srgb,var(--blue) 10%,transparent)}
+.kobo-dialog .kobo-connection-rule-fields>.kobo-field>input:disabled{opacity:.5;cursor:not-allowed}
+@media(prefers-reduced-motion:reduce){.kobo-dialog .kobo-connection-rule-fields>.kobo-field>input{transition:none}}

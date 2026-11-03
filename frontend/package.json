@@ -13,6 +13,8 @@
     "@embedpdf/fonts-arabic": "1.0.0",
     "@rive-app/react-webgl2": "4.32.1",
     "@vitejs/plugin-react": "6.1.0",
+    "@xyflow/react": "^12.12.1",
+    "elkjs": "^0.12.1",
     "html2canvas": "^1.4.1",
     "jspdf": "4.2.1",
     "lucide-react": "1.33.0",

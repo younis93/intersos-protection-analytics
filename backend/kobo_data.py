@@ -3,7 +3,8 @@ from .kobo import KoboFilter, filtered_records, label, missing, question_result,
 
 
 def pivot_records(project, settings, scope, records, selection):
-    questions = {q['id']: q for q in project['form']['questions']}
+    from .kobo_connections import form_question_index
+    questions = form_question_index(project['form'])
     question = questions.get(selection['question'])
     if question is None:
         raise ValueError('Question not found.')
@@ -120,7 +121,8 @@ def data_workbook(project, settings, scope, columns, search='', sort_column='', 
     columns = list(dict.fromkeys(columns))
     result = data_rows(project, settings, scope, columns, search, sort_column, direction, drilldown, None if selected_ids is not None else column_filters)
     selected = None if selected_ids is None else set(selected_ids)
-    questions = {q['id']: q for q in project['form']['questions']}
+    from .kobo_connections import form_question_index
+    questions = form_question_index(project['form'])
     labels = [label(questions[qid], settings.language) for qid in columns]
     counts = Counter(['Source row', *labels])
     headers, used = ['Source row'], {'Source row'}

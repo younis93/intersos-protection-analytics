@@ -7,7 +7,7 @@ const base='http://127.0.0.1:5397',fixture=JSON.parse(fs.readFileSync('output/an
   await page.goto(`${base}/#/${workspace}/${f.id}`);const card=page.locator(`[id="question-${f.answerName}"]`);await card.waitFor();
   await card.getByRole('button',{name:`Configure ${f.answerName}`,exact:true}).click();
   const dialog=page.getByRole('dialog',{name:`Customize ${f.answerName}`,exact:true});await dialog.waitFor();
-  await dialog.getByRole('button',{name:'Values & calculations',exact:true}).click();
+  await dialog.getByRole('button',{name:'Values & connections',exact:true}).click();
   const select=async(label,option)=>{await dialog.getByRole('button',{name:label,exact:true}).click();await page.getByRole('option',{name:option,exact:true}).click()};
   await select('Calculation','Sum');await select('Value column','Amount');
   await page.waitForFunction(()=>{const button=[...document.querySelectorAll('.kobo-customize button')].find(el=>el.textContent==='Apply changes');return button&&!button.disabled});

@@ -5,6 +5,14 @@ from backend.kobo import KoboSettings, ChartAppearance, QuestionSettings, analyz
 from backend.kobo_api import QuestionResult
 from backend.test_kobo import sample
 
+def test_optional_chart_title_survives_saved_settings_and_analysis(sample):
+    assert ChartAppearance().title == ''
+    settings = KoboSettings(questions={'group/needs': QuestionSettings(appearance={'title': 'الاحتياجات الرئيسية'})})
+    restored = KoboSettings.model_validate_json(settings.model_dump_json())
+    assert restored.questions['group/needs'].appearance.title == 'الاحتياجات الرئيسية'
+    result = next(q for q in analyze(sample[0], restored)['questions'] if q['id'] == 'group/needs')
+    assert QuestionResult.model_validate(result).appearance.title == 'الاحتياجات الرئيسية'
+
 
 @pytest.mark.parametrize('labels', ['both', 'hidden'])
 def test_appearance_roundtrip_preserves_results_and_settings_version(sample, labels):

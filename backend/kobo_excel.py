@@ -95,7 +95,8 @@ def native_breakdown_columns(project, result, settings):
 def source_context(project, settings):
     records = defaultdict(list)
     for record in filtered_records(project, settings): records[record['scope']].append(record)
-    return {'questions': {q['id']: q for q in project['form']['questions']}, 'records': records,
+    from .kobo_connections import form_question_index
+    return {'questions': form_question_index(project['form']), 'records': records,
             'lookup': {r['id']: r for r in project['records']}}
 
 
@@ -107,8 +108,14 @@ def iter_source_rows(project, result, settings, context=None):
     """
     context = context or source_context(project, settings)
     q = context['questions'][result['id']]
-    records = question_cohort(q, context['records'][q['repeat']], settings.questions.get(q['id'],QuestionSettings()), context['questions'], context['lookup'])
-    cfg = settings.questions.get(q['id'])
+    cfg = resolved_question_settings(q,settings)
+    from .kobo_connections import connection_plan
+    plan = connection_plan(q,cfg,context['questions'])
+    records = question_cohort(q, context['records'][q['repeat']], cfg, context['questions'], context['lookup'])
+    eligible_ids = None
+    if plan['enabled'] and plan['mode']=='keep-original':
+        eligible_ids = {record['id'] for record in records}
+        records = question_cohort(q,context['records'][q['repeat']],cfg.model_copy(update={'hiddenAnswers':[]}),context['questions'],context['lookup'],apply_connections=False)
     dimensions = breakdown_fields(cfg, context['questions'], q) if cfg else []
     lookup = context['lookup']
     answers = [r for r in result['rows'] if r['id'] != '__blank__']
@@ -127,16 +134,21 @@ def iter_source_rows(project, result, settings, context=None):
         breakdown = captions[0] if captions else 'Missing breakdown'
         extra = captions[1:]
         answered = not missing(value)
+        basis_answered = answered
+        if eligible_ids is not None:
+            from .kobo_measures import record_value
+            basis_answered = bool(plan['parent']) and not missing(record_value(record,plan['parent'],lookup))
         if not answered: selected = set()
         elif q['kind'] == 'multiple': selected = set(value)
         elif result['bins']:
             selected = {b['id'] for index, b in enumerate(result['bins']) if b['min'] <= value and (value <= b['max'] if index == len(result['bins'])-1 else value < b['max'])}
         elif q['kind'] == 'date': selected = {answer['id'] for answer in answers if str(value).startswith(answer['id'])}
         else: selected = {str(value)}
+        if eligible_ids is not None and record['id'] not in eligible_ids: selected = set()
         for answer in answers:
-            yield [record['id'], captions_by_answer[answer['id']], int(answer['id'] in selected), int(answered), breakdown, answer['id'], *extra]
+            yield [record['id'], captions_by_answer[answer['id']], int(answer['id'] in selected), int(basis_answered), breakdown, answer['id'], *extra]
         if blank:
-            yield [record['id'], captions_by_answer['__blank__'], int(not answered), 0, breakdown, '__blank__', *extra]
+            yield [record['id'], captions_by_answer['__blank__'], int(not answered and (eligible_ids is None or record['id'] in eligible_ids)), 0, breakdown, '__blank__', *extra]
 def source_rows(project, result, settings):
     return list(iter_source_rows(project, result, settings))
 
@@ -676,9 +688,11 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                 if independent and specs:
                     bottom = excel_cell(report, start + 4, 1).Top + ((len(specs)+3)//4)*156 + 24
                     while excel_cell(report, pivot_row - 2, 1).Top < bottom: pivot_row += 1
+                parent_base = (result.get('respondentBasis') or {}).get('kind') == 'parent'
                 keep_original = 'percentageRows' in result
-                pivot_sheet = _support_sheet(book, '_Kobo original pivots') if keep_original else report
-                pivot_destination = pivot_sheet.UsedRange.Row + pivot_sheet.UsedRange.Rows.Count + 6 if keep_original else pivot_row
+                linked_report = keep_original or parent_base
+                pivot_sheet = _support_sheet(book, '_Kobo original pivots') if linked_report else report
+                pivot_destination = pivot_sheet.UsedRange.Row + pivot_sheet.UsedRange.Rows.Count + 6 if linked_report else pivot_row
                 pivot = active_cache.CreatePivotTable(excel_cell(pivot_sheet, pivot_destination, 1), f'KoboPivot{position:03d}')
                 pivot.EnableDrilldown = True; pivot.SaveData = True
                 pivot.ManualUpdate = True
@@ -694,7 +708,7 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                     from .kobo_excel_binary import add_binary_metrics
                     add_binary_metrics(pivot, result)
                 else:
-                    for metric in (['count'] if keep_original or source.get('sparse') or result.get('percentageMode')=='breakdown-group' else metrics): add_metric(pivot, result, metric, _percentage_field)
+                    for metric in (['count'] if linked_report or source.get('sparse') or result.get('percentageMode')=='breakdown-group' else metrics): add_metric(pivot, result, metric, _percentage_field)
                 pivot.DisplayErrorString = True; pivot.ErrorString = '-'; pivot.RowGrand = False; pivot.ColumnGrand = False; pivot.PreserveFormatting = True; pivot.RowAxisLayout(1)
                 pivot.DisplayNullString = True; pivot.NullString = '0'
                 pivot.MergeLabels = True
@@ -715,13 +729,13 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                 if totals is not None:
                     block_pivots.extend([pivot, totals])
                     if base_answer is not None:
-                        answered = pivot_value(totals, 'Answered total', base_answer, result=result)
+                        answered = pivot_value(totals, 'Follow-up answered total' if parent_base else 'Answered total', base_answer, result=result)
                         cohort = pivot_value(totals, 'Cohort size', base_answer, result=result)
                         excel_cell(report, start + 1, 1).Formula = '="Answered: "&' + answered + '&". Missing: "&(' + cohort + '-' + answered + ')&". ' + ('Repeat entries.' if result['repeat'] else 'Respondents.') + '"'
                     _fixed_pivot_items(pivot, {**result, 'rows': result.get('percentageRows', result['rows'])}, project, settings)
                 _style_pivot(pivot, report, result, totals)
                 telemetry.begin('formulas', message=f'Writing question values: {completed}/{len(snapshot["questions"])}')
-                if keep_original:
+                if linked_report:
                     from .kobo_excel_percentages import report_table
                     area, footer = report_table(book, report, totals, result, pivot_row, metrics, _support_sheet, settings.language)
                 else:
@@ -742,6 +756,8 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                     if chart is None: excel_cell(report, start + 3, 1).Value = 'No answered responses available for a chart.'
                 from .kobo_excel_chart_projection import project_excel_chart
                 project_excel_chart(book,chart,result,_support_sheet)
+                if parent_base:
+                    excel_cell(report, start+2, 1).Value = safe_spreadsheet_value(result['percentageBasis'])
                 if keep_original:
                     excel_cell(report, start+3, 1).Value = 'Hidden answers remain included in percentage totals. Inspect contributing responses in the Data worksheet.'
                 if source.get('binary') and not keep_original:

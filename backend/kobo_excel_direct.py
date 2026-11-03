@@ -128,6 +128,23 @@ def direct_helpers(config, layouts):
             helpers[scope][fields['AnswerAllowed']] = f'=IF({hidden_answer_formula(q,value)},"Excluded","Included")'
             original = helpers[scope][fields['IncludeInPivot']][1:]
             helpers[scope][fields['IncludeInPivot']] = f'=IF({hidden_answer_formula(q,value)},"Excluded",{original})'
+        if q.get('connected'):
+            from .kobo_connection_rules import excel_condition
+            condition = excel_condition(q.get('connectionTree'),lambda key:raw(scope,key),{key:field['kind'] for key,field in config['fields'].items()})
+            eligible = f'AND({condition},NOT({hidden_answer_formula(q,value)}))'
+            parent = raw(scope,q['percentageParent']) if q.get('percentageParent') else None
+            if parent: eligible = f'AND({parent}<>"",{eligible})'
+            fields['Selected'] = prefix+'selected'
+            helpers[scope][fields['Selected']] = f'=IF({eligible},1,0)'
+            fields['AnswerAllowed'] = prefix+'answer allowed'
+            allowed = f'{parent}<>""' if parent else eligible
+            helpers[scope][fields['AnswerAllowed']] = f'=IF({allowed},"Included","Excluded")'
+            original = helpers[scope][fields['IncludeInPivot']][1:]
+            helpers[scope][fields['IncludeInPivot']] = f'=IF({eligible},{original},"Excluded")'
+            if parent:
+                fields['FollowupAnswered'] = prefix+'followup answered'
+                helpers[scope][fields['FollowupAnswered']] = f'=IF(AND({eligible},{value}<>""),1,0)'
+                helpers[scope][fields['Answered']] = f'=IF({parent}="",0,1)'
     return helpers, sources
 
 

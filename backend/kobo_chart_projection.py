@@ -32,7 +32,7 @@ def project_chart(result, cfg, question=None):
         total = result.get('pivotTotal') or {}
         grand = total.get('value') if measure else total.get('count')
         own_value = math.fsum((value(r) or 0) for r in omitted)
-        base = result['denominator'] if mode == 'legacy-respondents' else grand
+        base = (result.get('respondentBasis') or {}).get('denominator', result['denominator']) if mode == 'legacy-respondents' else grand
         merged = {'id':'__chart_other__', 'label':'Other (chart aggregation)', **combine(omitted,base,own_value)}
         merged['series'] = []
         for column in result['breakdowns']:

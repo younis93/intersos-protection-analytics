@@ -104,9 +104,11 @@ def report_table(book, report, totals, result, row, metrics, support_sheet, lang
     report.Cells(footer_row, 1).Value = 'الإجمالي' if language == 'ar' else 'Total'
     for c, column in enumerate(columns):
         denominator = column['_denominator']
+        linked = (result.get('respondentBasis') or {}).get('kind') == 'parent'
+        count_total = pivot_value(totals, 'Follow-up answered total', base, column['labels'], result) if linked else denominator
         for offset, metric in enumerate(metrics):
             target = report.Cells(footer_row, 2 + c * metric_count + offset)
-            target.Formula = '=' + (denominator if metric == 'count' else ratio(totals,result,None,column['labels'],margin=True) if modern(result) else f'IF({denominator}=0,"-",1)')
+            target.Formula = '=' + (count_total if metric == 'count' else f'IF({denominator}=0,"-",{count_total}/{denominator})' if linked else ratio(totals,result,None,column['labels'],margin=True) if modern(result) else f'IF({denominator}=0,"-",1)')
             target.NumberFormat = '#,##0' if metric == 'count' else percent_format(decimals)
     footer = report.Range(report.Cells(footer_row, 1), report.Cells(footer_row, width))
     footer.Interior.Color = 0xEBDFD2; footer.Font.Bold = True; footer.RowHeight = 26

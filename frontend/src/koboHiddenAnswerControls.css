@@ -1,0 +1,21 @@
+.kobo-answer-percentage-buttons{
+ display:inline-flex;align-items:stretch;gap:4px;padding:4px;max-width:100%;box-sizing:border-box;
+ border:1px solid var(--line);border-radius:12px;background:var(--panel);
+}
+.kobo-answer-percentage-buttons>button{
+ display:inline-flex;align-items:center;justify-content:center;flex:1 1 auto;min-width:0;min-height:38px;
+ margin:0;padding:9px 12px;border:1px solid transparent;border-radius:8px;
+ background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:600;line-height:1.4;
+ text-align:center;white-space:normal;box-shadow:none;cursor:pointer;
+ transition:background .15s,color .15s,border-color .15s;
+}
+.kobo-answer-percentage-buttons>button:hover:not(:disabled){background:color-mix(in srgb,var(--blue) 8%,var(--panel));color:var(--ink)}
+.kobo-answer-percentage-buttons>button[aria-pressed=true]{
+ border-color:color-mix(in srgb,var(--blue) 30%,var(--line));
+ background:color-mix(in srgb,var(--blue) 12%,var(--panel-strong));color:var(--blue);
+ box-shadow:0 1px 3px #0000000a;
+}
+.kobo-answer-percentage-buttons>button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.kobo-answer-percentage-buttons>button:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+.kobo-connection-settings>.kobo-answer-percentage-buttons{display:flex;width:100%}
+@media(prefers-reduced-motion:reduce){.kobo-answer-percentage-buttons>button{transition:none}}

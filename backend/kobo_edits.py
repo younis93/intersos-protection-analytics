@@ -119,7 +119,7 @@ def option_value(value,q,language):
     return code
 
 
-def apply_operation(project,operation,replay=False):
+def apply_operation(project,operation,replay=False,place_after_source=True):
     from .kobo import label, missing
     op=EditOperation.model_validate(operation)
     questions={q['id']:q for q in project['form']['questions']}
@@ -157,7 +157,11 @@ def apply_operation(project,operation,replay=False):
         if any(text(label(item,op.language))==text(op.name) for item in questions.values()):raise ValueError('A field already uses this name.')
         q=deepcopy(source);q.update(id=identity('local_field_',op.field,op.name),name=text(op.name),labels={op.language:text(op.name)},localDerived=True,derivedFrom=source['id'],order=len(questions))
         if q['kind']=='text':q['kind']='category';q['type']='select_one local'
-        project['form']['questions'].append(q)
+        if place_after_source:
+            ordered=project['form']['questions']
+            ordered.insert(ordered.index(source)+1,q)
+            for index,item in enumerate(ordered):item['order']=index
+        else:project['form']['questions'].append(q)
     labels={c['name']:deepcopy(c['labels']) for c in source['choices']}
     for item in options:labels.setdefault(item['id'],{op.language:item['label']})
     labels.setdefault(target,{})[op.language]=text(op.label)
@@ -177,7 +181,7 @@ def effective_project(project):
     if not active:return project
     result=deepcopy(project)
     result['_sourceRecords']=project['records'];result['_sourceForm']=project['form']
-    for batch in active:apply_operation(result,batch['operation'],replay=True)
+    for batch in active:apply_operation(result,batch['operation'],replay=True,place_after_source=batch.get('inheritSourceSettings',False))
     if result.get('customConfig',{}).get('calculatedColumns'):
         from .custom_analysis import Configuration
         from .custom_preparation import calculated_columns
@@ -207,11 +211,43 @@ def remap_merge_filters(settings,operation,after):
     return changes
 
 
+def inherit_new_field_settings(settings,operation,after):
+    """Copy current settings once, translating answer identities into the new field."""
+    from .kobo import QuestionSettings,label
+    op=EditOperation.model_validate(operation)
+    if op.kind!='answers' or op.destination!='new':return
+    qid=identity('local_field_',op.field,op.name)
+    question=next(q for q in after['form']['questions'] if q['id']==qid)
+    target=op.target or next(c['name'] for c in question['choices'] if text(label(c,op.language))==text(op.label))
+    sources=set(op.sources)
+    def mapped(code):return target if code in sources else code
+    cfg=deepcopy(settings.get('questions',{}).get(op.field))
+    if cfg is None:cfg=QuestionSettings(percentageMode=settings.get('percentageDefault') or 'grand-total').model_dump()
+    cfg['hiddenAnswers']=list(dict.fromkeys(mapped(code) for code in cfg.get('hiddenAnswers',[])))
+    for rule in cfg.get('ownFilters',[]):
+        if rule.get('field')==op.field:
+            rule['field']=qid
+            if rule.get('kind')=='category':rule['values']=list(dict.fromkeys(mapped(code) for code in rule.get('values',[])))
+    colors=cfg.get('colors',{})
+    cfg['colors']={code:color for code,color in colors.items() if code not in sources}
+    for code in dict.fromkeys([target,*op.sources]):
+        if code in colors:cfg['colors'][target]=colors[code];break
+    # Mark colors encode [breakdown fields, breakdown value, answer code].
+    marks={}
+    priority={code:index for index,code in enumerate(dict.fromkeys([target,*op.sources]))}
+    for key,color in sorted(cfg.get('pointColors',{}).items(),key=lambda item:priority.get(json.loads(item[0])[2],len(priority))):
+        parts=json.loads(key);parts[2]=mapped(parts[2])
+        marks.setdefault(json.dumps(parts,ensure_ascii=False,separators=(',',':')),color)
+    cfg['pointColors']=marks
+    settings.setdefault('questions',{})[qid]=cfg
+    if op.field in settings.get('hidden',[]):settings['hidden'].append(qid)
+
+
 def edit_preview(raw,request):
     if request.revision!=revision(raw):raise ValueError('The data changed. Reload this table and review your edit again.')
     before=effective_project(raw);operation=resolve_operation(before,request.operation)
     # Validate the full pipeline, including dependent calculations.
-    candidate=deepcopy(raw);candidate.setdefault('dataEdits',{}).setdefault('history',[]).append({'operation':operation.model_dump()})
+    candidate=deepcopy(raw);candidate.setdefault('dataEdits',{}).setdefault('history',[]).append({'operation':operation.model_dump(),'inheritSourceSettings':True})
     after=effective_project(candidate)
     changed=sum(a['values']!=b['values'] for a,b in zip(before['records'],after['records']))
     signature=hashlib.sha256(json.dumps([request.revision,request.operation.model_dump()],sort_keys=True,ensure_ascii=False).encode()).hexdigest()
@@ -219,6 +255,9 @@ def edit_preview(raw,request):
     created=next((q['id'] for q in after['form']['questions'] if q['id'] not in {v['id'] for v in before['form']['questions']}),field)
     settings=deepcopy(raw.get('settings',{}));filter_changes=remap_merge_filters(settings,request.operation,after)
     impacts=[f'{len(filter_changes)} current or saved filter configurations will follow the merged answer.'] if filter_changes else []
+    if operation.kind=='answers' and operation.destination=='new':
+        inherit_new_field_settings(settings,operation,after)
+        impacts.append('The new field will appear directly after the original question in form order and inherit its current analysis settings, including filters and hidden answers.')
     from .kobo_indicators import IndicatorDefinition,indicator_issues
     for definition in settings.get('indicators',[]):
         issues=indicator_issues(after,IndicatorDefinition.model_validate(definition))
@@ -242,7 +281,7 @@ def commit_edit(store,pid,request=None,undo=False):
             if request.signature and preview['signature']!=request.signature:raise ValueError('Review this edit again before applying.')
             if (request.operation.kind=='answers' or request.operation.allMatches) and not request.signature:raise ValueError('Preview the answer changes before applying.')
             operation=resolve_operation(effective_project(raw),request.operation)
-            edits['history'].append({'id':uuid.uuid4().hex,'at':datetime.now(timezone.utc).isoformat(),'operation':operation.model_dump(),'affectedRecords':preview['affectedRecords']})
+            edits['history'].append({'id':uuid.uuid4().hex,'at':datetime.now(timezone.utc).isoformat(),'operation':operation.model_dump(),'affectedRecords':preview['affectedRecords'],'inheritSourceSettings':True})
         effective=effective_project(raw)
         settings=json.loads(row[1])
         if undo:
@@ -252,7 +291,9 @@ def commit_edit(store,pid,request=None,undo=False):
                     container=snapshot.get('questions',{}).get(patch['question']) if patch.get('question') else snapshot
                     key='ownFilters' if patch.get('question') else 'filters'
                     if container is not None and container.get(key,[])==patch['after']:container[key]=patch['before']
-        else:edits['history'][-1]['filterChanges']=remap_merge_filters(settings,request.operation,effective)
+        else:
+            edits['history'][-1]['filterChanges']=remap_merge_filters(settings,request.operation,effective)
+            inherit_new_field_settings(settings,request.operation,effective)
         from .kobo import QuestionSettings
         for q in effective['form']['questions']:
             if q.get('localDerived') and q['id'] not in settings.get('questions',{}):settings.setdefault('questions',{})[q['id']]=QuestionSettings(percentageMode=settings.get('percentageDefault') or 'grand-total').model_dump()
@@ -324,7 +365,7 @@ def carry_edits(previous,payload,matching,apply=False,materialize=False):
                 cells.append({**cell,'record':new['id']})
             op['cells']=cells
             if not cells:continue
-        try:apply_operation(candidate,op,replay=True)
+        try:apply_operation(candidate,op,replay=True,place_after_source=batch.get('inheritSourceSettings',False))
         except ValueError as exc:
             issues.append(str(exc));continue
         history.append(saved)

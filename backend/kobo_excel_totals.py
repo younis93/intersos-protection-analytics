@@ -54,6 +54,8 @@ def append_overall_totals(book, report, totals, result, metrics, support_sheet,
     base = valid[0]['id'] if valid else '__blank__'
     count_result = {**result, '_countPivot': result['_overallCountPivot']} if '_overallCountPivot' in result else result
     denominator = selection_base(totals,result) if modern(result) else pivot_value(totals, 'Answered total', base, (), result)
+    linked = (result.get('respondentBasis') or {}).get('kind') == 'parent'
+    count_total = pivot_value(totals, 'Follow-up answered total', base, (), result) if linked else denominator
     captions = Counter(answer['label'] for answer in answers)
     options = {option['id']: option['caption'] for option in result.get('_source', {}).get('options', [])}
     canonical = {key: i for i, key in enumerate(sorted(answer['id'] for answer in answers))}
@@ -90,6 +92,6 @@ def append_overall_totals(book, report, totals, result, metrics, support_sheet,
             target.Font.Bold = True; target.Interior.Color = 0xEBDFD2
         if show_row:
             cell = excel_cell(report, footer_row, offset)
-            cell.Formula = '=' + (denominator if metric == 'count' else f'IF({denominator}=0,"-",1)')
+            cell.Formula = '=' + (count_total if metric == 'count' else f'IF({denominator}=0,"-",{count_total}/{denominator})' if linked else f'IF({denominator}=0,"-",1)')
             cell.NumberFormat = '#,##0' if metric == 'count' else percent_format(decimals)
     return right + len(metrics)

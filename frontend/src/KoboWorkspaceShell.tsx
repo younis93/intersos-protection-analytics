@@ -1,7 +1,7 @@
 import {analysisRoute,analysisWorkspace} from './koboApi';
 import {koboWorkspaceSections,type KoboWorkspaceSection} from './KoboWorkspaceNavigation';
-import {useEffect,useState,type ReactNode} from 'react';
-import {ArrowLeft,ArrowRight,ChevronDown,Database,FolderOpen,Home,Maximize2,Minimize2} from 'lucide-react';
+import {Fragment,useEffect,useState,type ReactNode} from 'react';
+import {ArrowLeft,ArrowRight,ChevronDown,Database,FolderOpen,Home,Maximize2,Minimize2,Workflow} from 'lucide-react';
 import {KoboGroupNavigationHost} from './KoboGroupNavigation';
 import './workspace.css';
 import './koboWorkspace.css';
@@ -9,6 +9,7 @@ import './koboIconMotion.css';
 
 type Props={
  projectId:string;
+ questionFlowActive?:boolean;
  activeWorkspace:KoboWorkspaceSection;
  onWorkspaceChange:(workspace:KoboWorkspaceSection)=>void;
  language:'en'|'ar';
@@ -19,7 +20,7 @@ type Props={
 };
 
 /** Uses the same workspace chrome, navigation and layout classes as Legal Platform. */
-export default function KoboWorkspaceShell({projectId,activeWorkspace,onWorkspaceChange,language,onNavigate,onImport,children,dialogs}:Props){
+export default function KoboWorkspaceShell({questionFlowActive=false,projectId,activeWorkspace,onWorkspaceChange,language,onNavigate,onImport,children,dialogs}:Props){
  const custom=analysisWorkspace()==='custom';
  const[collapsed,setCollapsed]=useState(()=>localStorage.getItem('kobo-sidebar-collapsed')==='true');
  const[groupHost,setGroupHost]=useState<HTMLDivElement|null>(null);
@@ -41,10 +42,10 @@ export default function KoboWorkspaceShell({projectId,activeWorkspace,onWorkspac
    <div className="legal-sidebar-utilities"><button aria-label="Home" title="Home" onClick={()=>onNavigate('#/')}><Home/><span>Home</span></button><button className="legal-menu-slide-toggle" aria-label={collapsed?'Expand menu':'Slide menu left'} aria-expanded={!collapsed} title={collapsed?'Expand menu':'Slide menu left'} onClick={()=>setCollapsed(previous=>{localStorage.setItem('kobo-sidebar-collapsed',String(!previous));return !previous})}><>{collapsed?<ArrowRight/>:<ArrowLeft/>}</><span>{collapsed?'Expand':'Slide left'}</span></button></div>
    <nav aria-label={custom?'Custom Analysis navigation':'Kobo navigation'}>
     <button className={!projectId?'active':''} aria-current={!projectId?'page':undefined} onClick={()=>onNavigate(analysisRoute())} title="Projects"><FolderOpen aria-hidden="true"/><span>Projects</span></button>
-    {projectId&&koboWorkspaceSections.map(({id,label,Icon})=><button key={id} type="button" className={`kobo-project-section${activeWorkspace===id?' active':''}`} aria-current={activeWorkspace===id?'page':undefined} onClick={()=>onWorkspaceChange(id)} title={label}><Icon aria-hidden="true"/><span>{label}</span></button>)}
+    {projectId&&koboWorkspaceSections.map(({id,label,Icon})=><Fragment key={id}><button type="button" className={`kobo-project-section${!questionFlowActive&&activeWorkspace===id?' active':''}`} aria-current={!questionFlowActive&&activeWorkspace===id?'page':undefined} onClick={()=>onWorkspaceChange(id)} title={label}><Icon aria-hidden="true"/><span>{label}</span></button>{id==='analysis'&&!custom&&<button type="button" className={`kobo-project-section kobo-question-flow-nav${questionFlowActive?' active':''}`} aria-current={questionFlowActive?'page':undefined} onClick={()=>onNavigate(`#/kobo/${projectId}/question-flow`)} title={language==='ar'?'تدفق الأسئلة':'Question flow'}><Workflow aria-hidden="true"/><span>{language==='ar'?'تدفق الأسئلة':'Question flow'}</span></button>}</Fragment>)}
     <button className="kobo-mobile-home" aria-label="Home" onClick={()=>onNavigate('#/')} title="Home"><Home/><span>Home</span></button>
    </nav>
-   <div className="kobo-group-navigation-host" hidden={!projectId||activeWorkspace!=='analysis'} ref={setGroupHost}/>
+   <div className="kobo-group-navigation-host" hidden={!projectId||questionFlowActive||activeWorkspace!=='analysis'} ref={setGroupHost}/>
   </aside>
   <main>
    <header className="topbar"><div className="mobile-brand">{custom?'Custom Analysis':'Kobo Analysis'}</div><div className="header-actions"><div id="legal-header-scroll-controls" className="legal-header-scroll-slot"/></div></header>

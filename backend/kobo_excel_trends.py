@@ -18,7 +18,8 @@ def trend_chart(book, report, cache, result, position, footer, left, top, metric
         sparse = result['_source'].get('sparse')
         if not result['_source'].get('direct'):
             field = pivot.PivotFields('QuestionId'); field.Orientation = 3; field.CurrentPage = result['id']
-        field = pivot.PivotFields(field_name(result, 'IncludeInPivot')); field.Orientation = 3
+        base_field = 'AnswerAllowed' if denominator and 'AnswerAllowed' in result['_source'].get('fields', {}) and (result.get('respondentBasis') or {}).get('kind') == 'parent' else 'IncludeInPivot'
+        field = pivot.PivotFields(field_name(result, base_field)); field.Orientation = 3
         field.CurrentPage = 'Denominator' if denominator and sparse else 'Included'
         period = pivot.PivotFields(field_name(result, 'TrendPeriod')); period.Orientation = 1; period.Subtotals = (False,)*12
         binary = result['_source'].get('binary')

@@ -27,9 +27,16 @@
 .kobo-dialog.kobo-answers>.legal-copy-toast{bottom:98px}
 @media(max-width:540px){.kobo-dialog.kobo-answers>.legal-copy-toast{bottom:145px}}
 
-.kobo-hidden-answer-notice{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 14px;padding:8px 11px;border:1px solid var(--line);border-radius:10px;background:color-mix(in srgb,var(--blue) 7%,var(--panel-strong));font-size:12px;color:var(--ink)}
-.kobo-hidden-answer-notice>svg{width:17px;height:17px;color:var(--muted)}
-.kobo-hidden-answer-notice small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
-.kobo-hidden-answer-notice button{margin-inline-start:auto}
+.kobo-shell .kobo-hidden-answers-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;margin:4px 0;padding:5px 10px 5px 5px;border:1px solid color-mix(in srgb,#c68b36 52%,var(--line));border-radius:11px;background:color-mix(in srgb,#d99b3d 12%,var(--panel-strong));color:var(--ink);font:inherit;font-size:11px;font-weight:600;line-height:1.4;box-shadow:0 1px 2px #00000008;cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s}
+.kobo-hidden-button-icon{display:grid;place-items:center;width:26px;height:26px;border-radius:7px;background:color-mix(in srgb,#d99b3d 18%,var(--panel-strong));color:var(--ink);flex:none}
+.kobo-hidden-button-icon>svg{width:16px;height:16px}
+.kobo-hidden-button-count{display:grid;place-items:center;min-width:21px;height:21px;padding:0 4px;box-sizing:border-box;border-radius:6px;background:#f6d9a7;color:#664009;font-size:11px;font-weight:750;font-variant-numeric:tabular-nums;flex:none}
+.kobo-hidden-button-label{white-space:nowrap}
+.kobo-hidden-button-arrow{width:13px;height:13px;color:var(--muted);margin-inline-start:2px;flex:none}
+[dir=rtl] .kobo-hidden-button-arrow{transform:rotate(180deg)}
+.kobo-shell .kobo-hidden-answers-button:hover{border-color:#c68b36;background:color-mix(in srgb,#d99b3d 19%,var(--panel-strong));box-shadow:0 2px 7px #00000012}
+.kobo-shell .kobo-hidden-answers-button:focus-visible{outline:2px solid #c68b36;outline-offset:3px}
+.kobo-shell .kobo-hidden-answers-button:active{box-shadow:none}
+@media(prefers-reduced-motion:reduce){.kobo-shell .kobo-hidden-answers-button{transition:none}}
 
 .kobo-settings-history{display:inline-flex;align-items:center;gap:5px}.kobo-settings-history button{min-width:54px;justify-content:center}

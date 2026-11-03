@@ -1179,6 +1179,26 @@ def should_recover_native_runtime(error: Exception) -> bool:
             and "Failed to resolve Python.Runtime.Loader.Initialize" in str(error))
 
 
+def install_excel_download_extension_guard(browser_class):
+    """Keep Excel downloads usable when the native Save dialog drops the suffix."""
+    original = browser_class.on_download_starting
+    if getattr(original, "_excel_extension_guard", False):
+        return
+
+    def on_download_starting(browser, sender, args):
+        suggested_path = str(args.ResultFilePath)
+        mime_type = str(args.DownloadOperation.MimeType).lower()
+        is_excel = suggested_path.lower().endswith(".xlsx") or mime_type == (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        original(browser, sender, args)
+        if is_excel and not args.Cancel and not str(args.ResultFilePath).lower().endswith(".xlsx"):
+            args.ResultFilePath = str(args.ResultFilePath) + ".xlsx"
+
+    on_download_starting._excel_extension_guard = True
+    browser_class.on_download_starting = on_download_starting
+
+
 def main() -> None:
     metrics = StartupMetrics()
     metrics.mark("process-started")
@@ -1209,6 +1229,8 @@ def main() -> None:
     runtime.preload_backend(metrics)
     import webview
     if sys.platform == "win32":
+        from webview.platforms.edgechromium import EdgeChrome
+        install_excel_download_extension_guard(EdgeChrome)
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
         except Exception:

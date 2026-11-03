@@ -145,6 +145,24 @@ def preview_settings(project, current, package):
                 own.append(rule)
             else: own.append({**rule,'field':field})
         config['ownFilters'] = own
+        if config.get('percentageParent'):
+            original = config.get('percentageParent', '')
+            from .kobo_connections import compatible
+            parent = mapping.get(original)
+            if parent and parent in destination and compatible(target, destination[parent]):
+                config['percentageParent'] = parent
+            else:
+                config['percentageParent'] = '__unresolved_parent__:' + original
+                warnings.append(f'Connected percentage base unavailable: {original}. Review {qid} before use.')
+        if config.get('connectionRules'):
+            def remap_connection(node):
+                if node['type']=='group': return {**node,'rules':[remap_connection(child) for child in node['rules']]}
+                source = node['field'];field = mapping.get(source)
+                if not field:
+                    warnings.append(f'Connection rule unavailable: {source}. Review {qid} before use.')
+                    field = '__unresolved_connection__:' + source
+                return {**node,'field':field}
+            config['connectionRules'] = remap_connection(config['connectionRules'])
         fields = remap(config['breakdowns'] or ([config['breakdown']] if config['breakdown'] else []), f'Breakdowns for {qid}')
         valid = []
         for field in fields:

@@ -6,6 +6,26 @@ import {calculationKey} from './koboCustomizeOptions';
 import {questionDefaults,type KoboResult,type KoboSettings,type KoboQuestion} from './koboTypes';
 const result={id:'q',name:'q',label:'Needs',kind:'multiple',denominator:2,missing:0,total:2,rows:[{id:'a',label:'Refugee registered with UNHCR or authorities',count:2,percent:100,series:[{id:'f',count:1,percent:50}]},{id:'b',label:'IDP',count:1,percent:50,series:[{id:'f',count:2,percent:100}]}],breakdowns:[{id:'f',label:'Female',denominator:2}],breakdownFields:[{id:'sex',label:'Sex'}],statistics:{},colors:{},chart:'column'} as KoboResult;
 describe('Kobo reporting appearance',()=>{
+ it('keeps titles optional and adds wrapped plain-text titles to screen and exported charts',()=>{
+  for(const chart of ['bar','column','line','pie','donut','heatmap'] as const)for(const exporting of [false,true]){
+   const source={...result,chart};
+   const plain=chartSpec(source,'en',exporting);
+   expect(plain.layout.title).toBeUndefined();
+   expect(chartSpec({...source,appearance:{title:'   '}},'en',exporting)).toEqual(plain);
+   const titled=chartSpec({...source,appearance:{title:'Needs <overview> & priorities'}},'en',exporting);
+   expect(titled.layout.title).toMatchObject({text:'Needs &lt;overview&gt; &amp; priorities'});
+   expect(titled.data).toEqual(plain.data);
+   expect(Number(titled.layout.height)).toBeGreaterThan(Number(plain.layout.height));
+   expect(titled.layout.margin!.t).toBeGreaterThan(plain.layout.margin!.t!);
+  }
+  const narrow=chartSpec({...result,appearance:{title:'A long chart title that wraps clearly on a narrow screen without changing any category values'}},'en',false,undefined,320);
+  expect(narrow.layout.title).toMatchObject({text:expect.stringContaining('<br>')});
+ });
+ it('adds titles to calculated charts too',()=>{
+  const source={...result,measure:{operation:'sum',field:'amount',label:'Amount',unit:'',parentValuesRepeated:false},appearance:{title:'Total amount'}} as KoboResult;
+  expect(chartSpec(source,'en').layout.title).toMatchObject({text:'Total amount'});
+  expect(chartSpec(source,'en',true).layout.title).toMatchObject({text:'Total amount'});
+ });
  it('shows automatic metric labels while preserving values and dimensions',()=>{const spec=chartSpec(result,'en');expect(spec.layout.barmode).toBe('group');expect(spec.layout.height).toBe(360);expect(spec.data[0]).toMatchObject({y:[1,2],text:['1','2']});expect(resolveAppearance().metric).toBe('auto')});
  it('uses respondent percentages without normalizing stacked series',()=>{const spec=chartSpec({...result,appearance:{metric:'percent',bars:'stack',labels:'both'}},'en');expect(spec.layout.barmode).toBe('stack');expect(spec.data[0]).toMatchObject({y:[50,100],text:['1 / 50%','2 / 100%']});expect(spec.layout.yaxis?.ticksuffix).toBe('%');expect(result.rows[0].count).toBe(2)});
  it('uses custom respondent percentages for multi-select pie labels',()=>{const spec=chartSpec({...result,chart:'donut',breakdowns:[],appearance:{labels:'percent'}},'en');expect(spec.data[0]).toMatchObject({values:[2,1],text:['100%','50%'],textinfo:'text'});expect(chartLabel(0,null,'both','en')).toBe('0 / -')});

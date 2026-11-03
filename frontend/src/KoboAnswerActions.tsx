@@ -3,13 +3,16 @@ import {createPortal} from 'react-dom';
 import {Eye,EyeOff,MoreHorizontal,Pencil,Settings2} from 'lucide-react';
 import './koboAnswerActions.css';
 
+const answerMenuOpened='kobo-answer-menu-opened';
+
 type MenuPosition={x:number;y:number;align:'start'|'end';last?:boolean;anchor?:{left:number;top:number}};
 type Props={label:string;children:ReactNode;language?:string;hiddenCount:number;onRename?:()=>void;onManage?:()=>void;onHide?:()=>void;onRestore?:()=>void};
 export default function KoboAnswerActions({label,children,language='en',hiddenCount,onRename,onManage,onHide,onRestore}:Props){
  const[position,setPosition]=useState<MenuPosition|null>(null),menu=useRef<HTMLDivElement>(null),trigger=useRef<HTMLButtonElement>(null),id=useId();
  const direction=language==='ar'?'rtl':'ltr';
  const close=(restore=true)=>{setPosition(null);if(restore)trigger.current?.focus({preventScroll:true})};
- const open=(last=false)=>{const b=trigger.current?.getBoundingClientRect();if(b)setPosition({x:direction==='rtl'?b.left:b.right,y:b.bottom+4,align:direction==='rtl'?'start':'end',last,anchor:{left:b.left,top:b.top}})};
+ const announceOpen=()=>window.dispatchEvent(new CustomEvent(answerMenuOpened,{detail:id}));
+ const open=(last=false)=>{announceOpen();const b=trigger.current?.getBoundingClientRect();if(b)setPosition({x:direction==='rtl'?b.left:b.right,y:b.bottom+4,align:direction==='rtl'?'start':'end',last,anchor:{left:b.left,top:b.top}})};
  useLayoutEffect(()=>{
   if(!position||!menu.current)return;const node=menu.current,b=node.getBoundingClientRect();
   node.style.left=`${Math.max(8,Math.min(position.align==='end'?position.x-b.width:position.x,innerWidth-b.width-8))}px`;
@@ -27,11 +30,13 @@ export default function KoboAnswerActions({label,children,language='en',hiddenCo
    // A scroll that moves the row invalidates the fixed popup position.
    if(event.type==='resize'||!anchor||!position.anchor||Math.abs(anchor.left-position.anchor.left)>1||Math.abs(anchor.top-position.anchor.top)>1)close(false);
   };
-  document.addEventListener('pointerdown',dismiss);window.addEventListener('resize',moved);window.addEventListener('scroll',moved,true);
-  return()=>{document.removeEventListener('pointerdown',dismiss);window.removeEventListener('resize',moved);window.removeEventListener('scroll',moved,true)};
+  const anotherOpened=(event:Event)=>{if((event as CustomEvent<string>).detail!==id)close(false)};
+  window.addEventListener(answerMenuOpened,anotherOpened);
+  document.addEventListener('pointerdown',dismiss,true);window.addEventListener('resize',moved);window.addEventListener('scroll',moved,true);
+  return()=>{document.removeEventListener('pointerdown',dismiss,true);window.removeEventListener(answerMenuOpened,anotherOpened);window.removeEventListener('resize',moved);window.removeEventListener('scroll',moved,true)};
  },[position]);
  const run=(action:()=>void)=>{close();action()};
- return <span className="kobo-answer-actions" dir={direction} onContextMenu={event=>{event.preventDefault();event.stopPropagation();const b=trigger.current?.getBoundingClientRect();setPosition({x:event.clientX,y:event.clientY,align:'start',anchor:b?{left:b.left,top:b.top}:undefined})}}>
+ return <span className="kobo-answer-actions" dir={direction} onContextMenu={event=>{event.preventDefault();event.stopPropagation();announceOpen();const b=trigger.current?.getBoundingClientRect();setPosition({x:event.clientX,y:event.clientY,align:'start',anchor:b?{left:b.left,top:b.top}:undefined})}}>
   <span className="kobo-answer-label" dir="auto">{children}</span>
   <button ref={trigger} type="button" className="soft kobo-answer-menu-trigger" title="Answer actions" aria-label={`Answer options: ${label}`} aria-haspopup="menu" aria-controls={position?id:undefined} aria-expanded={!!position} onPointerDown={event=>event.stopPropagation()} onMouseDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();if(position)close();else open()}} onKeyDown={event=>{if(event.key!=='Tab')event.stopPropagation();if(event.key==='ContextMenu'||event.key==='F10'&&event.shiftKey||event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();open(event.key==='ArrowUp')}}}><MoreHorizontal aria-hidden="true"/></button>
   {position&&createPortal(<div ref={menu} id={id} dir={direction} className="kobo-answer-context-menu" role="menu" aria-label={`Answer options: ${label}`} style={{left:position.x,top:position.y}} onPointerDown={event=>event.stopPropagation()} onMouseDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} onContextMenu={event=>{event.preventDefault();event.stopPropagation()}} onKeyDown={event=>{

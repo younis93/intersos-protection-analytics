@@ -139,7 +139,7 @@ def test_original_percentages_preserve_complete_calculations(percentage, kind, o
     settings.questions['answer'] = cfg.model_copy(update={'hiddenAnswers':['b'], 'hiddenAnswerPercentageMode':'keep-original'})
     actual = result(project, settings)
     assert actual['rows'] == [row for row in original['rows'] if row['id'] != 'b']
-    for key in ['denominator','total','missing','breakdowns','pivotTotal','measureTotal','statistics']:
+    for key in (['denominator','total','missing','measureTotal','statistics'] if operation == 'count' else ['denominator','total','missing','breakdowns','pivotTotal','measureTotal','statistics']):
         assert actual.get(key) == original.get(key)
     assert actual['trend']['series'] == [series for series in original['trend']['series'] if series['id'] != 'b']
     assert actual['trend']['percentageSeries'] == original['trend']['series']
@@ -248,3 +248,34 @@ def test_visibility_summary_respects_page_filters_and_all_answers_hidden():
     settings = KoboSettings(filters=[{'field':'region','values':['north']}], questions={'answer':QuestionSettings(hiddenAnswers=['a','b','c'])})
     snapshot = result(project, settings)
     assert snapshot['answerVisibility'] == {'shown':0, 'answered':4, 'missing':0, 'total':4, 'hiddenCount':3}
+
+
+@pytest.mark.parametrize('percentage',['legacy-respondents','grand-total','column-total'])
+def test_hidden_count_totals_show_visible_share_of_original_base(percentage):
+    project=fixture()
+    template=deepcopy(project['records'][0])
+    project['records']=[]
+    for index in range(344):
+        record=deepcopy(template);record['id']=str(index)
+        record['values']['answer']='a' if index<226 else 'c' if index<247 else 'b'
+        project['records'].append(record)
+    cfg=QuestionSettings(hiddenAnswers=['b'],percentageMode=percentage)
+    settings=KoboSettings(questions={'answer':cfg})
+    adjusted=result(project,settings)
+    assert adjusted.get('pivotTotal',{}).get('count',adjusted['denominator'])==247
+    cfg.hiddenAnswerPercentageMode='keep-original'
+    kept=result(project,settings)
+    assert kept['pivotTotal']['count']==247
+    assert kept['pivotTotal']['percent']==pytest.approx(247/344*100)
+    assert kept['denominator']==344
+    assert kept['answerVisibility']['shown']==247
+
+
+def test_hidden_original_breakdown_totals_use_visible_counts():
+    project=fixture()
+    settings=KoboSettings(questions={'answer':QuestionSettings(hiddenAnswers=['b'],hiddenAnswerPercentageMode='keep-original',breakdowns=['region'])})
+    actual=result(project,settings)
+    for column in actual['breakdowns']:
+        count=sum(cell['count'] for row in actual['rows'] if row['id']!='__blank__' for cell in row.get('series',[]) if cell['id']==column['id'])
+        assert column['totalCount']==count
+        assert column['totalPercent']==(count/column['denominator']*100 if column['denominator'] else None)

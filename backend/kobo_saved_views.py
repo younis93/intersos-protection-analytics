@@ -22,6 +22,9 @@ def snapshot_issues(project, snapshot):
     from .kobo import question_cohort
     for qid, cfg in snapshot.questions.items():
         if qid not in questions: continue
+        from .kobo_connections import connection_plan
+        plan = connection_plan(questions[qid],cfg,questions)
+        if plan['enabled'] and plan['issue']: issues.append(f'{questions[qid]["name"]}: review the connected question percentage base ({plan["issue"]}).')
         try: question_cohort(questions[qid],[],cfg,questions,{})
         except ValueError as exc: issues.append(f'{questions[qid]["name"]}: {exc}')
         try: breakdown_fields(cfg, questions, questions[qid])

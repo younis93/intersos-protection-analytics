@@ -58,6 +58,28 @@ class FakeServer:
 
 
 class DesktopLauncherTests(unittest.TestCase):
+    def test_native_excel_save_keeps_extension(self):
+        excel_mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        for suggested, selected, mime, cancelled, expected in [
+            ("review.xlsx", "review", excel_mime, False, "review.xlsx"),
+            ("download", "beneficiaries", excel_mime, False, "beneficiaries.xlsx"),
+            ("review.xlsx", "review.XLSX", excel_mime, False, "review.XLSX"),
+            ("review.xlsx", "review", excel_mime, True, "review"),
+            ("report.pdf", "report", "application/pdf", False, "report"),
+        ]:
+            with self.subTest(selected=selected, mime=mime, cancelled=cancelled):
+                class Browser:
+                    def on_download_starting(self, sender, args):
+                        args.ResultFilePath = selected
+                        args.Cancel = cancelled
+
+                launcher.install_excel_download_extension_guard(Browser)
+                launcher.install_excel_download_extension_guard(Browser)
+                args = SimpleNamespace(ResultFilePath=suggested, Cancel=False,
+                                       DownloadOperation=SimpleNamespace(MimeType=mime))
+                Browser().on_download_starting(None, args)
+                self.assertEqual(args.ResultFilePath, expected)
+
     def test_startup_embeds_offline_ring_renderer_and_stops_on_failure(self):
         html = launcher.startup_html('glass-light')
         self.assertIn('<canvas class="processing-ring-field" aria-hidden="true">', html)
