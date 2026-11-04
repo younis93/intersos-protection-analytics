@@ -72,11 +72,45 @@ def source_fingerprint(q, questions):
     return digest([q['id'], q.get('repeat',''), conditions(q), refs])
 
 
+def default_consent_overrides(project, questions):
+    """Ignore affirmative consent gates without changing source answers or expressions."""
+    import re
+    from .kobo_connection_rules import tree_issues
+    disabled=set(project.get('restoredConsentDependencies',[]))
+    found={}
+    for q in questions.values():
+        if configuration(project.get('settings',{}),q['id'])[0]=='manual': continue
+        check={**q, **((q.get('connectionSetup') or {}).get('recovered') or {})}
+        tree,_=review_tree(check,questions)
+        for rule in leaves(tree):
+            if tree_issues(rule,check,questions): continue
+            parent=questions.get(rule['field'],{})
+            names=' '.join([str(parent.get('name','')), *map(str,parent.get('labels',{}).values())]).casefold()
+            if not re.search(r'\bconsent\b|موافقة',names.replace('_',' ')): continue
+            if rule.get('operator') not in {'eq','selected'}: continue
+            value=str(rule.get('value','')).strip().casefold()
+            choice=next((c for c in parent.get('choices',[]) if str(c['name']).casefold()==value),{})
+            labels={str(v).strip().casefold() for v in choice.get('labels',{}).values()}
+            if value not in {'yes','true'} and not labels.intersection({'yes','نعم'}): continue
+            key=rule_key(rule)
+            if key in disabled: continue
+            try: prune(tree,key)
+            except ValueError: continue
+            item=found.setdefault(key,{'rule':rule,'questions':{},'default':True})
+            item['questions'][q['id']]=source_fingerprint(check,questions)
+    return found
+
+
 def annotate(project):
     """Runtime annotations only; saved source conditions remain intact."""
     from .kobo_connections import form_question_index
     questions=form_question_index(project['form'])
-    overrides=project.get('sharedDependencyOverrides',{})
+    overrides=default_consent_overrides(project,questions)
+    for key,entry in project.get('sharedDependencyOverrides',{}).items():
+        if entry.get('default'): continue
+        automatic=overrides.get(key,{})
+        overrides[key]={**entry,'questions':{**automatic.get('questions',{}),**entry.get('questions',{})}}
+    project['sharedDependencyOverrides']=overrides
     for q in project['form']['questions']:
         q.pop('ignoredConnectionRules',None);q.pop('dependencyReviewNeeded',None)
         if configuration(project.get('settings',{}),q['id'])[0]=='manual': continue
@@ -215,8 +249,11 @@ def apply(store,pid,request):
         result=preview(project,request)
         if not request.token or request.token!=result['token']: raise ValueError('The data or connections changed. Preview this action again.')
         overrides=raw.setdefault('sharedDependencyOverrides',{})
-        if request.action=='restore': overrides.pop(request.condition,None)
+        if request.action=='restore':
+            overrides.pop(request.condition,None)
+            raw['restoredConsentDependencies']=list(dict.fromkeys([*raw.get('restoredConsentDependencies',[]),request.condition]))
         else:
+            raw['restoredConsentDependencies']=[key for key in raw.get('restoredConsentDependencies',[]) if key!=request.condition]
             if not result['eligible']: raise ValueError('No eligible questions remain.')
             overrides[request.condition]={'rule':result['condition']['rule'],'label':result['condition']['label'],
                 'questions':result['targets'],'at':datetime.now(timezone.utc).isoformat()}

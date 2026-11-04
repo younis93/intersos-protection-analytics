@@ -59,3 +59,23 @@
  .qf-page .qf-workspace.is-outline.has-details{grid-template-columns:minmax(0,1fr)}
  .qf-page .qf-item-actions>.app-select-trigger{width:36px;min-width:36px;height:36px}
 }
+
+/* Keep the form explorer controls compact to reserve space for the diagram. */
+.qf-page .qf-back{margin-bottom:8px}
+.qf-page .qf-heading{margin-bottom:10px;gap:10px}
+.qf-page .qf-heading h1{font-size:23px;margin:2px 0}
+.qf-page .qf-heading .eyebrow{font-size:9px}
+.qf-page .qf-toolbar{padding:8px 10px;gap:8px;border-radius:12px}
+.qf-page .qf-toolbar .app-select-trigger{min-height:40px;padding-block:5px}
+.qf-page .qf-toolbar .soft{min-height:32px;padding:6px 10px}
+.qf-page .qf-help{margin:8px 2px;font-size:11px}
+.qf-page .qf-flow-review-bar{margin-block:6px;gap:8px}
+.qf-page .qf-flow-mode button{padding:6px 10px;font-size:11px}
+.qf-page .qf-tree-item{padding:6px;font-size:11px}
+.qf-page .qf-navigation h2{margin-bottom:8px}
+@media(min-width:1251px){
+ .qf-page:not(.qf-fullscreen) .qf-workspace{grid-template-columns:200px minmax(0,1fr);gap:10px}
+ .qf-page:not(.qf-fullscreen) .qf-workspace.has-details{grid-template-columns:190px minmax(300px,1fr) 280px}
+ .qf-page:not(.qf-fullscreen) .qf-canvas{height:calc(100dvh - 245px);min-height:420px}
+ .qf-page:not(.qf-fullscreen) .qf-navigation{max-height:calc(100dvh - 245px);padding:8px 5px}
+}

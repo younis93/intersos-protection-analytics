@@ -72,3 +72,11 @@ describe('optional chart labels',()=>{
 });
 
 describe('value axis visibility',()=>{for(const chart of ['bar','column'] as const)it('hides only the value scale for '+chart,()=>{const spec=chartSpec({...result,chart,appearance:{valueAxis:'hide'}},'en');expect(spec.layout[chart==='bar'?'xaxis':'yaxis']?.showticklabels).toBe(false);expect(spec.layout[chart==='bar'?'yaxis':'xaxis']?.showticklabels).not.toBe(false);expect(spec.data).toEqual(chartSpec({...result,chart},'en').data)});});
+
+
+it('formats escaped titles consistently in preview and export',()=>{
+ for(const exporting of [false,true])for(const align of ['left','center','right'] as const){
+  const spec=chartSpec({...result,appearance:{title:'Title <safe>',titleBold:true,titleItalic:true,titleUnderline:true,titleAlign:align,titleFont:'Georgia',titleSize:24,titleColor:'#123456'}},'en',exporting);
+  expect(spec.layout.title).toMatchObject({text:'<u><i><b>Title &lt;safe&gt;</b></i></u>',xanchor:align,x:align==='left'?0:align==='right'?1:.5,font:{family:'Georgia',size:exporting?48:24,color:'#123456'}});
+ }
+});

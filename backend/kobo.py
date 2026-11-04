@@ -62,6 +62,13 @@ class KoboFilter(BaseModel):
 
 class ChartAppearance(BaseModel):
     title: str = Field('', max_length=200)
+    titleBold: bool = False
+    titleItalic: bool = False
+    titleUnderline: bool = False
+    titleAlign: Literal['left', 'center', 'right'] = 'center'
+    titleFont: Literal['inherit', 'Arial', 'Calibri', 'Georgia', 'Times New Roman', 'Tahoma', 'Verdana'] = 'inherit'
+    titleSize: int = Field(0, ge=0, le=48)
+    titleColor: str = Field('', pattern=r'^$|^#[0-9a-fA-F]{6}$')
     valueAxis: Literal['show', 'hide'] = 'show'
     metric: Literal['auto', 'count', 'percent'] = 'auto'
     labels: Literal['auto', 'hidden', 'count', 'percent', 'both'] = 'auto'
@@ -915,7 +922,7 @@ def question_result(q: dict, records: list[dict], settings: KoboSettings, questi
     cfg = resolved_question_settings(q, settings)
     from .kobo_connections import connection_plan
     plan = connection_plan(q,cfg,questions)
-    if plan['enabled']: cfg = cfg.model_copy(update={'percentageMode':'legacy-respondents'})
+    if plan['enabled'] and (cfg.percentageBase == 'parent' or cfg.connectedPercentageMode == 'keep-original'): cfg = cfg.model_copy(update={'percentageMode':'legacy-respondents'})
     if not plan['enabled'] and cfg.hiddenAnswerPercentageMode == 'keep-original' and cfg.hiddenAnswers and q['kind'] in {'category','multiple','text'}:
         original_settings = settings.model_copy(update={'questions': {**settings.questions, q['id']: cfg.model_copy(update={'hiddenAnswers': []})}})
         result = question_result(q, records, original_settings, questions, lookup)

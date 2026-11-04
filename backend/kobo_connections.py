@@ -237,6 +237,9 @@ def apply_connection_basis(result, question, records, cfg, questions, lookup, se
             field = questions.get(key)
             if field: connections['parents'].append({'id':key,'name':field['name'],'label':label(field,settings.language),'hidden':key in settings.hidden,'compatible':compatible(question,field),'triggers':next((p['triggers'] for p in connections['originalParents'] if p['id']==key),[])})
     result['connections'] = connections
+    # Additive percentage bases retain connection filtering without respondent denominators.
+    if cfg.percentageMode != 'legacy-respondents' and cfg.percentageBase != 'parent' and cfg.connectedPercentageMode != 'keep-original':
+        return result
     parent, issue = plan['parent'], plan['issue']
     cohort = question_cohort(question, records, cfg, questions, lookup)
     parent_base = plan['mode']=='keep-original'

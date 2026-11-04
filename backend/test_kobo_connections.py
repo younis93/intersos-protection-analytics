@@ -179,12 +179,12 @@ def test_ancestor_parent_and_identifying_export_guard():
     with pytest.raises(ValueError,match='Identifying'):validate_export_fields(p,cfg,'visits/follow')
 
 
-def test_conditional_multiple_defaults_to_answered_respondents_and_top_n_uses_parent_base():
+def test_conditional_multiple_honors_grand_total_and_top_n_uses_parent_base():
     p=project();p['form']['questions'][1]['kind']='multiple'
     for r in p['records']:r['values']['follow']=['a','b'] if int(r['id'])<5 else None
     cfg=KoboSettings(questions={'follow':QuestionSettings(percentageMode='grand-total')})
     result=next(q for q in analyze(p,cfg)['questions'] if q['id']=='follow')
-    assert [r['percent'] for r in result['rows']]==[100,100]
+    assert [r['percent'] for r in result['rows']]==[50,50]
     result,_,_=run('parent',chartTopN=1,chartOther=True)
     assert [r['percent'] for r in result['chartProjection']['rows']]==[3,2]
 

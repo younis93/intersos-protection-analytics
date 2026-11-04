@@ -24,7 +24,7 @@ export async function layoutQuestionFlow(data:FlowData,view:Exclude<FlowView,'ou
  if(horizontal){
   const ids=[ROOT,...items.keys(),...(data.questions.some(isTechnical)?[TECHNICAL]:[])].filter(visible);
   const treeEdges=ids.filter(id=>id!==ROOT).map((id,index)=>({id:`tree-${index}`,sources:[items.has(id)?flowParent(items.get(id)!)||ROOT:ROOT],targets:[id]}));
-  const graph=await elk.layout({id:'layout',layoutOptions:{'elk.algorithm':'layered','elk.direction':'RIGHT','elk.spacing.nodeNode':'28','elk.layered.spacing.nodeNodeBetweenLayers':'100'},children:ids.map(id=>({id,width,height:nodeData(id).headerHeight})),edges:treeEdges});
+  const graph=await elk.layout({id:'layout',layoutOptions:{'elk.algorithm':'layered','elk.separateConnectedComponents':'false','elk.direction':'RIGHT','elk.spacing.nodeNode':'18','elk.layered.spacing.nodeNodeBetweenLayers':'64','elk.layered.considerModelOrder.strategy':'NODES_AND_EDGES','elk.layered.crossingMinimization.forceNodeModelOrder':'true','elk.layered.considerModelOrder.components':'MODEL_ORDER'},children:ids.map(id=>({id,width,height:nodeData(id).headerHeight})),edges:treeEdges});
   for(const child of graph.children||[])nodes.push({id:child.id,type:'flowCard',position:{x:child.x||0,y:child.y||0},data:nodeData(child.id),style:{width,height:child.height},sourcePosition:Position.Right,targetPosition:Position.Left});
   for(const edge of treeEdges)edges.push({id:edge.id,source:edge.sources[0],target:edge.targets[0],type:'smoothstep',className:'qf-tree-edge'});
  }else{
@@ -45,15 +45,17 @@ export async function layoutQuestionFlow(data:FlowData,view:Exclude<FlowView,'ou
   function build(parent:string,seen=new Set<string>()):ElkNode[]{
    return (children.get(parent)||[]).filter(visible).filter(id=>!seen.has(id)).map(id=>{
     const next=new Set([...seen,id]),info=nodeData(id),expanded=info.group&&!collapsed.has(id),nested=expanded?build(id,next):[];
-    return {id,width,height:info.headerHeight,layoutOptions:{'elk.padding':`[top=${info.headerHeight+24},left=30,bottom=30,right=30]`},...(nested.length?{children:nested}:{})};
+    return {id,width,height:info.headerHeight,layoutOptions:{'elk.padding':`[top=${info.headerHeight+16},left=18,bottom=18,right=18]`},...(nested.length?{children:nested}:{})};
    });
   }
+  const sectionOrder:ElkExtendedEdge[]=[];
+  for(const siblings of children.values()){const sections=siblings.filter(id=>visible(id)&&items.has(id)&&!isQuestion(items.get(id)!));for(let i=1;i<sections.length;i++)sectionOrder.push({id:`@section-order-${sectionOrder.length}`,sources:[sections[i-1]],targets:[sections[i]]})}
   const input:ElkNode={id:'@layout',layoutOptions:{
-   'elk.algorithm':'layered','elk.direction':'DOWN','elk.edgeRouting':'ORTHOGONAL','elk.hierarchyHandling':'INCLUDE_CHILDREN',
-   'elk.spacing.nodeNode':'56','elk.spacing.componentComponent':'70','elk.aspectRatio':'1.5',
-   'elk.layered.spacing.nodeNodeBetweenLayers':'100','elk.layered.spacing.edgeNodeBetweenLayers':'30',
-   'elk.spacing.edgeNode':'24','elk.spacing.edgeEdge':'18','elk.layered.considerModelOrder.strategy':'NODES_AND_EDGES',
-  },children:build(''),edges:routed.map(entry=>({id:entry.id,sources:[entry.source],targets:[entry.target],labels:[{text:caption(entry),width:Math.max(80,caption(entry).length*6+20),height:26,layoutOptions:{'elk.edgeLabels.placement':'CENTER'}}]}))};
+   'elk.algorithm':'layered','elk.separateConnectedComponents':'false','elk.direction':'DOWN','elk.edgeRouting':'ORTHOGONAL','elk.hierarchyHandling':'INCLUDE_CHILDREN',
+   'elk.spacing.nodeNode':'28','elk.spacing.componentComponent':'36','elk.aspectRatio':'1.5',
+   'elk.layered.spacing.nodeNodeBetweenLayers':'64','elk.layered.spacing.edgeNodeBetweenLayers':'22',
+   'elk.spacing.edgeNode':'18','elk.spacing.edgeEdge':'14','elk.layered.considerModelOrder.strategy':'NODES_AND_EDGES','elk.layered.crossingMinimization.forceNodeModelOrder':'true','elk.layered.considerModelOrder.components':'MODEL_ORDER','elk.layered.compaction.connectedComponents':'true',
+  },children:build(''),edges:[...sectionOrder,...routed.map(entry=>({id:entry.id,sources:[entry.source],targets:[entry.target],labels:[{text:caption(entry),width:Math.max(80,caption(entry).length*6+20),height:26,layoutOptions:{'elk.edgeLabels.placement':'CENTER'}}]}))]};
   const graph=await elk.layout(input),absolute=new Map<string,FlowPoint>([['@layout',{x:0,y:0}]]);
   function flatten(parent:ElkNode,offset:FlowPoint){
    for(const child of parent.children||[]){

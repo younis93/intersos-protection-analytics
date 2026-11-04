@@ -18,10 +18,15 @@ export function chartSpec(result:KoboChartPanel,language:string,exporting=false,
  const spec=baseChartSpec(result,language,exporting,themeOverride,containerWidth,colorSettings);
  const title=result.appearance?.title?.trim();
  if(!title)return spec;
- const font=(result.appearance?.fontSize||16)*(exporting?2:1),width=Number(spec.layout.width)||(exporting?1300:containerWidth);
- const text=chartCaption(title,Math.max(10,(width-48)/(font*.6)),20),lines=text.split('<br>').length;
+ const appearance=resolveAppearance(result.appearance);
+ const font=(appearance.titleSize||appearance.fontSize||16)*(exporting?2:1),width=Number(spec.layout.width)||(exporting?1300:containerWidth);
+ let text=chartCaption(title,Math.max(10,(width-48)/(font*.6)),20);
+ const lines=text.split('<br>').length;
+ if(appearance.titleBold)text=`<b>${text}</b>`;
+ if(appearance.titleItalic)text=`<i>${text}</i>`;
+ if(appearance.titleUnderline)text=`<u>${text}</u>`;
  const extra=Math.ceil(font*1.3*lines+24),height=Number(spec.layout.height)||440;
- return {...spec,layout:{...spec.layout,height:height+extra,margin:{...spec.layout.margin,t:(spec.layout.margin?.t||0)+extra},title:{text,x:.5,xanchor:'center',y:.99,yanchor:'top',font:{size:font}},...(spec.layout.legend?.yref==='container'&&result.appearance?.legend==='top'?{legend:{...spec.layout.legend,y:.99-extra/(height+extra)}}:{})}};
+ return {...spec,layout:{...spec.layout,height:height+extra,margin:{...spec.layout.margin,t:(spec.layout.margin?.t||0)+extra},title:{text,x:appearance.titleAlign==='left'?0:appearance.titleAlign==='right'?1:.5,xanchor:appearance.titleAlign,y:.99,yanchor:'top',font:{size:font,...(appearance.titleFont!=='inherit'?{family:appearance.titleFont}:{}),...(appearance.titleColor?{color:appearance.titleColor}:{})}},...(spec.layout.legend?.yref==='container'&&result.appearance?.legend==='top'?{legend:{...spec.layout.legend,y:.99-extra/(height+extra)}}:{})}};
 }
 
 function baseChartSpec(result:KoboChartPanel,language:string,exporting=false,themeOverride?:Theme,containerWidth=900,colorSettings?:KoboQuestionSettings):{data:Data[];layout:Partial<Layout>}{

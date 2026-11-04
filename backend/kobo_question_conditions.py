@@ -25,7 +25,8 @@ def annotate(project):
             q.setdefault('connectionSetup',{'pending':True,'reason':'source-condition-changed','sourceFingerprint':digest([q['id'],conditions(questions[q['id']]),'']),
                 'recovered':conditions(questions[q['id']]),'fingerprint':digest([saved,conditions(questions[q['id']])])})
         else:q['ignoredSourceConditions']=saved['conditions']
-    return project
+    from .kobo_connection_setup import resolve_ignored_setup
+    return resolve_ignored_setup(project)
 
 
 class QuestionConditionsRequest(BaseModel):

@@ -4,7 +4,7 @@ import KoboQuestionConditions,{type QuestionConditionControls} from './KoboQuest
 import KoboInlineConnectionEditor,{type InlineConnectionControls} from './KoboInlineConnectionEditor';
 import {connectionMessage,conditionSummary,ruleIssue} from './koboConnectionHealth';
 import KoboConnectionRuleEditor,{emptyConnectionRule} from './KoboConnectionRuleEditor';
-import {KoboHiddenAnswerControls} from './KoboHiddenAnswerControls';
+import {KoboHiddenAnswerControls,hasPercentageConnection} from './KoboHiddenAnswerControls';
 import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import {Link2,Link2Off,AlertTriangle,CheckCircle2,Pencil,X,Eye,CircleMinus,ArrowLeft,ArrowRight} from 'lucide-react';
@@ -50,7 +50,7 @@ export function KoboConnectionControls({result,project,value,language,onChange,s
  const seed=value.connectionRules||result.connections?.effectiveTree;
  const manualTree=seed?.type==='group'?seed:{type:'group' as const,match:'all' as const,rules:seed?[seed]:[emptyConnectionRule()]};
  const measured=!!value.calculation&&value.calculation.operation!=='count';
- const linked=source==='manual'||conditions.length>0||value.percentageBase==='parent';
+ const linked=hasPercentageConnection(result,value);
  const localIssue=source==='manual'?ruleIssue(manualTree,fields):'';
  const health=connectionHealth(result,language),review=source==='automatic'&&!!(result.connections?.reviewIssues?.length||result.connections?.issues.length);
  const summary=source==='manual'?conditionSummary(manualTree,fields,language):result.connections?.ignoredDependencies?.length?result.connections.effectiveCondition||text('Applies to all records in this response table','ينطبق على جميع السجلات في جدول الاستجابات هذا'):result.connections?.effectiveCondition||conditions.map(c=>c.readable||c.expression).join(' AND ');
@@ -68,7 +68,8 @@ export function KoboConnectionControls({result,project,value,language,onChange,s
  </>}
  {showOriginal&&conditions.length>0&&<KoboOriginalConnections result={result} language={language}/>}
  </section>}
- {section!=='connection'&&linked&&!measured&&<section className="kobo-values-card kobo-connection-percentages" dir={ar?'rtl':'ltr'} aria-label={text('Percentages','النسب المئوية')}><header><h4>{text('Percentages','النسب المئوية')}</h4></header>
+ {section!=='connection'&&!linked&&!measured&&!!value.hiddenAnswers?.length&&(!value.percentageMode||value.percentageMode==='legacy-respondents')&&<section className="kobo-values-card"><header><h4>{text('Hidden answer percentages','نسب الإجابات المخفية')}</h4></header><KoboHiddenAnswerControls language={language} mode={value.hiddenAnswerPercentageMode||'adjust'} onChange={hiddenAnswerPercentageMode=>onChange({hiddenAnswerPercentageMode})}/></section>}
+ {section!=='connection'&&linked&&!measured&&(!value.percentageMode||value.percentageMode==='legacy-respondents')&&<section className="kobo-values-card kobo-connection-percentages" dir={ar?'rtl':'ltr'} aria-label={text('Respondent group','مجموعة المستجيبين')}><header><h4>{text('Respondent group','مجموعة المستجيبين')}</h4></header>
   {linked&&!measured&&<><AppSelect label={text('Original base question','سؤال القاعدة الأصلية')} searchable value={selected} options={[["",text('Choose a connected question','اختر سؤالاً مرتبطاً')],...(!parents.some(q=>q.id===selected)&&selected?[[selected,text('Review this question - not in conditions','راجع السؤال - غير موجود في الشروط')] as [string,string]]:[]),...parents.map(q=>[q.id,koboLabel(q,language)] as [string,string])]} onChange={percentageParent=>onChange({percentageParent})}/>
    <KoboHiddenAnswerControls language={language} mode={mode} keepOriginalDisabled={!result.respondentBasis?.canKeepOriginal||source==='manual'&&!!ruleIssue(manualTree,fields)} onChange={mode=>onChange({connectedPercentageMode:mode,percentageBase:mode==='keep-original'?'parent':'question',percentageParent:selected,percentageMode:'legacy-respondents'})}/>
    <small>{mode==='adjust'?text('Visible answers are a share of this follow-up’s answered group.','الإجابات الظاهرة هي نسبة من مجموعة من أجابوا عن سؤال المتابعة.'):text('Visible answers are a share of the original parent group, before these conditions and hidden answers.','الإجابات الظاهرة هي نسبة من مجموعة السؤال الأصل قبل تطبيق هذه الشروط وإخفاء الإجابات.')}</small>

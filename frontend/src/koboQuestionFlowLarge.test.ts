@@ -60,3 +60,11 @@ describe('large-form flow review',()=>{
   }
  },20000);
 });
+
+
+it('keeps disconnected section cards in form order instead of packing by size',async()=>{
+ const data=form(99);data.edges=[];
+ const graph=await layoutQuestionFlow(data,'flowchart',overviewFlowCollapsed(data));
+ const sections=graph.nodes.filter(n=>n.parentId==='form').sort((a,b)=>Math.abs(a.position.y-b.position.y)>1?a.position.y-b.position.y:a.position.x-b.position.x);
+ expect(sections.map(n=>n.id)).toEqual(data.groups.filter(g=>g.parent==='form').map(g=>g.id));
+});

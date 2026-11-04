@@ -199,3 +199,53 @@ def confirm_connection(store, pid, request):
         db.execute('UPDATE projects SET payload=?,settings=?,updated=? WHERE id=?',
                    (json.dumps(raw, ensure_ascii=False), json.dumps(settings, ensure_ascii=False), datetime.now().isoformat(), pid))
     return store.get(pid)
+
+
+def resolve_ignored_setup(project):
+    """Verified ignored gates and valid remaining source rules need no setup."""
+    if not any((q.get("connectionSetup") or {}).get("pending") and (q.get("ignoredConnectionRules") or q.get("ignoredSourceConditions")) for q in project["form"]["questions"]):
+        return project
+    from .kobo import KoboSettings, resolved_question_settings
+    from .kobo_connections import connection_plan
+    from .kobo_question_flow import cyclic_nodes
+    from .kobo_shared_dependencies import context
+    _, questions = context(project)
+    settings = KoboSettings.model_validate(project.get('settings', {}))
+    plans = {key: connection_plan(source, resolved_question_settings(source, settings), questions) for key, source in questions.items()}
+    cycles = cyclic_nodes(list(questions), [(key, field) for key, plan in plans.items() for field in plan['fields'] if field in questions])
+    for q in project['form']['questions']:
+        setup = q.get('connectionSetup') or {}
+        if not setup.get('pending') or not setup.get('recovered') or q.get('dependencyReviewNeeded'):
+            continue
+        if setup.get('reason') in {'source-condition-changed', 'configured-connection-changed', 'ambiguous-question-identity', 'source-question-not-found'}:
+            continue
+        if not (q.get('ignoredConnectionRules') or q.get('ignoredSourceConditions')):
+            continue
+        source = questions[q['id']]
+        cfg = resolved_question_settings(source, settings)
+        if cfg.connectionSource == 'manual':
+            continue
+        plan = plans[q['id']]
+        if plan['reviewIssues'] or plan['issue'] or q['id'] in cycles or any(field in cycles for field in plan['fields']):
+            continue
+        # Retain recovered source metadata for the ignored-condition display.
+        # This is runtime hydration only; saved source and review history stay intact.
+        q.update(setup['recovered'])
+        q['connectionVerifiedInheritance'] = True
+        q.pop('connectionSetup', None)
+    # Automatic resolution can remove members from a previously shared setup.
+    # Bulk confirmation must only refer to questions that still need setup.
+    shared = {}
+    for q in project['form']['questions']:
+        setup = q.get('connectionSetup') or {}
+        previous = setup.pop('shared', None)
+        if setup.get('pending') and previous:
+            shared.setdefault(previous['fingerprint'], []).append(q)
+    for members in shared.values():
+        if len(members) < 2:
+            continue
+        identities = sorted((q['id'], q['connectionSetup']['fingerprint']) for q in members)
+        info = {'fingerprint': digest(identities), 'questions': [qid for qid, _ in identities]}
+        for q in members:
+            q['connectionSetup']['shared'] = info
+    return project

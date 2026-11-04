@@ -1,5 +1,5 @@
 import MoveFieldDialog from './KoboFieldLocationControls';
-import {koboRequest} from './koboApi';
+import {saveFieldPlacement} from './koboSaveFieldPlacement';
 import {analysisLabel,analysisWorkspace} from './koboApi';
 import {useEffect,useId,useMemo,useRef,useState,type ReactNode} from 'react';
 import {ArrowDownUp,Check,Eye,EyeOff,Layers,ListFilter,List,ListChecks,ListX,RotateCcw,Search,X} from 'lucide-react';
@@ -18,7 +18,7 @@ export default function KoboQuestionVisibility({project:incomingProject,settings
  const[project,setProject]=useState(incomingProject),[moving,setMoving]=useState<KoboQuestion|null>(null),[moveNotice,setMoveNotice]=useState<{field:string;group:string;placement:KoboQuestion['placement'];updated:string}|null>(null),[moveError,setMoveError]=useState(''),[undoBusy,setUndoBusy]=useState(false);
  useEffect(()=>setProject(incomingProject),[incomingProject]);
  const publishMove=(saved:KoboProject)=>{setProject(saved);window.dispatchEvent(new CustomEvent('kobo-placement-changed',{detail:saved}))};
- const undoMove=async()=>{if(!moveNotice)return;setUndoBusy(true);setMoveError('');try{const saved=await koboRequest<KoboProject>(`/projects/${project.id}/placement`,{...moveNotice,placement:moveNotice.placement||null});publishMove(saved);setFilter(current=>({...current,group:moveNotice.group,query:'',kind:'all',status:'all'}));setMoveNotice(null)}catch(e){setMoveError((e as Error).message)}finally{setUndoBusy(false)}};
+ const undoMove=async()=>{if(!moveNotice)return;setUndoBusy(true);setMoveError('');try{const saved=await saveFieldPlacement(project,{field:moveNotice.field,group:moveNotice.group,placement:moveNotice.placement||null});publishMove(saved);setFilter(current=>({...current,group:moveNotice.group,query:'',kind:'all',status:'all'}));setMoveNotice(null)}catch(e){setMoveError((e as Error).message)}finally{setUndoBusy(false)}};
  const isCustom=analysisWorkspace()==='custom';
  const[tab,setTab]=useState<'questions'|'answers'>('questions'),tabId=useId();
  const[initialOptions]=useState(()=>visibilityOptions(settings)),[options,setOptions]=useState(()=>visibilityOptions(settings));

@@ -202,3 +202,20 @@ def test_broken_detected_rules_preserve_tree_and_target_diagnostics():
     assert 'main' in plan['diagnostics'][0]['availableIds']
     assert plan['issue'] == ''  # Adjust remains available for actual follow-up answers.
     assert not plan['canKeepOriginal']
+
+
+@pytest.mark.parametrize('mode', ['grand-total', 'column-total', 'row-total', 'breakdown-group'])
+@pytest.mark.parametrize('ignored', [False, True])
+def test_additive_percentage_basis_preserves_connection_filter(mode, ignored):
+    p=example()
+    follow=p['form']['questions'][1]
+    follow['kind']='multiple'
+    p['records'][0]['values']['follow']=['a','b']
+    if ignored:
+        follow['ignoredConnectionRules']=[leaf('main','other')]
+    q,_=result(p,percentageMode=mode,connectedPercentageMode='adjust',percentageBase='question')
+    assert q['percentageMode']==mode
+    assert not q.get('respondentBasis')
+    assert q['connections']
+    assert q['pivotTotal']['count']==11
+    assert q['rows'][0]['percent']==pytest.approx(100 if mode=='row-total' else 6/11*100)

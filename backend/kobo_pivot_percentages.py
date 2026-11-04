@@ -2,7 +2,7 @@
 import math
 from decimal import Decimal,ROUND_HALF_UP
 
-MODES={'grand-total':'% of Grand Total','column-total':'% of Column Total','row-total':'% of Row Total','breakdown-group':'% within breakdown group','legacy-respondents':'Respondents (legacy)'}
+MODES={'grand-total':'% of Grand Total','column-total':'% of Column Total','row-total':'% of Row Total','breakdown-group':'% within breakdown group','legacy-respondents':'% of Respondents'}
 
 def apply_pivot_percentages(result,cfg):
     mode=cfg.percentageMode
