@@ -96,8 +96,9 @@ def refresh_notes(payload, sheets=None):
         # Multiset avoids reopening notes solely because source row order changed.
         records = Counter(digest([r.get('id'), r.get('scope'), {k: v for k, v in r.get('values', {}).items() if not related or k in related}])
                           for r in payload.get('records', []))
-        schema = [q for q in base.get('questions', []) if not related or q['id'] in related]
-        effective = [questions[qid] for qid in sorted(related) if qid in questions]
+        # Connection setup is transient review UI state, not import evidence.
+        schema = [{k:v for k,v in q.items() if k not in {'connectionSetup','ignoredConnectionRules','dependencyReviewNeeded','ignoredSourceConditions','conditionReview'}} for q in base.get('questions', []) if not related or q['id'] in related]
+        effective = [{k:v for k,v in questions[qid].items() if k not in {'connectionSetup','ignoredConnectionRules','dependencyReviewNeeded','ignoredSourceConditions','conditionReview'}} for qid in sorted(related) if qid in questions]
         semantic_links = [{k: m.get(k, '' if k not in {'answerMap', 'priority'} else {} if k == 'answerMap' else 0)
                            for k in ('sheet', 'column', 'header', 'question', 'option', 'status', 'answerMap', 'mergeMode', 'priority')} for m in links]
         note['fingerprint'] = digest([note['message'], note.get('count'), schema, effective, semantic_links,

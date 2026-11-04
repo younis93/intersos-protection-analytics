@@ -1,7 +1,8 @@
+import KoboProjectHeader from './KoboProjectHeader';
 import {describe,expect,it} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {importNoteKey,reviewedNotes} from './koboImportNoteState';
-import KoboImportNotes,{KoboImportNoteList} from './KoboImportNotes';
+import {importNoteKey,reviewedNotes,importNoteDescription} from './koboImportNoteState';
+import {KoboImportNoteList} from './KoboImportNotes';
 import type {KoboForm,KoboImportNote,KoboProject} from './koboTypes';
 
 const form:KoboForm={questions:[],groups:[],language:'en',warnings:[]};
@@ -22,10 +23,18 @@ describe('persistent import note review',()=>{
   expect(html).toContain('Show reviewed notes (1)');
   expect(html).not.toContain('Previously accepted');
  });
- it('removes the Important notes trigger when all notes are reviewed',()=>{
-  const project={id:'project',form,settings:{language:'en'},importNotes:[{...note,reviewed:true}]} as KoboProject;
-  expect(renderToStaticMarkup(<KoboImportNotes project={project} onReview={()=>{}}/>)).toBe('');
-  expect(renderToStaticMarkup(<KoboImportNotes project={{...project,importNotes:[note]}} onReview={()=>{}}/>)).toContain('Important notes');
+ it('uses one Review entry point with an explicit pending-note badge',()=>{
+  const header=(notes:KoboImportNote[])=>renderToStaticMarkup(<KoboProjectHeader project={{id:'p',name:'Project',settings:{language:'en'},importNotes:notes} as KoboProject} counts={null} exportDisabled onReupload={()=>{}} onReview={()=>{}} onQualityReview={()=>{}} onPdf={()=>{}} onExcel={async()=>{}} onRename={()=>{}} onIndicators={()=>{}} onBinaryExcel={async()=>{}} onBackup={()=>{}} backupBusy={false}/>);
+  const pending=header([note]);expect(pending).toContain('aria-label="Review"');expect(pending).toContain('1 note');expect(pending).toContain('1 unreviewed import note');expect(pending).not.toContain('Important notes');
+  expect(header([{...note,reviewed:true}])).not.toContain('kobo-review-note-badge');
+ });
+ it('localizes note descriptions, actions and reviewed states in Arabic',()=>{
+  const html=renderToStaticMarkup(<KoboImportNoteList form={form} notes={[note]} language="ar" onMark={()=>{}}/>);
+  for(const text of ['ملاحظات الاستيراد','تحديد كمراجَع','تحديد الكل كمراجَع','تفاصيل تقنية'])expect(html).toContain(text);
+  expect(html).not.toContain('Mark reviewed');
+  expect(importNoteDescription('invalid numeric answer','ar')).toContain('لا يمكن قراءة');
+  expect(importNoteDescription('original source message','ar')).toBe('original source message');
+  expect(renderToStaticMarkup(<KoboImportNoteList form={form} notes={[{...note,reviewed:true}]} language="ar" onMark={()=>{}}/>)).toContain('تمت مراجعة جميع ملاحظات الاستيراد.');
  });
  it('keeps a clear all-reviewed state in import review and has no empty note panel',()=>{
   const reviewed=renderToStaticMarkup(<KoboImportNoteList form={form} notes={[{...note,reviewed:true}]} onMark={()=>{}}/>);

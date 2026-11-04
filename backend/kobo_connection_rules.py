@@ -93,17 +93,30 @@ def parse_condition(expression, child, questions, allow_unresolved=False):
         if token.startswith(("'", '"')): return token[1:-1]
         if not re.fullmatch(r'-?\d+(?:\.\d+)?', token): raise ValueError('Expected a literal value.')
         return token
+    def negate(node):
+        if node['type'] == 'group':
+            return {'type': 'group', 'match': 'any' if node['match'] == 'all' else 'all',
+                    'rules': [negate(item) for item in node['rules']]}
+        complements = {'selected': 'not-selected', 'not-selected': 'selected', 'blank': 'not-blank', 'not-blank': 'blank'}
+        # Preserve the existing categorical not(selected(...)) interpretation.
+        if questions.get(node['field'], {}).get('kind') in {'category', 'text'}:
+            complements.update(eq='neq', neq='eq')
+        if node['operator'] not in complements: raise ValueError('Unsupported negation.')
+        return {**node, 'operator': complements[node['operator']]}
     def atom():
         if tokens[index:index+1] == ['(']:
             take(); node = disjunction(); expect(')'); return node
-        negative = index < len(tokens) and tokens[index].lower() == 'not'
-        if negative: take(); expect('(')
+        if index < len(tokens) and tokens[index].lower() == 'not':
+            take(); expect('(')
+            direct_selection = index < len(tokens) and tokens[index].lower() == 'selected'
+            node = disjunction(); expect(')')
+            if direct_selection and node['type'] == 'rule' and node['operator'] in {'eq', 'neq'}:
+                return {**node, 'operator': 'neq' if node['operator'] == 'eq' else 'eq'}
+            return negate(node)
         if index < len(tokens) and tokens[index].lower() == 'selected':
             take(); expect('('); field = reference(); expect(','); value = literal(); expect(')')
-            if negative: expect(')')
-            operator = ('not-selected' if negative else 'selected') if questions.get(field,{}).get('kind')=='multiple' else ('neq' if negative else 'eq')
+            operator = 'selected' if questions.get(field,{}).get('kind')=='multiple' else 'eq'
             return {'type':'rule','field':field,'operator':operator,'value':value}
-        if negative: raise ValueError('Unsupported negation.')
         field = reference(); operator = take()
         operators = {'=':'eq','!=':'neq','>':'gt','>=':'gte','<':'lt','<=':'lte'}
         if operator not in operators: raise ValueError('Unsupported operator.')

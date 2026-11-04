@@ -133,6 +133,13 @@ def decoded_value(raw, question, mapping):
     from .kobo import decode_choice, missing, norm
     if missing(raw): return None, None
     kind = question['kind']
+    if kind == 'multiple' and isinstance(raw, list):
+        result = []
+        for atom in raw:
+            value, error = decoded_value(atom, {**question, 'kind':'category'}, mapping)
+            if error: return None, error
+            if value is not None: result.append(value)
+        return sorted(set(result)) or None, None
     if kind in {'category', 'multiple'}:
         answer_map = mapping.get('answerMap', {})
         raw_text = str(raw).strip()

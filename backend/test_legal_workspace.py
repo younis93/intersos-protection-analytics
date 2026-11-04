@@ -37,7 +37,7 @@ def environment(monkeypatch, tmp_path):
     return main, TestClient(main.app), registry
 
 
-def test_roundtrip_all_datasets_decisions_and_restart(environment, tmp_path):
+def test_roundtrip_all_datasets_fresh_reviews_and_restart(environment, tmp_path):
     main, client, registry = environment
     payload = full_payload()
     decision = {'dataset': 'beneficiaries', 'rule': 'Possible duplicate name',
@@ -53,7 +53,9 @@ def test_roundtrip_all_datasets_decisions_and_restart(environment, tmp_path):
     assert response.status_code == 200, response.text
     assert response.headers['content-disposition'] == 'attachment; filename="Legal Platform export 2026-Oct.zip"'
     assert 'no-store' in response.headers['cache-control']
-    assert workspace.read_backup(response.content) == (payload, [decision])
+    assert workspace.read_backup(response.content) == (payload, [])
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert 'exclusions.json' not in archive.namelist()
     registry._write([])
     operation_id = str(uuid4())
     master = main.indicator_master
@@ -62,10 +64,10 @@ def test_roundtrip_all_datasets_decisions_and_restart(environment, tmp_path):
     assert restored.status_code == 200, restored.text
     assert restored.json()['revision'] != original.revision
     assert restored.json()['sheets'] == original.metadata()['sheets']
-    assert restored.json()['reviewCounts'] == original.metadata()['reviewCounts']
+    assert restored.json()['reviewCounts'] == LegalStore.from_files(payload, 'fresh').metadata()['reviewCounts']
     for name in payload:
         pd.testing.assert_frame_equal(main.legal_store.frames[name], original.frames[name])
-    assert registry.exclusion_rows() == [decision]
+    assert registry.exclusion_rows() == []
     assert main.indicator_master is master
     assert main.legal_import_tracker.status(operation_id)['state'] == 'complete'
     settings = json.loads((root / 'settings.json').read_text())
@@ -76,7 +78,7 @@ def test_roundtrip_all_datasets_decisions_and_restart(environment, tmp_path):
     main.legal_store = None
     main.load_initial_legal_store()
     assert main.legal_store.source_files == payload
-    assert main.legal_store.metadata()['reviewCounts'] == original.metadata()['reviewCounts']
+    assert main.legal_store.metadata()['reviewCounts'] == LegalStore.from_files(payload, 'fresh').metadata()['reviewCounts']
 
 
 @pytest.mark.parametrize('dataset', ['awareness', 'deportationrecords', 'legalhotlines'])
@@ -122,7 +124,7 @@ def test_invalid_archives_preserve_workspace(environment, mode):
     elif mode == 'duplicate':
         with pytest.warns(UserWarning): raw = rewrite(raw, lambda files: files + [files[0]])
     elif mode == 'path': raw = rewrite(raw, lambda files: files + [('../outside.csv', b'x')])
-    elif mode == 'missing': raw = rewrite(raw, lambda files: [(name, value) for name, value in files if name != 'exclusions.json'])
+    elif mode == 'missing': raw = rewrite(raw, lambda files: [(name, value) for name, value in files if name != 'manifest.json'])
     response = client.post('/api/legal/backups/restore', files={'file': ('bad.zip', raw)})
     assert response.status_code == 400, response.text
     assert main.legal_store is previous and registry.path.read_bytes() == before
@@ -248,3 +250,22 @@ def test_invalid_exclusions_with_valid_checksums(environment):
         return files.items()
     response = client.post('/api/legal/backups/restore', files={'file': ('project.zip', rewrite(raw, change))})
     assert response.status_code == 400 and main.legal_store is previous
+
+
+def test_legacy_archive_discards_saved_and_current_review_decisions(environment):
+    import hashlib
+    main,client,registry=environment
+    decision={'dataset':'beneficiaries','rule':'Possible duplicate name','identifierType':'caseId','identifierValue':'B1','caseId':'B1'}
+    registry._write([decision])
+    raw=workspace.backup_project(main.legal_store,[])
+    def legacy(files):
+        files=dict(files)
+        files['exclusions.json']=json.dumps([decision]).encode()
+        manifest=json.loads(files['manifest.json'])
+        manifest['version']=1;manifest.pop('includesSettings')
+        manifest['checksums']['exclusions.json']=hashlib.sha256(files['exclusions.json']).hexdigest()
+        files['manifest.json']=json.dumps(manifest).encode()
+        return files.items()
+    response=client.post('/api/legal/backups/restore',files={'file':('legacy.zip',rewrite(raw,legacy))})
+    assert response.status_code==200,response.text
+    assert registry.exclusion_rows()==[]

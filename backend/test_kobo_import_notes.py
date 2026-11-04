@@ -174,3 +174,43 @@ def test_legacy_missing_source_and_ignored_column_notes_are_obsolete():
                             'Saved link for Old field could not be reused safely.',
                             'Old field: unsupported type mystery; retained in source only.']}
     assert refresh_notes(payload) == []
+
+
+def test_note_acknowledgment_with_pending_connection_does_not_change_data(client_store):
+    import io
+    from openpyxl import load_workbook
+    client,store=client_store
+    _,body=stage(client);saved=confirm(client,body);pid=saved['id']
+    source=store.sources(pid)[0];book=load_workbook(io.BytesIO(source))
+    book['survey'].cell(1,5,'relevant')
+    for row in book['survey'].iter_rows(min_row=2):
+        if row[1].value=='district':book['survey'].cell(row[0].row,5,"${other} = 'Hello'")
+    output=io.BytesIO();book.save(output)
+    with store.connect() as db:db.execute('UPDATE projects SET form=? WHERE id=?',(output.getvalue(),pid))
+    current=store.get(pid)
+    assert next(q for q in current['form']['questions'] if q['id']=='district')['connectionSetup']['pending']
+    before=deepcopy(current)
+    response=client.post(f'/api/kobo/projects/{pid}/import-notes/review',json={'reviewedImportNotes':[note_key(n) for n in current['importNotes'] if not n['reviewed']]})
+    assert response.status_code==200,response.text
+    after=store.get(pid)
+    assert all(n['reviewed'] for n in after['importNotes'])
+    assert after['records']==before['records']
+    assert after['settings']==before['settings']
+    assert after.get('dataEdits')==before.get('dataEdits')
+    assert after.get('conditionalReview')==before.get('conditionalReview')
+    assert next(q for q in after['form']['questions'] if q['id']=='district')['connectionSetup']['pending']
+
+
+def test_grouped_review_keeps_import_notes_out_of_coverage_duplicates(client_store):
+    client,store=client_store
+    _,body=stage(client);saved=confirm(client,body);pid=saved['id']
+    query={'settings':saved['settings']}
+    from backend.kobo import KoboSettings
+    from backend.kobo_quality import quality_review
+    legacy=quality_review(store.get(pid),KoboSettings.model_validate(saved['settings']))
+    assert any(n.startswith('Saved import note (whole import, not filter-scoped):') for n in legacy.notes)
+    result=client.post(f'/api/kobo/projects/{pid}/data-review',json=query)
+    assert result.status_code==200,result.text
+    assert not any(n.startswith('Saved import note (whole import, not filter-scoped):') for n in result.json()['notes'])
+    assert any('normalized responses' in n for n in result.json()['notes'])
+    assert saved['importNotes']

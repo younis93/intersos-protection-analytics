@@ -93,6 +93,8 @@ def native_breakdown_columns(project, result, settings):
 
 
 def source_context(project, settings):
+    from .kobo_conditional import analysis_project
+    project = analysis_project(project, settings)
     records = defaultdict(list)
     for record in filtered_records(project, settings): records[record['scope']].append(record)
     from .kobo_connections import form_question_index
@@ -522,6 +524,8 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
     prepared_path = Path(target).with_suffix(".prepared.xlsx")
     try:
         settings = KoboSettings.model_validate(settings_dict)
+        from .kobo_conditional import analysis_project
+        project = analysis_project(project, settings)
         validate_export_fields(project, settings, question)
         specs = slicer_specs(project, settings)
         own_specs = {}

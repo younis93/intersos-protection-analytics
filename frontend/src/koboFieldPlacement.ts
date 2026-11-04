@@ -8,7 +8,7 @@ export function placeQuestions<T extends Pick<KoboQuestion,'id'|'group'|'repeat'
  const buckets=new Map([...new Set(questions.map(q=>q.group))].map(group=>[group,ordered.filter(q=>q.group===group)]));return questions.map(q=>buckets.get(q.group)!.shift()!);
 }
 export function placementCandidate(form:KoboForm,question:KoboQuestion,group:string,placement:KoboFieldPlacement|null){
- const candidate=[...form.questions.filter(q=>q.id!==question.id),{...question,group,placement}];
+ const candidate=[...form.questions.filter(q=>q.id!==question.id).map(q=>q.placement?.reference===question.id?{...q,placement:null}:q),{...question,group,placement}];
  try{return placeQuestions(candidate)}catch(error){
   // Other broken saved placements remain editable one at a time during import review.
   const byId=new Map(candidate.map(q=>[q.id,q]));let current=byId.get(question.id)!,seen=new Set<string>();

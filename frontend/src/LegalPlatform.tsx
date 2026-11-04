@@ -408,7 +408,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
       await finishImport();
     }
   };
-  const projectTransfer=useProjectTransfer({onCancelImport:()=>{void cancelProcessing()}});
+  const projectTransfer=useProjectTransfer({dataOnly:true,onCancelImport:()=>{void cancelProcessing()}});
   const restoreProject = async (file:File,password?:string) => {
     if(uploading||restoringData||exportingProject)return;
     if(file.size>projectUploadLimit)throw new Error('Choose a project file of 200 MB or smaller.');
@@ -580,7 +580,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
                   <ArrowRight/>
                 </button>
                 <button type="button" className="legal-import-source-option" onClick={()=>projectInput.current?.click()} disabled={uploading||restoringData||exportingProject}>
-                  <FolderInput/><span><strong>Import project</strong><small>Restore a saved project ZIP with its data and review decisions.</small></span><ArrowRight/>
+                  <FolderInput/><span><strong>Import project</strong><small>Restore project data with default settings and fresh reviews.</small></span><ArrowRight/>
                 </button>
               </div>
             </section>

@@ -28,6 +28,7 @@ class ProjectProtectionError(ValueError):
 
 class ExportProtection(BaseModel):
     password: SecretStr | None = None
+    includeSettings: bool = True
 
     def value(self):
         return self.password.get_secret_value() if self.password is not None else None

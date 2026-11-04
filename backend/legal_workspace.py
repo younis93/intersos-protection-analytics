@@ -38,8 +38,7 @@ def backup_project(store, exclusions):
     if sum(map(len, store.source_files.values())) > MAX_CSV:
         raise ValueError('Legal Platform CSV files must total 100 MB or smaller.')
     files = {f'{name}.csv': raw for name, raw in store.source_files.items()}
-    files['exclusions.json'] = json.dumps(validate_exclusions(exclusions), ensure_ascii=False).encode('utf-8')
-    files['manifest.json'] = json.dumps({'format': FORMAT, 'version': 1,
+    files['manifest.json'] = json.dumps({'format': FORMAT, 'version': 2, 'includesSettings': False,
         'checksums': {name: hashlib.sha256(raw).hexdigest() for name, raw in files.items()}}).encode('utf-8')
     if sum(map(len, files.values())) > MAX_BACKUP:
         raise ValueError('Project exceeds the 200 MB expanded backup limit.')
@@ -60,7 +59,7 @@ def read_backup(raw):
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             entries = archive.infolist()
             names = {entry.filename for entry in entries}
-            if len(entries) != len(names) or not names <= allowed or not {'manifest.json', 'exclusions.json'} <= names:
+            if len(entries) != len(names) or not names <= allowed or 'manifest.json' not in names:
                 raise ValueError('Invalid project ZIP contents.')
             if sum(entry.file_size for entry in entries) > MAX_BACKUP:
                 raise ValueError('Project ZIP expanded size exceeds 200 MB.')
@@ -70,15 +69,20 @@ def read_backup(raw):
                 raise ValueError('Encrypted files and symbolic links are not supported.')
             files = {entry.filename: archive.read(entry) for entry in entries}
         manifest = json.loads(files.pop('manifest.json'))
-        if not isinstance(manifest, dict) or manifest.get('format') != FORMAT or type(manifest.get('version')) is not int or manifest['version'] != 1:
+        if not isinstance(manifest, dict) or manifest.get('format') != FORMAT or type(manifest.get('version')) is not int or manifest['version'] not in (1, 2):
             raise ValueError('Unsupported Legal Platform project format or version.')
         checksums = manifest.get('checksums')
         if not isinstance(checksums, dict) or set(checksums) != set(files):
             raise ValueError('Invalid project ZIP checksums.')
         if any(checksums[name] != hashlib.sha256(value).hexdigest() for name, value in files.items()):
             raise ValueError('Project checksum failed. Choose an intact ZIP.')
-        exclusions = validate_exclusions(json.loads(files.pop('exclusions.json')))
-        return {name[:-4]: value for name, value in files.items()}, exclusions
+        if manifest['version']==1 and 'exclusions.json' not in files:
+            raise ValueError('Invalid project ZIP contents.')
+        if 'exclusions.json' in files:
+            validate_exclusions(json.loads(files.pop('exclusions.json')))
+        if manifest['version']==2 and manifest.get('includesSettings') is not False:
+            raise ValueError('Legal projects must contain data only.')
+        return {name[:-4]: value for name, value in files.items()}, []
     except (OSError, KeyError, TypeError, UnicodeError, RuntimeError, NotImplementedError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
         raise ValueError('This file is not a valid Legal Platform project ZIP.') from exc
 

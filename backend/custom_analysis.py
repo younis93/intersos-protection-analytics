@@ -71,6 +71,9 @@ def custom_store():
 
 
 def read_tables(raw, filename):
+    from .project_snapshot import decode
+    snapshot = decode(raw, 'custom')
+    if snapshot is not None: return snapshot
     if filename.lower().endswith('.csv'):
         try:
             text = raw.decode('utf-8-sig')

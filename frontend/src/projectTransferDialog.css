@@ -25,3 +25,19 @@
 .project-transfer-spinner{animation:project-transfer-spin 1s linear infinite}@keyframes project-transfer-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.project-transfer-spinner{animation:none}}
 @media(max-width:480px){.project-transfer-dialog{padding:20px}.project-transfer-dialog footer{flex-wrap:wrap}.project-transfer-dialog footer button{font-size:13px}.project-transfer-dialog footer button:first-child{flex:0 0 auto}.project-transfer-dialog footer button:last-child{flex:1}}
+
+.project-transfer-dialog .project-content-options{margin:18px 0;padding:12px;border:1px solid var(--line);border-radius:12px}
+.project-content-options legend{padding:0 6px;font-size:13px;font-weight:700}
+.project-transfer-dialog .project-content-options>label{display:flex;align-items:flex-start;gap:10px;margin:4px 0;padding:10px;border-radius:9px;cursor:pointer}
+.project-content-options label:has(input:checked){background:color-mix(in srgb,var(--blue) 9%,transparent)}
+.project-transfer-dialog .project-content-options input{appearance:auto;width:17px;height:17px;margin:2px 0;flex:none;padding:0;accent-color:var(--blue)}
+.project-content-options strong,.project-content-options small{display:block}.project-content-options small{font-size:12px;line-height:1.5;color:var(--muted);font-weight:400;margin-top:4px}
+.project-content-options label:has(input:disabled){opacity:.6;cursor:default}
+.project-import-review{width:min(760px,calc(100vw - 32px))}
+.project-destination{display:block;font-size:13px;font-weight:600}
+.project-destination select{display:block;width:100%;margin-top:8px;padding:12px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px}
+.project-import-review .kobo-update-review input[type=checkbox]{appearance:auto;width:17px;height:17px;padding:0;margin-right:8px}
+.project-import-review fieldset:disabled{opacity:.7}
+
+.project-import-review footer{position:sticky;bottom:-28px;z-index:2;margin:14px -28px -28px;padding:14px 28px 20px;background:var(--panel-strong);border-top:1px solid var(--line);backdrop-filter:blur(16px)}
+@media(max-width:480px){.project-import-review footer{bottom:-20px;margin-left:-20px;margin-right:-20px;margin-bottom:-20px;padding:12px 20px 20px}}

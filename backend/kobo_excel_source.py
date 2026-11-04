@@ -42,6 +42,8 @@ def validate_export_fields(project, settings, question=''):
 
 
 def response_layout(project, settings):
+    from .kobo_conditional import analysis_project
+    project = analysis_project(project, settings)
     questions = [q for q in project['form']['questions'] if not q['identifying']]
     scopes = list(dict.fromkeys(['', *(g['id'] for g in project['form']['groups'] if g['repeat']), *(q['repeat'] for q in questions), *(r['scope'] for r in project['records'])]))
     used = {'_kobo choices', '_kobo chart pivots', '_kobo chart labels', '_kobo slicer totals', '_kobo chart values', '_kobo trend pivots'}
@@ -84,6 +86,8 @@ def response_values(layout, record, escape=True):
 
 
 def query_config(project, snapshot, settings, specs, layouts):
+    from .kobo_conditional import analysis_project
+    project = analysis_project(project, settings)
     from .kobo_connections import form_question_index
     by_id = form_question_index(project['form'])
     fields = {}
@@ -101,6 +105,7 @@ def query_config(project, snapshot, settings, specs, layouts):
         dimensions = breakdown_fields(cfg, by_id, q) if cfg else []
         counts = Counter(row['label'] for row in result.get('percentageRows', result['rows']))
         results.append({'id': q['id'], 'label': result['label'], 'group': q['group'], 'groupLabel': next((g['label'] for g in snapshot['groups'] if g['id'] == q['group']), ''),
+            'excludedRecords': [r['id'] for r in project['records'] if q['id'] in r.get('_conditionalExcluded', [])],
             'scope': q['repeat'], 'kind': q['kind'], 'dateUnit': cfg.dateUnit if cfg else 'month', 'trendDateField': cfg.trendDateField if cfg and result.get('trend') else '', 'trendUnit': cfg.trendUnit if cfg else 'month', 'dimensions': [f['id'] for f in dimensions],
             'bins': result.get('bins', []), 'blank': not settings.hideBlanks and not (cfg and (plan['enabled'] or cfg.hiddenAnswerPercentageMode == 'adjust') and '__blank__' in cfg.hiddenAnswers), 'hiddenAnswers': cfg.hiddenAnswers if cfg and (plan['enabled'] or cfg.hiddenAnswerPercentageMode == 'adjust') and q['kind'] in {'category','multiple','text'} else [],
             'hiddenAnswerPercentageMode': cfg.hiddenAnswerPercentageMode if cfg else 'adjust',
@@ -144,7 +149,7 @@ def multi_config(config, question):
 
 
 def multi_row_count(project, result, hide_blanks):
-    rows = [record for record in project['records'] if record['scope'] == result['repeat']]
+    rows = [record for record in project['records'] if record['scope'] == result['repeat'] and result['id'] not in record.get('_conditionalExcluded', [])]
     return (len(rows) + sum(len(set(record['values'].get(result['id']) or [])) or int(not hide_blanks) for record in rows)
             + len(result['rows']))
 
@@ -183,7 +188,7 @@ QUERY_BODY = r'''
      else if x = null or y = null then false else if op = "gt" then x > y else if op = "gte" then x >= y else if op = "lt" then x < y else if op = "lte" then x <= y else false,
  FilterValues = (r as record) as list => List.Transform(Config[filters], (f) => let v = FieldValue(r, f[id]) in Record.FieldOrDefault(f[captions], if v = "" then "__blank__" else v, if v = "" then "Blank / unanswered" else Caption(f[id], v))),
  QuestionRows = (q as record) as list => let
-   Cohort = List.Select(Records, (r) => r[_Scope] = q[scope]),
+   Cohort = List.Select(Records, (r) => r[_Scope] = q[scope] and not List.Contains(Record.FieldOrDefault(q, "excludedRecords", {}), TextValue(Record.Field(r, "Response ID")))),
    Options = q[answers] & (if q[blank] then {[id="__blank__", label=q[blankLabel]]} else {}),
    Expanded = List.Combine(List.Transform(Cohort, (r) => let
      value = FieldValue(r, q[id]), selected = List.Distinct(List.Select(Text.Split(value, " "), each _ <> "")), answered = if List.IsEmpty(selected) then 0 else 1,

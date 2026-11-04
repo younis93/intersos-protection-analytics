@@ -79,7 +79,8 @@ def test_recovery_closes_runtime_and_instance_before_relaunch():
     webview = SimpleNamespace(settings={}, create_window=MagicMock(), start=MagicMock(
         side_effect=RuntimeError("Failed to resolve Python.Runtime.Loader.Initialize from test.dll")))
     with ExitStack() as stack:
-        stack.enter_context(patch.dict(sys.modules, {"webview": webview}))
+        stack.enter_context(patch.dict(sys.modules, {"webview": webview,
+            "webview.platforms.edgechromium": SimpleNamespace(EdgeChrome=MagicMock())}))
         stack.enter_context(patch.object(sys, "frozen", True, create=True))
         stack.enter_context(patch.object(sys, "platform", "win32"))
         stack.enter_context(patch.object(sys, "argv", ["app.exe", "--home"]))

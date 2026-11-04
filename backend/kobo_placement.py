@@ -62,12 +62,28 @@ def move_field(store,pid,body):
         if not row: raise KeyError('Project not found.')
         if row[1]!=body.updated: raise ValueError('The project changed. Reload before moving this field.')
         raw=json.loads(row[0]);form=raw['form'];q=next((q for q in form['questions'] if q['id']==body.field),None)
-        if not q or not q.get('addedFromData'): raise ValueError('Only added fields can be moved.')
+        if not q: raise ValueError('Question is unavailable. Reload before moving it.')
         validate_group(form,body.group,q['repeat'])
+        # Keep questions anchored to this question in their existing location.
+        for sibling in form['questions']:
+            if (sibling.get('placement') or {}).get('reference') == q['id']:
+                sibling['placement'] = None
         q['group']=body.group;q['placement']=body.placement.model_dump() if body.placement else None
         form['questions']=place_questions(form['questions'])
+        locations = {item['id']: item for item in form['questions']}
+        # Review rebuilds the form from baseForm, so retain original-question moves there.
+        for key in ('baseForm', '_sourceForm'):
+            if key in raw:
+                for original in raw[key]['questions']:
+                    if original['id'] in locations:
+                        location = locations[original['id']]
+                        original.update(group=location['group'], placement=deepcopy(location.get('placement')))
+                ranks = {item['id']: index for index, item in enumerate(form['questions'])}
+                raw[key]['questions'].sort(key=lambda item: ranks.get(item['id'], len(ranks)))
         for added in raw.get('reviewConfig',{}).get('addedQuestions',[]):
-            if added['id']==q['id']: added.update(group=q['group'],placement=q['placement'])
+            if added['id'] in locations:
+                location = locations[added['id']]
+                added.update(group=location['group'],placement=deepcopy(location.get('placement')))
         db.execute('UPDATE projects SET payload=?,updated=? WHERE id=?',(json.dumps(raw,ensure_ascii=False),datetime.now().isoformat(),pid))
 
 

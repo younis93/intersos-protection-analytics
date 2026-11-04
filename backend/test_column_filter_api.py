@@ -38,11 +38,15 @@ def test_empty_selections_and_invalid_columns_are_explicit(preview_client):
     assert response.status_code==400
 
 
-def test_quality_and_answer_record_filters_keep_summary_calculations(preview_client):
+def test_quality_and_answer_record_filters_keep_summary_calculations(preview_client, monkeypatch):
     client,store,pid=preview_client
-    settings=store.get(pid)['settings']
+    project=store.get(pid)
+    project['records'][0]['values']['group/gender']='unrecognized'
+    monkeypatch.setattr(store,'get',lambda project_id:project)
+    settings=project['settings']
     quality=client.post(f'/api/kobo/projects/{pid}/quality-review',json={'settings':settings}).json()
-    check=quality['checks'][0]['id']
+    check='invalid:group/gender'
+    assert any(item['id']==check for item in quality['checks'])
     filtered=client.post(f'/api/kobo/projects/{pid}/quality-review',json={'settings':settings,'check':check,'columnFilters':[{'column':'row','values':[]}]}).json()
     assert filtered['matched']==0 and filtered['rows']==[]
     assert filtered['checks']==quality['checks']

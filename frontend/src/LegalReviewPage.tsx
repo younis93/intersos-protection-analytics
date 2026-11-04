@@ -82,8 +82,8 @@ export const REVIEW_CHECK_METHODS: Record<string, { columns: string[]; logic: st
   "Detained without lawyer referral": { columns: ["Is the beneficiary detained", "Refer to Lawyer"], logic: "Flags explicit Yes detention answers with a blank lawyer referral." },
   "Not detained and not referred to helpline": { columns: ["Is the beneficiary detained", "Has the beneficiary referred to the helpline?"], logic: "Flags records with explicit No answers to both questions. Blank answers do not count as No." },
   "High priority without lawyer referral": { columns: ["Priority", "Refer to Lawyer"], logic: "Flags High priority records with a blank lawyer referral." },
-  "Possible duplicate name": { columns: ["Name (Filter Color Red)", "Project"], logic: "Normalizes names, groups them within the permitted project group, then compares the configured leading characters (or exact names when Exact matches is enabled)." },
-  "Possible duplicate contact and name": { columns: ["Contact Number", "Name (Filter Color Red)", "# UNHCR", "ID Number", "Individual Number ASSISIT", "Spouse name", "Project"], logic: "Within the permitted project group, flags records with the same nonblank normalized contact number, at least 90% full-name similarity, and one populated identity marker on each record." },
+  "Possible duplicate name": { columns: ["Name (Filter Color Red)", "Project"], logic: "Normalizes names, groups Erbil, SULI (Sulaymaniyah), and Mosul & Kirkuk together as North Iraq, keeps the other project groups separate, then compares the configured leading characters (or exact names when Exact matches is enabled)." },
+  "Possible duplicate contact and name": { columns: ["Contact Number", "Name (Filter Color Red)", "# UNHCR", "ID Number", "Individual Number ASSISIT", "Spouse name", "Project"], logic: "Checks Erbil, SULI (Sulaymaniyah), and Mosul & Kirkuk together as North Iraq, keeps the other project groups separate, and flags records with the same nonblank normalized contact number, at least 90% full-name similarity, and one populated identity marker on each record." },
   "Invalid contact number": { columns: ["Contact Number / Phone Number"], logic: "Keeps normalized phone numbers that are not blank, one digit, or 11 digits, after excluding configured system prefixes." },
   "Case without assessment": { columns: ["Case ID", "# total assessments"], logic: "Flags beneficiaries whose total assessment count is zero." },
   "Invalid age": { columns: ["Age", "Date of Birth", "Spouse DoB"], logic: "Flags missing, non-numeric, negative, or implausible age values, plus nonblank Spouse DoB values that are invalid or after today." },
@@ -269,6 +269,7 @@ export function FindingTable({
     <th>Recommended action</th>
     <th>{dataset === "legalhotlines" ? "Lawyer referral" : "Lawyer"}</th>
     <th>Project</th>
+    {rule === "Case without assessment" && <><th>Created On</th><th>Date of Identification</th></>}
     <th>Project location</th>{rule === "Detention Governorate mismatch" && <th>Detention Governorate mismatch</th>}
     <th>{dataset === "legalhotlines" ? "Detained-person name" : "Name"}</th>
     {(rule === "Marital status below 18" || rule === "Spouse below 18") && <th>Marital status</th>}
@@ -297,6 +298,7 @@ export function FindingTable({
         <strong>{r.lawyer || (dataset === "legalhotlines" ? "Not recorded" : "Unassigned")}</strong>
       </td>
       <td>{r.project ? formatProjectLabel(r.project) : "-"}</td>
+      {rule === "Case without assessment" && <><td>{r.createdOn || "-"}</td><td>{r.identificationDate || "-"}</td></>}
       <td>{r.location || "-"}</td>{rule === "Detention Governorate mismatch" && <td>{r.detentionGovernorate || "Missing"}</td>}
       <td
         className={r.duplicateGroup ? `duplicate-name-cell ${r.nameMatchMode === "exact" ? "exact-duplicate-name" : "variation-duplicate-name"}` : ""}

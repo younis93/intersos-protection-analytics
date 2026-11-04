@@ -6,6 +6,11 @@ REFERENCE = re.compile(r'\$\{([^}]+)\}')
 TOKEN = re.compile(r'''\s*(\$\{[^}]+\}|'[^']*'|"[^"]*"|!=|>=|<=|=|>|<|\(|\)|,|\band\b|\bor\b|\bselected\b|-?\d+(?:\.\d+)?)''', re.I)
 
 
+def semantic_form(form):
+    """Presentation metadata must not invalidate corrections or review decisions."""
+    return {**form,'questions':[{key:value for key,value in q.items() if key!='conditionReview'} for q in form['questions']]}
+
+
 def form_question_index(form):
     """Derive inherited conditions for older forms that retained group metadata."""
     groups = {g['id']: g for g in form.get('groups', [])}
@@ -15,7 +20,7 @@ def form_question_index(form):
         while gid in groups and gid not in seen:
             seen.add(gid); group = groups[gid]; chain.insert(0, group); gid = group.get('parent', '')
         inherited = original.get('inheritedRelevant', [])
-        if any('relevant' in group for group in chain):
+        if not original.get('connectionVerifiedInheritance') and any('relevant' in group for group in chain):
             inherited = [{'source': group['id'], 'expression': group['relevant']} for group in chain if group.get('relevant')]
         questions[original['id']] = {**original, 'inheritedRelevant': inherited}
     return questions
@@ -58,6 +63,46 @@ def describe_condition(expression, child, questions, language):
     return describe_tree(tree,questions,language),triggers
 
 
+def condition_review(child, questions, settings):
+    from .kobo_question_conditions import entries,entry_id
+    from .kobo_connection_rules import parse_condition,tree_issues,describe_tree,fields_in
+    from .kobo_shared_dependencies import prune,rule_key
+    cfg=settings.questions.get(child['id'])
+    manual=bool(cfg and cfg.connectionSource=='manual')
+    local={entry_id(e) for e in child.get('ignoredSourceConditions',[])}
+    output=[]
+    for entry in entries(child):
+        readable,_=describe_condition(entry['expression'],child,questions,settings.language)
+        missing=[]
+        for ref in REFERENCE.findall(entry['expression']):
+            if resolve_reference(ref,child,questions) is None: missing.append(ref)
+        status='manual' if manual else 'active';scope='';ignored_parts=[];ignored_rules=[];remaining=None;active_fields=[]
+        if not manual and entry_id(entry) in local:
+            status='ignored';scope='question';missing=[]
+        elif not manual:
+            try:
+                node=parse_condition(entry['expression'],child,questions,allow_unresolved=True)
+                for rule in child.get('ignoredConnectionRules',[]):
+                    try: changed=prune(node,rule_key(rule))
+                    except ValueError: continue
+                    if changed!=node:
+                        ignored_parts.append(describe_tree(rule,questions,settings.language));ignored_rules.append(rule);node=changed
+                if ignored_parts:scope='project'
+                issues=tree_issues(node,child,questions) if node else []
+                if node is None:status='ignored';missing=[]
+                elif missing:status='missing'
+                elif issues:status='unchecked'
+                elif ignored_parts:status='adjusted'
+                remaining=describe_tree(node,questions,settings.language)
+                active_fields=fields_in(node)
+            except ValueError:status='missing' if missing else 'unchecked'
+        if (child.get('connectionSetup') or {}).get('pending') and status in {'active','adjusted'}:status='setup'
+        if manual:missing=[]
+        output.append({**entry,'readable':readable,'supported':readable is not None,'status':status,'ignoredScope':scope,
+            'ignoredParts':ignored_parts,'ignoredRules':ignored_rules,'activeFields':active_fields,'missingReferences':list(dict.fromkeys(missing)),'activeCondition':remaining})
+    return output
+
+
 def connection_details(child, questions, settings):
     conditions = [*child.get('inheritedRelevant', [])]
     if child.get('relevant', '').strip(): conditions.append({'source': child['id'], 'expression': child['relevant']})
@@ -77,13 +122,32 @@ def connection_details(child, questions, settings):
             from .kobo import label
             parent = parents.setdefault(target['id'], {'id': target['id'], 'name': target['name'], 'label': label(target, settings.language), 'hidden': target['id'] in settings.hidden or bool(target.get('metadata') and not settings.metadata), 'compatible': compatible(child, target), 'triggers': []})
             parent['triggers'] = list(dict.fromkeys([*parent['triggers'], *triggers.get(target['id'], [])]))
-    return {'parents': list(parents.values()), 'conditions': descriptions, 'unresolvedReferences':unresolved,'issues': list(dict.fromkeys(issues))}
+    return {'parents': list(parents.values()), 'conditions': condition_review(child,questions,settings), 'unresolvedReferences':unresolved,'issues': list(dict.fromkeys(issues))}
+
+
+def ignored_percentage_base(question, cfg, questions, original_tree, active_tree):
+    """A removed percentage parent falls back reversibly to the current question."""
+    from .kobo_connection_rules import fields_in
+    if cfg.connectionSource=='manual' or (cfg.calculation and cfg.calculation.operation!='count'): return None
+    mode=cfg.connectedPercentageMode or ('keep-original' if cfg.percentageBase=='parent' else 'adjust')
+    if mode!='keep-original': return None
+    original=[key for key in fields_in(original_tree) if key in questions and compatible(question,questions[key])]
+    selected=cfg.percentageParent or (original[0] if len(set(original))==1 else '')
+    if selected and selected in original and selected not in fields_in(active_tree):
+        return {'from':selected,'to':question['id']}
+    return None
 
 
 def connection_plan(question, cfg, questions):
     from .kobo_connection_rules import parse_condition, tree_issues, fields_in, tree_diagnostics
     entries = list(question.get('inheritedRelevant', []))
-    if question.get('relevant', '').strip(): entries.append({'expression':question['relevant']})
+    if question.get('relevant', '').strip(): entries.append({'source':question['id'],'expression':question['relevant']})
+    original_entries = list(entries)
+    ignored_source = question.get('ignoredSourceConditions',[]) if cfg.connectionSource!='manual' else []
+    if ignored_source:
+        from .kobo_question_conditions import entry_id
+        ignored_ids={entry_id(e) for e in ignored_source}
+        entries=[e for e in entries if entry_id({'source':e.get('source',question['id']),**e}) not in ignored_ids]
     measured = cfg.calculation and cfg.calculation.operation != 'count'
     enabled = bool(entries or cfg.connectionSource == 'manual' or cfg.percentageBase == 'parent' or cfg.connectedPercentageMode) and not measured
     mode = cfg.connectedPercentageMode or ('keep-original' if cfg.percentageBase == 'parent' else 'adjust')
@@ -113,18 +177,36 @@ def connection_plan(question, cfg, questions):
                         diagnostics.append(dict(code='missing-rule-question', path=[index], field=name, expression=entry['expression'], availableIds=[q['id'] for q in questions.values() if compatible(question,q)]))
                 nodes.append({'type':'group','match':'all','rules':[]})
         if nodes: tree = {'type':'group','match':'all','rules':nodes}
-    elif enabled:
+    elif enabled and not ignored_source:
         review.append('manual-connection-required')
+    original_tree = tree
+    if ignored_source:
+        original_keys=list(dict.fromkeys(target['id'] for e in original_entries for name in REFERENCE.findall(e['expression']) if (target:=resolve_reference(name,question,questions))))
+        original_tree={'type':'group','match':'all','rules':[{'type':'rule','field':key,'operator':'eq','value':''} for key in original_keys]}
+        if tree is None and not review: enabled=False
+    ignored = question.get('ignoredConnectionRules', []) if cfg.connectionSource != 'manual' else []
+    if ignored:
+        from .kobo_shared_dependencies import prune, rule_key
+        for rule in ignored:
+            try: tree = prune(tree, rule_key(rule))
+            except ValueError: review.append('ignored-condition-needs-review')
+        referenced = fields_in(tree)
+        if tree is None and not review: enabled = False
     candidates = [questions[key] for key in dict.fromkeys(referenced) if key in questions and compatible(question, questions[key])]
     selected = cfg.percentageParent or (candidates[0]['id'] if len(candidates)==1 else '')
+    base_change = ignored_percentage_base(question,cfg,questions,original_tree,tree) if (ignored or ignored_source) else None
+    if base_change:
+        mode = 'adjust'
+        selected = ''
     parent = questions.get(selected)
     parent_issue = '' if parent and compatible(question,parent) else 'missing-parent' if not parent else 'incompatible-scope'
     if not parent_issue and selected not in {candidate['id'] for candidate in candidates}: parent_issue = 'not-connected-parent'
     if parent_issue: parent = None
+    if base_change: parent_issue = ''
     issue = (review[0] if review else '') if cfg.connectionSource == 'manual' or mode == 'keep-original' else ''
     if mode == 'keep-original' and not issue: issue = parent_issue
     if measured and cfg.percentageBase == 'parent': issue = 'calculated-measure'
-    return {'enabled':enabled,'mode':mode,'source':cfg.connectionSource,'tree':tree,'diagnostics':diagnostics,'reviewIssues':list(dict.fromkeys(review)),'parent':parent,'parentId':selected,'parentIssue':parent_issue,'issue':issue,'canKeepOriginal':not review and not parent_issue and not measured,'fields':list(dict.fromkeys(referenced))}
+    return {'percentageBaseChange':base_change,'enabled':enabled,'mode':mode,'source':cfg.connectionSource,'tree':tree,'diagnostics':diagnostics,'reviewIssues':list(dict.fromkeys(review)),'parent':parent,'parentId':selected,'parentIssue':parent_issue,'issue':issue,'canKeepOriginal':not review and not parent_issue and not measured and not base_change,'fields':list(dict.fromkeys(referenced))}
 
 
 def parent_field(question, cfg, questions):
@@ -138,17 +220,22 @@ def apply_connection_basis(result, question, records, cfg, questions, lookup, se
     from .kobo_connection_rules import describe_tree
     plan = connection_plan(question,cfg,questions)
     connections = connection_details(question, questions, settings)
+    connections['ignoredSourceConditions'] = question.get('ignoredSourceConditions',[])
     connections['originalParents'] = list(connections['parents'])
-    if not plan['enabled']:
+    connections['suspendedDependencies'] = bool(question.get('dependencyReviewNeeded'))
+    connections['percentageBaseChange'] = plan['percentageBaseChange']
+    if question.get('ignoredConnectionRules') and cfg.connectionSource != 'manual':
+        connections['ignoredDependencies'] = question['ignoredConnectionRules']
+    if not plan['enabled'] and not question.get('ignoredConnectionRules') and not question.get('ignoredSourceConditions'):
         if connections['conditions']: result['connections'] = connections
         return result
     connections.update(source=plan['source'],manualTree=cfg.connectionRules,effectiveTree=plan['tree'],effectiveCondition=describe_tree(plan['tree'],questions,settings.language),diagnostics=plan['diagnostics'],baseIssue=plan['parentIssue'],reviewIssues=plan['reviewIssues'],canKeepOriginal=plan['canKeepOriginal'])
-    if plan['source']=='manual':
+    if plan['source']=='manual' or question.get('ignoredConnectionRules') or question.get('ignoredSourceConditions'):
         connections['issues'] = plan['reviewIssues']
         connections['parents'] = []
         for key in plan['fields']:
             field = questions.get(key)
-            if field: connections['parents'].append({'id':key,'name':field['name'],'label':label(field,settings.language),'hidden':key in settings.hidden,'compatible':compatible(question,field),'triggers':[]})
+            if field: connections['parents'].append({'id':key,'name':field['name'],'label':label(field,settings.language),'hidden':key in settings.hidden,'compatible':compatible(question,field),'triggers':next((p['triggers'] for p in connections['originalParents'] if p['id']==key),[])})
     result['connections'] = connections
     parent, issue = plan['parent'], plan['issue']
     cohort = question_cohort(question, records, cfg, questions, lookup)

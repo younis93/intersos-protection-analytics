@@ -4,9 +4,10 @@ import {Download,Eye,EyeOff,LockKeyhole,LoaderCircle,ShieldCheck,X} from 'lucide
 import {exportPasswordError,passwordLength} from './projectProtection';
 import './projectTransferDialog.css';
 
-export default function ProjectTransferDialog({mode,filename,onSubmit,onClose,onCancelBusy}:{mode:'export'|'unlock';filename?:string;onSubmit:(password?:string)=>Promise<void>;onClose:()=>void;onCancelBusy?:()=>void}){
+export default function ProjectTransferDialog({mode,filename,onSubmit,onClose,onCancelBusy,dataOnly=false}:{dataOnly?:boolean;mode:'export'|'unlock';filename?:string;onSubmit:(password?:string,includeSettings?:boolean)=>Promise<void>;onClose:()=>void;onCancelBusy?:()=>void}){
  const dialog=useRef<HTMLDialogElement>(null),running=useRef(false),id=useId();
  const[protectedExport,setProtected]=useState(false),[password,setPassword]=useState(''),[confirmation,setConfirmation]=useState(''),[show,setShow]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const[includeSettings,setIncludeSettings]=useState(!dataOnly);
  const unlock=mode==='unlock',needsPassword=unlock||protectedExport;
  useEffect(()=>{const opener=document.activeElement;dialog.current?.showModal();return()=>{dialog.current?.close();if(opener instanceof HTMLElement&&opener.isConnected)opener.focus()}},[]);
  const submit=async()=>{
@@ -14,7 +15,7 @@ export default function ProjectTransferDialog({mode,filename,onSubmit,onClose,on
   const issue=unlock?(!password?'Enter the project password.':''):protectedExport?exportPasswordError(password,confirmation):'';
   if(issue){setError(issue);return}
   running.current=true;setBusy(true);setError('');
-  try{await onSubmit(needsPassword?password:undefined);setPassword('');setConfirmation('');onClose()}
+  try{await onSubmit(needsPassword?password:undefined,includeSettings);setPassword('');setConfirmation('');onClose()}
   catch(reason){setError(reason instanceof Error?reason.message:'Unable to complete the project transfer.');setPassword('');setConfirmation('');dialog.current?.querySelector<HTMLInputElement>('input[type=password],input[type=text]')?.focus()}
   finally{running.current=false;setBusy(false)}
  };
@@ -22,9 +23,10 @@ export default function ProjectTransferDialog({mode,filename,onSubmit,onClose,on
   <form onSubmit={event=>{event.preventDefault();void submit()}}>
    <header><span className="project-transfer-emblem">{unlock?<LockKeyhole aria-hidden="true"/>:<ShieldCheck aria-hidden="true"/>}</span><button type="button" className="soft" aria-label="Close project transfer" disabled={busy} onClick={onClose}><X aria-hidden="true"/></button></header>
    <h2 id={`${id}-title`}>{unlock?'Unlock project':'Export project'}</h2>
-   <p id={`${id}-intro`}>{unlock?'Enter the password used when this project was exported.':'Save your project data and settings in a portable backup.'}</p>
+   <p id={`${id}-intro`}>{unlock?'Enter the password used when this project was exported.':dataOnly?'Save project data with default settings and fresh reviews.':'Choose what to include in your portable project file.'}</p>
    {filename&&<p className="project-transfer-file" title={filename}>{filename}</p>}
-   {!unlock&&<label className="project-protection-toggle"><span><strong>Protect with password</strong><small>Encrypt the complete project backup.</small></span><input type="checkbox" role="switch" checked={protectedExport} disabled={busy} onChange={event=>{setProtected(event.target.checked);setPassword('');setConfirmation('');setShow(false);setError('')}}/></label>}
+   {!unlock&&(dataOnly?<p className="project-transfer-file">Data only - default settings</p>:<fieldset className="project-content-options" disabled={busy}><legend>Export contents</legend><label><input type="radio" name={`${id}-contents`} checked={includeSettings} onChange={()=>setIncludeSettings(true)}/><span><strong>Data and settings</strong><small>Complete project data, analysis settings, and saved decisions.</small></span></label><label><input type="radio" name={`${id}-contents`} checked={!includeSettings} onChange={()=>setIncludeSettings(false)}/><span><strong>Data only</strong><small>All corrected and cleaned data. Opens with default settings.</small></span></label></fieldset>)}
+   {!unlock&&<label className="project-protection-toggle"><span><strong>Protect with password</strong><small>Encrypt this project file.</small></span><input type="checkbox" role="switch" checked={protectedExport} disabled={busy} onChange={event=>{setProtected(event.target.checked);setPassword('');setConfirmation('');setShow(false);setError('')}}/></label>}
    <fieldset disabled={busy}>
     {needsPassword&&<><label htmlFor={`${id}-password`}>Password</label><div className="project-password-input"><input id={`${id}-password`} type={show?'text':'password'} value={password} autoComplete={unlock?'current-password':'new-password'} spellCheck={false} autoCapitalize="none" aria-describedby={`${id}-help`} aria-invalid={!!error} onChange={event=>{setPassword(event.target.value);setError('')}}/><button type="button" className="soft" aria-label={show?'Hide password':'Show password'} aria-pressed={show} onClick={()=>setShow(value=>!value)}>{show?<EyeOff aria-hidden="true"/>:<Eye aria-hidden="true"/>}</button></div>
     {!unlock&&<><label htmlFor={`${id}-confirmation`}>Confirm password</label><input id={`${id}-confirmation`} type={show?'text':'password'} value={confirmation} autoComplete="new-password" spellCheck={false} autoCapitalize="none" aria-invalid={!!error} onChange={event=>{setConfirmation(event.target.value);setError('')}}/></>}

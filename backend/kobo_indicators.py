@@ -248,6 +248,11 @@ def score_record(record, definition, questions, lookup, language):
 
 def calculate_indicator(project, settings, definition, *, status='all', page=1, page_size=25, records=None):
     from .kobo import filtered_records, label, missing
+    from .kobo_conditional import analysis_project
+    project = analysis_project(project, settings)
+    if records is not None:
+        projected_lookup = {r['id']: r for r in project['records']}
+        records = [projected_lookup[r['id']] for r in records]
     issues = indicator_issues(project, definition)
     if issues: raise ValueError('\n'.join(issues))
     if records is None: records = filtered_records(project, settings)

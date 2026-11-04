@@ -40,6 +40,7 @@ createRoot(document.getElementById('root')!).render(<BeneficiaryIdModal ids={par
       headless: true,
     });
     const page = await browser.newPage();
+    await page.route('https://**/*', route => route.abort());
     const errors = [], results = [];
     const exports = [];
     await page.route('**/api/legal/indicators/records-export', route => {
@@ -51,7 +52,7 @@ createRoot(document.getElementById('root')!).render(<BeneficiaryIdModal ids={par
       for (const width of [1440, 837, 390]) {
         for (const deportation of [false, true]) {
           await page.setViewportSize({ width, height: 918 });
-          await page.goto(`${process.env.APP_TEST_URL || 'http://127.0.0.1:5174'}/indicator-drilldown-check.html?theme=${theme}${deportation ? '&deportation=1' : ''}`);
+          await page.goto(`${process.env.APP_TEST_URL || 'http://127.0.0.1:5174'}/indicator-drilldown-check.html?theme=${theme}${deportation ? '&deportation=1' : ''}`, {waitUntil:'domcontentloaded'});
           await page.locator('.drill-source').first().waitFor();
           await page.locator('td[dir="rtl"]').first().waitFor();
           const layout = await page.locator('.drilldown-table').evaluate(table => {
@@ -63,6 +64,18 @@ createRoot(document.getElementById('root')!).render(<BeneficiaryIdModal ids={par
               for (const rect of range.getClientRects()) {
                 if (rect.left < bounds.left - 1 || rect.right > bounds.right + 1) failures.push(cell.textContent);
               }
+            }
+            for (const header of table.querySelectorAll('th')) {
+              const label = header.querySelector('.column-header-label');
+              const filter = header.querySelector('.column-filter-trigger');
+              if (!label || !filter) continue;
+              const range = document.createRange(); range.selectNodeContents(label);
+              const labelBounds = label.getBoundingClientRect(), filterBounds = filter.getBoundingClientRect();
+              for (const rect of range.getClientRects()) {
+                if (rect.right > labelBounds.right + 1 || rect.left < labelBounds.left - 1) failures.push('Clipped header: ' + label.textContent);
+                if (rect.right > filterBounds.left + 1) failures.push('Overlapping header filter: ' + label.textContent);
+              }
+              if (label.scrollWidth > label.clientWidth + 1) failures.push('Truncated header: ' + label.textContent);
             }
             const source = table.querySelector('.drill-source');
             const style = getComputedStyle(source.parentElement);
@@ -98,10 +111,10 @@ createRoot(document.getElementById('root')!).render(<BeneficiaryIdModal ids={par
         }
       }
     }
-    await page.goto(`${process.env.APP_TEST_URL || 'http://127.0.0.1:5174'}/indicator-drilldown-check.html?plain=1`);
+    await page.goto(`${process.env.APP_TEST_URL || 'http://127.0.0.1:5174'}/indicator-drilldown-check.html?plain=1`, {waitUntil:'domcontentloaded'});
     await page.locator('.drill-source').first().waitFor();
     assert.equal(await page.getByRole('button', { name: /^Open case / }).count(), 0, 'Unavailable case review must leave IDs as text');
-    await page.goto(`${process.env.APP_TEST_URL || 'http://127.0.0.1:5174'}/indicator-drilldown-check.html?missingIds=1`);
+    await page.goto(`${process.env.APP_TEST_URL || 'http://127.0.0.1:5174'}/indicator-drilldown-check.html?missingIds=1`, {waitUntil:'domcontentloaded'});
     await page.getByText('No Beneficiary ID is available for these matching records.').waitFor();
     const missingIdDownload = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Download Excel', exact: true }).click();

@@ -34,10 +34,11 @@ it('always shows original expressions and missing references alongside a manual 
  expect(html).toContain('Original Kobo connection');expect(html).toContain('Missing or unresolved question');expect(html).toContain('removed_parent');
 });
 
-it('combines connection status and editing into one button for unconnected questions',()=>{
+it('shows only editing for unconnected questions',()=>{
  for(const language of ['en','ar'] as const){
   const html=renderToStaticMarkup(<KoboConnections result={{...result,connections:null,respondentBasis:null}} project={project} language={language} onConfigure={()=>{}}/>);
   expect(html.match(/<button/g)).toHaveLength(1);
+  expect(html).not.toContain(language==='en'?'View':'عرض');
   expect(html).toContain(language==='en'?'No connection · Edit':'لا يوجد ارتباط · تعديل');
   expect(html).not.toContain('Set connection');
  }
@@ -52,16 +53,31 @@ it('uses a compact empty state and keeps calculation-specific connections visibl
   expect(measured).toContain('Question connection');expect(measured).toContain('Switch the calculation to Count');expect(measured).not.toContain('Condition mode');
  }
 });
-it('collapses original logic by default and expands detected issues',()=>{
+it('keeps original Kobo logic visible with or without detected issues',()=>{
  const render=(value:KoboResult)=>renderToStaticMarkup(<KoboConnectionControls result={value} project={project} value={{} as KoboQuestionSettings} language="en" onChange={()=>{}}/>);
- expect(render(result)).toContain('<details class="kobo-original-logic">');
- expect(render({...result,connections:{...result.connections!,reviewIssues:['unsupported-condition']}})).toContain('<details class="kobo-original-logic" open="">');
+ expect(render(result)).toContain('<section class="kobo-original-connections"');
+ expect(render(result)).not.toContain('<details class="kobo-original-logic"');
+ expect(render({...result,connections:{...result.connections!,reviewIssues:['unsupported-condition']}})).toContain('<section class="kobo-original-connections"');
 });
 
 it('places hidden actions alongside the connection button and retains them for measures',()=>{
  const action=<button type="button">3 answers hidden</button>;
  const html=renderToStaticMarkup(<KoboConnections result={result} project={project} language="en" trailingAction={action}/>);
- expect(html).toContain('</button><button type="button">3 answers hidden</button></div>');
+ expect(html).toContain('</button></div><button type="button">3 answers hidden</button></div>');
  const measured=renderToStaticMarkup(<KoboConnections result={{...result,measure:{operation:'sum',field:'main',decimals:0,label:'Sum',unit:'',parentValuesRepeated:false}}} project={project} language="ar" trailingAction={action}/>);
  expect(measured).toContain('3 answers hidden');expect(measured).toContain('dir="rtl"');expect(measured).not.toContain('Edit');
+});
+
+
+it('places View conditions before Edit connection and outside the condition summary',()=>{
+ for(const language of ['en','ar'] as const){
+  const html=renderToStaticMarkup(<KoboConnections result={result} project={project} language={language} onConfigure={()=>{}}/>);
+  const view=language==='ar'?'عرض':'View',edit=language==='ar'?'تعديل':'Edit';
+  expect(html.indexOf(view)).toBeLessThan(html.indexOf(edit));
+  expect(html.match(new RegExp(view,'g'))).toHaveLength(1);
+  expect(html).not.toContain('kobo-condition-card');
+  expect(html).toContain('kobo-connection-action-group');
+  expect(html).toContain('role="group"');
+  expect(html).not.toContain('kobo-connection-card-issue');
+ }
 });

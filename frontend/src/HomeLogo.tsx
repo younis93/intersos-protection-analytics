@@ -1,14 +1,16 @@
-import {type CSSProperties,type ReactNode,useEffect,useRef,useState} from 'react';
+import {type CSSProperties,type ReactNode,useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {createGlobeRenderer,loadGlobeMap} from './homeGlobeRenderer';
 
 const TURN_DURATION=2400;
 const smooth=(value:number)=>value*value*value*(value*(value*6-15)+10);
 
-export function HomeLogo({children}:{children?:ReactNode}){
+export function HomeLogo({children,halloween=false}:{children?:ReactNode;halloween?:boolean}){
   const [spinning,setSpinning]=useState(false),[highlighted,setHighlighted]=useState(false),[ready,setReady]=useState(false);
   const canvas=useRef<HTMLCanvasElement>(null),renderer=useRef<ReturnType<typeof createGlobeRenderer>|undefined>(undefined);
   const initialization=useRef<Promise<void>|undefined>(undefined);
   const autoPlayed=useRef(false);
+  const rotation=useRef(0);
+  useLayoutEffect(()=>{renderer.current?.(rotation.current)},[halloween]);
   const busy=useRef(false),frame=useRef<number|undefined>(undefined),timer=useRef<number|undefined>(undefined),generation=useRef(0);
   const cancel=(updateState=true)=>{
     generation.current++;
@@ -27,14 +29,15 @@ export function HomeLogo({children}:{children?:ReactNode}){
     const preference=window.matchMedia('(prefers-reduced-motion: reduce)');
     initialization.current=loadGlobeMap().then(map=>{
       if(disposed||!canvas.current)return;
-      const render=createGlobeRenderer(canvas.current,map);
+      const draw=createGlobeRenderer(canvas.current,map);
+      const render=(angle:number)=>{rotation.current=angle;draw(angle)};
       render(0);
       renderer.current=render;
       setReady(true);
     }).catch(()=>{});
     const onPreference=()=>{if(preference.matches&&busy.current){cancel();highlight()}};
     const onVisibility=()=>{if(document.hidden){autoPlayed.current=true;cancel()}};
-    const themeObserver=new MutationObserver(()=>renderer.current?.(0));
+    const themeObserver=new MutationObserver(()=>renderer.current?.(rotation.current));
     themeObserver.observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
     preference.addEventListener('change',onPreference);
     document.addEventListener('visibilitychange',onVisibility);

@@ -309,10 +309,10 @@ def test_contact_and_name_duplicate_requires_matching_contact_markers_and_projec
     })
     store=LegalStore.from_files(payload,"test")
     result=store.review("beneficiaries",rule="Possible duplicate contact and name",page_size=100)
-    assert {row["caseId"] for row in result["rows"]}=={"B1","B2"}
+    assert {row["caseId"] for row in result["rows"]}=={"B1","B2","B5"}
     assert all(row["duplicateSimilarity"] >= 90 for row in result["rows"])
     assert all("contact number 07701234567 matches" in row["detail"] for row in result["rows"])
-    store.set_review_exclusions({("Possible duplicate contact and name","B1")})
+    store.set_review_exclusions({("Possible duplicate contact and name","B1"),("Possible duplicate contact and name","B5")})
     assert store.review("beneficiaries",rule="Possible duplicate contact and name")["total"]==0
     workbook=load_workbook(io.BytesIO(store.review_export("beneficiaries")),read_only=True,data_only=True)
     for sheet in workbook.worksheets:
@@ -619,7 +619,7 @@ def test_duplicate_name_review_can_show_only_100_percent_matches():
     })
     store=LegalStore.from_files(payload,"test")
     rows=store.review("beneficiaries",rule="Possible duplicate name",name_compare_chars=30,allow_name_variations=True,exact_matches_only=True)["rows"]
-    assert {row["caseId"] for row in rows}=={"B1","B2","B4","B5"}
+    assert {row["caseId"] for row in rows}=={"B1","B2","B4","B5","B6","B7"}
     assert {row["duplicateSimilarity"] for row in rows}=={100}
 
 
@@ -656,9 +656,9 @@ def test_duplicate_names_follow_north_south_and_amal_project_boundaries():
     store=LegalStore.from_files(payload,"test")
     result=store.review("beneficiaries",rule="Possible duplicate name")
     flagged={row["caseId"] for row in result["rows"]}
-    assert flagged=={"E1","E2","B1","G1","B2","A1","A2"}
+    assert flagged=={"E1","E2","M1","S1","B1","G1","B2","A1","A2"}
     details={row["caseId"]:row["detail"] for row in result["rows"]}
-    assert "North - Erbil" in details["E1"]
+    assert "North Iraq" in details["E1"]
     assert "South (Baghdad + Gov)" in details["G1"]
     assert "AMAL" in details["A1"]
 
@@ -2015,3 +2015,34 @@ def test_analytics_cache_is_bounded_and_does_not_modify_source():
         assert result["matchedRows"]==0
     assert len(store._analytics_results)==24
     pd.testing.assert_frame_equal(store.frames["assessments"],source)
+
+
+@pytest.mark.parametrize("projects", [
+    ["UNHCR 2026 - Erbil", "UNHCR 2026 - SULI"],
+    ["UNHCR 2026 - Erbil", "UNHCR 2026 - Mosul & Kirkuk"],
+    ["UNHCR 2026 - SULI", "UNHCR 2026 - Mosul & Kirkuk"],
+])
+@pytest.mark.parametrize("mode", ["prefix", "variation", "exact", "contact"])
+def test_beneficiary_duplicates_match_between_northern_projects(projects, mode):
+    names=["Ahmed Ali Hassan Mahmoud"]*2
+    if mode in {"variation", "contact"}:
+        names[1]="Ahmad Ali Hassan Mahmoud"
+    payload=required_payload()
+    payload["beneficiaries"]=csv(**{
+        "Case ID":["N1","N2","S1","A1"],
+        "Name (Filter Color Red)":names+[names[0]]*2,
+        "Project":projects+["UNHCR 2026 - Baghdad","UNHCR 2026 - AMAL CAMP"],
+        "Contact Number":["07701234567"]*4,
+        "# UNHCR":["U1","","US","UA"],
+        "Spouse name":["","Spouse Two","",""],
+    })
+    store=LegalStore.from_files(payload,"test")
+    rule="Possible duplicate contact and name" if mode=="contact" else "Possible duplicate name"
+    settings={"allow_name_variations":mode=="variation", "exact_matches_only":mode=="exact"}
+    result=store.review("beneficiaries",rule=rule,**settings)
+    assert {row["caseId"] for row in result["rows"]}=={"N1","N2"}
+    assert len({row["duplicateGroup"] for row in result["rows"]})==1
+    workbook=load_workbook(io.BytesIO(store.review_export("beneficiaries",selected_rules=[rule],**settings)),read_only=True,data_only=True)
+    rows=list(workbook["North Iraq"].iter_rows(values_only=True))
+    headers=list(rows[0])
+    assert {row[headers.index("Case ID")] for row in rows[1:]}=={"N1","N2"}

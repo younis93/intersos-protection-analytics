@@ -24,7 +24,7 @@ export function createKoboApi(workspace?:AnalysisWorkspace){
  exportSettings:async(id:string,name:string,settings:KoboSettings)=>{const file=await request<unknown>(`/projects/${id}/settings/export`,settings);downloadBlob(new Blob([JSON.stringify(file,null,2)],{type:'application/json'}),`${name.replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')||'Kobo'}.kobo-settings.json`)},
  previewSettings:(id:string,settings:KoboSettings,pack:unknown)=>request<KoboSettingsReview>(`/projects/${id}/settings/import-preview`,{settings,package:pack}),
  rename:(id:string,name:string)=>request<{id:string;name:string;updated:string}>(`/projects/${encodeURIComponent(id)}`,{name},'PATCH'),
- exportData:async(id:string,body:{settings:KoboSettings;scope:string;columns:string[];search:string;sortColumn:string;sortDirection:'asc'|'desc';columnFilters?:import('./columnFilters').ColumnFilter[];selectedIds?:string[];drilldown?:import('./koboTypes').KoboPivotDrilldown})=>{
+ exportData:async(id:string,body:{recordIds?:string[];settings:KoboSettings;scope:string;columns:string[];search:string;sortColumn:string;sortDirection:'asc'|'desc';columnFilters?:import('./columnFilters').ColumnFilter[];selectedIds?:string[];drilldown?:import('./koboTypes').KoboPivotDrilldown})=>{
   const response=await fetch(`${analysisBase(workspace)}/projects/${encodeURIComponent(id)}/data/export`,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!response.ok){const issue=await response.json().catch(()=>({detail:'Unable to download response data.'}));throw new Error(typeof issue.detail==='string'?issue.detail:'Unable to download response data.')}
   downloadBlob(await response.blob(),'kobo-response-data.xlsx');

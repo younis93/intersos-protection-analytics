@@ -18,8 +18,27 @@ it('shows broken active connections and keeps valid manual overrides healthy',()
  const result={connections:{parents:[],conditions:[],issues:[],reviewIssues:['missing-rule-question'],diagnostics:[{code:'missing-rule-question',path:[0],field:'removed'}]}} as unknown as KoboResult;
  const project={form:{questions:fields}} as KoboProject;
  let html=renderToStaticMarkup(<KoboConnections result={result} project={project} language="en" onConfigure={()=>{}}/>);
- expect(html).toContain('Broken connection');expect(html).toContain('Broken connection · Edit');expect(html).toContain('removed');
+ expect(html).toContain('Broken connection');expect(html).toContain('Broken connection · Edit');expect(html).not.toContain('removed');expect(html).toContain('>View</button>');
  result.connections={...result.connections!,source:'manual',parents:[{id:'main',name:'main',label:'Main',compatible:true,hidden:false,triggers:[]}],reviewIssues:[],diagnostics:[],conditions:[{source:'follow',expression:'unsupported()',readable:null,supported:false}]};
  html=renderToStaticMarkup(<KoboConnections result={result} project={project} language="en"/>);
  expect(html).toContain('is-connected');expect(html).not.toContain('Broken connection');
+});
+
+
+it('keeps source details accessible after the only dependency is ignored',()=>{
+ const result={connections:{parents:[],conditions:[],issues:[],ignoredDependencies:[{type:'rule',field:'main',operator:'eq',value:'other'}]}} as unknown as KoboResult;
+ const html=renderToStaticMarkup(<KoboConnections result={result} project={{form:{questions:fields}} as KoboProject} language="en"/>);
+ expect(html).toContain('Condition ignored');expect(html).toContain('>View</button>');expect(html).toContain('>Edit</button>');
+});
+
+
+it('uses effective controllers and retains real errors when dependencies are ignored',()=>{
+ const result={connections:{parents:[{id:'main',label:'Main'}],conditions:[],issues:[],reviewIssues:[],ignoredDependencies:[{type:'rule',field:'consent',operator:'eq',value:'yes'}]},respondentBasis:{kind:'question',parentId:'consent',issue:''}} as unknown as KoboResult;
+ const project={form:{questions:fields}} as KoboProject;
+ let html=renderToStaticMarkup(<KoboConnections result={result} project={project} language="en"/>);
+ expect(html).toContain('Connected');expect(html).toContain('1 question');expect(html).not.toContain('2 questions');expect(html).toContain('1 ignored');
+ result.connections!.reviewIssues=['missing-rule-question'];
+ html=renderToStaticMarkup(<KoboConnections result={result} project={project} language="en"/>);expect(html).toContain('Broken connection');
+ result.connections!.suspendedDependencies=true;
+ html=renderToStaticMarkup(<KoboConnections result={result} project={project} language="en"/>);expect(html).toContain('Needs review');expect(html).not.toContain('Broken connection');
 });

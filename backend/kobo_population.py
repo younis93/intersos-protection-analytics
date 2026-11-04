@@ -53,6 +53,8 @@ class PopulationResult(BaseModel):
 
 
 def compare_population(project, settings, *, group_field, groups, question_id='', indicator=None):
+    from .kobo_conditional import analysis_project
+    project = analysis_project(project, settings)
     from .kobo import filtered_records, label, missing
     questions = {q['id']: q for q in project['form']['questions']}
     field = questions.get(group_field)

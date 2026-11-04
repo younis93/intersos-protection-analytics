@@ -3,7 +3,11 @@ import './welcomeCompact.css';
 import './customAnalysis.css';
 import {formatUpdateSize,UpdateReleaseNotes} from "./UpdateReleaseNotes";
 import {UpdateFallbackNotice} from "./UpdateFallbackNotice";
-import {useCallback,useEffect,useRef,useState} from 'react';
+import {lazy,Suspense,useCallback,useEffect,useRef,useState} from 'react';
+import PumpkinIcon from './PumpkinIcon';
+import HalloweenTransition from './HalloweenTransition';
+import {createBurnAudio} from './halloweenAudio';
+import './halloween.css';
 import {ArrowRight,BriefcaseBusiness,ChartColumnIncreasing,Maximize2,Minimize2,Palette,Power,RefreshCw} from 'lucide-react';
 import {checkForUpdates,getUpdateStatus,installUpdate} from './api';
 import {AppSelect} from './SelectionControls';
@@ -18,6 +22,7 @@ import ProcessingBackground from './ProcessingBackground';
 import {readStartupPage,saveStartupPage,STARTUP_PAGE_LABELS,type StartupPage} from './startupPage';
 
 const UPDATE_CHECK_INTERVAL_MS=6*60*60*1000;
+const HalloweenGame=lazy(()=>import('./HalloweenGame'));
 
 export interface WorkspaceDefinition {id:string;label:string;description:string;route:string;icon:any;accent:string;badge?:string;enabled:boolean}
 export const workspaces:WorkspaceDefinition[]=[
@@ -32,6 +37,13 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
     return (localStorage.getItem('app-theme') as Theme)||startupTheme||'glass-light';
   });
   const [fullscreen,setFullscreen]=useState(false);
+  const [halloween,setHalloween]=useState(false);
+  const [halloweenTransition,setHalloweenTransition]=useState<boolean|null>(null),transitionGuard=useRef(false);
+  const burnAudio=useRef<ReturnType<typeof createBurnAudio>|null>(null);
+  useEffect(()=>()=>{burnAudio.current?.dispose()},[]);
+  const [manualPlay,setManualPlay]=useState(false),[pumpkinPulse,setPumpkinPulse]=useState(0);
+  const homeLocked=(halloween&&manualPlay)||halloweenTransition!==null;
+  const manualPlayRef=useRef(false);manualPlayRef.current=homeLocked;
   const [koboIconMotion,setKoboIconMotion]=useState(0);
   const [startupPage,setStartupPage]=useState<StartupPage>(readStartupPage);
   const [startupSaving,setStartupSaving]=useState(false);
@@ -77,26 +89,36 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
   },[theme]);
   useEffect(()=>{const sync=()=>setFullscreen(Boolean(document.fullscreenElement));document.addEventListener('fullscreenchange',sync);return()=>document.removeEventListener('fullscreenchange',sync)},[]);
   const toggleFullscreen=async()=>{const nativeApi=(window as any).pywebview?.api;if(nativeApi?.toggle_fullscreen)setFullscreen(await nativeApi.toggle_fullscreen());else if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()};
-  useEffect(()=>{let active=true;updateMounted.current=true;const refresh=(openWhenAvailable:boolean)=>refreshUpdate().then(info=>{if(active&&openWhenAvailable&&info.available&&!updateOpenedManually.current)setUpdateOpen(true)}).catch(()=>{});void refresh(true);const timer=window.setInterval(()=>void refresh(false),UPDATE_CHECK_INTERVAL_MS);return()=>{active=false;updateMounted.current=false;window.clearInterval(timer)}},[refreshUpdate]);
+  useEffect(()=>{let active=true;updateMounted.current=true;const refresh=(openWhenAvailable:boolean)=>refreshUpdate().then(info=>{if(active&&openWhenAvailable&&info.available&&!updateOpenedManually.current&&!manualPlayRef.current)setUpdateOpen(true)}).catch(()=>{});void refresh(true);const timer=window.setInterval(()=>void refresh(false),UPDATE_CHECK_INTERVAL_MS);return()=>{active=false;updateMounted.current=false;window.clearInterval(timer)}},[refreshUpdate]);
   useEffect(()=>{if(!updateStatus||!["downloading","verifying","installing","restarting"].includes(updateStatus.phase))return;const timer=window.setInterval(()=>getUpdateStatus().then(setUpdateStatus).catch(()=>{}),700);return()=>window.clearInterval(timer)},[updateStatus?.phase]);
   const checkUpdates=()=>{updateOpenedManually.current=true;setUpdateOpen(true);void refreshUpdate().catch(()=>{})};
   const beginUpdate=()=>installUpdate().then(setUpdateStatus).catch((error:Error)=>setUpdateStatus({phase:'error',progress:0,error:error.message,currentVersion:updateInfo?.currentVersion||'1.0.0'}));
   const toggleAvatar=()=>setAvatarRevealed(current=>!current);
-  return <main className="welcome-page">
-    <ProcessingBackground speed={3}/>
-    <div className="welcome-home-actions"><button className={`soft fullscreen-button update-button ${updateInfo?.available?'update-available':''}`} onClick={checkUpdates} title={updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:'Check for updates'} aria-label="Check for updates"><RefreshCw/>{updateInfo?.available&&<b aria-label="New update available">New</b>}</button><div className="startup-launch-select" aria-busy={startupSaving}><AppSelect label="Open on launch" ariaLabel="Open on launch" icon={Power} value={startupPage} disabled={startupSaving} onChange={value=>void saveStartup(value as StartupPage)} options={Object.entries(STARTUP_PAGE_LABELS) as [string,string][]}/>{startupSaving&&<span role="status" className="sr-only">Saving startup page...</span>}{startupNotice&&<p className="startup-launch-feedback" role="status">{startupNotice}</p>}{startupError&&<p className="startup-launch-feedback is-error" role="alert">{startupError}</p>}</div><AppSelect label="Theme" value={theme} onChange={value=>setTheme(value as Theme)} variant="theme" icon={Palette} ariaLabel="Application theme" options={[["glass-light","Liquid Glass Light"],["glass-dark","Liquid Glass Dark"],["unhcr","INTERSOS"],["multicolor","Chromatic Executive"],["executive","Executive Minimal"],["forest","Forest Professional"]]}/><button className="soft fullscreen-button" onClick={toggleFullscreen} title={fullscreen?'Exit full screen':'Enter full screen'} aria-label={fullscreen?'Exit full screen':'Enter full screen'}>{fullscreen?<Minimize2/>:<Maximize2/>}</button></div>
-    <section className="welcome-content">
+  const toggleHalloween=()=>{
+    if(transitionGuard.current)return;
+    transitionGuard.current=true;burnAudio.current?.dispose();burnAudio.current=createBurnAudio();setHalloweenTransition(!halloween);setPumpkinPulse(value=>value+1);
+  };
+  const finishHalloweenTransition=()=>{
+    transitionGuard.current=false;burnAudio.current?.dispose();burnAudio.current=null;setHalloweenTransition(null);
+    requestAnimationFrame(()=>document.querySelector<HTMLButtonElement>('.halloween-pumpkin-toggle')?.focus({preventScroll:true}));
+  };
+  return <main className={`welcome-page${halloween?' is-halloween':''}${halloween&&manualPlay?' is-playing-halloween':''}`}>
+    {!halloween&&<ProcessingBackground speed={3}/>}
+    {halloweenTransition!==null&&<HalloweenTransition onStart={()=>burnAudio.current?.play()} onReveal={()=>burnAudio.current?.reveal()} onCovered={()=>{setHalloween(halloweenTransition);setManualPlay(false)}} onComplete={finishHalloweenTransition}/>}
+    {halloween&&<Suspense fallback={<span className="halloween-loading" role="status">Waking the pumpkin mage...</span>}><HalloweenGame paused={updateOpen||halloweenTransition!==null} onManualChange={setManualPlay}/></Suspense>}
+    <div className="welcome-home-actions"><button type="button" className="halloween-pumpkin-toggle" aria-label={halloween?'Turn off Halloween mode':'Turn on Halloween mode'} aria-pressed={halloween} title={halloween?'Return to the original home screen':'A little Halloween magic'} onClick={toggleHalloween} disabled={halloweenTransition!==null} aria-busy={halloweenTransition!==null}><PumpkinIcon active={halloween}/>{pumpkinPulse>0&&<span key={pumpkinPulse} className="pumpkin-toggle-burst" data-on={halloween} aria-hidden="true">{Array.from({length:12},(_,i)=><i key={i} style={{'--spark-x':`${Math.cos(i*Math.PI/6)*38}px`,'--spark-y':`${Math.sin(i*Math.PI/6)*38}px`,'--spark-delay':`${i*.01}s`} as React.CSSProperties}/>)}</span>}</button><div className="welcome-home-controls" inert={homeLocked}><button className={`soft fullscreen-button update-button ${updateInfo?.available?'update-available':''}`} onClick={checkUpdates} title={updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:'Check for updates'} aria-label="Check for updates"><RefreshCw/>{updateInfo?.available&&<b aria-label="New update available">New</b>}</button><div className="startup-launch-select" aria-busy={startupSaving}><AppSelect label="Open on launch" ariaLabel="Open on launch" icon={Power} value={startupPage} disabled={startupSaving} onChange={value=>void saveStartup(value as StartupPage)} options={Object.entries(STARTUP_PAGE_LABELS) as [string,string][]}/>{startupSaving&&<span role="status" className="sr-only">Saving startup page...</span>}{startupNotice&&<p className="startup-launch-feedback" role="status">{startupNotice}</p>}{startupError&&<p className="startup-launch-feedback is-error" role="alert">{startupError}</p>}</div><AppSelect label="Theme" value={theme} onChange={value=>setTheme(value as Theme)} variant="theme" icon={Palette} ariaLabel="Application theme" options={[["glass-light","Liquid Glass Light"],["glass-dark","Liquid Glass Dark"],["unhcr","INTERSOS"],["multicolor","Chromatic Executive"],["executive","Executive Minimal"],["forest","Forest Professional"]]}/><button className="soft fullscreen-button" onClick={toggleFullscreen} title={fullscreen?'Exit full screen':'Enter full screen'} aria-label={fullscreen?'Exit full screen':'Enter full screen'}>{fullscreen?<Minimize2/>:<Maximize2/>}</button></div></div>
+    <section className="welcome-content" inert={homeLocked}>
       <header className="welcome-header welcome-header-compact">
         <div className="welcome-brand-stage">
-          <HomeLogo>{AVATAR_ENABLED&&foxUnlocked&&<GuardianFox mode="home"/>}</HomeLogo>
+          <HomeLogo halloween={halloween}>{!halloween&&AVATAR_ENABLED&&foxUnlocked&&<GuardianFox mode="home"/>}</HomeLogo>
         </div>
         <span>Iraq Data Analysis</span>
       </header>
       <div className="workspace-cards">{workspaces.filter(x=>x.enabled).map((workspace,index)=>{const Icon=workspace.icon;return <a key={workspace.id} href={`#${workspace.route}`} className={`workspace-card workspace-${workspace.accent}`} onPointerEnter={()=>{if(workspace.id==='kobo')setKoboIconMotion(value=>value+1)}} onFocus={()=>{if(workspace.id==='kobo')setKoboIconMotion(value=>value+1)}} style={{'--card-index':index} as React.CSSProperties}><span className="workspace-card-glow"/><span className="workspace-icon">{workspace.id==='kobo'?<AnimatedSectionIcon key={koboIconMotion} Icon={ChartColumnIncreasing} iconStyle="chart-column-increasing" size={28}/>:<Icon/>}</span><span className="workspace-badge">{workspace.badge}</span><strong>{workspace.label}</strong><p>{workspace.description}</p><span className="workspace-enter">Enter workspace <ArrowRight/></span></a>})}</div>
 
     </section>
-    <footer className="welcome-footer"><span>Designed for clear, local and decision-ready legal data review.</span><button type="button" className="designer-unlock" onClick={toggleAvatar} aria-pressed={avatarRevealed} aria-label={`${avatarRevealed?'Hide':'Reveal'} the cartoon boy`}>Designed by <strong>Younis Jamal</strong></button></footer>
-    {RIVE_HOME_AVATAR_ENABLED&&avatarRevealed&&<HomeRiveAvatar disabled={false} phase="normal"/>}
+    <footer className="welcome-footer" inert={homeLocked}><span>Designed for clear, local and decision-ready legal data review.</span><button type="button" className="designer-unlock" onClick={toggleAvatar} aria-pressed={avatarRevealed} aria-label={`${avatarRevealed?'Hide':'Reveal'} the cartoon boy`}>Designed by <strong>Younis Jamal</strong></button></footer>
+    {!halloween&&RIVE_HOME_AVATAR_ENABLED&&avatarRevealed&&<HomeRiveAvatar disabled={false} phase="normal"/>}
     {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon" data-updating={updateChecking||Boolean(updateStatus&&['downloading','verifying','installing','restarting'].includes(updateStatus.phase))} aria-hidden="true"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{!updateInfo&&updateChecking?'Checking for updates…':!updateInfo&&updateCheckError?'Unable to check for updates':updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?'Updates need configuration':updateInfo?.message?.startsWith('Unable')?'Unable to check for updates':'You’re up to date'}</h2>{updateInfo?.available?<UpdateReleaseNotes notes={updateInfo.notes} sizeBytes={updateInfo.sizeBytes}/>:<p>{!updateInfo&&updateChecking?'Looking for the latest version of Iraq Data Analysis.':!updateInfo&&updateCheckError?'Please try checking again.':updateInfo?.message||`You are using version ${updateInfo?.currentVersion||'1.0.0'}.`}</p>}{updateChecking&&updateInfo&&<p role="status" className="update-check-status">Checking for the latest version…</p>}{updateCheckError&&<p role="alert" className="update-check-error">{updateCheckError}</p>}{updateStatus&&updateStatus.phase!=='idle'&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.phase==='downloading'&&<small>Downloaded {formatUpdateSize(updateStatus.downloadedBytes)} of {formatUpdateSize(updateStatus.totalBytes||updateInfo?.sizeBytes)}</small>}{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}{updateInfo?.available&&<UpdateFallbackNotice failed={updateStatus?.phase === "error"}/>}<div className="update-actions">{updateCheckError&&<button className="primary" onClick={checkUpdates}>Check again</button>}{updateInfo?.available&&(!updateStatus||['idle','error'].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>{updateStatus?.phase === "error" ? "Try again" : "Update now"}</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&['installing','restarting'].includes(updateStatus.phase))}>{updateInfo?.available?'Later':'Close'}</button></div></section></div>}
   </main>;
 }

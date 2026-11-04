@@ -27,6 +27,7 @@ const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-run
     notes=notes.map(note=>({...note,reviewed:true}));applied=true;body=project();
    }else if(path.endsWith('/projects/notes-preview/review'))body=preview();
    else if(path.endsWith('/projects/notes-preview'))body=project();
+   else if(path.endsWith('/data-review'))body={groups:[],rows:[],notes:[],summary:{conflicts:0,conditionGroups:0,requiredMissing:0,connectedBlank:0},revision:'notes',group:'',category:'all',status:'open',page:1,matched:0,total:1,affected:0};
    else if(path.endsWith('/data'))body={rows:[],total:0,matched:0};
    else if(path.endsWith('/analysis'))body={total:1,filtered:1,questions:[],groups:[],settings,filterSummary:[]};
    else if(path.endsWith('/projects'))body=[{id:'notes-preview',name:'Import note review',updated:'2026-11-02'}];
@@ -35,9 +36,10 @@ const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-run
    else if(path.endsWith('/export-recovery'))body=[];
    await route.fulfill({json:body});
   });
-  await page.goto('http://127.0.0.1:5298/#/kobo/notes-preview');
-  await page.getByRole('button',{name:'Important notes'}).click({timeout:10000}).catch(async error=>{console.error((await page.locator('body').innerText()).slice(0,4000));throw error});
-  const dialog=page.getByRole('dialog',{name:'Important notes'});
+  await page.goto(`${process.argv[2]||'http://127.0.0.1:5298'}/#/kobo/notes-preview`);
+  await page.getByRole('button',{name:'Review',exact:true}).click({timeout:10000}).catch(async error=>{console.error((await page.locator('body').innerText()).slice(0,4000));throw error});
+  const dialog=page.getByRole('dialog',{name:'Kobo review'});
+  await dialog.getByRole('button',{name:'Import notes · 1',exact:true}).click();
   await dialog.getByText('Answers will be checked against all available choices because the related filter question is ignored.', {exact:true}).waitFor();
   assert.equal(await dialog.getByText('ambiguous choice label',{exact:true}).count(),0);
   await dialog.getByLabel('Show reviewed notes (1)').check();
@@ -49,10 +51,12 @@ const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-run
    await dialog.screenshot({path:`output/import-note-review/notes-${width}.png`});
   }
   await dialog.getByRole('button',{name:'Mark all reviewed',exact:true}).click();
-  await page.getByRole('button',{name:'Important notes'}).waitFor({state:'detached'});
+  await dialog.getByRole('button',{name:'Import notes · 0',exact:true}).waitFor();
+  assert.equal(await page.locator('.kobo-review-note-badge').count(),0);
+  await dialog.getByRole('button',{name:'Close',exact:true}).click();
   await page.reload();
   await page.getByRole('heading',{name:'Import note review',exact:true}).waitFor();
-  assert.equal(await page.getByRole('button',{name:'Important notes'}).count(),0);
+  assert.equal(await page.locator('.kobo-review-note-badge').count(),0);
   await page.getByRole('button',{name:'Data source',exact:true}).click();
   await page.getByRole('button',{name:'Review import',exact:true}).click();
   const review=page.getByRole('dialog',{name:'Review and correct import'});
@@ -73,7 +77,7 @@ const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-run
   await confirmation.getByRole('button',{name:'Accept warnings and continue',exact:true}).click();
   await review.waitFor({state:'detached'});
   assert(applied);
-  assert.equal(await page.getByRole('button',{name:'Important notes'}).count(),0);
+  assert.equal(await page.locator('.kobo-review-note-badge').count(),0);
   assert.deepEqual(errors,[]);
   console.log('PASS: note counts, reviewed toggle, mark all, reload persistence, saved-file review, desktop/mobile overflow, no browser errors.');
  }finally{await browser.close()}

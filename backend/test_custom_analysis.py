@@ -18,7 +18,7 @@ def env(tmp_path):
     app = FastAPI()
     app.include_router(make_custom_router(store))
     shared = make_router(store, prefix='/api/custom')
-    shared.routes = [r for r in shared.routes if '/imports/' not in r.path and not r.path.endswith('/review')]
+    shared.routes = [r for r in shared.routes if '/imports/' not in r.path and r.path != '/api/custom/projects/{pid}/review']
     app.include_router(shared)
     app.include_router(make_router(ProjectStore(tmp_path / 'kobo.sqlite3')))
     return TestClient(app), store

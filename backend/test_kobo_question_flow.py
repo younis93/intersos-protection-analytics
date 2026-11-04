@@ -26,7 +26,7 @@ def test_group_conditions_are_single_edges_and_inherited_in_details():
     result = question_flow(p)
     follow = result['questions'][1]
     assert follow['groupPath'] == ['details', 'details/members']
-    assert [c['source'] for c in follow['connections']['conditions']] == ['details', 'follow']
+    assert {c['source'] for c in follow['connections']['conditions']} == {'details', 'follow'}
     assert [(e['source'], e['target']) for e in result['edges']] == [('main', 'details'), ('main', 'follow')]
     assert not follow['connections']['parents'][0]['hidden']
     assert p == before

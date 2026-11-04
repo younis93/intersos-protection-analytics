@@ -119,3 +119,108 @@ def test_empty_independent_card_remains_available_to_repair_its_filters():
     settings=KoboSettings(questions={'answer':QuestionSettings(filterMode='own',ownFilters=[{'field':'number','kind':'number','minimum':'100'}])})
     result=answer(fixture(),settings)
     assert result['cohortCount']==0 and result['denominator']==0 and result['rows']==[]
+
+
+def multiple_filter_project():
+    project = fixture()
+    multi = deepcopy(project['form']['questions'][0])
+    multi.update(id='needs', name='needs', labels={'en': 'needs'}, kind='multiple', type='select_multiple',
+                 choices=[{'name': code, 'labels': {'en': code}} for code in ['food', 'water', 'shelter']])
+    project['form']['questions'].append(multi)
+    values = [['food', 'water'], ['water'], ['shelter'], ['food'], [], None, ['water', 'shelter']]
+    for record, value in zip(project['records'], values):
+        record['values']['needs'] = value
+    return project
+
+
+@pytest.mark.parametrize('target', ['answer', 'needs'])
+@pytest.mark.parametrize('mode', ['own', 'additional'])
+def test_multiple_choice_question_filters_apply_to_self_and_other_questions(target, mode):
+    settings = KoboSettings(hideEmpty=False, questions={target: QuestionSettings(
+        filterMode=mode, ownFilters=[{'field': 'needs', 'values': ['food']}])})
+    snapshot = analyze(multiple_filter_project(), settings)
+    result = next(item for item in snapshot['questions'] if item['id'] == target)
+    assert result['cohortCount'] == 2
+    assert result['denominator'] == 2
+    assert result['filterSummary'] == ['needs: food']
+    other = next(item for item in snapshot['questions'] if item['id'] == ('answer' if target == 'needs' else 'needs'))
+    assert other['cohortCount'] == 7
+    selection = {'question': target, 'answer': 'food' if target == 'needs' else 'a'}
+    rows = data_rows(multiple_filter_project(), settings, '', [target], drilldown=selection)['rows']
+    assert len(rows) == (2 if target == 'needs' else 1)
+
+
+def test_multiple_choice_filters_combine_any_selected_answer_with_other_fields_and_page_filters():
+    project = multiple_filter_project()
+    settings = KoboSettings(hideEmpty=False, filters=[{'field': 'region', 'values': ['north']}],
+        questions={'answer': QuestionSettings(filterMode='additional', ownFilters=[
+            {'field': 'needs', 'values': ['food', 'shelter']},
+            {'field': 'number', 'kind': 'number', 'minimum': 10}])})
+    assert answer(project, settings)['cohortCount'] == 2
+    settings.questions['answer'].ownFilters[0].values = ['water']
+    assert answer(project, settings)['cohortCount'] == 1
+    settings.questions['answer'].ownFilters[1].minimum = '100'
+    assert answer(project, settings)['cohortCount'] == 0
+
+
+@pytest.mark.parametrize('target', ['answer', 'needs'])
+def test_blank_multiple_choice_filter_matches_empty_lists_and_null(target):
+    settings = KoboSettings(hideEmpty=False, questions={target: QuestionSettings(
+        filterMode='additional', ownFilters=[{'field': 'needs', 'values': ['__blank__']}])})
+    result = next(item for item in analyze(multiple_filter_project(), settings)['questions'] if item['id'] == target)
+    assert result['cohortCount'] == 2
+
+
+@pytest.mark.parametrize('mode', ['own', 'additional'])
+@pytest.mark.parametrize('percentage', ['legacy-respondents', 'grand-total', 'column-total'])
+def test_multiple_choice_self_filter_only_displays_selected_answers(mode, percentage):
+    project = multiple_filter_project()
+    settings = KoboSettings(hideEmpty=False, hideZero=False, questions={'needs': QuestionSettings(
+        filterMode=mode, percentageMode=percentage, breakdowns=['region'], chartTopN=2,
+        ownFilters=[{'field': 'needs', 'values': ['food']}])})
+    result = next(item for item in analyze(project, settings)['questions'] if item['id'] == 'needs')
+    assert [(row['id'], row['count']) for row in result['rows']] == [('food', 2)]
+    assert result['cohortCount'] == 2
+    assert result['rows'][0]['percent'] == 100
+    assert [row['id'] for row in result['chartProjection']['rows']] == ['food']
+    with pytest.raises(ValueError, match='no longer available'):
+        data_rows(project, settings, '', ['needs'], drilldown={'question': 'needs', 'answer': 'water'})
+    settings.questions['needs'].ownFilters[0].values = ['food', 'water']
+    result = next(item for item in analyze(project, settings)['questions'] if item['id'] == 'needs')
+    assert {row['id']: row['count'] for row in result['rows']} == {'food': 2, 'water': 3}
+    settings.questions['needs'].ownFilters[0].values = []
+    result = next(item for item in analyze(project, settings)['questions'] if item['id'] == 'needs')
+    assert {row['id'] for row in result['rows']} == {'food', 'water', 'shelter'}
+
+
+def test_multiple_choice_cross_filter_preserves_target_answer_choices():
+    project = multiple_filter_project()
+    settings = KoboSettings(hideZero=False, questions={'answer': QuestionSettings(filterMode='additional',
+        ownFilters=[{'field': 'needs', 'values': ['food']}])})
+    assert {row['id'] for row in answer(project, settings)['rows']} == {'a', 'b', 'c'}
+
+
+
+def test_multiple_choice_filter_resolves_parent_answers_for_repeat_questions():
+    project = multiple_filter_project()
+    child = deepcopy(project['form']['questions'][0])
+    child.update(id='child', name='child', repeat='people')
+    project['form']['questions'].append(child)
+    project['records'] += [dict(id='child'+str(i), scope='people', parent=str(i), row=i+2, sheet=1,
+                               values={'child': 'a'}) for i in range(7)]
+    settings = KoboSettings(questions={'child': QuestionSettings(filterMode='additional',
+        ownFilters=[{'field': 'needs', 'values': ['food']}])})
+    result = next(item for item in analyze(project, settings)['questions'] if item['id'] == 'child')
+    assert result['cohortCount'] == 2
+    assert result['rows'][0]['count'] == 2
+
+
+def test_multiple_choice_self_filter_export_source_uses_selected_answer_rows_only():
+    from backend.kobo_excel import iter_source_rows
+    project = multiple_filter_project()
+    settings = KoboSettings(questions={'needs': QuestionSettings(filterMode='additional',
+        ownFilters=[{'field': 'needs', 'values': ['food']}])})
+    result = next(item for item in analyze(project, settings)['questions'] if item['id'] == 'needs')
+    rows = list(iter_source_rows(project, result, settings))
+    assert rows
+    assert all(row[5] == 'food' for row in rows)

@@ -88,7 +88,7 @@ def effective_form(base, config, sheets, allow_empty=False, allow_invalid_placem
              'kind': kind, 'type': {'category': 'select_one', 'multiple': 'select_multiple', 'number': 'decimal'}.get(kind, kind),
              'group': group_id, 'repeat': repeat, 'metadata': False, 'identifying': False,
              'choices': deepcopy(added.get('choices', [])), 'order': len(questions),
-             'placement': deepcopy(added.get('placement')), 'addedFromData': True, 'sourceColumn': {'sheet': si, 'column': ci}}
+             'required': '', 'placement': deepcopy(added.get('placement')), 'addedFromData': True, 'sourceColumn': {'sheet': si, 'column': ci}}
         questions[qid] = q
         result['questions'].append(q)
         if added.get('separator'): q['dataSeparator'] = added['separator']

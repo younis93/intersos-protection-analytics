@@ -145,6 +145,17 @@ def direct_helpers(config, layouts):
                 fields['FollowupAnswered'] = prefix+'followup answered'
                 helpers[scope][fields['FollowupAnswered']] = f'=IF(AND({eligible},{value}<>""),1,0)'
                 helpers[scope][fields['Answered']] = f'=IF({parent}="",0,1)'
+        if q.get('excludedRecords'):
+            # A fixed project decision follows Response ID when workbook rows are sorted.
+            excluded = f'IFERROR(VLOOKUP({excel_literal("exclude:"+q["id"]+"|")}&[@[Response ID]],KoboChoices,2,FALSE),"")="Excluded"'
+            for key in ['IncludeInPivot', 'AnswerAllowed']:
+                if key in fields:
+                    original = helpers[scope][fields[key]][1:]
+                    helpers[scope][fields[key]] = f'=IF({excluded},"Excluded",{original})'
+            for key in ['Selected', 'Answered', 'FollowupAnswered']:
+                if key in fields and fields[key] in helpers[scope]:
+                    original = helpers[scope][fields[key]][1:]
+                    helpers[scope][fields[key]] = f'=IF({excluded},0,{original})'
     return helpers, sources
 
 
@@ -159,4 +170,6 @@ def choice_lookup_rows(config):
             rows.update((f'period:{question["id"]}|{a["id"]}', a['label']) for a in question['answers'])
         elif question['kind'] == 'number' and not question['bins']:
             rows.update((f'field:{question["id"]}|{float(a["id"]):.15g}', a['label']) for a in question['answers'])
+    for question in config['questions']:
+        rows.update((f'exclude:{question["id"]}|{rid}', 'Excluded') for rid in question.get('excludedRecords', []))
     return list(rows.items()) or [('unused', '')]

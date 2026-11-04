@@ -110,6 +110,7 @@ def helper_values(layouts, config, sources, helpers):
                 codes = {'__blank__'} if not answered else set(value) if question['kind']=='multiple' else {str(value)}
                 excluded = bool(codes.intersection(question.get('hiddenAnswers', [])))
                 if 'AnswerAllowed' in fields: values[fields['AnswerAllowed']] = 'Excluded' if excluded else 'Included'
+                excluded = excluded or record['id'] in question.get('excludedRecords', [])
                 values[fields['IncludeInPivot']] = 'Included' if not excluded and (answered or question['blank']) else 'Excluded'
                 if question.get('connected'):
                     from .kobo_connection_rules import matches_tree
@@ -122,6 +123,11 @@ def helper_values(layouts, config, sources, helpers):
                     if question.get('percentageParent'):
                         values[fields['FollowupAnswered']] = int(answered and eligible)
                         values[fields['Answered']] = int(parent_answered)
+                if record['id'] in question.get('excludedRecords', []):
+                    values[fields['IncludeInPivot']] = 'Excluded'
+                    if 'AnswerAllowed' in fields: values[fields['AnswerAllowed']] = 'Excluded'
+                    for key in ['Selected', 'Answered', 'FollowupAnswered']:
+                        if key in fields and fields[key] in helpers[layout['scope']]: values[fields[key]] = 0
                 for level, qid in enumerate(question['dimensions'], 1):
                     values[fields[f'Breakdown{level}']] = caption(record, qid, 'Missing breakdown')
             rows.append([values[header] for header in helpers[layout['scope']]])
@@ -186,6 +192,7 @@ def materialize_multi(args):
     cohort = [record for record in records if record['scope'] == question['scope']]
     rows = []
     for record in cohort:
+        if record['id'] in question.get('excludedRecords', []): continue
         value = raw(record, question['id'])
         selected = list(dict.fromkeys(value or []))
         from .kobo_connection_rules import matches_tree

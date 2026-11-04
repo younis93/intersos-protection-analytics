@@ -9,10 +9,10 @@ export type WorkspaceReport=import('./koboTypes').KoboReport;
 export const emptyReport:WorkspaceReport={title:'',findings:'',methodology:'',recommendations:'',questions:[]};
 const message=(e:unknown)=>e instanceof Error?e.message:String(e);
 
-export async function downloadBackup(id:string,password?:string){
- const response=await fetch(`${analysisBase()}/projects/${encodeURIComponent(id)}/backup`,{credentials:'include',method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});
+export async function downloadBackup(id:string,password?:string,includeSettings=true){
+ const response=await fetch(`${analysisBase()}/projects/${encodeURIComponent(id)}/backup`,{credentials:'include',method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password,includeSettings})});
  if(!response.ok){const issue=await response.json().catch(()=>({detail:'Unable to create backup. Please retry.'}));throw projectResponseError(issue.detail,'Unable to create backup. Please retry.');}
- downloadBlob(await response.blob(),`project.${analysisWorkspace()}-backup.${password===undefined?'zip':'intersos'}`);
+ downloadBlob(await response.blob(),`project.${analysisWorkspace()}-${includeSettings?'backup':'data-only'}.${password===undefined?'zip':'intersos'}`);
 }
 function ResultSummary({result,language}:{result:KoboResult;language:string}){
  const[sort,setSort]=useState<PivotSort|null>(null);

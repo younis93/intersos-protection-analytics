@@ -1,4 +1,8 @@
 .kobo-data-explorer{min-width:0}
+.kobo-data-explorer tr.kobo-warning-source-row>td{background:color-mix(in srgb,var(--blue) 8%,var(--panel));border-block:1px solid var(--blue)}
+.kobo-data-explorer td.is-required-blank{background:color-mix(in srgb,#c78118 14%,var(--panel));box-shadow:inset 0 0 0 2px #bb7818}.kobo-data-explorer td.is-connected-blank{background:color-mix(in srgb,#378b96 11%,var(--panel));box-shadow:inset 0 0 0 2px #46868c}.kobo-conditional-badge.soft.is-connected-blank{color:#367f86;border-color:#46868c;background:color-mix(in srgb,#378b96 8%,var(--panel))}
+.kobo-data-explorer td.kobo-warning-source-cell{background:color-mix(in srgb,#d28b19 15%,var(--panel));box-shadow:inset 0 0 0 2px #bd7918}.kobo-warning-records .kobo-pivot-records-context p{flex-basis:100%;margin:0;line-height:1.6}.kobo-warning-records .kobo-pivot-records-context{gap:8px}
+.kobo-data-explorer td.kobo-warning-source-cell.is-connected-blank{background:color-mix(in srgb,#378b96 11%,var(--panel));box-shadow:inset 0 0 0 2px #46868c}
 /* The table uses Legal Platform sizing and shared record controls. */
 .kobo-response-table{min-width:0;border-radius:var(--lp-radius);box-shadow:none!important;backdrop-filter:none;-webkit-backdrop-filter:none}
 .kobo-response-table .legal-card-heading{display:flex;position:relative;flex-wrap:wrap}

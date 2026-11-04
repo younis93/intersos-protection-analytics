@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import math
+import stat
 import zipfile
 from collections import Counter
 from .kobo import KoboSettings, filtered_records, label, missing
@@ -11,16 +12,21 @@ MAX_BACKUP = 200 * 1024 * 1024
 MEMBERS = {'project.json', 'form.bin', 'data.bin', 'manifest.json'}
 
 
-def backup_project(store, pid):
+def backup_project(store, pid, include_settings=True):
     # Read one SQLite snapshot so source uploads and normalized data stay consistent.
     with store.connect() as db:
         row = db.execute('SELECT name,payload,settings,form,data FROM projects WHERE id=?', (pid,)).fetchone()
     if row is None:
         raise KeyError('Project not found.')
-    files = {'project.json': json.dumps({'name': row[0], 'payload': json.loads(row[1]), 'settings': json.loads(row[2])}, ensure_ascii=False).encode(), 'form.bin': bytes(row[3]), 'data.bin': bytes(row[4])}
+    payload = json.loads(row[1])
+    form_raw, data_raw = bytes(row[3]), bytes(row[4])
+    if not include_settings:
+        from .project_snapshot import materialize
+        payload, form_raw, data_raw = materialize(payload, form_raw)
+    files = {'project.json': json.dumps({'name': row[0], 'payload': payload, **({'settings': json.loads(row[2])} if include_settings else {})}, ensure_ascii=False).encode(), 'form.bin': form_raw, 'data.bin': data_raw}
     if sum(map(len, files.values())) > MAX_BACKUP - 4096:
         raise ValueError('This project exceeds the 200 MB portable backup limit.')
-    files['manifest.json'] = json.dumps({'format': 'intersos-kobo-backup', 'version': 1, 'checksums': {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}).encode()
+    files['manifest.json'] = json.dumps({'format': 'intersos-kobo-backup', 'version': 2, 'includesSettings': include_settings, 'checksums': {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}).encode()
     out = io.BytesIO()
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as archive:
         for name, data in files.items():
@@ -30,7 +36,7 @@ def backup_project(store, pid):
     return out.getvalue()
 
 
-def read_backup(raw):
+def read_backup(raw, *, with_metadata=False):
     if len(raw) > MAX_BACKUP:
         raise ValueError('Backup exceeds the 200 MB limit.')
     try:
@@ -38,10 +44,17 @@ def read_backup(raw):
             info = archive.infolist()
             if len(info) != 4 or {i.filename for i in info} != MEMBERS or sum(i.file_size for i in info) > MAX_BACKUP:
                 raise ValueError('Invalid backup contents or expanded size exceeds 200 MB.')
+            if any(i.flag_bits & 1 or stat.S_ISLNK(i.external_attr >> 16) for i in info):
+                raise ValueError('Encrypted ZIP entries and symbolic links are not supported.')
             files = {i.filename: archive.read(i) for i in info}
         manifest = json.loads(files['manifest.json'])
-        if manifest.get('format') != 'intersos-kobo-backup' or manifest.get('version') != 1:
+        if not isinstance(manifest, dict) or manifest.get('format') != 'intersos-kobo-backup' or type(manifest.get('version')) is not int or manifest.get('version') not in (1, 2):
             raise ValueError('Unsupported backup format or version.')
+        includes_settings = manifest.get('includesSettings') if manifest['version']==2 else True
+        if type(includes_settings) is not bool or ('settings' in json.loads(files['project.json'])) != includes_settings:
+            raise ValueError('Invalid project settings declaration.')
+        if set(manifest.get('checksums', {})) != MEMBERS - {'manifest.json'}:
+            raise ValueError('Invalid backup checksums.')
         for name in MEMBERS - {'manifest.json'}:
             if manifest.get('checksums', {}).get(name) != hashlib.sha256(files[name]).hexdigest():
                 raise ValueError('Backup checksum failed. Choose an intact backup.')
@@ -67,13 +80,16 @@ def read_backup(raw):
                     raise ValueError('Invalid response parent links.')
                 seen.add(current)
                 current = parents[current]
-        settings = KoboSettings.model_validate(project['settings'])
-        return project['name'], payload, settings, files['form.bin'], files['data.bin']
+        settings = KoboSettings.model_validate(project['settings']) if includes_settings else None
+        result = (project['name'], payload, settings, files['form.bin'], files['data.bin'])
+        return (*result, includes_settings) if with_metadata else result
     except (KeyError, TypeError, AttributeError, UnicodeError, RuntimeError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
         raise ValueError('This file is not a valid Kobo project backup.') from exc
 
 
 def geography(project, settings, field):
+    from .kobo_conditional import analysis_project
+    project = analysis_project(project, settings)
     question = next((q for q in project['form']['questions'] if q['id'] == field), None)
     if not question or question['repeat'] or question['identifying'] or field in settings.hidden or (question['metadata'] and not settings.metadata):
         raise ValueError('Choose a visible, non-identifying main-submission location field.')

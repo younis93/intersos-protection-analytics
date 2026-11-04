@@ -14,7 +14,7 @@ from fastapi.encoders import jsonable_encoder
 
 from . import legal_processing_cache as processing
 
-PAGE_CACHE_VERSION = 1
+PAGE_CACHE_VERSION = 2
 MAX_BYTES = 64 * 1024 * 1024
 MAX_ENTRIES = 96
 MAX_ENTRY_BYTES = 16 * 1024 * 1024

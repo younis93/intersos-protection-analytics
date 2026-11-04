@@ -52,7 +52,7 @@ def test_api_move_reload_undo_and_replacement_preserve_values(client_store):
     undo=client.post(f'/api/kobo/projects/{pid}/placement',json={'updated':moved['updated'],'field':'added_status','group':'','placement':{'position':'last'}})
     assert undo.status_code==200,undo.text
     assert [q['id'] for q in undo.json()['form']['questions']]==['gender','added_status']
-    invalid=client.post(f'/api/kobo/projects/{pid}/placement',json={'updated':undo.json()['updated'],'field':'gender','group':'','placement':{'position':'last'}})
+    invalid=client.post(f'/api/kobo/projects/{pid}/placement',json={'updated':undo.json()['updated'],'field':'missing','group':'','placement':{'position':'last'}})
     assert invalid.status_code==409
 
 
@@ -86,3 +86,52 @@ def test_import_review_repairs_multiple_missing_positions_individually(client_st
     assert {issue['question'] for issue in checked.json()['issues']}=={'added_2'}
     blocked=client.post('/api/kobo/imports/confirm',json={**body,'token':staged['token'],'name':'Blocked','acceptInvalid':True})
     assert blocked.status_code==400
+
+
+def test_original_question_can_reorder_move_group_and_survive_review(client_store):
+    client, store = client_store
+    staged = preview(client, b'gender,age\nf,20\nm,30\n')
+    saved = client.post('/api/kobo/imports/confirm', json={
+        'token': staged['token'], 'name': 'Original placement', 'mappings': staged['mappings'],
+        'reviewConfig': {'excludedQuestionIds': ['needs', 'new_field']}, 'acceptInvalid': True,
+    }).json()
+    pid = saved['id']
+    records = deepcopy(store.get(pid)['records'])
+    moved = client.post(f'/api/kobo/projects/{pid}/placement', json={
+        'updated': saved['updated'], 'field': 'age', 'group': '',
+        'placement': {'position': 'before', 'reference': 'gender'},
+    })
+    assert moved.status_code == 200, moved.text
+    assert [item['id'] for item in moved.json()['form']['questions']] == ['age', 'gender']
+    review = client.post(f'/api/kobo/projects/{pid}/review')
+    assert review.status_code == 200, review.text
+    from backend.kobo_review_schema import effective_form
+    rebuilt = effective_form(review.json()['form'], review.json()['reviewConfig'], [])
+    assert [item['id'] for item in rebuilt['questions']] == ['age', 'gender']
+    assert store.get(pid)['records'] == records
+
+
+def test_moving_anchor_keeps_dependent_in_its_group(client_store):
+    client, store = client_store
+    staged = preview(client, b'gender,status\nf,Returnee\n')
+    mappings = staged['mappings']; mappings[1].update(question='added_status', status='matched')
+    config = {'excludedQuestionIds': ['age', 'needs', 'new_field'],
+              'addedQuestions': [added('text', placement={'position': 'after', 'reference': 'gender'})]}
+    saved = client.post('/api/kobo/imports/confirm', json={
+        'token': staged['token'], 'name': 'Anchor', 'mappings': mappings, 'reviewConfig': config,
+    }).json()
+    pid = saved['id']
+    with store.connect() as db:
+        import json
+        raw = json.loads(db.execute('SELECT payload FROM projects WHERE id=?', (pid,)).fetchone()[0])
+        group = dict(id='destination', name='destination', labels={'en': 'Destination'}, parent='', repeat=False)
+        raw['form']['groups'].append(group); raw['baseForm']['groups'].append(group)
+        db.execute('UPDATE projects SET payload=? WHERE id=?', (json.dumps(raw), pid))
+    moved = client.post(f'/api/kobo/projects/{pid}/placement', json={
+        'updated': saved['updated'], 'field': 'gender', 'group': 'destination', 'placement': {'position': 'first'},
+    })
+    assert moved.status_code == 200, moved.text
+    by_id = {item['id']: item for item in moved.json()['form']['questions']}
+    assert by_id['gender']['group'] == 'destination'
+    assert by_id['added_status']['group'] == ''
+    assert by_id['added_status']['placement'] is None

@@ -1,5 +1,8 @@
 """Local Kobo project API. Imports remain staged until mapping is confirmed."""
 from __future__ import annotations
+from .kobo_shared_dependencies import DependencyRequest
+from .kobo_question_conditions import QuestionConditionsRequest
+from .kobo_connection_setup import ConnectionSetupRequest, confirm_connection
 
 import threading
 import time
@@ -21,6 +24,7 @@ from .kobo_import_links import review_details, reuse_links, form_changes, sugges
 from .kobo_indicators import IndicatorDefinition, IndicatorResult, indicator_issues, calculate_indicator, filter_descriptions
 from .kobo_settings_share import SettingsFile, export_settings, preview_settings
 from .kobo_quality import QualityResult, quality_review
+from .kobo_conditional import ConditionalAction
 from .kobo_population import PopulationRequest, PopulationResult, compare_population
 from .kobo_saved_views import saved_view_issues, apply_saved_view, apply_default_view
 from .import_reuse import source_reuse_reasons, settings_reuse_reasons, reuse_result
@@ -56,6 +60,14 @@ class MoveFieldRequest(BaseModel):
     placement: FieldPlacement | None = None
 
 class FormQuestion(BaseModel):
+    connectionVerifiedInheritance: bool = False
+    relevanceMetadataVersion: int | None = None
+    conditionReview: list[dict] = Field(default_factory=list)
+    ignoredSourceConditions: list[dict] = Field(default_factory=list)
+    ignoredConnectionRules: list[dict] = Field(default_factory=list)
+    dependencyReviewNeeded: bool = False
+    connectionSetup: dict | None = None
+    required: str | None = None
     placement: FieldPlacement | None = None
     inheritedRelevant: list[dict[str, str]] = Field(default_factory=list)
     choiceFilter: str = ''
@@ -199,6 +211,10 @@ class AnswerVisibility(BaseModel):
 
 
 class QuestionResult(BaseModel):
+    conditionalWarnings: dict[str, int] = Field(default_factory=dict)
+    missingAnswers: dict[str, int] = Field(default_factory=dict)
+    connectionSetup: dict | None = None
+    conditionChecks: dict[str, int] = Field(default_factory=dict)
     connections: dict[str, Any] | None = None
     respondentBasis: dict[str, Any] | None = None
     pivotSort: dict[str, Any] | None = None
@@ -291,6 +307,37 @@ class QualityRequest(BaseModel):
     pageSize: int = Field(25, ge=1, le=100)
 
 
+class DataReviewRequest(BaseModel):
+    focusRecord: str = Field('', max_length=1000)
+    settings: KoboSettings
+    group: str = ''
+    category: Literal['all', 'missing', 'conflicts', 'checks', 'other'] = 'all'
+    status: Literal['open', 'ignored', 'excluded', 'all'] = 'open'
+    question: str = ''
+    search: str = Field('', max_length=1000)
+    groupSearch: str = Field('', max_length=1000)
+    columnFilters: list[ColumnFilter] = Field(default_factory=list)
+    page: int = Field(1, ge=1)
+    pageSize: int = Field(25, ge=1, le=100)
+
+
+class DataReviewValuesRequest(DataReviewRequest):
+    column: str
+    valueSearch: str = ''
+    offset: int = Field(0, ge=0)
+
+
+class ConditionalReviewRequest(BaseModel):
+    category: Literal['all', 'conflicts', 'checks', 'missing'] = 'conflicts'
+    group: str = ''
+    settings: KoboSettings = Field(default_factory=KoboSettings)
+    status: Literal['all', 'open', 'ignored', 'excluded'] = 'open'
+    question: str = ''
+    search: str = Field('', max_length=1000)
+    page: int = Field(1, ge=1)
+    pageSize: int = Field(25, ge=1, le=100)
+
+
 class SavedViewApplyRequest(BaseModel):
     settings: KoboSettings
     viewId: str
@@ -304,6 +351,7 @@ class IndicatorRecordsRequest(IndicatorRequest):
 
 
 class QuestionPreviewRequest(AnalysisRequest):
+    connectionSetup: bool = False
     question: str = Field(min_length=1)
 
 
@@ -362,6 +410,7 @@ class PivotDrilldown(BaseModel):
 
 
 class DataRequest(BaseModel):
+    recordIds: list[str] | None = Field(None, max_length=1000)
     columnFilters: list[ColumnFilter] = Field(default_factory=list)
     drilldown: PivotDrilldown | None = None
     settings: KoboSettings
@@ -496,7 +545,7 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
             if len(set(question_ids)) != len(question_ids):
                 raise ValueError('Duplicate question identifiers in backup.')
             from .kobo_edits import effective_project
-            filtered_records(effective_project(payload), settings)
+            filtered_records(effective_project(payload), settings or new_project_settings(payload['form'], payload['records']))
             return await run_in_threadpool(store.create, name, payload, form_raw, data_raw, settings)
         except ProjectProtectionError as exc:
             raise HTTPException(400, exc.detail) from None
@@ -504,18 +553,18 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
             raise HTTPException(400, {'code': 'invalid_backup', 'message': str(exc)}) from None
 
     @router.get('/projects/{pid}/backup')
-    def download_backup(pid: str):
-        return backup_response(pid)
+    def download_backup(pid: str, includeSettings: bool = True):
+        return backup_response(pid, include_settings=includeSettings)
 
     @router.post('/projects/{pid}/backup')
     def download_protected_backup(pid: str, body: ExportProtection):
-        return backup_response(pid, body.value())
+        return backup_response(pid, body.value(), body.includeSettings)
 
-    def backup_response(pid, password=None):
+    def backup_response(pid, password=None, include_settings=True):
         from .kobo_workspace import backup_project
         get(pid)
         try:
-            raw = protect_backup(backup_project(store, pid), password)
+            raw = protect_backup(backup_project(store, pid, include_settings), password)
             extension = 'intersos' if password is not None else 'zip'
             workspace = 'custom' if prefix == '/api/custom' else 'kobo'
             return Response(raw, media_type='application/octet-stream' if password is not None else 'application/zip', headers={
@@ -903,6 +952,34 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
         try: return compare_population(get(pid), body.settings, group_field=body.groupField, groups=body.groups, question_id=body.question, indicator=body.indicator)
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
+    @router.post('/projects/{pid}/conditional-review')
+    def conditional_review(pid: str, body: ConditionalReviewRequest):
+        from .kobo_conditional import review
+        try:
+            return review(get(pid), body.settings, status=body.status, question=body.question, search=body.search, page=body.page, page_size=body.pageSize, category=body.category, group=body.group)
+        except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
+    @router.post('/projects/{pid}/conditional-review/actions', response_model=ProjectResponse)
+    def conditional_action(pid: str, body: ConditionalAction):
+        from .kobo_conditional import commit_review
+        get(pid)
+        try: commit_review(store, pid, body); return project(pid)
+        except ValueError as exc: raise HTTPException(409, str(exc)) from exc
+
+    @router.post('/projects/{pid}/data-review')
+    def grouped_data_review(pid: str, body: DataReviewRequest):
+        from .kobo_data_review import data_review
+        try:
+            return data_review(get(pid), body.settings, group=body.group, category=body.category, status=body.status, question=body.question, search=body.search, group_search=body.groupSearch, column_filters=body.columnFilters, page=body.page, page_size=body.pageSize, focus_record=body.focusRecord)
+        except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
+    @router.post('/projects/{pid}/data-review/values')
+    def grouped_data_review_values(pid: str, body: DataReviewValuesRequest):
+        from .kobo_data_review import data_review_values
+        try:
+            return data_review_values(get(pid), body.settings, body.column, group=body.group, category=body.category, status=body.status, question=body.question, search=body.search, group_search=body.groupSearch, column_filters=body.columnFilters, value_search=body.valueSearch, offset=body.offset)
+        except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
     @router.post('/projects/{pid}/quality-review', response_model=QualityResult)
     def review_quality(pid: str, body: QualityRequest):
         try:
@@ -957,9 +1034,59 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
         try: return analyze(get(pid), body.settings, body.question)
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
+    @router.post('/projects/{pid}/question-conditions/preview')
+    def question_condition_preview(pid: str, body: QuestionConditionsRequest):
+        from .kobo_question_conditions import preview
+        try: return preview(get(pid),body)
+        except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+
+    @router.post('/projects/{pid}/question-conditions/apply')
+    def question_condition_apply(pid: str, body: QuestionConditionsRequest):
+        from .kobo_question_conditions import apply
+        get(pid)
+        try:
+            apply(store,pid,body)
+            return project(pid)
+        except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+
+    @router.get('/projects/{pid}/shared-dependencies')
+    def shared_dependencies(pid: str, language: Literal['en','ar']='en'):
+        from .kobo_shared_dependencies import catalog
+        return {'conditions':catalog(get(pid),language)}
+
+    @router.post('/projects/{pid}/shared-dependencies/preview')
+    def shared_dependency_preview(pid: str, body: DependencyRequest):
+        from .kobo_shared_dependencies import preview
+        try:
+            result=preview(get(pid),body)
+            return {k:v for k,v in result.items() if k!='targets'}
+        except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+
+    @router.post('/projects/{pid}/shared-dependencies/apply')
+    def shared_dependency_apply(pid: str, body: DependencyRequest):
+        from .kobo_shared_dependencies import apply
+        get(pid)
+        try:
+            apply(store,pid,body)
+            return project(pid)
+        except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+
+    @router.post('/projects/{pid}/connection-setup/confirm')
+    def save_connection_setup(pid: str, body: ConnectionSetupRequest):
+        get(pid)
+        try:
+            confirm_connection(store,pid,body)
+            return project(pid)
+        except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+
     @router.post('/projects/{pid}/analysis/preview', response_model=QuestionResult)
     def preview_question(pid: str, body: QuestionPreviewRequest):
         project = get(pid)
+        if body.connectionSetup:
+            from .kobo_connection_setup import preview_project
+            project = preview_project(project, body.question)
+        from .kobo_conditional import analysis_project
+        project = analysis_project(project, body.settings)
         from .kobo_connections import form_question_index
         questions = form_question_index(project['form'])
         question = questions.get(body.question)
@@ -967,11 +1094,20 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
         try:
             records = filtered_records(project, body.settings)
             lookup = {record['id']: record for record in project['records']}
-            return question_result(question, records, body.settings, questions, lookup)
+            from .kobo_conditional import review as conditional_review
+            result = question_result(question, records, body.settings, questions, lookup)
+            review_summary = conditional_review(project.get('_conditionalSource', project), body.settings, page_size=1)
+            summary = review_summary['questions'].get(question['id'], {})
+            result['missingAnswers'] = {key: value for key, value in review_summary['missingQuestions'].get(question['id'], {}).items() if key != 'label'}
+            result['connectionSetup'] = question.get('connectionSetup')
+            result['conditionChecks'] = {key: value for key, value in review_summary['conditionQuestions'].get(question['id'], {}).items() if key != 'label'}
+            result['conditionalWarnings'] = {key: value for key, value in summary.items() if key != 'label'}
+            return result
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
     def response_rows(pid, body):
-        p = get(pid)
+        from .kobo_conditional import analysis_project
+        p = analysis_project(get(pid), body.settings)
         q = next((q for q in p['form']['questions'] if q['id'] == body.question), None)
         if not q: raise HTTPException(404, 'Question not found.')
         try: records = filtered_records(p, body.settings)
@@ -1011,14 +1147,14 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
     def data(pid: str, body: DataRequest):
         from .kobo_data import data_page
         try:
-            return data_page(get(pid), body.settings, body.scope, body.columns, body.search, body.sortColumn, body.sortDirection, body.page, body.pageSize, drilldown=body.drilldown.model_dump() if body.drilldown else None, column_filters=body.columnFilters)
+            return data_page(get(pid), body.settings, body.scope, body.columns, body.search, body.sortColumn, body.sortDirection, body.page, body.pageSize, drilldown=body.drilldown.model_dump() if body.drilldown else None, column_filters=body.columnFilters, record_ids=body.recordIds)
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
     @router.post('/projects/{pid}/data/export')
     def export_data(pid: str, body: DataExportRequest):
         from .kobo_data import data_workbook
         try:
-            content = data_workbook(get(pid), body.settings, body.scope, body.columns, body.search, body.sortColumn, body.sortDirection, body.selectedIds, drilldown=body.drilldown.model_dump() if body.drilldown else None, column_filters=body.columnFilters)
+            content = data_workbook(get(pid), body.settings, body.scope, body.columns, body.search, body.sortColumn, body.sortDirection, body.selectedIds, drilldown=body.drilldown.model_dump() if body.drilldown else None, column_filters=body.columnFilters, record_ids=body.recordIds)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return Response(content, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={'Content-Disposition': 'attachment; filename="kobo-response-data.xlsx"'})
@@ -1030,7 +1166,7 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
         from .column_filters import value_page
         try:
             project = get(pid)
-            result = data_rows(project,body.settings,body.scope,body.columns,body.search,drilldown=body.drilldown.model_dump() if body.drilldown else None)
+            result = data_rows(project,body.settings,body.scope,body.columns,body.search,drilldown=body.drilldown.model_dump() if body.drilldown else None,record_ids=body.recordIds)
             frame = pd.DataFrame([{'__row__':row['row'],**row['values']} for row in result['rows']],columns=['__row__',*body.columns])
             result = value_page(frame,body.column,body.columnFilters,body.valueSearch,body.offset)
             question = next((q for q in project['form']['questions'] if q['id']==body.column), {})
@@ -1048,7 +1184,7 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
         for r in p['records']:
             if question not in r['values']: continue
             v = r['values'][question]
-            values.update(v if isinstance(v, list) else [str(v) if v is not None else '__blank__'])
+            values.update(['__blank__'] if v is None or v == [] or v == '' else v if isinstance(v, list) else [str(v)])
         return sorted(values)
 
     @router.post('/projects/{pid}/exports', response_model=ExportStatus)
@@ -1081,4 +1217,6 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
         except (ValueError, KeyError) as exc: raise HTTPException(409, 'Export is not ready or has expired.') from exc
         return Response(payload, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', headers={'Content-Disposition': 'attachment; filename="kobo-analysis.xlsx"'})
 
+    from .project_transfer import add_transfer_routes
+    add_transfer_routes(router, store, prefix)
     return router

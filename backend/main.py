@@ -572,7 +572,7 @@ def legal_project_backup_response(exportMonth, password=None):
     try:
         with legal_project_lock:
             store = require_legal_store()
-            raw = backup_project(store, duplicate_exclusions.exclusion_rows())
+            raw = backup_project(store, [])
         now = datetime.now()
         month = exportMonth or f'{now.year}-{("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")[now.month - 1]}'
         raw = protect_backup(raw, password)
@@ -1232,7 +1232,7 @@ from .custom_analysis import make_custom_router, custom_store
 _custom_store = custom_store()
 app.include_router(make_custom_router(_custom_store))
 _custom_services = make_kobo_router(_custom_store, prefix='/api/custom')
-_custom_services.routes = [route for route in _custom_services.routes if '/imports/' not in route.path and not route.path.endswith('/review')]
+_custom_services.routes = [route for route in _custom_services.routes if '/imports/' not in route.path and route.path != '/api/custom/projects/{pid}/review']
 app.include_router(_custom_services)
 
 if STATIC_DIR.exists():

@@ -1426,9 +1426,9 @@ class LegalStore:
         normalized=self._prepared_column("beneficiaries",name,normalize_name)
         excluded = {clean_id(case) for case in (excluded_case_ids or set()) if clean_id(case)}
         project_groups={
-            "unhcr 2026 - erbil":"North - Erbil",
-            "unhcr 2026 - mosul & kirkuk":"North - Mosul & Kirkuk",
-            "unhcr 2026 - suli":"North - SULI",
+            "unhcr 2026 - erbil":"North Iraq",
+            "unhcr 2026 - mosul & kirkuk":"North Iraq",
+            "unhcr 2026 - suli":"North Iraq",
             "unhcr 2026 - baghdad":"South (Baghdad + Gov)",
             "unhcr 2026 - gov":"South (Baghdad + Gov)",
             "unhcr 2026 - amal camp":"AMAL",
@@ -1436,7 +1436,7 @@ class LegalStore:
         normalized_projects=self._prepared_column("beneficiaries",project,_normalized_project)
         south_projects={"unhcr 2026 - baghdad","unhcr 2026 - gov"}
         eligible={
-            int(i):("South Iraq" if normalized_projects[i] in south_projects else (normalized_projects[i] or f"Unspecified project {i}"),text)
+            int(i):("South Iraq" if normalized_projects[i] in south_projects else (project_groups.get(normalized_projects[i]) or normalized_projects[i] or f"Unspecified project {i}"),text)
             for i,text in normalized.items() if text and (not excluded or not case_id or clean_id(df.loc[i, case_id]) not in excluded)
         } if exact_only else {int(i):(project_groups.get(normalized_projects[i],""),text[:bounded_chars]) for i,text in normalized.items() if len(text)>=bounded_chars and normalized_projects[i] in project_groups and (not excluded or not case_id or clean_id(df.loc[i, case_id]) not in excluded)}
         matches:dict[int,set[int]]=defaultdict(set)
@@ -1506,9 +1506,9 @@ class LegalStore:
             return []
         excluded={clean_id(case) for case in (excluded_case_ids or set()) if clean_id(case)}
         project_groups={
-            "unhcr 2026 - erbil":"North - Erbil",
-            "unhcr 2026 - mosul & kirkuk":"North - Mosul & Kirkuk",
-            "unhcr 2026 - suli":"North - SULI",
+            "unhcr 2026 - erbil":"North Iraq",
+            "unhcr 2026 - mosul & kirkuk":"North Iraq",
+            "unhcr 2026 - suli":"North Iraq",
             "unhcr 2026 - baghdad":"South (Baghdad + Gov)",
             "unhcr 2026 - gov":"South (Baghdad + Gov)",
             "unhcr 2026 - amal camp":"AMAL",
@@ -2137,6 +2137,12 @@ class LegalStore:
                 ("Lawyer","lawyer",("Lawyers","Lawyer","Created By","Created by")),
                 ("Project","project",("Projects -","Project")),("Project location","location",("Project Location","Project location")),
             ]
+            if dataset == "beneficiaries" and rule == "Case without assessment":
+                project_index = next(index for index, column in enumerate(page_columns) if column[0] == "Project")
+                page_columns[project_index + 1:project_index + 1] = [
+                    ("Created On", "createdOn", ("Created On",)),
+                    ("Date of Identification", "identificationDate", ("Date of Identification",)),
+                ]
             if dataset=="legalhotlines":
                 page_columns.extend([
                     ("Record identifier","hotlineId",()),("Contact date","contactDate",("Contact Date",)),

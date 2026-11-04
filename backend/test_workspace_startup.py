@@ -123,6 +123,7 @@ def test_desktop_launch_uses_cached_profile_and_prepares_backend_before_window(m
     window = SimpleNamespace(events=SimpleNamespace(shown=Event(), closing=Event()))
     webview = SimpleNamespace(settings={}, create_window=Mock(return_value=window), start=Mock())
     monkeypatch.setitem(sys.modules, "webview", webview)
+    monkeypatch.setitem(sys.modules, "webview.platforms.edgechromium", SimpleNamespace(EdgeChrome=Mock()))
     instance = SimpleNamespace(acquire=Mock(return_value=True), watch=Mock(), close=Mock())
     monkeypatch.setattr(launcher, "SingleInstance", lambda: instance)
     runtime = SimpleNamespace(preload_backend=Mock(), initialize=Mock(), stop=Mock(), backend_main=None)

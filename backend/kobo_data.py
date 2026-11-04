@@ -3,6 +3,10 @@ from .kobo import KoboFilter, filtered_records, label, missing, question_result,
 
 
 def pivot_records(project, settings, scope, records, selection):
+    from .kobo_conditional import analysis_project
+    project = analysis_project(project, settings)
+    projected_lookup = {r['id']: r for r in project['records']}
+    records = [projected_lookup[r['id']] for r in records]
     from .kobo_connections import form_question_index
     questions = form_question_index(project['form'])
     question = questions.get(selection['question'])
@@ -38,7 +42,11 @@ def pivot_records(project, settings, scope, records, selection):
     return selected
 
 
-def data_rows(project, settings, scope, columns, search='', sort_column='', direction='asc', drilldown=None, column_filters=None):
+def data_rows(project, settings, scope, columns, search='', sort_column='', direction='asc', drilldown=None, column_filters=None, record_ids=None):
+    raw_lookup = {r['id']: r for r in project['records']}
+    if drilldown:
+        from .kobo_conditional import analysis_project
+        project = analysis_project(project, settings)
     questions = {q['id']: q for q in project['form']['questions'] if q['repeat'] == scope}
     measure_field = None
     if drilldown:
@@ -62,7 +70,12 @@ def data_rows(project, settings, scope, columns, search='', sort_column='', dire
         if isinstance(value, list): return ', '.join(display(qid, item) for item in value)
         return captions[qid].get(str(value), str(value))
 
-    records = [record for record in filtered_records(project, settings) if record['scope'] == scope]
+    # An exact raw-row inspection must also reach orphaned/cyclic repeat records.
+    source_records = project['records'] if record_ids is not None and not settings.filters and drilldown is None else filtered_records(project, settings)
+    records = [record for record in source_records if record['scope'] == scope]
+    if record_ids is not None:
+        selected_records = set(record_ids)
+        records = [record for record in records if record['id'] in selected_records]
     if drilldown is not None:
         if drilldown.get('baseFilters') is not None:
             # Keep the clicked pivot cohort and numeric bin boundaries stable.
@@ -78,6 +91,9 @@ def data_rows(project, settings, scope, columns, search='', sort_column='', dire
     query = search.strip().casefold()
     rows = []
     for record in records:
+        if drilldown:
+            raw_record = raw_lookup[record['id']]
+            record = {**raw_record, 'values': {**raw_record['values'], measure_field['id']: record['values'].get(measure_field['id'])}} if measure_field else raw_record
         values = {qid: display(qid, record['values'].get(qid)) for qid in columns}
         if query and not any(query in text.casefold() for text in [str(record['row']), *values.values(), *(str(record['values'].get(qid, '')) for qid in columns)]):
             continue
@@ -105,13 +121,18 @@ def data_rows(project, settings, scope, columns, search='', sort_column='', dire
     return {'total': len(records), 'matched': len(rows), 'rows': [item[1] for item in rows]}
 
 
-def data_page(project, settings, scope, columns, search='', sort_column='', direction='asc', page=1, page_size=50, drilldown=None, column_filters=None):
-    result = data_rows(project, settings, scope, columns, search, sort_column, direction, drilldown, column_filters)
+def data_page(project, settings, scope, columns, search='', sort_column='', direction='asc', page=1, page_size=50, drilldown=None, column_filters=None, record_ids=None):
+    result = data_rows(project, settings, scope, columns, search, sort_column, direction, drilldown, column_filters, record_ids)
     start = (page - 1) * page_size
-    return {**result, 'rows': result['rows'][start:start + page_size]}
+    from .kobo_conditional import scan
+    warnings = {}
+    for row in scan(project, settings)['rows']:
+        if row['question'] in columns: warnings.setdefault(row['record'], {})[row['question']] = {'status': row['status'], 'outcome': row['outcome'], 'condition': row['condition']}
+    setups = {qid: {'status':'open','outcome':'connection-setup-needed','condition':''} for qid in columns if any(q['id']==qid and (q.get('connectionSetup') or {}).get('pending') for q in project['form']['questions'])}
+    return {**result, 'rows': [{**row, 'conditionalWarnings': {**warnings.get(row['id'], {}), **setups}} for row in result['rows'][start:start + page_size]]}
 
 
-def data_workbook(project, settings, scope, columns, search='', sort_column='', direction='asc', selected_ids=None, drilldown=None, column_filters=None):
+def data_workbook(project, settings, scope, columns, search='', sort_column='', direction='asc', selected_ids=None, drilldown=None, column_filters=None, record_ids=None):
     from collections import Counter
     from io import BytesIO
     from openpyxl import Workbook
@@ -119,7 +140,7 @@ def data_workbook(project, settings, scope, columns, search='', sort_column='', 
     from openpyxl.styles import Alignment, Font, PatternFill
 
     columns = list(dict.fromkeys(columns))
-    result = data_rows(project, settings, scope, columns, search, sort_column, direction, drilldown, None if selected_ids is not None else column_filters)
+    result = data_rows(project, settings, scope, columns, search, sort_column, direction, drilldown, None if selected_ids is not None else column_filters, record_ids)
     selected = None if selected_ids is None else set(selected_ids)
     from .kobo_connections import form_question_index
     questions = form_question_index(project['form'])

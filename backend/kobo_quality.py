@@ -26,6 +26,9 @@ class QualityRecord(BaseModel):
     id: str
     row: int
     scope: str
+    field: str = ''
+    scopeId: str = ''
+    value: object = None
     question: str
     answer: str
     reason: str
@@ -39,6 +42,7 @@ class QualityResult(BaseModel):
     checks: list[QualityCheck]
     filterSummary: list[str]
     notes: list[str]
+    conditional: dict = Field(default_factory=dict)
     rows: list[QualityRecord] = Field(default_factory=list)
     matched: int = 0
     page: int = 1
@@ -79,16 +83,17 @@ def quality_review(project, settings, *, check_id='', page=1, page_size=25):
             affected.add(record['id'])
             if cid != check_id: continue
             if start <= matched < start+page_size:
-                matches.append(QualityRecord(id=record['id'], row=record['row'], scope=label(groups[record['scope']], settings.language) if record['scope'] in groups else record['scope'] or 'Main submissions', question=caption, answer=value, reason=reason))
+                matches.append(QualityRecord(id=record['id'], row=record['row'], field=question['id'] if question else '',scopeId=record['scope'],value=record['values'].get(question['id']) if question else None,scope=label(groups[record['scope']], settings.language) if record['scope'] in groups else record['scope'] or 'Main submissions', question=caption, answer=value, reason=reason))
             matched += 1
 
     for q in questions:
+        if (q.get('connectionSetup') or {}).get('pending'): continue
         cohort = [r for r in records if r['scope'] == q['repeat']]
-        blanks, invalid = [], []
+        invalid = []
         captions = {c['name']: label(c, settings.language) for c in q['choices']}
         for r in cohort:
             value = r['values'].get(q['id'])
-            if missing(value): blanks.append((r, '', 'No answer is available. The question may have been skipped or not applicable.')); continue
+            if missing(value) or value == []: continue
             valid = True
             if q['kind'] == 'number': valid = not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
             elif q['kind'] == 'category': valid = isinstance(value, str) and value in captions
@@ -99,7 +104,6 @@ def quality_review(project, settings, *, check_id='', page=1, page_size=25):
             if not valid:
                 answer = ', '.join(captions.get(str(v), str(v)) for v in value) if isinstance(value, list) else str(value)
                 invalid.append((r, answer, 'The value does not match the current question type or configured answer options.'))
-        add('missing:'+q['id'], 'Missing answers', 'check', q, cohort, blanks, 'Missing does not automatically mean an error. Relevance and skip logic are not evaluated in this review.', 'Check applicability and source answers before treating these records as incomplete or correcting the import.')
         add('invalid:'+q['id'], 'Invalid or unrecognized values', 'correction', q, cohort, invalid, 'Values cannot be interpreted using the current question type or answer codes.', 'Review the source values and answer mappings using Review and correct import. Apply only confirmed corrections.')
 
     duplicate_groups = defaultdict(list)
@@ -141,4 +145,8 @@ def quality_review(project, settings, *, check_id='', page=1, page_size=25):
         q = next((q for q in questions if q['id'] == issue['question']), None)
         if q: notes.append(f'Saved import note (whole import, not filter-scoped): {label(q, settings.language)}: {issue["message"]} ({issue["count"]} rows).')
     if check_id and not any(c.id == check_id for c in checks): matched = 0
-    return QualityResult(total=len(records), main=sum(not r['scope'] for r in records), repeats=len(repeats), affected=len(affected), checks=checks, filterSummary=filter_descriptions(project, settings), notes=notes, rows=matches, matched=matched, page=page, pageSize=page_size)
+    from .kobo_conditional import review as conditional_review
+    conditional = conditional_review(project, settings, status='all', page_size=10**9)
+    affected.update(row['record'] for row in conditional['rows'] if row['status'] == 'open' and row['outcome'] != 'uncheckable')
+    notes = [note.replace('Relevance and skip logic are not evaluated in this review.', 'See Conditional answer conflicts for answers present outside their conditions.').replace('skip logic, survey sampling, numeric outliers, or cross-question consistency', 'survey sampling, numeric outliers, or other cross-question consistency') for note in notes]
+    return QualityResult(conditional={key: conditional[key] for key in ['coverage', 'counts', 'questions', 'conditionQuestions', 'missingQuestions', 'summary']}, total=len(records), main=sum(not r['scope'] for r in records), repeats=len(repeats), affected=len(affected), checks=checks, filterSummary=filter_descriptions(project, settings), notes=notes, rows=matches, matched=matched, page=page, pageSize=page_size)

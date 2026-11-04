@@ -234,7 +234,7 @@ def scalar(value: Any) -> Any:
 
 
 def missing(value: Any) -> bool:
-    return value is None or (isinstance(value, str) and not value.strip())
+    return value is None or value == [] or (isinstance(value, str) and not value.strip())
 
 
 def labels(record: dict) -> dict[str, str]:
@@ -255,6 +255,9 @@ def label(item: dict, language: str) -> str:
 
 
 def parse_form(raw: bytes) -> dict:
+    from .project_snapshot import decode
+    snapshot = decode(raw, 'form')
+    if snapshot is not None: return snapshot
     validate_xlsx_archive(raw)
     book = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
     try:
@@ -299,7 +302,8 @@ def parse_form(raw: bytes) -> dict:
             choice_list = kind.split()[1] if base in {'select_one', 'select_multiple'} and len(kind.split()) > 1 else ''
             if choice_list and not choices[choice_list]: raise ValueError(f'{path}: choice list {choice_list} is missing or empty in choices.')
             numeric = base in {'integer', 'decimal'}
-            q = {'id': path, 'name': name, 'type': base, 'kind': 'number' if numeric else 'date' if base in {'date', 'datetime', 'today', 'start', 'end'} else 'multiple' if base == 'select_multiple' else 'category' if base == 'select_one' else 'text', 'labels': labels(row), 'group': stack[-1]['id'] if stack else '', 'repeat': repeat, 'metadata': base in metadata_types or base == 'calculate', 'choices': choices[choice_list] if choice_list else [], 'order': len(questions), 'relevant': str(row.get('relevant') or ''), 'choiceFilter': str(row.get('choice_filter') or ''), 'identifying': base == 'text' and bool(re.search(r'(respondent.*name|name.*respondent|enumerator.*name|name.*enumerator|full.?name|phone|telephone|email|اسم.*(المستجيب|المستجوب)|name_of)', ' '.join([name, *labels(row).values()]), re.I))}
+            q = {'id': path, 'name': name, 'type': base, 'kind': 'number' if numeric else 'date' if base in {'date', 'datetime', 'today', 'start', 'end'} else 'multiple' if base == 'select_multiple' else 'category' if base == 'select_one' else 'text', 'labels': labels(row), 'group': stack[-1]['id'] if stack else '', 'repeat': repeat, 'metadata': base in metadata_types or base == 'calculate', 'choices': choices[choice_list] if choice_list else [], 'order': len(questions), 'required': str(row['required']) if row.get('required') is not None else '', 'relevant': str(row.get('relevant') or ''), 'choiceFilter': str(row.get('choice_filter') or ''), 'identifying': base == 'text' and bool(re.search(r'(respondent.*name|name.*respondent|enumerator.*name|name.*enumerator|full.?name|phone|telephone|email|اسم.*(المستجيب|المستجوب)|name_of)', ' '.join([name, *labels(row).values()]), re.I))}
+            q['relevanceMetadataVersion'] = 1
             q['inheritedRelevant'] = [{'source': g['id'], 'expression': g['relevant']} for g in stack if g.get('relevant')]
             questions.append(q)
         if stack: raise ValueError('XLSForm has an unclosed group or repeat.')
@@ -310,6 +314,9 @@ def parse_form(raw: bytes) -> dict:
 
 
 def data_worksheets(raw: bytes, filename: str) -> list[str]:
+    from .project_snapshot import decode
+    snapshot = decode(raw, 'kobo')
+    if snapshot is not None: return [s['name'] for s in snapshot]
     if not filename.lower().endswith('.xlsx'): raise ValueError('Choose an .xlsx response workbook.')
     validate_xlsx_archive(raw)
     book = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
@@ -319,6 +326,11 @@ def data_worksheets(raw: bytes, filename: str) -> list[str]:
 
 
 def parse_data(raw: bytes, filename: str, worksheet: str = '') -> list[dict]:
+    from .project_snapshot import decode
+    snapshot = decode(raw, 'kobo')
+    if snapshot is not None:
+        if worksheet and worksheet not in [s['name'] for s in snapshot]: raise ValueError('Choose an available worksheet.')
+        return [s for s in snapshot if not worksheet or s['name']==worksheet]
     if filename.lower().endswith('.csv'):
         if worksheet: raise ValueError('Worksheet selection is only available for Excel workbooks.')
         try: text = raw.decode('utf-8-sig')
@@ -406,6 +418,9 @@ def propose_mapping(form: dict, sheets: list[dict]) -> tuple[list[dict], list[st
 
 
 def decode_choice(value: Any, q: dict, multiple=False) -> tuple[list[str], str | None]:
+    if multiple and isinstance(value, list):
+        codes = {c['name'] for c in q['choices']}
+        return (list(dict.fromkeys(value)), None) if all(isinstance(v,str) and v in codes for v in value) else ([], 'unknown choice value')
     if missing(value): return [], None
     value = str(value).strip()
     lookup = defaultdict(set)
@@ -517,7 +532,7 @@ def normalize(form: dict, sheets: list[dict], mappings: list[dict], policies: di
                     selected = split if policy == 'split' or (missing(value) and split_seen) else set(combined)
                     values[qid] = sorted(selected) or None
                 else: values[qid] = value
-            records.append({'id': rid, 'parent': parent, 'scope': scope, 'sheet': si, 'row': ri + 2, 'values': values})
+            records.append({'id': rid, 'parent': parent, 'scope': scope, 'sheet': si, 'row': ri + 2, 'values': values, 'sourceIdentity': str(get('_uuid') or get('_id') or '')})
             index = get('_index')
             if index is not None:
                 parent_maps[(sheet['name'], str(index))] = rid
@@ -551,10 +566,25 @@ class ProjectStore:
 
     def get(self, pid, *, raw=False):
         with self.connect() as db:
-            row = db.execute('SELECT name,payload,settings,updated FROM projects WHERE id=?', (pid,)).fetchone()
+            row = db.execute('SELECT name,payload,settings,updated,form FROM projects WHERE id=?', (pid,)).fetchone()
         if not row: raise KeyError('Project not found.')
         project = {'id': pid, 'name': row[0], **json.loads(row[1]), 'settings': json.loads(row[2]), 'updated': row[3]}
         from .kobo_edits import effective_project
+        from .kobo_required import recover_required
+        if any(q.get('required') is None for q in project['form']['questions']):
+            project = recover_required(project, bytes(row[4]))
+        from .kobo_connection_setup import hydrate_connections
+        project = hydrate_connections(project, bytes(row[4]))
+        from .kobo_shared_dependencies import annotate
+        project = annotate(project)
+        from .kobo_question_conditions import annotate as annotate_question_conditions
+        project = annotate_question_conditions(project)
+        from .kobo_connections import condition_review,form_question_index
+        from .kobo_shared_dependencies import context as connection_source_context
+        _,source_questions=connection_source_context(project)
+        source_settings=KoboSettings.model_validate(project['settings'])
+        for q in project['form']['questions']:
+            q['conditionReview']=condition_review(source_questions[q['id']],source_questions,source_settings)
         if raw: return project
         project = effective_project(project)
         from .kobo_import_notes import refresh_notes
@@ -611,10 +641,17 @@ class ProjectStore:
         # Keep the project identity, latest display settings until the reviewed sources are applied.
         with self.connect() as db:
             if expected_updated is not None: db.execute('BEGIN IMMEDIATE')
-            row = db.execute('SELECT settings,payload,updated FROM projects WHERE id=?', (pid,)).fetchone()
+            row = db.execute('SELECT settings,payload,updated,form FROM projects WHERE id=?', (pid,)).fetchone()
             if not row: raise KeyError('Project not found.')
             settings = json.loads(row[0])
-            previous_payload=json.loads(row[1])
+            from .kobo_required import recover_required
+            previous_payload=recover_required(json.loads(row[1]), bytes(row[3]))
+            if 'questionConditionOverrides' in previous_payload and 'questionConditionOverrides' not in payload:
+                payload['questionConditionOverrides'] = previous_payload['questionConditionOverrides']
+            if 'sharedDependencyOverrides' in previous_payload and 'sharedDependencyOverrides' not in payload:
+                payload['sharedDependencyOverrides'] = previous_payload['sharedDependencyOverrides']
+            if 'connectionVerification' in previous_payload and 'connectionVerification' not in payload:
+                payload['connectionVerification'] = previous_payload['connectionVerification']
             if 'dataEdits' in previous_payload and 'dataEdits' not in payload:
                 if data_raw!=self.sources(pid)[1]: raise ValueError('Review local edits before replacing this source.')
                 payload['dataEdits']={**previous_payload['dataEdits'],'revision':previous_payload['dataEdits'].get('revision',0)+1}
@@ -655,6 +692,8 @@ class ProjectStore:
                 if payload.get('customConfig'):
                     from .custom_analysis import reconcile_settings
                     settings = reconcile_settings(effective_project(json.loads(row[1])), effective_payload, settings)
+            from .kobo_conditional import preserve_review
+            preserve_review(previous_payload, payload, KoboSettings.model_validate(settings), same_source=data_raw == self.sources(pid)[1])
             payload.setdefault('dataEdits',{'revision':previous_payload.get('dataEdits',{}).get('revision',0)+1,'history':[]})
             if update_entry is not None:
                 payload['updateHistory'] = [update_entry, *json.loads(row[1]).get('updateHistory', [])][:20]
@@ -681,7 +720,8 @@ def filter_rule_summary(rule: KoboFilter, choices=None):
 def matches(value, rule: KoboFilter):
     if rule.kind == 'category':
         if not rule.values: return True
-        return any(v in rule.values for v in (value if isinstance(value, list) else [str(value) if value is not None else '__blank__']))
+        values = ['__blank__'] if missing(value) or value == [] else value if isinstance(value, list) else [str(value)]
+        return any(v in rule.values for v in values)
     if missing(value): return False
     if rule.kind == 'date':
         value = str(value)[:10]
@@ -714,8 +754,9 @@ def filtered_records(project: dict, settings: KoboSettings):
         matching_parents = set()
         for r in records:
             if r['scope'] != scope or not passes(r, scope_rules): continue
-            parent = r
-            while parent.get('parent') in lookup: parent = lookup[parent['parent']]
+            parent, seen = r, set()
+            while parent.get('parent') in lookup and parent['id'] not in seen:
+                seen.add(parent['id']); parent = lookup[parent['parent']]
             matching_parents.add(parent['id'])
         parents &= matching_parents
     out = []
@@ -723,8 +764,9 @@ def filtered_records(project: dict, settings: KoboSettings):
         if not r['scope']:
             if r['id'] in parents: out.append(r)
             continue
-        root = r
-        while root.get('parent') in lookup: root = lookup[root['parent']]
+        root, seen = r, set()
+        while root.get('parent') in lookup and root['id'] not in seen:
+            seen.add(root['id']); root = lookup[root['parent']]
         if root['id'] in parents and passes(r, [f for f in repeat_rules if questions[f.field]['repeat'] == r['scope']]): out.append(r)
     return out
 
@@ -774,6 +816,17 @@ def palette_color(palette, option):
     return colors[0 if option == 'series' else value % len(colors)]
 
 
+def selected_question_answers(q, cfg):
+    """A multiple-choice self-filter limits both respondents and displayed selections."""
+    if q['kind'] != 'multiple' or cfg.filterMode not in {'own', 'additional'}: return None
+    selected = None
+    for rule in active_question_filters(cfg):
+        if rule.field == q['id'] and rule.kind == 'category' and rule.values:
+            values = set(rule.values)
+            selected = values if selected is None else selected & values
+    return selected
+
+
 def question_categories(q: dict, answered: list[dict], cfg):
     denominator = len(answered)
     values = [r['values'][q['id']] for r in answered]
@@ -784,9 +837,10 @@ def question_categories(q: dict, answered: list[dict], cfg):
         if (cfg.chart == 'histogram' or cfg.numericMode == 'bins' or (cfg.numericMode == 'auto' and len(unique) > 12)) and min(values) != max(values):
             low, high = min(values), max(values); step = (high - low) / cfg.bins
             bins = [{'id': f'bin:{i}', 'label': f'{low + i * step:g} - {low + (i + 1) * step:g}' + (' (inclusive)' if i == cfg.bins - 1 else ' (upper excluded)'), 'min': low + i * step, 'max': low + (i + 1) * step} for i in range(cfg.bins)]
+    selected = selected_question_answers(q, cfg)
     def categories(value):
         if missing(value): return []
-        if q['kind'] == 'multiple': return value
+        if q['kind'] == 'multiple': return [code for code in value if selected is None or code in selected]
         if q['kind'] == 'number' and bins:
             i = min(int((value - bins[0]['min']) / (bins[-1]['max'] - bins[0]['min']) * len(bins)), len(bins) - 1)
             return [bins[i]['id']]
@@ -816,6 +870,7 @@ def question_cohort(question, records, cfg, questions, lookup, *, apply_connecti
     hidden = set(cfg.hiddenAnswers) if (plan['enabled'] or cfg.hiddenAnswerPercentageMode == 'adjust') and question['kind'] in {'category','multiple','text'} else set()
     kinds = {key:field['kind'] for key,field in questions.items()}
     def visible(record):
+        if question['id'] in record.get('_conditionalExcluded', []): return False
         value = record['values'].get(question['id'])
         codes = {'__blank__'} if missing(value) else set(value) if question['kind']=='multiple' else {str(value)}
         if hidden.intersection(codes): return False
@@ -908,6 +963,8 @@ def question_result(q: dict, records: list[dict], settings: KoboSettings, questi
     universe = list(answer_labels) if q['choices'] or bins else sorted(counts, key=lambda v: float(v) if q['kind'] == 'number' else v)
     if q['kind']=='text' and q['choices']:universe=list(dict.fromkeys([*answer_labels,*counts]))
     if q['kind'] in {'category', 'multiple', 'text'}: universe = [c for c in universe if c not in cfg.hiddenAnswers]
+    selected = selected_question_answers(q, cfg)
+    if selected is not None: universe = [c for c in universe if c in selected]
     rows = [{'id': c, 'label': answer_labels.get(c, c), 'count': counts[c], 'percent': counts[c] / denominator * 100 if denominator else None} for c in universe]
     breakdowns = []
     dimensions = breakdown_fields(cfg, questions, q)
@@ -958,6 +1015,10 @@ def question_result(q: dict, records: list[dict], settings: KoboSettings, questi
 
 
 def analyze(project: dict, settings: KoboSettings, question: str = ''):
+    from .kobo_conditional import analysis_project, review as conditional_review
+    review_summary = conditional_review(project.get('_conditionalSource', project), settings, page_size=1) if not project.get('customConfig') else {}
+    warnings = review_summary.get('questions', {})
+    project = analysis_project(project, settings)
     settings = settings.model_copy(update={'questions': {q['id']: resolved_question_settings(q, settings) for q in project['form']['questions']}})
     records = filtered_records(project, settings)
     from .kobo_connections import form_question_index
@@ -968,7 +1029,11 @@ def analyze(project: dict, settings: KoboSettings, question: str = ''):
         if question and q['id'] != question: continue
         if q['id'] in settings.hidden or (q['metadata'] and not settings.metadata): continue
         result = question_result(q, records, settings, questions, lookup)
-        if not settings.hideEmpty or result['denominator'] or (result.get('respondentBasis') or {}).get('kind') == 'parent' or bool(result.get('respondentBasis') and (settings.questions[q['id']].connectionSource == 'manual' or settings.questions[q['id']].connectedPercentageMode is not None or result['respondentBasis'].get('issue'))) or result.get('filterMode') in {'own', 'additional'} or settings.questions[q['id']].hiddenAnswers or settings.questions[q['id']].ownFilters: results.append(result)
+        result['missingAnswers'] = {key: value for key, value in review_summary.get('missingQuestions', {}).get(q['id'], {}).items() if key != 'label'}
+        result['connectionSetup'] = q.get('connectionSetup')
+        result['conditionChecks'] = {key: value for key, value in review_summary.get('conditionQuestions', {}).get(q['id'], {}).items() if key != 'label'}
+        result['conditionalWarnings'] = {key: value for key, value in warnings.get(q['id'], {}).items() if key != 'label'}
+        if result.get('connectionSetup') or result['missingAnswers'].get('open') or result['conditionChecks'].get('open') or result['conditionalWarnings'].get('open') or not settings.hideEmpty or result['denominator'] or (result.get('respondentBasis') or {}).get('kind') == 'parent' or bool(result.get('respondentBasis') and (settings.questions[q['id']].connectionSource == 'manual' or settings.questions[q['id']].connectedPercentageMode is not None or result['respondentBasis'].get('issue'))) or result.get('filterMode') in {'own', 'additional'} or settings.questions[q['id']].hiddenAnswers or settings.questions[q['id']].ownFilters: results.append(result)
     if settings.questionSort != 'form':
         by_count = settings.questionSort.startswith('answered')
         # Sorting only within groups preserves the original group hierarchy.

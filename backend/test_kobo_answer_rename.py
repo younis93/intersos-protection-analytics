@@ -22,7 +22,9 @@ def test_single_rename_can_create_a_field_copy_without_changing_the_original(sav
     changed = apply(store, project, {'kind': 'answers', 'field': 'answer', 'sources': ['a'],
                                     'target': 'a', 'label': 'Renamed answer', 'destination': 'new',
                                     'name': 'Renamed field copy', 'language': 'en'})
-    assert changed['form']['questions'][0] == original
+    copied_original = changed['form']['questions'][0]
+    assert {key: value for key, value in copied_original.items() if key != 'order'} == {key: value for key, value in original.items() if key != 'order'}
+    assert copied_original['order'] == 0
     copy = next(question for question in changed['form']['questions'] if question.get('derivedFrom') == 'answer')
     assert next(choice for choice in copy['choices'] if choice['name'] == 'a')['labels']['en'] == 'Renamed answer'
     assert all(record['values'][copy['id']] == record['values']['answer'] for record in changed['records'])

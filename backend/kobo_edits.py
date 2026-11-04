@@ -19,9 +19,21 @@ class CellChange(BaseModel):
     field: str
     value: Any = None
 
+class ReviewBlankSelection(BaseModel):
+    settings: dict
+    group: str = Field(min_length=1, max_length=1000)
+    category: Literal['all','missing','conflicts','checks','other'] = 'all'
+    status: Literal['open','ignored','excluded','all'] = 'open'
+    question: str = Field(min_length=1, max_length=1000)
+    search: str = Field('', max_length=1000)
+    groupSearch: str = Field('', max_length=1000)
+    columnFilters: list[dict] = Field(default_factory=list, max_length=100)
+
+
 class EditOperation(BaseModel):
     kind: Literal['cells','answers']
     cells: list[CellChange] = Field(default_factory=list)
+    reviewBlanks: ReviewBlankSelection | None = None
     allMatches: bool = False
     originalValue: Any = None
     field: str = ''
@@ -42,6 +54,8 @@ class EditRequest(BaseModel):
         if len(self.operation.cells)>1000:raise ValueError('Choose at most 1000 explicit cells.')
         if self.operation.allMatches and (self.operation.kind!='cells' or len(self.operation.cells)!=1):
             raise ValueError('Choose one response to match.')
+        if self.operation.reviewBlanks and (self.operation.allMatches or self.operation.kind!='cells' or len(self.operation.cells)!=1):
+            raise ValueError('Choose one question and one review scope for blank filling.')
         return self
 
 
@@ -57,6 +71,23 @@ def match_value(value, question):
 
 
 def resolve_operation(project, operation):
+    if operation.reviewBlanks:
+        from .kobo import KoboSettings, missing
+        from .column_filters import ColumnFilter
+        from .kobo_data_review import data_review
+        selector=operation.reviewBlanks
+        change=operation.cells[0]
+        if any(q['id']==change.field and (q.get('connectionSetup') or {}).get('pending') for q in project['form']['questions']):
+            raise ValueError('Review and save the connection before filling blank answers.')
+        if change.field!=selector.question:raise ValueError('The review question does not match the edited question.')
+        if missing(change.value) or change.value==[]:raise ValueError('Choose a nonblank answer before filling blank rows.')
+        apply_operation(deepcopy(project),operation)
+        result=data_review(project,KoboSettings.model_validate(selector.settings),group=selector.group,category=selector.category,
+            status=selector.status,question=selector.question,search=selector.search,group_search=selector.groupSearch,
+            column_filters=[ColumnFilter.model_validate(f) for f in selector.columnFilters],page_size=10**9)
+        eligible={r['record'] for r in result['rows'] if r['question']==change.field and r['outcome'] in {'required-missing','connected-blank'} and (missing(r['value']) or r['value']==[])}
+        cells=[CellChange(record=r['id'],field=change.field,value=change.value) for r in project['records'] if r['id'] in eligible]
+        return operation.model_copy(update={'cells':cells,'reviewBlanks':None})
     if not operation.allMatches:return operation
     change=operation.cells[0]
     # Validate the anchor and replacement before looking for other matching records.
@@ -155,7 +186,7 @@ def apply_operation(project,operation,replay=False,place_after_source=True):
     if op.destination=='new':
         if not text(op.name):raise ValueError('Enter the new field name.')
         if any(text(label(item,op.language))==text(op.name) for item in questions.values()):raise ValueError('A field already uses this name.')
-        q=deepcopy(source);q.update(id=identity('local_field_',op.field,op.name),name=text(op.name),labels={op.language:text(op.name)},localDerived=True,derivedFrom=source['id'],order=len(questions))
+        q=deepcopy(source);q.update(id=identity('local_field_',op.field,op.name),name=text(op.name),labels={op.language:text(op.name)},localDerived=True,required='',derivedFrom=source['id'],order=len(questions))
         if q['kind']=='text':q['kind']='category';q['type']='select_one local'
         if place_after_source:
             ordered=project['form']['questions']
@@ -247,10 +278,16 @@ def edit_preview(raw,request):
     if request.revision!=revision(raw):raise ValueError('The data changed. Reload this table and review your edit again.')
     before=effective_project(raw);operation=resolve_operation(before,request.operation)
     # Validate the full pipeline, including dependent calculations.
-    candidate=deepcopy(raw);candidate.setdefault('dataEdits',{}).setdefault('history',[]).append({'operation':operation.model_dump(),'inheritSourceSettings':True})
+    candidate=deepcopy(raw)
+    if operation.cells or operation.kind=='answers':candidate.setdefault('dataEdits',{}).setdefault('history',[]).append({'operation':operation.model_dump(),'inheritSourceSettings':True})
     after=effective_project(candidate)
     changed=sum(a['values']!=b['values'] for a,b in zip(before['records'],after['records']))
-    signature=hashlib.sha256(json.dumps([request.revision,request.operation.model_dump()],sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    evidence=[request.revision,request.operation.model_dump()]
+    if request.operation.reviewBlanks:
+        connections={key:[cfg.get('connectionSource','automatic'),cfg.get('connectionRules')] for key,cfg in raw.get('settings',{}).get('questions',{}).items() if cfg.get('connectionSource','automatic')!='automatic' or cfg.get('connectionRules')}
+        from .kobo_connections import semantic_form
+        evidence.extend([semantic_form(before['form']),before['records'],before.get('conditionalReview',{}),connections,[(c.record,c.field) for c in operation.cells]])
+    signature=hashlib.sha256(json.dumps(evidence,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
     field=request.operation.field
     created=next((q['id'] for q in after['form']['questions'] if q['id'] not in {v['id'] for v in before['form']['questions']}),field)
     settings=deepcopy(raw.get('settings',{}));filter_changes=remap_merge_filters(settings,request.operation,after)
@@ -262,7 +299,7 @@ def edit_preview(raw,request):
     for definition in settings.get('indicators',[]):
         issues=indicator_issues(after,IndicatorDefinition.model_validate(definition))
         if issues:impacts.append(definition['name']+': review indicator scoring after this change.')
-    return {'impacts':impacts,'revision':revision(raw),'signature':signature,'affectedRecords':changed,'matchingRecords':len(operation.cells) if request.operation.allMatches else None,'field':created,'options':choices_for(after,created,request.operation.language) if created else [],'beforeOptions':choices_for(before,field,request.operation.language) if field else []}
+    return {'impacts':impacts,'revision':revision(raw),'signature':signature,'affectedRecords':len(operation.cells) if request.operation.reviewBlanks else changed,'matchingRecords':len(operation.cells) if request.operation.allMatches or request.operation.reviewBlanks else None,'field':created,'options':choices_for(after,created,request.operation.language) if created else [],'beforeOptions':choices_for(before,field,request.operation.language) if field else []}
 
 
 def commit_edit(store,pid,request=None,undo=False):
@@ -270,17 +307,29 @@ def commit_edit(store,pid,request=None,undo=False):
         db.execute('BEGIN IMMEDIATE')
         row=db.execute('SELECT payload,settings FROM projects WHERE id=?',(pid,)).fetchone()
         if not row:raise KeyError('Project not found.')
-        raw=json.loads(row[0]);edits=raw.setdefault('dataEdits',{'revision':0,'history':[]})
+        raw=json.loads(row[0])
+        review_context=None
+        if not undo and request.operation.reviewBlanks:
+            from .kobo_required import recover_required
+            form_raw=bytes(db.execute('SELECT form FROM projects WHERE id=?',(pid,)).fetchone()[0])
+            raw=recover_required(raw,form_raw)
+            from .kobo_connection_setup import hydrate_connections
+            review_context=hydrate_connections({**raw,'settings':json.loads(row[1])},form_raw)
+            from .kobo_shared_dependencies import annotate as shared_connections
+            from .kobo_question_conditions import annotate as local_connections
+            review_context=local_connections(shared_connections(review_context))
+        edits=raw.setdefault('dataEdits',{'revision':0,'history':[]})
         if undo:
             if request.revision!=revision(raw):raise ValueError('The data changed. Reload before undoing.')
             last=next((b for b in reversed(edits['history']) if not b.get('undone')),None)
             if not last:raise ValueError('There is no local edit to undo.')
             last['undone']=True
         else:
-            preview=edit_preview(raw,request)
+            preview=edit_preview(review_context if request.operation.reviewBlanks else raw,request)
             if request.signature and preview['signature']!=request.signature:raise ValueError('Review this edit again before applying.')
-            if (request.operation.kind=='answers' or request.operation.allMatches) and not request.signature:raise ValueError('Preview the answer changes before applying.')
-            operation=resolve_operation(effective_project(raw),request.operation)
+            if (request.operation.kind=='answers' or request.operation.allMatches or request.operation.reviewBlanks) and not request.signature:raise ValueError('Preview the answer changes before applying.')
+            if request.operation.reviewBlanks and not preview['affectedRecords']:raise ValueError('No eligible blank rows remain in this review.')
+            operation=resolve_operation(effective_project(review_context if request.operation.reviewBlanks else raw),request.operation)
             edits['history'].append({'id':uuid.uuid4().hex,'at':datetime.now(timezone.utc).isoformat(),'operation':operation.model_dump(),'affectedRecords':preview['affectedRecords'],'inheritSourceSettings':True})
         effective=effective_project(raw)
         settings=json.loads(row[1])

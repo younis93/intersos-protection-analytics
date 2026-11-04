@@ -8,11 +8,9 @@ from backend.test_kobo_preview import preview_client
 def test_missing_is_a_check_and_review_never_changes_data(sample):
     project = sample[0]; before = copy.deepcopy(project)
     result = quality_review(project, KoboSettings())
-    missing = next(c for c in result.checks if c.id == 'missing:group/needs')
-    assert missing.severity == 'check' and missing.count == 1 and missing.total == 3
-    assert 'skip' in missing.explanation
-    assert not any('respondent_name' in c.id for c in result.checks)
-    assert result.affected == 1 and project == before
+    assert not any(c.id.startswith('missing:') for c in result.checks)
+    assert result.affected == 0 and project == before
+
 
 
 def test_invalid_values_filters_and_pagination(sample):
@@ -37,7 +35,7 @@ def test_possible_duplicates_ignore_identity_and_metadata_and_count_unique_recor
     result = quality_review(project, KoboSettings(), check_id='duplicates')
     assert result.matched == 2 and all('Private' not in row.answer+row.reason for row in result.rows)
     assert next(c for c in result.checks if c.id == 'duplicates').severity == 'check'
-    assert result.affected == 3
+    assert result.affected == 2
 
 
 def test_repeat_links_and_duplicate_entries_are_checked_within_parent(sample):
