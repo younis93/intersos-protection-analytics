@@ -19,6 +19,8 @@ import './workspaceCardMotion.css';
 import {AnimatedSectionIcon} from './AnimatedNavigationIcon';
 import {HomeRiveAvatar} from './HomeRiveAvatar';
 import ProcessingBackground from './ProcessingBackground';
+import {mountHomeCardRefraction} from './homeCardRefraction';
+import './homeCardGlass.css';
 import {readStartupPage,saveStartupPage,STARTUP_PAGE_LABELS,type StartupPage} from './startupPage';
 
 const UPDATE_CHECK_INTERVAL_MS=6*60*60*1000;
@@ -38,6 +40,11 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
   });
   const [fullscreen,setFullscreen]=useState(false);
   const [halloween,setHalloween]=useState(false);
+  const glassCards=useRef<HTMLDivElement>(null);
+  const showCardGlass=!halloween&&(theme==='glass-light'||theme==='glass-dark');
+  useEffect(()=>{
+    if(showCardGlass&&glassCards.current)return mountHomeCardRefraction(glassCards.current);
+  },[showCardGlass]);
   const [halloweenTransition,setHalloweenTransition]=useState<boolean|null>(null),transitionGuard=useRef(false);
   const burnAudio=useRef<ReturnType<typeof createBurnAudio>|null>(null);
   useEffect(()=>()=>{burnAudio.current?.dispose()},[]);
@@ -114,7 +121,7 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
         </div>
         <span>Iraq Data Analysis</span>
       </header>
-      <div className="workspace-cards">{workspaces.filter(x=>x.enabled).map((workspace,index)=>{const Icon=workspace.icon;return <a key={workspace.id} href={`#${workspace.route}`} className={`workspace-card workspace-${workspace.accent}`} onPointerEnter={()=>{if(workspace.id==='kobo')setKoboIconMotion(value=>value+1)}} onFocus={()=>{if(workspace.id==='kobo')setKoboIconMotion(value=>value+1)}} style={{'--card-index':index} as React.CSSProperties}><span className="workspace-card-glow"/><span className="workspace-icon">{workspace.id==='kobo'?<AnimatedSectionIcon key={koboIconMotion} Icon={ChartColumnIncreasing} iconStyle="chart-column-increasing" size={28}/>:<Icon/>}</span><span className="workspace-badge">{workspace.badge}</span><strong>{workspace.label}</strong><p>{workspace.description}</p><span className="workspace-enter">Enter workspace <ArrowRight/></span></a>})}</div>
+      <div ref={glassCards} className={`workspace-cards${showCardGlass?' home-card-glass':''}`}>{workspaces.filter(x=>x.enabled).map((workspace,index)=>{const Icon=workspace.icon;return <a key={workspace.id} href={`#${workspace.route}`} className={`workspace-card workspace-${workspace.accent}`} onPointerEnter={()=>{if(workspace.id==='kobo')setKoboIconMotion(value=>value+1)}} onFocus={()=>{if(workspace.id==='kobo')setKoboIconMotion(value=>value+1)}} style={{'--card-index':index} as React.CSSProperties}><span className="workspace-card-glow"/><span className="workspace-icon">{workspace.id==='kobo'?<AnimatedSectionIcon key={koboIconMotion} Icon={ChartColumnIncreasing} iconStyle="chart-column-increasing" size={28}/>:<Icon/>}</span><span className="workspace-badge">{workspace.badge}</span><strong>{workspace.label}</strong><p>{workspace.description}</p><span className="workspace-enter">Enter workspace <ArrowRight/></span></a>})}</div>
 
     </section>
     <footer className="welcome-footer" inert={homeLocked}><span>Designed for clear, local and decision-ready legal data review.</span><button type="button" className="designer-unlock" onClick={toggleAvatar} aria-pressed={avatarRevealed} aria-label={`${avatarRevealed?'Hide':'Reveal'} the cartoon boy`}>Designed by <strong>Younis Jamal</strong></button></footer>
