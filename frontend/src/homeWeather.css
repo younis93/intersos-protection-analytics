@@ -1,0 +1,149 @@
+.welcome-page .home-weather-sky,
+.welcome-page .home-weather-surface {
+  display: block;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.welcome-page .welcome-home-actions .fullscreen-button {
+  position: relative;
+}
+
+.welcome-page .home-logo-weather-border {
+  position: absolute;
+  /* Visible frame bounds within the transparent INTERSOS symbol. */
+  inset: 8.6% 11.65% 11.88% 11.72%;
+  border-radius: 10%;
+  pointer-events: none;
+}
+
+.welcome-page .home-weather-sky {
+  position: fixed;
+  z-index: 0;
+}
+
+.home-snowman-strip {
+  --snowman-size: clamp(104px, 13vw, 128px);
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 32;
+  width: min(calc(100% - 16px), calc(var(--snowman-size) + 145px));
+  height: var(--snowman-size);
+  margin-inline: auto;
+  pointer-events: none;
+}
+
+.home-snowman {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: var(--snowman-size);
+  height: var(--snowman-size);
+}
+
+.home-snowman-sprite {
+  position: absolute;
+  inset: 0;
+  background-size: 600% 500%;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.home-snowman[data-facing='left'] .home-snowman-sprite {
+  transform: scaleX(-1);
+}
+
+.home-snowman button {
+  position: absolute;
+  left: 56%;
+  transform: translateX(-50%);
+  width: 44%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.home-snowman[data-animation='pickup'] button { cursor: grabbing; }
+.home-snowman[data-facing='left'] button { left: 44%; }
+.home-snowman button[data-part='hat'] { top: 5%; height: 24%; }
+.home-snowman button[data-part='face'] { top: 29%; height: 25%; }
+.home-snowman button[data-part='belly'] { top: 54%; height: 35%; }
+.home-snowman button:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+.welcome-page .home-weather-surface {
+  position: absolute;
+  z-index: 5;
+  border-radius: inherit;
+  opacity: .94;
+}
+
+@media (max-width: 760px) {
+  .welcome-page .welcome-header-compact {
+    top: -24px;
+  }
+
+  .welcome-page .welcome-home-actions .app-select-theme {
+    display: grid;
+    place-items: center;
+    padding: 0;
+  }
+
+  .welcome-page .welcome-home-actions .app-select-theme > .app-select-label {
+    display: none;
+  }
+
+  .welcome-page .welcome-home-actions .app-select-theme > .app-select-trigger {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    pointer-events: auto;
+  }
+
+  .welcome-page .welcome-home-actions .app-select-theme:focus-within {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+  }
+
+  main.welcome-page {
+    padding-top: 90px;
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-page .home-weather-sky {
+    visibility: hidden;
+  }
+
+  .welcome-page .home-weather-surface {
+    visibility: hidden;
+  }
+
+  .welcome-page[data-home-weather='rain'] :has(> .home-weather-surface) {
+    border-top-color: #6da4c9;
+  }
+
+  .welcome-page[data-home-weather='snow'] :has(> .home-weather-surface) {
+    border-top-color: #b3cfe4;
+    box-shadow: inset 0 2px 0 #e5f3ffb8, var(--shadow);
+  }
+
+  .welcome-page[data-home-weather='rain'] .home-logo-weather-border {
+    box-shadow: inset 0 2px 0 #a7dcf2;
+  }
+
+  .welcome-page[data-home-weather='snow'] .home-logo-weather-border:has(> .home-weather-surface) {
+    box-shadow: inset 0 3px 0 #f1faff;
+  }
+}

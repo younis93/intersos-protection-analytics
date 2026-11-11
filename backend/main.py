@@ -33,6 +33,7 @@ from .duplicate_exclusions import DuplicateExclusionRegistry
 from .indicator_reporting import build_indicator_report, build_indicator_workbook, build_narrative_workbook
 from .indicator_reconciliation import IndicatorMasterWorkbook, build_reconciliation_workbook, reconcile as reconcile_indicators
 from . import updater
+from .home_weather import read_home_weather
 from .import_progress import legal_import_tracker, ImportBusyError, ImportCancelled
 from .static_cache import static_cache_policy
 from .legal_page_cache import page as cache_legal_page
@@ -445,6 +446,16 @@ def health(): return {"status": "ready" if legal_store else "awaiting_source", "
 
 @app.get("/api/update/check")
 def update_check(): return updater.check()
+
+
+@app.get("/api/home/weather")
+def home_weather():
+    from fastapi.responses import JSONResponse
+    headers = {"Cache-Control": "no-store"}
+    try:
+        return JSONResponse({"mode": read_home_weather()}, headers=headers)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc), headers=headers) from exc
 
 
 @app.get("/api/update/status")

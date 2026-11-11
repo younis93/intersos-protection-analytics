@@ -1,1 +1,1 @@
-Fixes in Kobo Analysis.
+Home weather is now controlled centrally. Rain and snow can appear automatically on Home, including on the cards, dropdowns, toolbar, and INTERSOS logo. This release removes the local weather buttons.

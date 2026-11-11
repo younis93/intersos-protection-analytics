@@ -4,7 +4,7 @@ import {createGlobeRenderer,loadGlobeMap} from './homeGlobeRenderer';
 const TURN_DURATION=2400;
 const smooth=(value:number)=>value*value*value*(value*(value*6-15)+10);
 
-export function HomeLogo({children,halloween=false}:{children?:ReactNode;halloween?:boolean}){
+export function HomeLogo({children,halloween=false,frameDecoration}:{children?:ReactNode;halloween?:boolean;frameDecoration?:ReactNode}){
   const [spinning,setSpinning]=useState(false),[highlighted,setHighlighted]=useState(false),[ready,setReady]=useState(false);
   const canvas=useRef<HTMLCanvasElement>(null),renderer=useRef<ReturnType<typeof createGlobeRenderer>|undefined>(undefined);
   const initialization=useRef<Promise<void>|undefined>(undefined);
@@ -78,6 +78,7 @@ export function HomeLogo({children,halloween=false}:{children?:ReactNode;hallowe
       <span className="welcome-logo-mark"><span className="home-logo-emblem">
         <span className="home-logo-frame" aria-hidden="true"/>
         <canvas className="home-logo-earth" ref={canvas} aria-hidden="true"/>
+        {frameDecoration&&<span className="home-logo-weather-border" aria-hidden="true">{frameDecoration}</span>}
       </span></span>
       <span className="welcome-logo-word" aria-hidden="true">{'INTERSOS'.split('').map((letter,index)=><b key={index} style={{'--letter':index} as CSSProperties}>{letter}</b>)}</span>
     </span>

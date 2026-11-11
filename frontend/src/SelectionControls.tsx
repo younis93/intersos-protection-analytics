@@ -122,6 +122,7 @@ export function AppSelect({
   ariaLabel,
   searchable = false,
   preserveOrder = false,
+  decoration,
 }: {
   label: string;
   value: string;
@@ -133,6 +134,7 @@ export function AppSelect({
   ariaLabel?: string;
   searchable?: boolean;
   preserveOrder?: boolean;
+  decoration?: ReactNode;
 }) {
   const [open, setOpen] = useState(false), [search, setSearch] = useState("");
   const {root, menu} = useDropdownPosition(open, () => setOpen(false));
@@ -174,8 +176,10 @@ export function AppSelect({
       >
         <span>{displayCaption(selected)}</span><ChevronDown />
       </button>
+      {decoration}
       {open && (
         <div id={menuId} ref={menu} popover="manual" onKeyDown={dropdownMenuKey} className={`app-select-menu viewport-dropdown${variant==='theme'?' theme-dropdown':''}`} role="listbox" aria-label={`${label} options`}>
+          {decoration}
           {searchable && <label className="app-select-menu-search"><Search/><input aria-label={`Search ${label.toLowerCase()}`} autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${label.toLowerCase()}`}/></label>}
           {value&&!options.some(([option])=>option===value)&&<p className="filter-empty">{displayCaption(value)} - Unavailable</p>}
           <VirtualRows items={visibleOptions} enabled={visibleOptions.length>60} resetKey={search} initialFocusIndex={searchable?null:Math.max(0,visibleOptions.findIndex(([option])=>option===value))} render={([option, caption]) => (
