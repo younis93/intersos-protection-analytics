@@ -8,6 +8,10 @@
 
 The application also checks every six hours while it remains open. Periodic checks update the red Updates indicator without reopening the update dialog.
 
+## Home weather
+
+From the repository root, run `python scripts/set_home_weather.py rain`, `python scripts/set_home_weather.py snow`, or `python scripts/set_home_weather.py off` with GitHub CLI signed in as a repository maintainer. The command verifies the setting on the `home-weather` branch. Connected clients check it on Home entry and about once a minute while Home is visible. Weather remains active until the next command. If the branch needs to be provisioned, run `python scripts/set_home_weather.py off --initialize`.
+
 ## First installation with the self-signed certificate
 
 Starting with version 1.0.4, the setup executable contains only the public INTERSOS code-signing certificate and installs it into the current user's Root and Trusted Publishers stores after explicit confirmation. The PFX and its password remain only in GitHub Actions secrets.

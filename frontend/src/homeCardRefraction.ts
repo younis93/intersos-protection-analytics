@@ -14,7 +14,7 @@ function drawDisplacementMap(context: CanvasRenderingContext2D, width: number, h
       const y = row + 0.5 - halfHeight;
       const edgeX = Math.abs(x) - (halfWidth - radius);
       const edgeY = Math.abs(y) - (halfHeight - radius);
-      const cornerDistance = Math.hypot(Math.max(0, edgeX), Math.max(0, edgeY));
+      const cornerDistance = edgeX > 0 && edgeY > 0 ? Math.hypot(edgeX, edgeY) : Math.max(0, edgeX, edgeY);
       const depth = radius - cornerDistance - Math.min(0, Math.max(edgeX, edgeY));
       const index = (row * width + column) * 4;
       image.data[index] = 128;

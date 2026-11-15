@@ -447,19 +447,8 @@ def _chart(report, pivot, result, left, top, metrics, project, settings, totals=
     kind = result['chart']
     if result['breakdowns'] and kind in {'pie', 'donut'}: kind = 'bar'
     if kind == 'column':
-        rows = [answer for answer in result['rows'] if answer['id'] != '__blank__']
-        series_count = max(1, chart.SeriesCollection().Count)
-        decimals = result.get('percentageDecimals', 0)
-        font = appearance.get('fontSize') or 11
-        labels = appearance.get('labels', 'auto')
-        entries = [entry for answer in rows for entry in (answer.get('series', []) if result['breakdowns'] else [answer])]
-        def width(entry):
-            count = f"{entry.get('count', 0):,.0f}"
-            value = entry.get('displayPercent', entry.get('percent'))
-            percent = f'{value:.{decimals}f}%' if value is not None else '-'
-            return len(count if labels in {'count', 'auto', 'hidden'} else percent if labels == 'percent' else count + ' (' + percent + ')')
-        if len(rows) > 8 or 530 / max(1, len(rows) * series_count) * .8 < max((width(entry) for entry in entries), default=1) * font * .64 + 10:
-            kind = 'bar'
+        categories = sum(answer['id'] != '__blank__' for answer in result['rows'])
+        chart_object.Width = max(chart_object.Width, categories * 85 + 120)
     result['_excelChartKind'] = kind
     if kind == 'bar':
         chart_object.Height = max(chart_object.Height, len(result['rows']) * max(1, chart.SeriesCollection().Count) * 24 + 80)
@@ -469,8 +458,14 @@ def _chart(report, pivot, result, left, top, metrics, project, settings, totals=
     if kind == 'bar':
         chart.Axes(1).ReversePlotOrder = True
         chart.Axes(1).Crosses = 2  # xlMaximum keeps the value axis below reversed categories.
-    chart.HasTitle = True; chart.ChartTitle.Text = result['label'][:255]
-    chart.ChartTitle.Font.Name = 'Arial'; chart.ChartTitle.Font.Size = 12
+    if kind in {'column', 'bar', 'histogram'}:
+        chart.Axes(1).TickLabelSpacing = 1
+    font_family = appearance.get('fontFamily', 'Helvetica Neue')
+    chart.ChartArea.Font.Name = font_family
+    chart.HasTitle = True; chart.ChartTitle.Text = (appearance.get('title') or result['label'])[:255]
+    title_font = appearance.get('titleFont', 'inherit')
+    chart.ChartTitle.Font.Name = font_family if title_font == 'inherit' else title_font
+    chart.ChartTitle.Font.Size = appearance.get('titleSize') or 12
     legend = appearance.get('legend', 'auto')
     chart.HasLegend = (bool(result['breakdowns']) or kind in {'pie', 'donut'}) if legend == 'auto' else legend != 'hidden'
     if chart.HasLegend and legend != 'auto': chart.Legend.Position = {'top': -4160, 'bottom': -4107, 'left': -4131, 'right': -4152}[legend]

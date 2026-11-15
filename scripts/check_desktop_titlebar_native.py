@@ -46,6 +46,7 @@ def run():
         time.sleep(.5)
         assert api.get_window_state()["nativeDrag"], "WebView2 native dragging was not enabled"
         assert controller.on_native_ui(lambda native: native.webview.CoreWebView2.Settings.IsNonClientRegionSupportEnabled)
+        assert controller.on_native_ui(lambda native: native.webview.CoreWebView2.Settings.AreDefaultContextMenusEnabled)
         assert window.evaluate_js('getComputedStyle(document.querySelector(".desktop-titlebar-brand")).getPropertyValue("app-region")') == "drag"
         if "--start-maximized" in sys.argv:
             startup = geometry()
@@ -68,6 +69,22 @@ def run():
         controller.on_native_ui(move_on_same_monitor)
         assert not monitor_queries, "Normal movement queried the work area repeatedly"
         controller._frame.monitor_info = original_monitor_info
+        window.evaluate_js("window.moveResizeMarker = true")
+        def resize_and_finish(native):
+            import ctypes
+            from System.Drawing import Size
+            original = native.ClientSize
+            for step in range(1, 11):
+                native.ClientSize = Size(original.Width - step * 10, original.Height)
+            native.ClientSize = original
+            frame = controller._frame
+            send = frame._user32.SendMessageW
+            send.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+            send.restype = ctypes.c_ssize_t
+            send(frame.hwnd, 0x0232, 0, 0)  # WM_EXITSIZEMOVE
+            assert native.webview.Bounds == native.ClientRectangle
+        controller.on_native_ui(resize_and_finish)
+        assert window.evaluate_js("window.moveResizeMarker") is True
         window.evaluate_js('window.dragBridgeCalls=0;window.pywebview.api.begin_window_drag=async()=>{window.dragBridgeCalls++};document.querySelector(".desktop-titlebar-brand").dispatchEvent(new MouseEvent("mousedown",{button:0,screenX:30,screenY:15}));window.dispatchEvent(new MouseEvent("mousemove",{screenX:120,screenY:15}));window.dispatchEvent(new MouseEvent("mouseup"))')
         assert window.evaluate_js('window.dragBridgeCalls') == 0
         for _ in range(3):

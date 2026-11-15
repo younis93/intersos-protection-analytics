@@ -6,5 +6,10 @@ import './styles.css';
 import './forestTheme.css';
 import './tableSelection.css';
 const startupTheme=new URLSearchParams(window.location.search).get('appTheme');
-if(startupTheme)document.documentElement.dataset.theme=startupTheme;
+if(startupTheme&&startupTheme!=='vice-city')document.documentElement.dataset.theme=startupTheme;
+try {
+  for(const themeKey of ['app-theme','legal-platform-theme']){
+    if(localStorage.getItem(themeKey)==='vice-city')localStorage.setItem(themeKey,'glass-light');
+  }
+}catch{/* Storage may be unavailable during startup. */}
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><RootApp /></React.StrictMode>);

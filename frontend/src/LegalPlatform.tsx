@@ -179,7 +179,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
     [caseQuery, setCaseQuery] = useState(() => legalRouteFromUrl().caseId),
     [reviewCaseId, setReviewCaseId] = useState(""),
     [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("legal-sidebar-collapsed") === "true"),
-    [theme, setTheme] = useState(() => localStorage.getItem("legal-platform-theme") || localStorage.getItem("app-theme") || new URLSearchParams(window.location.search).get("appTheme") || "glass-light"),
+    [theme, setTheme] = useState(() => localStorage.getItem("legal-platform-theme") || localStorage.getItem("app-theme") || document.documentElement.dataset.theme || "glass-light"),
     [fullscreen, setFullscreen] = useState(false),
     [dataMenuOpen, setDataMenuOpen] = useState(false),
     [error, setError] = useState(""),

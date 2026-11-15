@@ -26,10 +26,11 @@ describe('shared question controls',()=>{
   expect(questionExclusionCandidate(candidate.config,candidate.mappings,'q',false).config.excludedQuestionIds).toEqual([]);
  });
  it('explicit bulk percentages replace hidden compatible fields and preserve measured fields',()=>{
-  const original={...settings,questions:{hidden:{...questionDefaults,percentageMode:'row-total' as const},sum:{...questionDefaults,calculation:{operation:'sum' as const,field:'value',decimals:2}},average:{...questionDefaults,calculation:{operation:'average' as const,field:'value',decimals:2}}}};
+  const original={...settings,questions:{hidden:{...questionDefaults,percentageMode:'row-total' as const,percentageBase:'parent' as const,connectedPercentageMode:'keep-original' as const,percentageParent:'parent'},sum:{...questionDefaults,calculation:{operation:'sum' as const,field:'value',decimals:2}},average:{...questionDefaults,calculation:{operation:'average' as const,field:'value',decimals:2}}}};
   const changed=replacePercentageBasis(original,['hidden','sum','average','future'],'breakdown-group');
   expect(changed.percentageDefault).toBe('breakdown-group');
   expect(changed.questions.hidden.percentageMode).toBe('breakdown-group');
+  expect(changed.questions.hidden).toMatchObject({percentageBase:'question',connectedPercentageMode:'adjust',percentageParent:'parent'});
   expect(changed.questions.sum.percentageMode).toBe('breakdown-group');
   expect(changed.questions.average).toBe(original.questions.average);
   expect(sharedPercentageBasis(changed,['hidden','sum','future'])).toBe('breakdown-group');

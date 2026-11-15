@@ -18,6 +18,14 @@ it('explains the selected base and hidden-answer behavior in both languages',()=
  const invalid={...result,respondentBasis:{...result.respondentBasis!,issue:'missing-parent',denominator:null}};
  expect(renderToStaticMarkup(<KoboBasisSummary result={invalid} language="en"/>)).toContain('Percentage base unavailable');
 });
+it('describes an ignored connection using the question’s own respondent base',()=>{
+ const ignored={...result,connections:{...result.connections!,effectiveTree:null},
+  respondentBasis:{...result.respondentBasis!,kind:'question' as const,hiddenMode:'keep-original' as const,denominator:5}};
+ const html=renderToStaticMarkup(<KoboBasisSummary result={ignored} language="en"/>);
+ expect(html).toContain('answered this question');
+ expect(html).toContain('All respondents');
+ expect(html).not.toContain('Original parent base');
+});
 it('offers explicit parent selection while preserving an unavailable selection for repair',()=>{
  const value={percentageBase:'parent',percentageParent:'removed'} as KoboQuestionSettings;
  const html=renderToStaticMarkup(<KoboConnectionControls result={result} project={project} value={value} language="en" onChange={()=>{}}/>);
@@ -100,16 +108,18 @@ it('shows respondent switches only for active connections or hidden answers',()=
  const ignored={...result,connections:{...result.connections!,effectiveTree:null,conditions:result.connections!.conditions.map(c=>({...c,status:'ignored'}))}};
  expect(showRespondentPercentageControls(ignored,settings)).toBe(false);
  for(const percentageMode of ['grand-total','row-total','column-total','breakdown-group'] as const){
-  expect(showRespondentPercentageControls({...result,percentageMode},{...settings,hiddenAnswers:['a']})).toBe(false);
+  expect(showRespondentPercentageControls({...result,percentageMode},settings)).toBe(false);
+  expect(showRespondentPercentageControls({...result,percentageMode},{...settings,hiddenAnswers:['a']})).toBe(true);
   const html=renderToStaticMarkup(<KoboConnectionControls result={result} project={project} value={{...settings,percentageMode}} language="en" onChange={()=>{}}/>);
-  expect(html).not.toContain('Adjust %');
+  expect(html).not.toContain('kobo-answer-percentage-buttons');
  }
  for(const candidate of [plain,ignored]){
   const html=renderToStaticMarkup(<KoboConnectionControls result={candidate} project={project} value={settings} language="en" onChange={()=>{}}/>);
-  expect(html).not.toContain('Adjust %');
+  expect(html).not.toContain('kobo-answer-percentage-buttons');
  }
  const hidden=renderToStaticMarkup(<KoboConnectionControls result={plain} project={project} value={{...settings,hiddenAnswers:['a']}} language="en" onChange={()=>{}}/>);
- expect(hidden).toContain('Adjust %');
+ expect(hidden).toContain('Visible respondents');
+ expect(hidden).toContain('All respondents');
  expect(hidden).not.toContain('Original base question');
 });
 
@@ -121,11 +131,10 @@ it('selecting % of Respondents alone does not reveal respondent switches',()=>{
  for(const candidate of [plain,ignored]){
   expect(showRespondentPercentageControls(candidate,settings)).toBe(false);
   const html=renderToStaticMarkup(<KoboConnectionControls section="percentages" result={candidate} project={project} value={settings} language="en" onChange={()=>{}}/>);
-  expect(html).not.toContain('Adjust %');
-  expect(html).not.toContain('Keep original %');
- }
+  expect(html).not.toContain('kobo-answer-percentage-buttons');
+   }
  expect(showRespondentPercentageControls(result,settings)).toBe(true);
  const connected=renderToStaticMarkup(<KoboConnectionControls section="percentages" result={result} project={project} value={settings} language="en" onChange={()=>{}}/>);
- expect(connected).toContain('Adjust %');
- expect(connected).toContain('Keep original %');
+ expect(connected).toContain('Follow-up respondents');
+ expect(connected).toContain('Parent respondents');
 });

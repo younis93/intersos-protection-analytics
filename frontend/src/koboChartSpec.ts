@@ -2,7 +2,7 @@ import {projectKoboChart} from './koboChartDensity';
 import {measured} from './koboMeasures';
 import {measureChartSpec} from './koboMeasureChartSpec';
 import {advancedChartSpec} from './koboAdvancedChartSpec';
-import {displayPercent,formatPercent,percentageDecimals} from './koboPercentages';
+import {displayPercent,formatPercent,percentageDecimals,type PercentageValue} from './koboPercentages';
 import {resultWithColors,markColor} from './koboMarkColors';
 import type {Data,Layout} from 'plotly.js';
 import type {Theme} from './types';
@@ -11,31 +11,44 @@ import {koboThemeColor} from './koboThemeColors';
 import {chartGrid,chartInk} from './ChartPrimitives';
 import {chartCaption} from './koboChartLabels';
 import {barValueLabel,labelInk} from './koboDataLabels';
-import {chartLabel,resolveAppearance} from './koboAppearance';
-import {koboChartRows,koboScreenChartRows,isDenseKoboChart,readableKoboChartType,type KoboChartPanel} from './koboChartDensity';
+import {chartLabel,koboChartFontFamily,resolveAppearance,titleSpacingPoints} from './koboAppearance';
+import {koboScreenChartRows,isDenseKoboChart,readableKoboChartType,type KoboChartPanel} from './koboChartDensity';
 
 export function chartSpec(result:KoboChartPanel,language:string,exporting=false,themeOverride?:Theme,containerWidth=900,colorSettings?:KoboQuestionSettings):{data:Data[];layout:Partial<Layout>}{
  const spec=baseChartSpec(result,language,exporting,themeOverride,containerWidth,colorSettings);
- const title=result.appearance?.title?.trim();
- if(!title)return spec;
  const appearance=resolveAppearance(result.appearance);
+ spec.layout.font={...spec.layout.font,family:koboChartFontFamily(appearance.fontFamily,language)};
+ const title=appearance.title.trim();
+ if(!title)return spec;
  const font=(appearance.titleSize||appearance.fontSize||16)*(exporting?2:1),width=Number(spec.layout.width)||(exporting?1300:containerWidth);
  let text=chartCaption(title,Math.max(10,(width-48)/(font*.6)),20);
  const lines=text.split('<br>').length;
  if(appearance.titleBold)text=`<b>${text}</b>`;
  if(appearance.titleItalic)text=`<i>${text}</i>`;
  if(appearance.titleUnderline)text=`<u>${text}</u>`;
- const extra=Math.ceil(font*1.3*lines+24),height=Number(spec.layout.height)||440;
- return {...spec,layout:{...spec.layout,height:height+extra,margin:{...spec.layout.margin,t:(spec.layout.margin?.t||0)+extra},title:{text,x:appearance.titleAlign==='left'?0:appearance.titleAlign==='right'?1:.5,xanchor:appearance.titleAlign,y:.99,yanchor:'top',font:{size:font,...(appearance.titleFont!=='inherit'?{family:appearance.titleFont}:{}),...(appearance.titleColor?{color:appearance.titleColor}:{})}},...(spec.layout.legend?.yref==='container'&&result.appearance?.legend==='top'?{legend:{...spec.layout.legend,y:.99-extra/(height+extra)}}:{})}};
+ const gap=titleSpacingPoints(appearance.titleSpacing)*4/3*(exporting?2:1);
+ const titleBottom=Math.ceil(font*1.3*lines)+(exporting?20:12);
+ const baseTop=spec.layout.margin?.t??0;
+ const topLegend=Boolean(spec.layout.showlegend&&appearance.legend==='top');
+ const extra=topLegend?titleBottom+gap:Math.max(0,titleBottom+gap-baseTop);
+ const top=baseTop+extra,height=(Number(spec.layout.height)||440)+extra;
+ return {...spec,layout:{
+  ...spec.layout,height,margin:{...spec.layout.margin,t:top},
+  title:{text,x:appearance.titleAlign==='left'?0:appearance.titleAlign==='right'?1:.5,xanchor:appearance.titleAlign,xref:'paper',
+   y:1-(topLegend?titleBottom:top-gap)/height,yref:'container',yanchor:'bottom',
+   font:{size:font,...(appearance.titleFont!=='inherit'?{family:appearance.titleFont==='Helvetica Neue'?koboChartFontFamily(appearance.titleFont,language):appearance.titleFont}:{}),...(appearance.titleColor?{color:appearance.titleColor}:{})}},
+  ...(topLegend?{legend:{...spec.layout.legend,yref:'container',yanchor:'top',y:.99-extra/height}}:{})
+ }};
 }
 
 function baseChartSpec(result:KoboChartPanel,language:string,exporting=false,themeOverride?:Theme,containerWidth=900,colorSettings?:KoboQuestionSettings):{data:Data[];layout:Partial<Layout>}{
  result=projectKoboChart(result);
  if(measured(result))return measureChartSpec(result,language,exporting);
- const appearance=resolveAppearance(result.appearance),shown=exporting?koboChartRows(result):koboScreenChartRows(result);
- const dense=!exporting&&isDenseKoboChart(result);
- const type=dense?'bar':readableKoboChartType(result,exporting,containerWidth);
+ const appearance=resolveAppearance(result.appearance),shown=koboScreenChartRows(result);
+ const dense=isDenseKoboChart(result);
+ const type=dense?'bar':readableKoboChartType(result);
  const horizontal=type==='bar',pie=type==='pie'||type==='donut',percentage=appearance.metric==='percent';
+ const fullExportCaptions=exporting&&!pie;
  const value=(count:number,percent:number|null|undefined)=>percentage?percent??0:count;
  const theme=themeOverride||(typeof document!=='undefined'?document.documentElement.dataset.theme||'glass-light':'glass-light') as Theme;
  if(colorSettings)result={...result,...resultWithColors(result,colorSettings,theme)};
@@ -52,11 +65,13 @@ function baseChartSpec(result:KoboChartPanel,language:string,exporting=false,the
  const categoryWidth=horizontal?Math.min(exporting?460:300,width*.38):exporting?90:55;
  const legendWidth=Math.min(width*.22,exporting?240:180);
  const left=categoryWidth+(showlegend&&legendLeft?legendWidth:0),right=showlegend&&legendRight?legendWidth:Math.max(25,labelFont*2);
- const columnWidth=!exporting&&type==='column'?Math.max(width,shown.length*Math.max(72,(stacked?1:seriesCount)*(labelFont*3+16))+left+right):undefined;
- const usable=Math.max(80,(columnWidth||width)-left-right),stride=horizontal?1:Math.max(1,Math.ceil(shown.length*(font*5.5+12)/usable));
+ const captionSpacing=font*5.5+12;
+ const columnWidth=type==='column'||(exporting&&type==='line')
+  ?Math.max(width,shown.length*Math.max(captionSpacing,72,(stacked?1:seriesCount)*(labelFont*3+16))+left+right):undefined;
+ const usable=Math.max(80,(columnWidth||width)-left-right),stride=fullExportCaptions||horizontal||type==='column'?1:Math.max(1,Math.ceil(shown.length*captionSpacing/usable));
  const ticks=shown.filter((_,index)=>index%stride===0);
  const captionWidth=horizontal?categoryWidth-24:usable/Math.max(1,ticks.length)-12;
- const captions=ticks.map(row=>chartCaption(row.label,Math.min(horizontal?44:32,Math.max(5,captionWidth/(font*.57))),horizontal?5:4));
+ const captions=ticks.map(row=>chartCaption(row.label,Math.min(horizontal?44:32,Math.max(5,captionWidth/(font*.57))),fullExportCaptions?Infinity:horizontal?5:4));
  const lines=Math.max(1,...captions.map(text=>text.split('<br>').length));
  const legendFont=appearance.fontSize?appearance.fontSize*scale:exporting?24:12;
  const legendLabels=result.breakdowns.length?result.breakdowns.map(column=>column.label):pie?shown.map(row=>row.label):[result.label];
@@ -69,9 +84,10 @@ function baseChartSpec(result:KoboChartPanel,language:string,exporting=false,the
  const automaticHeight=horizontal?Math.max(exporting?650:330,shown.length*band+bottom+top):exporting?750:Math.max(360,bottom+220);
  // A requested height is a minimum for horizontal comparisons: never squeeze labels into thinner rows.
  const requestedHeight=appearance.height?Math.round(appearance.height*(exporting?1.4:1)):automaticHeight;
- const height=horizontal?Math.max(requestedHeight,automaticHeight):requestedHeight;
- const position=(row:typeof shown[number])=>!exporting&&type!=='line'?row.id:row.label;
- const categoryAxis={...(exporting||type==='line'?{}:{type:'category' as const,categoryorder:'array' as const,categoryarray:shown.map(position)}),tickmode:'array' as const,tickvals:ticks.map(position),ticktext:captions,tickangle:0,ticklabelposition:'outside' as const,ticklabelstandoff:horizontal?10:6};
+ const height=horizontal?Math.max(requestedHeight,automaticHeight):fullExportCaptions?Math.max(requestedHeight,bottom+top+220):requestedHeight;
+ const useCategoryIds=fullExportCaptions||!exporting&&type!=='line';
+ const position=(row:typeof shown[number])=>useCategoryIds?row.id:row.label;
+ const categoryAxis={...(useCategoryIds?{type:'category' as const,categoryorder:'array' as const,categoryarray:shown.map(position)}:{}),tickmode:'array' as const,tickvals:ticks.map(position),ticktext:captions,tickangle:0,ticklabelposition:'outside' as const,ticklabelstandoff:horizontal?10:6};
  const labelMode=appearance.labels==='auto'?(percentage?'percent':'count'):appearance.labels,visibleLabels=appearance.labels!=='hidden';
  const maximum=Math.max(result.chartMaximum||0,...shown.map(row=>result.breakdowns.length?(stacked?row.series?.reduce((sum,entry)=>sum+value(entry.count,entry.percent),0)||0:Math.max(0,...(row.series||[]).map(entry=>value(entry.count,entry.percent)))):value(row.count,row.percent)));
  const plotHeight=Math.max(80,height-bottom-top);
@@ -82,15 +98,16 @@ function baseChartSpec(result:KoboChartPanel,language:string,exporting=false,the
  const hoverText=(label:string,count:number|undefined,percent:number|null|undefined,breakdown?:string)=>
   `<b>${chartCaption(label,42,4)}</b>${breakdown?`<br>${chartCaption(breakdown,48,4)}`:''}<br>${language==='ar'?'# العدد':'# Count'}: <b>${count===undefined?'-':hoverNumber.format(count)}</b><br>${language==='ar'?'% النسبة':'% Share'}: <b>${formatPercent(percent,decimals,language)}</b>`;
  const data:Data[]=[];
+ const dataLabel=(entry:PercentageValue&{count:number})=>chartLabel(entry.count,displayPercent(entry),labelMode,language,decimals,appearance.zeroPercentLabels);
  if(pie){
   data.push({type:'pie',labels:shown.map(row=>row.label),values:shown.map(row=>value(row.count,row.percent)),hole:type==='donut'?.55:0,marker:{colors},sort:false,
-   textinfo:appearance.labels==='hidden'?'none':'text',text:shown.map(row=>appearance.labels==='auto'?(pieTotal&&value(row.count,row.percent)/pieTotal>=.035?`${chartCaption(row.label,24,2)}<br>${chartLabel(row.count,displayPercent(row),labelMode,language,decimals)}`:''):chartLabel(row.count,displayPercent(row),labelMode,language,decimals)),textposition:'auto',automargin:true,textfont:{size:labelFont,weight:700},insidetextfont:{color:colors.map(labelInk),size:labelFont,weight:700},outsidetextfont:{color:ink,size:labelFont,weight:700},
+   textinfo:appearance.labels==='hidden'?'none':'text',text:shown.map(row=>appearance.labels==='auto'?(pieTotal&&value(row.count,row.percent)/pieTotal>=.035?[chartCaption(row.label,24,2),dataLabel(row)].filter(Boolean).join('<br>'):''):dataLabel(row)),textposition:'auto',automargin:true,textfont:{size:labelFont,weight:700},insidetextfont:{color:colors.map(labelInk),size:labelFont,weight:700},outsidetextfont:{color:ink,size:labelFont,weight:700},
    customdata:shown.map(row=>[row.count,row.percent==null?'-':`${row.percent}%`,row.label,row.id,null]),hovertext:shown.map(row=>hoverText(row.label,row.count,displayPercent(row))),hovertemplate:'%{hovertext}<extra></extra>'} as unknown as Data);
  }else{
   const series=result.breakdowns.length?result.breakdowns:[{id:'',label:''}],indexed=shown.map(row=>new Map(row.series?.map(entry=>[entry.id,entry])));
   series.forEach(column=>{
    const entries=shown.map((row,index)=>column.id?indexed[index].get(column.id):row),values=entries.map(entry=>entry?value(entry.count,entry.percent):0);
-   const labels=entries.map((entry,index)=>entry&&(appearance.labels!=='auto'||values[index]>0)?chartLabel(entry.count,displayPercent(entry),labelMode,language,decimals):'');
+   const labels=entries.map((entry,index)=>entry&&(appearance.labels!=='auto'||values[index]>0)?dataLabel(entry):'');
    const placed=labels.map((text,index)=>barValueLabel(text,values[index],maximum,(horizontal?usable:plotHeight)*.88,thickness,labelFont,horizontal,stacked));
    const fill=shown.map(row=>markColor(result,{answer:row.id,...(column.id?{breakdown:column.id}:{})},theme));
    const contrast=Array.isArray(fill)?fill.map(labelInk):labelInk(fill);
@@ -102,10 +119,8 @@ function baseChartSpec(result:KoboChartPanel,language:string,exporting=false,the
   });
  }
  return {data,layout:{height,...(columnWidth&&columnWidth>width?{width:columnWidth}:{}),autosize:!columnWidth||columnWidth<=width,dragmode:false,
-  hovermode:'closest',hoverlabel:{bgcolor:'#17324d',bordercolor:'#577997',font:{family:'Segoe UI, Arial, sans-serif',size:13,color:'#ffffff'},align:'left',namelength:0},
-  paper_bgcolor:exporting?'#ffffff':'transparent',plot_bgcolor:exporting?'#ffffff':'transparent',font:{family:language==='ar'?'Noto Naskh Arabic, Segoe UI, sans-serif':'DM Sans, Segoe UI, sans-serif',color:ink,size:font},
+  hovermode:'closest',hoverlabel:{bgcolor:'#17324d',bordercolor:'#577997',font:{size:13,color:'#ffffff'},align:'left',namelength:0},
+  paper_bgcolor:exporting?'#ffffff':'transparent',plot_bgcolor:exporting?'#ffffff':'transparent',font:{color:ink,size:font},
   margin:{l:left,r:right,t:top,b:bottom},
   xaxis:{...axis,...(horizontal?{...metricAxis,...(visibleLabels&&maximum>0?{range:[0,maximum*1.14]}:{})}:categoryAxis)},yaxis:{...axis,autorange:horizontal?'reversed':visibleLabels&&type!=='line'&&maximum>0?false:true,...(!horizontal?{...metricAxis,...(visibleLabels&&type!=='line'&&maximum>0?{range:[0,maximum*1.14]}:{})}:categoryAxis)},barmode:appearance.bars,bargap:type==='histogram'?0:.2,bargroupgap:type==='histogram'?0:.04,showlegend,legend}};
 }
-
-export function withoutKoboChartGrid(spec:{data:Data[];layout:Partial<Layout>}){return {...spec,layout:{...spec.layout,...Object.fromEntries((['xaxis','yaxis'] as const).map(key=>[key,{...spec.layout[key],showgrid:false,zeroline:false,minor:{showgrid:false}}]))}}}

@@ -240,7 +240,6 @@ def review(project, settings, *, status='open', question='', search='', page=1, 
 
 def commit_review(store, pid, request):
     from .kobo import KoboSettings
-    from .kobo_edits import effective_project
     with store.connect() as db:
         db.execute('BEGIN IMMEDIATE')
         saved = db.execute('SELECT payload,form FROM projects WHERE id=?', (pid,)).fetchone()

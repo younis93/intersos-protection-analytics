@@ -1,1 +1,1 @@
-Fixes in Kobo Analysis.
+App Improvements

@@ -12,10 +12,16 @@ from openpyxl.utils import get_column_letter
 from .excel_export import Font, PatternFill, append_frame
 from .legal_platform import (
     DATE_HINT, EXPLORER_DATE_FORMAT, _safe_export, clean_id, display_value,
-    YEAR_MONTH, distinct_transform, filter_rows, format_excel_dates, phone_digits,
+    YEAR_MONTH, distinct_transform, filter_rows, format_excel_dates, normalize_name, phone_digits,
 )
 from .filter_selection import selection_mask, selection_value
+from .hotline_review import FIELDS as HOTLINE_FIELDS
 from .linked_filters import available_values, search_mask
+
+
+PRIMARY_PHONE = re.compile(r"0?(?:75|77|78)[0-9]{8}")
+PRIMARY_PHONE_RULE = ("A primary contact must have 10 digits starting with 75, 77, or 78, "
+                      "or 11 digits starting with 075, 077, or 078.")
 
 
 LEADING = (
@@ -60,6 +66,19 @@ def find_column(columns, *names):
     return None
 
 
+def sampling_phone_key(value):
+    digits = phone_digits(value)
+    return digits[-10:] if PRIMARY_PHONE.fullmatch(digits) else ""
+
+
+def completed_representation(frame, fields):
+    status = frame[fields["status"]].fillna("").map(text)
+    service = frame[fields["type"]].fillna("").map(text)
+    completed = status.str.match(r"^completed(?:\b|$)") | status.isin(["اكتملت", "مكتملة", "مكتمل"])
+    representation = service.str.match(r"^legal representation(?:\b|$)") | service.isin(["تمثيل", "التمثيل القانوني", "تمثيل قانوني"])
+    return frame.loc[completed & representation]
+
+
 def prepare(frame):
     if frame is None:
         return None, {}, "Sampling is unavailable because Legal Services has not been imported."
@@ -72,21 +91,51 @@ def prepare(frame):
     missing = [label for key, label in required.items() if not fields[key]]
     if missing:
         return None, fields, "Sampling is unavailable. Missing source fields: " + ", ".join(missing) + "."
-    status = frame[fields["status"]].fillna("").map(text)
-    service = frame[fields["type"]].fillna("").map(text)
-    completed = status.str.match(r"^completed(?:\b|$)") | status.isin(["اكتملت", "مكتملة", "مكتمل"])
-    representation = service.str.match(r"^legal representation(?:\b|$)") | service.isin(["تمثيل", "التمثيل القانوني", "تمثيل قانوني"])
-    phones = frame[fields["phone"]].map(phone_digits)
-    eligible = frame.loc[completed & representation & phones.str.fullmatch(r"(?:77|78|75)[0-9]{8}")].copy().reset_index(drop=True)
+    candidates = completed_representation(frame, fields)
+    phones = candidates[fields["phone"]].map(sampling_phone_key)
+    eligible = candidates.loc[phones.ne("")].reset_index(drop=True)
     leading = [fields[key] for key, *_ in LEADING if fields[key]]
     columns = list(dict.fromkeys(leading + list(frame.columns)))
     return eligible[columns], fields, ""
 
 
-def pipeline(frame, filters=None, search="", removeDuplicateBeneficiaryIds=False, removeDuplicateContacts=False, facets=False, columnFilters=None):
+def hotline_fields(hotline, service_name):
+    if hotline is None:
+        return None, None, "Import Hotline data to match contacts."
+    if service_name is None:
+        return None, None, "Legal Services is missing the Name field."
+    caller = find_column(hotline.columns, *HOTLINE_FIELDS["callerName"])
+    if caller is None:
+        return None, None, "Hotline data is missing the Name of the caller field."
+    creator = find_column(hotline.columns, "Created By", "Original Created By")
+    return caller, creator, ""
+
+
+def name_key(value):
+    if pd.isna(value):
+        return ""
+    return " ".join(filter(None, (normalize_name(word) for word in text(value).split())))
+
+
+def operator_values(hotline, creator):
+    return hotline[creator].fillna("").astype(str).str.strip()
+
+
+def pipeline(frame, filters=None, search="", removeDuplicateBeneficiaryIds=False, removeDuplicateContacts=False,
+             facets=False, columnFilters=None, *, hotline=None, hotlineOnly=False, hotlineOperator=""):
     base, fields, reason = prepare(frame)
     if reason:
         return None, fields, {}, reason
+    if hotlineOnly or hotlineOperator:
+        caller, creator, _ = hotline_fields(hotline, fields["name"])
+        if caller is None or (hotlineOperator and creator is None):
+            base = base.iloc[:0]
+        else:
+            calls = hotline[caller]
+            if hotlineOperator:
+                calls = calls.loc[operator_values(hotline, creator).eq(hotlineOperator)]
+            names = set(distinct_transform(calls, name_key)) - {"", None}
+            base = base.loc[distinct_transform(base[fields["name"]], name_key).fillna("").isin(names)]
     filters = filters or {}
     searched = search_mask(base, search)
     selected = base.loc[searched]
@@ -108,7 +157,9 @@ def pipeline(frame, filters=None, search="", removeDuplicateBeneficiaryIds=False
     priority = selected.loc[dates.sort_values(ascending=False, kind="stable", na_position="last").index]
     seen_ids, seen_phones, retained = set(), set(), []
     if removeDuplicateBeneficiaryIds or removeDuplicateContacts:
-        for index, beneficiary, phone in zip(priority.index, priority[fields["beneficiary"]].map(clean_id), priority[fields["phone"]].map(phone_digits)):
+        beneficiaries = priority[fields["beneficiary"]].map(clean_id)
+        phones = priority[fields["phone"]].map(sampling_phone_key)
+        for index, beneficiary, phone in zip(priority.index, beneficiaries, phones):
             if removeDuplicateBeneficiaryIds and beneficiary and beneficiary in seen_ids:
                 continue
             if removeDuplicateContacts and phone in seen_phones:
@@ -134,15 +185,33 @@ def pipeline(frame, filters=None, search="", removeDuplicateBeneficiaryIds=False
     return selected, fields, options, ""
 
 
-def table(frame, *, page=1, pageSize=100, **query):
-    selected, fields, options, reason = pipeline(frame, facets=True, **query)
+def table(frame, *, page=1, pageSize=100, hotline=None, **query):
+    selected, fields, options, reason = pipeline(frame, facets=True, hotline=hotline, **query)
     total = 0 if selected is None else len(selected)
+    _, creator, match_reason = hotline_fields(hotline, fields.get("name"))
+    operators = sorted(set(operator_values(hotline, creator)) - {""}, key=lambda value: (value.casefold(), value)) if creator else []
+    operator_reason = match_reason or ("Hotline data is missing the Created By field." if creator is None else
+                                       "Hotline data has no recorded creators." if not operators else "")
+    empty_reason = ""
+    if selected is not None and not total:
+        candidates = completed_representation(frame, fields)
+        phones = candidates[fields["phone"]].fillna("").astype(str).str.strip()
+        if len(candidates) and phones.eq("").all():
+            empty_reason = (f"All {len(candidates):,} completed Legal Representation records have a blank primary contact number. "
+                            + PRIMARY_PHONE_RULE)
+        elif query.get("hotlineOnly") or query.get("hotlineOperator"):
+            empty_reason = "No eligible Legal Services records match a hotline caller name with these filters."
+        else:
+            empty_reason = ("No eligible Legal Services records match these settings. "
+                            f"Sampling requires completed Legal Representation. {PRIMARY_PHONE_RULE}")
     page = min(page, max(1, (total + pageSize - 1) // pageSize))
     rows = [] if selected is None else [{column: display_value(value) for column, value in row.items()}
                                       for row in selected.iloc[(page - 1) * pageSize:page * pageSize].to_dict("records")]
     return {"available": not bool(reason), "reason": reason, "columns": [] if selected is None else list(selected.columns),
             "rows": rows, "total": total, "page": page, "pageSize": pageSize, "filterOptions": options,
-            "quickFilters": [fields[key] for key in ("project", "location", "completed") if fields.get(key)]}
+            "quickFilters": [fields[key] for key in ("project", "location", "completed") if fields.get(key)],
+            "emptyReason": empty_reason, "hotlineMatchReason": match_reason,
+            "hotlineOperatorReason": operator_reason, "hotlineOperators": operators}
 
 
 def export(frame, **query):

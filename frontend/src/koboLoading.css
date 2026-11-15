@@ -18,6 +18,17 @@
 .kobo-skeleton-header .count{width:92px;height:40px}
 .kobo-skeleton-layout .actions{width:240px;height:42px}
 .kobo-skeleton-panel{padding:22px;border:1px solid var(--line);border-radius:18px;background-color:var(--bg);background-image:linear-gradient(var(--panel-strong),var(--panel-strong));min-width:0}
+.kobo-menu-skeleton-toolbar>.app-search-field,.kobo-menu-skeleton-toolbar>.app-select{height:48px;border:0;border-radius:12px}
+.kobo-menu-skeleton-toolbar>.kobo-project-count{width:64px;height:18px}
+.kobo-menu-skeleton-card{pointer-events:none}
+.kobo-menu-skeleton-card .kobo-project-card-icon{height:44px;border:0}
+.kobo-menu-skeleton-card .kobo-project-card-title{width:75%;height:24px}
+.kobo-menu-skeleton-card .kobo-project-description{width:65%;height:17px}
+.kobo-menu-skeleton-card .kobo-project-updated{width:90%;height:14px}
+.kobo-menu-skeleton-card .kobo-project-card-actions{margin-top:0}
+.kobo-menu-skeleton-card .kobo-project-card-actions>i{height:40px;border-radius:10px}
+.kobo-menu-skeleton-card .kobo-project-card-actions>i:first-child{flex:1}
+.kobo-menu-skeleton-card .kobo-project-card-actions>i:last-child{flex:0 0 40px}
 .kobo-skeleton-layout .heading{width:210px;height:18px}
 .kobo-skeleton-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:22px}
 .kobo-skeleton-fields i{height:42px}

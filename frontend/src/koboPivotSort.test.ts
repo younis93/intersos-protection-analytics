@@ -1,13 +1,62 @@
 import {describe,expect,it} from 'vitest';
-import {defaultPivotSort,resultWithPivotSort,sortPivotRows,type PivotSort} from './koboPivotSort';
+import {defaultPivotSort,resultWithPivotColumns,resultWithPivotOrdering,resultWithPivotSort,sortPivotRows,type PivotSort} from './koboPivotSort';
 import type {KoboResult,KoboRow} from './koboTypes';
 import {chartSpec} from './koboChartSpec';
+import {koboTableData} from './koboTableData';
 
 const row=(label:string,count:number,percent:number|null,series?:KoboRow['series']):KoboRow=>({id:label,label,count,percent,series});
 const result={rows:[row('Answer 10',9,90,[{id:'f',count:1,percent:10}]),row('Answer 2',10,100,[{id:'f',count:8,percent:80}]),row('Missing',2,null)],breakdowns:[{id:'f',label:'Female',denominator:10}]};
 const sort=(metric:PivotSort['metric'],direction:PivotSort['direction']='desc',series?:string[]):PivotSort=>({id:metric,label:metric,metric,direction,series});
 
 const chartResult=():KoboResult=>({...result,id:'q',name:'q',label:'Answers',kind:'category',chart:'bar',group:'',repeat:'',denominator:21,total:21,missing:0,statistics:{},percentageBasis:'Answered',colors:{}});
+
+it('sorts rows and column totals independently while keeping grouped headers together',()=>{
+ const source=chartResult();
+ source.breakdowns=[
+  {id:'a10',label:'Group A / 10',values:['a','10'],labels:['Group A','10'],denominator:22,totalCount:1,totalPercent:null},
+  {id:'a2',label:'Group A / 2',values:['a','2'],labels:['Group A','2'],denominator:22,totalCount:8,totalPercent:20},
+  {id:'a1',label:'Group A / 1',values:['a','1'],labels:['Group A','1'],denominator:22,totalCount:8,totalPercent:90},
+  {id:'b1',label:'Group B / 1',values:['b','1'],labels:['Group B','1'],denominator:22,totalCount:99,totalPercent:100},
+ ];
+ for(const [metric,direction,expected] of [
+  ['count','desc',['a2','a1','a10','b1']],
+  ['percent','desc',['a1','a2','a10','b1']],
+  ['percent','asc',['a2','a1','a10','b1']],
+  ['name','asc',['a1','a2','a10','b1']],
+  ['name','desc',['a10','a2','a1','b1']],
+ ] as const){
+  const next=resultWithPivotOrdering(source,{pivotSort:sort('answer','asc'),pivotColumnSort:{metric,direction}},'both','en');
+  expect(next.rows.map(row=>row.id)).toEqual(['Answer 2','Answer 10','Missing']);
+  expect(next.breakdowns.map(column=>column.id)).toEqual(expected);
+ }
+});
+
+it('falls back for a hidden column used to sort rows or a missing answer used to sort columns',()=>{
+ const source=chartResult();
+ source.breakdowns=[...source.breakdowns,{id:'m',label:'Male',denominator:10}];
+ const sorted=resultWithPivotOrdering(source,{pivotSort:sort('count','asc',['f']),hiddenPivotColumns:['f'],
+  pivotColumnSort:{metric:'count',direction:'desc',answer:'missing-id'}},'both','en');
+ expect(sorted.rows[0].id).toBe('Answer 2');
+ expect(sorted.breakdowns.map(column=>column.id)).toEqual(['m']);
+});
+
+it('sorts columns numerically by a single answer and keeps hidden columns out of the chart and copied table',()=>{
+ const breakdowns=['Anbar','Baghdad','Erbil','Ninewa'].map(label=>({id:label,label,denominator:40}));
+ const answer=row('Unsafe',100,100,[
+  {id:'Anbar',count:18,percent:18},{id:'Baghdad',count:33,percent:22},
+  {id:'Erbil',count:59,percent:39},{id:'Ninewa',count:2,percent:null},
+ ]);
+ const source={...chartResult(),rows:[answer],breakdowns};
+ const next=resultWithPivotColumns(source,{pivotColumnSort:{answer:answer.id,metric:'percent',direction:'desc'},hiddenPivotColumns:['Baghdad']});
+ expect(next.breakdowns.map(column=>column.id)).toEqual(['Erbil','Anbar','Ninewa']);
+ expect(chartSpec(next,'en').data.map(trace=>('name' in trace?trace.name:null))).toEqual(['Erbil','Anbar','Ninewa']);
+ expect(koboTableData(next,'percent')[1]).toEqual(['Unsafe','39%','18%','-','100%']);
+ expect(source.breakdowns).toHaveLength(4);
+ expect(source.rows[0].series).toHaveLength(4);
+ const ascending=resultWithPivotColumns(source,{pivotColumnSort:{answer:answer.id,metric:'count',direction:'asc'}});
+ expect(ascending.breakdowns.map(column=>column.id)).toEqual(['Ninewa','Anbar','Baghdad','Erbil']);
+ expect(koboTableData(resultWithPivotColumns(source,{hiddenPivotColumns:breakdowns.map(column=>column.id)}),'percent')[1]).toEqual(['Unsafe','100%']);
+});
 
 it('updates table and chart order together while the server result still has the previous sort',()=>{
  const source=chartResult();

@@ -4,6 +4,7 @@ import {Fragment,useEffect,useState,type ReactNode} from 'react';
 import {ArrowLeft,ArrowRight,ChevronDown,Database,FolderOpen,Home,Maximize2,Minimize2,Workflow} from 'lucide-react';
 import {KoboGroupNavigationHost} from './KoboGroupNavigation';
 import './workspace.css';
+import './kobo.css';
 import './koboWorkspace.css';
 import './koboIconMotion.css';
 
@@ -14,7 +15,7 @@ type Props={
  onWorkspaceChange:(workspace:KoboWorkspaceSection)=>void;
  language:'en'|'ar';
  onNavigate:(route:string)=>void;
- onImport:()=>void;
+ onImport?:()=>void;
  children:ReactNode;
  dialogs:ReactNode;
 };
@@ -37,7 +38,7 @@ export default function KoboWorkspaceShell({questionFlowActive=false,projectId,a
    <div className="brand"><img src="/intersos-symbol-clear.png" alt="INTERSOS"/><div><strong>{custom?'Custom Analysis':'Kobo Analysis'}</strong><small>{custom?'Excel & CSV analysis':'Survey analysis & reports'}</small></div></div>
    <div className="sidebar-workspace-controls">
     <button className="soft sidebar-fullscreen" onClick={()=>void toggleFullscreen()} title={fullscreen?'Exit full screen':'Enter full screen'} aria-label={fullscreen?'Exit full screen':'Enter full screen'}>{fullscreen?<Minimize2/>:<Maximize2/>}<span>Full screen</span></button>
-    <div className="data-source-control app-select app-select-theme"><Database className="app-select-icon"/><span className="app-select-label">Data source</span><button className="app-select-trigger" aria-label={custom?'Import Excel or CSV':'Import Kobo files'} onClick={onImport}><span>Choose source</span><ChevronDown/></button></div>
+    <div className="data-source-control app-select app-select-theme"><Database className="app-select-icon"/><span className="app-select-label">Data source</span><button className="app-select-trigger" aria-label={custom?'Import Excel or CSV':'Import Kobo files'} disabled={!onImport} onClick={onImport}><span>Choose source</span><ChevronDown/></button></div>
    </div>
    <div className="legal-sidebar-utilities"><button aria-label="Home" title="Home" onClick={()=>onNavigate('#/')}><Home/><span>Home</span></button><button className="legal-menu-slide-toggle" aria-label={collapsed?'Expand menu':'Slide menu left'} aria-expanded={!collapsed} title={collapsed?'Expand menu':'Slide menu left'} onClick={()=>setCollapsed(previous=>{localStorage.setItem('kobo-sidebar-collapsed',String(!previous));return !previous})}><>{collapsed?<ArrowRight/>:<ArrowLeft/>}</><span>{collapsed?'Expand':'Slide left'}</span></button></div>
    <nav aria-label={custom?'Custom Analysis navigation':'Kobo navigation'}>

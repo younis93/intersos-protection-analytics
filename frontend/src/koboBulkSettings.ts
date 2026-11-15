@@ -10,7 +10,11 @@ export function bulkQuestionSettings(question:KoboQuestion,settings:KoboSettings
  if(draft.chart!==undefined)next.chart=draft.chart;
  if(['category','multiple','number'].includes(question.kind)){if(draft.trendDateField!==undefined)next.trendDateField=draft.trendDateField;if(draft.trendUnit!==undefined)next.trendUnit=draft.trendUnit}
  if(draft.appearance!==undefined)next.appearance={...current.appearance,...draft.appearance};
- if(draft.breakdowns!==undefined){next.pointColors={};next.breakdown='';next.breakdowns=draft.breakdowns.filter(id=>id!==question.id)}
+ if(draft.breakdowns!==undefined){
+  const previous=current.breakdowns?.length?current.breakdowns:current.breakdown?[current.breakdown]:[];
+  next.pointColors={};next.breakdown='';next.breakdowns=draft.breakdowns.filter(id=>id!==question.id);
+  if(JSON.stringify(previous)!==JSON.stringify(next.breakdowns)){next.pivotColumnSort=null;next.hiddenPivotColumns=[]}
+ }
  if(draft.breakdownDisplay!==undefined)next.breakdownDisplay=draft.breakdownDisplay;
  if(draft.answerSort!==undefined){next.answerSort=draft.answerSort;if(draft.answerSort!==current.answerSort)next.pivotSort=null}
  if(question.kind==='number'){if(draft.numericMode!==undefined)next.numericMode=draft.numericMode;if(draft.bins!==undefined)next.bins=draft.bins}

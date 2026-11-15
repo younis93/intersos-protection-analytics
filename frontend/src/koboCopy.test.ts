@@ -58,6 +58,21 @@ describe.each(['kobo','custom'] as const)('%s zero-inclusive copying',workspace=
  });
 });
 
+it('copies the saved row and column orders together',async()=>{
+ const config=settings();
+ config.questions.q.pivotColumnSort={metric:'count',direction:'desc'};
+ const full=result(true);
+ full.breakdowns.push({id:'south',label:'South',denominator:4,totalCount:5});
+ const analysis:KoboAnalysis={settings:config,questions:[full],filterSummary:[],total:4,filtered:4,groups:[]};
+ const api={analyze:vi.fn(async()=>analysis)};
+ const single=await prepareKoboQuestionCopy(api,'p',config,'q',new AbortController().signal);
+ const bulk=await buildKoboBulkCopy(analysis);
+ for(const copy of [single,bulk]){
+  expect(copy.text.indexOf('South')).toBeLessThan(copy.text.indexOf('North'));
+  expect(copy.text.indexOf('No\t')).toBeLessThan(copy.text.indexOf('Yes\t'));
+ }
+});
+
 it('propagates fetch failures and aborts without returning a partial copy',async()=>{
  const api={analyze:vi.fn().mockRejectedValueOnce(new Error('Connection failed')).mockRejectedValueOnce(new DOMException('Cancelled','AbortError'))};
  const controller=new AbortController();

@@ -1,5 +1,5 @@
 import type {createKoboApi} from './koboApi';
-import {resultWithPivotSort} from './koboPivotSort';
+import {resultWithPivotOrdering} from './koboPivotSort';
 import {koboTableHtml,koboTableText} from './koboTableData';
 import type {KoboSettings} from './koboTypes';
 
@@ -15,6 +15,6 @@ export async function prepareKoboQuestionCopy(api:Pick<ReturnType<typeof createK
  if(!result)throw new Error('This question is no longer available. Refresh the analysis and try again.');
  const config=analysis.settings.questions[question];
  const display=config?.breakdownDisplay||result.breakdownDisplay||'both';
- const sorted=resultWithPivotSort(result,config?.pivotSort||result.pivotSort,display,analysis.settings.language);
+ const sorted=resultWithPivotOrdering(result,config,display,analysis.settings.language,config?.pivotSort??result.pivotSort);
  return {text:koboTableText(sorted,display),html:koboTableHtml(sorted,display)};
 }

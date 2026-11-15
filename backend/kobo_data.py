@@ -15,8 +15,10 @@ def pivot_records(project, settings, scope, records, selection):
     if question['repeat'] != scope:
         raise ValueError('The selected question belongs to a different response table.')
     lookup = {record['id']: record for record in project['records']}
-    records = question_cohort(question, records, settings.questions.get(question['id'], QuestionSettings()), questions, lookup)
+    cfg = settings.questions.get(question['id'], QuestionSettings())
+    visible_cfg = cfg.model_copy(update={'hiddenAnswerPercentageMode': 'adjust'})
     snapshot = question_result(question, records, settings, questions, lookup)
+    records = question_cohort(question, records, visible_cfg, questions, lookup)
     answer, breakdown = selection.get('answer'), selection.get('breakdown')
     if answer is not None and not any(row['id'] == answer for row in snapshot['rows']):
         raise ValueError('The selected answer is no longer available in this pivot.')
@@ -26,7 +28,6 @@ def pivot_records(project, settings, scope, records, selection):
     if answer == '__blank__' and breakdown is not None:
         raise ValueError('Blank answers do not have breakdown values.')
     answered = [record for record in records if not missing(record['values'].get(question['id']))]
-    cfg = settings.questions.get(question['id'], QuestionSettings())
     _, _, categories = question_categories(question, answered, cfg)
     dimensions = breakdown_fields(cfg, questions, question)
     selected = []

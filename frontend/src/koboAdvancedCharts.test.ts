@@ -1,6 +1,6 @@
 import {singlePeriodTrendNotice} from './koboAdvancedChartSpec';
 import {describe,it,expect} from 'vitest';
-import {chartSpec,withoutKoboChartGrid} from './koboChartSpec';
+import {chartSpec} from './koboChartSpec';
 import {isDenseKoboChart,koboPdfChartPanels,koboPdfChartKey,readableKoboChartType} from './koboChartDensity';
 import type {KoboResult} from './koboTypes';
 
@@ -9,7 +9,7 @@ describe('household assessment charts',()=>{
  it('keeps histogram bins adjacent and preserves type in screen and export',()=>{
   const histogram={...base,rows:Array.from({length:20},(_,i)=>({...base.rows[i%3],id:String(i)}))};
   expect(isDenseKoboChart(histogram)).toBe(false);
-  expect(readableKoboChartType(histogram,true)).toBe('histogram');
+  expect(readableKoboChartType(histogram)).toBe('histogram');
   for(const exporting of [true,false]){const spec=chartSpec(histogram,'en',exporting);expect(spec.layout.bargap).toBe(0);expect(spec.data[0].type).toBe('bar')}
  });
  it('renders heatmap cells from breakdown values with correct percentages',()=>{
@@ -40,8 +40,12 @@ describe('household assessment charts',()=>{
   expect(trace.x).toEqual(trend.trend!.periods);expect(trace.y).toEqual([100,null,100]);expect(trace.connectgaps).toBe(false);
   expect(koboPdfChartPanels(trend)).toHaveLength(1);expect(trend.rows).toEqual(base.rows);
  });
- it.each(['histogram','heatmap','line'] as const)('removes all exported gridlines for %s without changing screen settings',chart=>{
-  const spec=chartSpec({...base,chart,appearance:{grid:'show'}},'ar',true),clean=withoutKoboChartGrid(spec);
-  for(const key of ['xaxis','yaxis'] as const){expect(clean.layout[key]).toMatchObject({showgrid:false,zeroline:false,minor:{showgrid:false}});expect(spec.layout[key]?.showgrid).toBe(true)}
+ it.each(['histogram','heatmap','line'] as const)('keeps configured gridlines and font in exported %s charts',chart=>{
+  for(const grid of ['show','hide'] as const){
+   const spec=chartSpec({...base,chart,appearance:{grid,fontFamily:'Georgia'}},'ar',true);
+   expect(spec.layout.font?.family).toBe('Georgia, Noto Naskh Arabic, Arial, sans-serif');
+   expect(spec.layout.xaxis?.showgrid).toBe(grid==='show');
+   expect(spec.layout.yaxis?.showgrid).toBe(grid==='show');
+  }
  });
 });

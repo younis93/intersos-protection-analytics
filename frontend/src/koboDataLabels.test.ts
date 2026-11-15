@@ -1,10 +1,29 @@
 import {describe,expect,it} from 'vitest';
 import {barValueLabel,labelInk} from './koboDataLabels';
 import {chartSpec} from './koboChartSpec';
+import {chartLabel} from './koboAppearance';
+
 import type {Data} from 'plotly.js';
 import type {KoboResult} from './koboTypes';
 const result={id:'q',name:'q',label:'Gender',kind:'category',denominator:200,rows:[{id:'a',label:'Male',count:145,percent:72.5},{id:'b',label:'Female',count:54,percent:27},{id:'c',label:'Other',count:1,percent:.5},{id:'d',label:'Unanswered option',count:0,percent:0}],colors:{a:'#ffffff',b:'#123456'},breakdowns:[],chart:'bar'} as unknown as KoboResult;
 const texts=(trace:Data)=>(trace as {text?:string[]}).text;
+it('can hide rounded zero percentages in charts and exports while keeping counts and data',()=>{
+ const source={...result,chart:'column' as const,breakdowns:[],rows:[
+  {...result.rows[0],percent:0},
+  {...result.rows[1],percent:0.4},
+  {...result.rows[2],percent:0.5},
+ ]};
+ for(const exporting of [false,true]){
+  const shown=chartSpec({...source,appearance:{metric:'percent',labels:'percent'}},'en',exporting).data[0];
+  const hidden=chartSpec({...source,appearance:{metric:'percent',labels:'percent',zeroPercentLabels:'hide'}},'en',exporting).data[0];
+  expect(shown).toMatchObject({y:[0,0.4,0.5],text:['0%','0%','1%']});
+  expect(hidden).toMatchObject({y:[0,0.4,0.5],text:['','','1%']});
+  expect(hidden).toMatchObject({hovertext:(shown as {hovertext?:string[]}).hovertext});
+ }
+ expect(chartLabel(7,0.004,'both','en',2,'hide')).toBe('7');
+ expect(chartLabel(7,0.005,'percent','en',2,'hide')).toBe('0.01%');
+});
+
 describe('readable chart values',()=>{
  it('uses contrast from the bar fill',()=>{expect(labelInk('#fff')).toBe('#081827');expect(labelInk('#123456')).toBe('#ffffff');expect(labelInk('#1683d8')).toBe('#081827')});
  it('uses larger bold value labels independently of axes and respects explicit sizes',()=>{const spec=chartSpec(result,'en');expect(spec.layout.font?.size).toBe(12);expect(spec.data[0]).toMatchObject({insidetextfont:{size:14,weight:700},outsidetextfont:{size:14,weight:700}});expect(chartSpec({...result,appearance:{fontSize:10}},'en').data[0]).toMatchObject({insidetextfont:{size:10,weight:700}});expect(chartSpec(result,'en',true).data[0]).toMatchObject({insidetextfont:{size:14*2.3,weight:700}});expect(chartSpec({...result,chart:'line'},'en').data[0]).toMatchObject({textfont:{size:14,weight:700}});expect(chartSpec({...result,chart:'pie'},'en').data[0]).toMatchObject({insidetextfont:{size:14,weight:700}})});

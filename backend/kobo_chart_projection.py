@@ -1,9 +1,10 @@
 """Chart-only answer projection. Pivot rows and full-data bases stay intact."""
 from copy import deepcopy
 import math
+from .kobo_pivot_percentages import column_base, put_percent, trend_pivot, value_totals
 
 
-def project_chart(result, cfg, question=None):
+def project_chart(result, cfg, question=None, *, original=None):
     rows = [r for r in result['rows'] if r['id'] != '__blank__']
     limit = cfg.chartTopN
     if not limit or result['kind'] == 'date' or result.get('bins') or result['chart'] == 'histogram': return None
@@ -19,51 +20,49 @@ def project_chart(result, cfg, question=None):
     other = bool(cfg.chartOther and additive and omitted)
     mode = cfg.percentageMode
 
-    def combine(entries, base, row_base=None):
+    basis = original if original is not None else result
+    respondent_mode = mode == 'legacy-respondents'
+
+    def combine(entries, denominator):
         count = sum(e['count'] for e in entries)
         valid = [e.get('value') for e in entries if e.get('value') is not None]
         amount = math.fsum(valid) if valid else None
-        number = amount if measure else count
-        denominator = row_base if mode == 'row-total' else base
-        percent = number / denominator * 100 if denominator and number is not None else None
-        return {'count': count, 'value': amount, 'contributingCount': sum(e.get('contributingCount',0) for e in entries), 'percent': percent, 'displayPercent': percent}
+        merged = {'count': count, 'value': amount,
+                  'contributingCount': sum(e.get('contributingCount', 0) or 0 for e in entries)}
+        put_percent(merged, amount if measure else count, denominator, result.get('percentageDecimals', 0))
+        return merged
 
     if other:
-        total = result.get('pivotTotal') or {}
-        grand = total.get('value') if measure else total.get('count')
-        own_value = math.fsum((value(r) or 0) for r in omitted)
-        base = (result.get('respondentBasis') or {}).get('denominator', result['denominator']) if mode == 'legacy-respondents' else grand
-        merged = {'id':'__chart_other__', 'label':'Other (chart aggregation)', **combine(omitted,base,own_value)}
-        merged['series'] = []
-        for column in result['breakdowns']:
-            entries = [next((s for s in r.get('series',[]) if s['id']==column['id']), {'count':0}) for r in omitted]
-            column_base = column.get('totalValue') if measure else column.get('totalCount')
-            denominator = column['denominator'] if mode == 'legacy-respondents' else column_base if mode == 'column-total' else grand
-            if mode=='breakdown-group':denominator=column_base/(column['totalPercent']/100) if column.get('totalPercent') else None
-            merged['series'].append({'id':column['id'], **combine(entries,denominator,own_value)})
+        if respondent_mode:
+            denominator = (basis.get('respondentBasis') or {}).get('denominator', basis['denominator'])
+            column_denominators = {column['id']: column['denominator'] for column in basis['breakdowns']}
+        else:
+            totals = value_totals(basis, bool(measure), cfg.percentageGroupLevel)
+            denominator = math.fsum(totals[0].get(row['id']) or 0 for row in omitted) if mode == 'row-total' else totals[3]
+            column_denominators = {column['id']: denominator if mode == 'row-total' else column_base(mode, column['id'], totals) for column in result['breakdowns']}
+        merged = {'id': '__chart_other__', 'label': 'Other (chart aggregation)', **combine(omitted, denominator)}
+        merged['series'] = [
+            {'id': column['id'], **combine(
+                [cell for row in omitted for cell in row.get('series', []) if cell['id'] == column['id']],
+                column_denominators.get(column['id']))}
+            for column in result['breakdowns']
+        ]
         kept.append(merged)
-    projection = {'rows':kept, 'topNTotal':len(rows), 'topNShown':min(limit,len(rows)), 'topNOther':other}
-    trend = result.get('trend')
-    if trend:
-        trend = deepcopy(trend)
-        removed = [s for s in trend['series'] if s['id'] not in chosen]
-        trend['series'] = [s for s in trend['series'] if s['id'] in chosen]
+    projection = {'rows': kept, 'topNTotal': len(rows), 'topNShown': min(limit, len(rows)), 'topNOther': other}
+    if result.get('trend'):
+        trend = deepcopy(result['trend'])
+        removed = [series for series in trend['series'] if series['id'] not in chosen]
+        trend['series'] = [series for series in trend['series'] if series['id'] in chosen]
         if other and removed:
-            points = []
-            for index in range(len(trend['periods'])):
-                entries = [s['points'][index] for s in removed]
-                # Trend percentages use the complete period's additive denominator.
-                complete = [s['points'][index] for s in result['trend']['series']]
-                base = trend['denominators'][index] if mode == 'legacy-respondents' else math.fsum((e.get('value') or 0) if measure else e['count'] for e in complete)
-                points.append(combine(entries,base,base))
-            trend['series'].append({'id':'__chart_other__','label':'Other (chart aggregation)','points':points})
-        if other and mode!='legacy-respondents':
-            from .kobo_pivot_percentages import apply_pivot_percentages
-            visible_ids={s['id'] for s in result['trend']['series']}
-            basis_series=[*trend['series'],*[s for s in result['trend'].get('percentageSeries',[]) if s['id'] not in visible_ids]]
-            nested={'rows':[{'id':s['id'],'count':0,'value':None,'series':[dict(point,id=period) for point,period in zip(s['points'],trend['periods'])]} for s in basis_series], 'breakdowns':[{'id':period} for period in trend['periods']], 'measure':measure, 'denominator':result['denominator'],'percentageDecimals':result.get('percentageDecimals',0)}
-            apply_pivot_percentages(nested,cfg)
-            for series,row in zip(trend['series'],nested['rows']):
-                for point,cell in zip(series['points'],row['series']):point.update(percent=cell['percent'],displayPercent=cell['displayPercent'])
+            base_trend = basis['trend']
+            if respondent_mode:
+                period_bases = dict(zip(base_trend['periods'], base_trend['denominators']))
+            else:
+                totals = value_totals(trend_pivot(base_trend, basis), bool(measure), cfg.percentageGroupLevel)
+                denominator = math.fsum(totals[0].get(series['id']) or 0 for series in removed)
+                period_bases = {period: denominator if mode == 'row-total' else column_base(mode, period, totals) for period in trend['periods']}
+            points = [combine([series['points'][index] for series in removed], period_bases.get(period))
+                      for index, period in enumerate(trend['periods'])]
+            trend['series'].append({'id': '__chart_other__', 'label': 'Other (chart aggregation)', 'points': points})
         projection['trend'] = trend
     return projection

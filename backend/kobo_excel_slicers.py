@@ -3,7 +3,7 @@ import math
 from collections import Counter
 
 from .kobo import label, matches, missing
-from .kobo_excel_ranges import excel_cell, excel_range
+from .kobo_excel_ranges import excel_cell
 from .kobo_excel_layout import excel_literal
 from .kobo_excel_direct import field_name
 

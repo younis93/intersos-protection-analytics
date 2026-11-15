@@ -11,7 +11,7 @@ def natural(value):
 def apply_pivot_sort(result, cfg):
     selected = cfg.pivotSort
     columns = {c['id']: c for c in result['breakdowns']}
-    if selected and selected.series and (any(key not in columns for key in selected.series)
+    if selected and selected.series and (any(key not in columns or key in cfg.hiddenPivotColumns for key in selected.series)
             or selected.id.endswith(':count') and cfg.breakdownDisplay == 'percent'
             or selected.id.endswith(':percent') and cfg.breakdownDisplay == 'count'):
         selected = None
@@ -19,13 +19,14 @@ def apply_pivot_sort(result, cfg):
     if not selected: return result
     ids = set(selected.series or [])
     base = sum(columns[key]['denominator'] for key in ids)
+    def percent(cell): return cell.get('displayPercent', cell.get('percent'))
     def value(row):
         if selected.metric == 'answer': return natural(row['label'])
-        if not ids: return row.get('value') if result.get('measure') and selected.metric == 'count' else row.get(selected.metric)
+        if not ids: return row.get('value') if result.get('measure') and selected.metric == 'count' else percent(row) if selected.metric == 'percent' else row['count']
         cells = [cell for cell in row.get('series', []) if cell['id'] in ids]
-        if not cells or selected.metric == 'percent' and all(c.get('percent') is None for c in cells): return None
+        if not cells or selected.metric == 'percent' and all(percent(c) is None for c in cells): return None
         if selected.metric == 'count' and result.get('measure'): return cells[0].get('value')
-        if selected.metric == 'percent' and len(cells) == 1: return cells[0].get('percent')
+        if selected.metric == 'percent' and len(cells) == 1: return percent(cells[0])
         count = sum(cell['count'] for cell in cells)
         return count if selected.metric == 'count' else count / base * 100 if base else None
     def compare(a, b):

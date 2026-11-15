@@ -26,6 +26,7 @@ function useOptions(project:KoboProject,question:KoboQuestion){const[options,set
 export type CellEditorController={save:()=>Promise<boolean>;reset:()=>void};
 export function KoboCellEditor({project,question,record,value,row,onClose,onSaved,embedded=false,onDirtyChange,onBusyChange,controllerRef,bulkScope,bulkScopeSummary=''}:{bulkScope?:ReviewBlankScope;bulkScopeSummary?:string;project:KoboProject;question:KoboQuestion;record:string;value:unknown;row:number;onClose:()=>void;onSaved:(p:KoboProject,advance?:boolean,affected?:number)=>void|Promise<void>;embedded?:boolean;onDirtyChange?:(dirty:boolean)=>void;onBusyChange?:(busy:boolean)=>void;controllerRef?:MutableRefObject<CellEditorController|null>}){
  const editorRoot=useRef<HTMLFormElement>(null);
+ const [renameAnswer,setRenameAnswer]=useState<string>();
  const t=(en:string,ar:string)=>project.settings.language==='ar'?ar:en;
  const{options,error:optionError,loading}=useOptions(project,question),[search,setSearch]=useState(''),[selected,setSelected]=useState<string[]>(Array.isArray(value)?value.map(String):value==null?[]:[String(value)]),[scalar,setScalar]=useState(value==null?'':String(value)),[invalidInput,setInvalidInput]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[allMatches,setAllMatches]=useState(false),[preview,setPreview]=useState<(EditPreview&{key:string})|null>(null),[previewError,setPreviewError]=useState('');
  const choices=['category','multiple'].includes(question.kind),multiple=question.kind==='multiple',visible=options.filter(c=>`${c.label} ${c.id}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())),labels=new Map(options.map(o=>[o.id,o.label]));
@@ -59,9 +60,20 @@ export function KoboCellEditor({project,question,record,value,row,onClose,onSave
  useEffect(()=>{if(embedded){editorRoot.current?.querySelector<HTMLElement>('[data-initial-focus]')?.focus();editorRoot.current?.querySelector<HTMLElement>('footer')?.scrollIntoView({block:'nearest',inline:'nearest'})}return()=>onDirtyChange?.(false)},[]);
  const save=async(advance=false):Promise<boolean>=>{if(blocked)return false;if(embedded&&!dirty)return false;setBusy(true);setError('');try{await prepareDataEdit(project.id);const p=await koboRequest<KoboProject>(`/projects/${project.id}/edits/apply`,{revision:project.dataRevision||0,operation,...(allMatches?{signature:readyPreview!.signature}:{})});notifyDataEdit(p);await onSaved(p,advance);if(!embedded)onClose();return true}catch(e){setError(e instanceof Error?e.message:String(e));return false}finally{setBusy(false)}};
  useEffect(()=>{if(!controllerRef)return;const controller={save:()=>save(false),reset};controllerRef.current=controller;return()=>{if(controllerRef.current===controller)controllerRef.current=null}});
+ const responseIds=Array.isArray(value)?value.map(String):value==null?[]:[String(value)];
+ const renameOptions=choices?options.filter(option=>responseIds.includes(option.id)):[];
+ if(!embedded&&renameAnswer)return <KoboAnswerManager project={project} question={question} initialAnswer={renameAnswer}
+  onClose={()=>setRenameAnswer(undefined)} onSaved={async saved=>{await onSaved(saved);onClose()}}/>;
  const form=<form ref={editorRoot} className={embedded?'kobo-embedded-response-editor':undefined} onSubmit={e=>{e.preventDefault();void save()}}>
   <div className="kobo-response-body">{!embedded&&<><div className="kobo-edit-field"><small>Source row {row}{question.repeat?` · ${question.repeat}`:''}</small><strong dir="auto">{koboLabel(question,project.settings.language)}</strong></div>
-  <section className="kobo-response-current" aria-label="Current response"><h3>Current response</h3><div dir="auto">{describe(value)}</div></section></>}
+  <section className="kobo-response-current" aria-label="Current response">
+   <h3>Current response</h3><div dir="auto">{describe(value)}</div>
+   {renameOptions.length>0&&<div className="kobo-response-rename-actions">{renameOptions.map(option=>
+    <button key={option.id} type="button" className="soft" disabled={busy}
+     onClick={()=>setRenameAnswer(option.id)} title={option.id}>
+     <Pencil size={14} aria-hidden="true"/><span dir="auto">{t(`Rename “${option.label}”`,`إعادة تسمية «${option.label}»`)}</span>
+    </button>)}</div>}
+  </section></>}
   <fieldset className="kobo-response-controls" disabled={busy}><legend>{embedded?t('Answer','الإجابة'):'New response'}</legend>
   {choices?<>{!compact&&<p className="kobo-response-hint">{multiple?t('Choose one or more options.','اختر خياراً واحداً أو أكثر.'):t('Choose one option.','اختر خياراً واحداً.')}</p>}
    {multiple&&selected.length>0&&<div className="kobo-edit-chips" aria-label="Selected options">{selected.map(id=><span key={id} dir="auto">{labels.get(id)||id}<button type="button" aria-label={`Remove ${labels.get(id)||id}`} onClick={()=>setSelected(current=>current.filter(v=>v!==id))}><X/></button></span>)}</div>}
@@ -83,7 +95,7 @@ export function KoboCellEditor({project,question,record,value,row,onClose,onSave
  return embedded?form:<EditDialog title="Edit response" onClose={onClose} busy={busy} response>{form}</EditDialog>;
 }
 
-export function KoboAnswerManager({project,question,initialAnswer,onClose}:{project:KoboProject;question:KoboQuestion;initialAnswer?:string;onClose:()=>void}){
+export function KoboAnswerManager({project,question,initialAnswer,onClose,onSaved}:{project:KoboProject;question:KoboQuestion;initialAnswer?:string;onClose:()=>void;onSaved?:(p:KoboProject)=>void|Promise<void>}){
  const{options,error:optionError,loading}=useOptions(project,question);
  const[mode,setMode]=useState<'rename'|'merge'>('rename'),[search,setSearch]=useState(''),[sources,setSources]=useState<string[]>([]),[renameId,setRenameId]=useState(''),[editing,setEditing]=useState(false),[label,setLabel]=useState(''),[target,setTarget]=useState(''),[destination,setDestination]=useState<'new'|'same'>('same'),[name,setName]=useState(''),[preview,setPreview]=useState<EditPreview|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[attempted,setAttempted]=useState(false);
  const previewKey=useRef(''),previewSection=useRef<HTMLElement>(null),renameInput=useRef<HTMLInputElement>(null),initialHandled=useRef(false),body=useRef<HTMLDivElement>(null),modeRef=useRef(mode);
@@ -104,7 +116,7 @@ export function KoboAnswerManager({project,question,initialAnswer,onClose}:{proj
  const finishRename=()=>{setAttempted(true);if(validation)return;setEditing(false);requestAnimationFrame(()=>body.current?.querySelector<HTMLButtonElement>('[data-edit-rename]')?.focus())};
  const act=async(apply=false)=>{
   if(blocked)return;const snapshotKey=key,snapshotMode=mode;setBusy(true);setError('');
-  try{await prepareDataEdit(project.id);if(apply){if(!readyPreview)return;const p=await koboRequest<KoboProject>(`/projects/${project.id}/edits/apply`,{revision:project.dataRevision||0,operation,signature:readyPreview.signature});notifyDataEdit(p);onClose()}else{const next=await koboRequest<EditPreview>(`/projects/${project.id}/edits/preview`,{revision:project.dataRevision||0,operation});if(modeRef.current!==snapshotMode)return;previewKey.current=snapshotKey;setPreview(next)}}catch(issue){setError(issue instanceof Error?issue.message:String(issue))}finally{setBusy(false)}
+  try{await prepareDataEdit(project.id);if(apply){if(!readyPreview)return;const p=await koboRequest<KoboProject>(`/projects/${project.id}/edits/apply`,{revision:project.dataRevision||0,operation,signature:readyPreview.signature});notifyDataEdit(p);if(onSaved)await onSaved(p);else onClose()}else{const next=await koboRequest<EditPreview>(`/projects/${project.id}/edits/preview`,{revision:project.dataRevision||0,operation});if(modeRef.current!==snapshotMode)return;previewKey.current=snapshotKey;setPreview(next)}}catch(issue){setError(issue instanceof Error?issue.message:String(issue))}finally{setBusy(false)}
  };
  const showCode=(option:AnswerOption)=>options.some(other=>other.id!==option.id&&normalizedAnswerLabel(other.label)===normalizedAnswerLabel(option.label));
  const renderRow=(option:AnswerOption,pinned=false)=><div key={option.id} className={`kobo-managed-answer${pinned?' is-active':''}`} data-answer-id={option.id}>

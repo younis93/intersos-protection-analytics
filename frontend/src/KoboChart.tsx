@@ -8,8 +8,7 @@ import {memo,useEffect,useMemo,useRef,useState} from 'react';
 import {useKoboTheme,useScheduledKoboChart} from './KoboRendering';
 import createPlotlyComponent from 'react-plotly.js/factory';
 import Plotly from './plotlyEngine';
-import {chartSpec,withoutKoboChartGrid} from './koboChartSpec';
-import {readableKoboChartType} from './koboChartDensity';
+import {chartSpec} from './koboChartSpec';
 export {chartSpec} from './koboChartSpec';
 import type {KoboQuestionSettings,KoboResult} from './koboTypes';
 import {downloadBlob} from './koboApi';
@@ -20,14 +19,23 @@ const Plot=createPlotlyComponent(Plotly);
 const config={displayModeBar:false,responsive:true,scrollZoom:false,doubleClick:false} as const;
 
 export const koboColor=chartCategoryColor;
-export async function koboChartImage(result:KoboResult,language:string,format:'png'|'svg'='png',signal?:AbortSignal,hideGrid=false){
+export async function koboChartImage(result:KoboResult,language:string,format:'png'|'svg'='png',signal?:AbortSignal){
  signal?.throwIfAborted();
+ const spec=chartSpec(result,language,true),width=Number(spec.layout.width)||1300,height=Number(spec.layout.height)||750;
+ // Wide or tall exports keep all categories within the browser's raster size limits.
+ const scale=format==='svg'?2:Math.min(2,16384/Math.max(width,height),Math.sqrt(32_000_000/(width*height)));
  const host=document.createElement('div');host.style.cssText='position:fixed;left:-10000px;top:0;width:1300px';document.body.appendChild(host);
  const cleanup=()=>{Plotly.purge(host);host.remove()};
  signal?.addEventListener('abort',cleanup,{once:true});
- try{const original=chartSpec(result,language,true),spec=hideGrid?withoutKoboChartGrid(original):original,width=Number(spec.layout.width)||1300;await Plotly.newPlot(host,spec.data,{...spec.layout,width,height:spec.layout.height||750,autosize:false},{staticPlot:true});signal?.throwIfAborted();const image=await Plotly.toImage(host,{format,width,height:Number(spec.layout.height)||750,scale:2});signal?.throwIfAborted();return image}finally{signal?.removeEventListener('abort',cleanup);cleanup()}
+ try{
+  await Plotly.newPlot(host,spec.data,{...spec.layout,width,height,autosize:false},{staticPlot:true});
+  signal?.throwIfAborted();
+  const image=await Plotly.toImage(host,{format,width,height,scale});
+  signal?.throwIfAborted();
+  return image;
+ }finally{signal?.removeEventListener('abort',cleanup);cleanup()}
 }
-export async function downloadKoboPng(result:KoboResult,language:string){const url=await koboChartImage(result,language,'png',undefined,true);downloadBlob(await(await fetch(url)).blob(),`${result.name}.png`)}
+export async function downloadKoboPng(result:KoboResult,language:string){const url=await koboChartImage(result,language);downloadBlob(await(await fetch(url)).blob(),`${result.name}.png`)}
 function KoboChart({result:sourceResult,language,showLegend=true,colorSettings,onColorApply}:{result:KoboResult;language:string;showLegend?:boolean;colorSettings?:KoboQuestionSettings;onColorApply?:(target:KoboMarkTarget,color:string|null)=>void}){
  const allRows=useMemo(()=>koboScreenChartRows(sourceResult),[sourceResult]);
  const[pageSelection,setPageSelection]=useState({source:sourceResult,page:0});
@@ -50,10 +58,20 @@ function KoboChart({result:sourceResult,language,showLegend=true,colorSettings,o
  useEffect(()=>{const viewport=host.current?.querySelector('.kobo-chart-viewport');if(viewport)viewport.scrollTop=0;setEdit(null)},[result]);
  useEffect(()=>{
   const node=host.current;if(!node||!active)return;
-  let frame=0;
-  const measure=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{const next=Math.round(node.getBoundingClientRect().width/16)*16;if(next>0)setWidth(current=>current===next?current:next)})};
-  const observer=new ResizeObserver(measure);observer.observe(node);measure();
-  return()=>{observer.disconnect();cancelAnimationFrame(frame)};
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  let measuredWidth=Math.round(node.getBoundingClientRect().width/16)*16;
+  if(measuredWidth>0)setWidth(measuredWidth);
+  const observer=new ResizeObserver(()=>{
+   const next=Math.round(node.getBoundingClientRect().width/16)*16;
+   if(next<=0||next===measuredWidth)return;
+   measuredWidth=next;
+   clearTimeout(timer);
+   // Plotly resizes the existing plot. Rebuild the width-dependent spec after
+   // the window settles so dragging does not repeatedly rebuild chart data.
+   timer=setTimeout(()=>setWidth(next),120);
+  });
+  observer.observe(node);
+  return()=>{observer.disconnect();clearTimeout(timer)};
  },[active,host]);
  const spec=useMemo(()=>{if(!active)return null;const value=chartSpec(shown,language,false,theme,width);return showLegend?value:{...value,layout:{...value.layout,showlegend:false}}},[active,shown,language,theme,showLegend,width]);
  if(spec)lastLayoutHeight.current=Number(spec.layout.height)||330;

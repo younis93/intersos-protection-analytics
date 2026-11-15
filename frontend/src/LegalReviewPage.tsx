@@ -43,6 +43,22 @@ import { RowSelectionCheckbox } from './TableControls';
 import type { DuplicateExclusion,LegalFlag,LegalReview } from "./types";
 import { ValueTable } from "./ValueTable";
 
+const DUPLICATE_RECHECK_NOTICE_MS = 20_000;
+const seenDuplicateRechecks = new Map<string, string>();
+
+function markDuplicateRecheckSeen(dataset: string, pendingSince: string) {
+  const key = `legal-review-duplicate-recheck-seen:${dataset}`;
+  if (pendingSince <= (seenDuplicateRechecks.get(dataset) ?? "")) return false;
+  try {
+    if (pendingSince <= (localStorage.getItem(key) ?? "")) return false;
+    localStorage.setItem(key, pendingSince);
+  } catch {
+    // Keep the notice one-time during this app session if storage is unavailable.
+  }
+  seenDuplicateRechecks.set(dataset, pendingSince);
+  return true;
+}
+
 export const AMAL_HIDDEN_ASSESSMENT_RULES = new Set([
   "Detention/immigration inconsistency",
   "Detained beneficiary has counselling only",
@@ -459,6 +475,7 @@ export function ReviewPageBody({
     [fieldFilters, setFieldFilters] = useState<Record<string,string[]>>({}),
     [drawer, setDrawer] = useState(false),
     [excludedDuplicates, setExcludedDuplicates] = useState<DuplicateExclusion[]>([]),
+    [duplicateRecheckNotice, setDuplicateRecheckNotice] = useState<{dataset:string;pendingSince:string} | null>(null),
     [excludedManagerOpen, setExcludedManagerOpen] = useState(false),
     [exclusionCandidates, setExclusionCandidates] = useState<LegalFlag[] | null>(null),
     [exclusionImportOpen, setExclusionImportOpen] = useState(false),
@@ -483,6 +500,7 @@ export function ReviewPageBody({
   useEffect(() => {
     if (previousDataset.current === dataset) return;
     previousDataset.current = dataset;
+    setDuplicateRecheckNotice(null);
     setSelectedRules([]);
     setDefaultRules([]);
     setInitialized(false);
@@ -559,6 +577,20 @@ export function ReviewPageBody({
     }),
     pendingDuplicateRechecks = excludedDuplicates.filter((entry) => (entry.dataset || "beneficiaries") === dataset && entry.pendingRecheck),
     pendingDuplicateRules = Array.from(new Set(pendingDuplicateRechecks.map((entry) => entry.rule)));
+  const latestDuplicateRecheck = pendingDuplicateRechecks.reduce((latest, entry) => {
+    const pendingSince = entry.pendingSince || "0";
+    return pendingSince > latest ? pendingSince : latest;
+  }, "");
+  useEffect(() => {
+    if (latestDuplicateRecheck && markDuplicateRecheckSeen(dataset, latestDuplicateRecheck)) {
+      setDuplicateRecheckNotice({dataset, pendingSince:latestDuplicateRecheck});
+    }
+  }, [dataset, latestDuplicateRecheck]);
+  useEffect(() => {
+    if (!duplicateRecheckNotice) return;
+    const timer = window.setTimeout(() => setDuplicateRecheckNotice(null), DUPLICATE_RECHECK_NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [duplicateRecheckNotice]);
   useEffect(() => {
     if (amalProjectOnly) setSelectedRules((current) => current.filter((rule) => !AMAL_HIDDEN_ASSESSMENT_RULES.has(rule)));
   }, [amalProjectOnly]);
@@ -644,7 +676,7 @@ export function ReviewPageBody({
           </button>
         </div>
       )}
-      {pendingDuplicateRechecks.length > 0 && (
+      {duplicateRecheckNotice?.dataset === dataset && pendingDuplicateRechecks.length > 0 && (
         <aside className="glass duplicate-recheck-notice" role="status">
           <AlertTriangle />
           <div><strong>{pendingDuplicateRechecks.length} excluded duplicate {pendingDuplicateRechecks.length === 1 ? "finding has" : "findings have"} changed</strong><span>New or removed matching records changed the reviewed duplicate group. These findings are back in the Review tables.</span></div>

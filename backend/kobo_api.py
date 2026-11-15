@@ -7,6 +7,8 @@ from .kobo_connection_setup import ConnectionSetupRequest, confirm_connection
 import threading
 import time
 import uuid
+from collections import OrderedDict
+from hashlib import sha256
 from typing import Any, Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -291,6 +293,35 @@ class AnalysisRequest(BaseModel):
     question: str = ''
 
 
+class ProjectResponseCache:
+    """Bounded LRU of immutable, validated response bodies."""
+
+    max_entries = 8
+    max_bytes = 32 * 1024 * 1024
+
+    def __init__(self):
+        self._entries: OrderedDict[tuple[str, ...], bytes] = OrderedDict()
+        self._size = 0
+        self._lock = threading.Lock()
+
+    def get(self, key):
+        with self._lock:
+            if key in self._entries:
+                self._entries.move_to_end(key)
+                return self._entries[key]
+        return None
+
+    def put(self, key, body):
+        if len(body) > self.max_bytes:
+            return
+        with self._lock:
+            self._size -= len(self._entries.pop(key, b''))
+            self._entries[key] = body
+            self._size += len(body)
+            while len(self._entries) > self.max_entries or self._size > self.max_bytes:
+                self._size -= len(self._entries.popitem(last=False)[1])
+
+
 class IndicatorRequest(BaseModel):
     settings: KoboSettings
     indicator: IndicatorDefinition
@@ -467,6 +498,8 @@ def answer_examples(sheets, mappings, issues):
 def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
     router = APIRouter(prefix=prefix, tags=['Custom Analysis' if prefix == '/api/custom' else 'Kobo Analysis'])
     store = store or ProjectStore()
+    project_cache = ProjectResponseCache()
+    analysis_cache = ProjectResponseCache()
     recovery = ExportRecoveryStore(store.path.parent / ('custom-export-tasks.sqlite3' if prefix == '/api/custom' else 'export-tasks.sqlite3'))
     cleanup_export_folders()
 
@@ -489,6 +522,10 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
 
     def get(pid):
         try: return store.get(pid)
+        except KeyError as exc: raise HTTPException(404, str(exc)) from exc
+
+    def project_revision(pid):
+        try: return store.project_revision(pid)
         except KeyError as exc: raise HTTPException(404, str(exc)) from exc
 
     def mapping_payload(item, links, config=None):
@@ -588,13 +625,23 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
         except KeyError as exc: raise HTTPException(404, 'Project not found.') from exc
         except ValueError as exc: raise HTTPException(409, str(exc)) from exc
 
-    @router.get('/projects/{pid}', response_model=ProjectResponse)
     def project(pid: str):
-        p = get(pid)
+        return project_payload(get(pid))
+
+    def project_payload(p):
         from .kobo_edits import revision,editable
         protected={field for entry in p.get('updateHistory',[])[:1] for keys in entry.get('keys',{}).values() for field in keys}
         p={**p,'form':{**p['form'],'questions':[{**q,'editable':editable(q) and q['id'] not in protected} for q in p['form']['questions']]}}
         return {**{k: v for k, v in p.items() if not k.startswith('_') and k not in {'records', 'sheets','dataEdits'}},'dataRevision':revision(p),'canUndoEdit':any(not b.get('undone') for b in p.get('dataEdits',{}).get('history',[]))}
+
+    @router.get('/projects/{pid}', response_model=ProjectResponse)
+    def open_project(pid: str):
+        body = project_cache.get((pid, project_revision(pid)))
+        if body is None:
+            p = get(pid)
+            body = ProjectResponse.model_validate(project_payload(p)).model_dump_json(by_alias=True).encode()
+            project_cache.put((pid, p['updated']), body)
+        return Response(body, media_type='application/json')
 
     @router.post('/projects/{pid}/placement', response_model=ProjectResponse)
     def move_project_field(pid: str, body: MoveFieldRequest):
@@ -1031,8 +1078,20 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
 
     @router.post('/projects/{pid}/analysis', response_model=AnalysisResponse)
     def analysis(pid: str, body: AnalysisRequest):
-        try: return analyze(get(pid), body.settings, body.question)
+        if not body.question:
+            settings_key = sha256(body.settings.model_dump_json().encode()).hexdigest()
+            payload = analysis_cache.get((pid, project_revision(pid), settings_key))
+            if payload is not None:
+                return Response(payload, media_type='application/json')
+        p = get(pid)
+        try:
+            result = analyze(p, body.settings, body.question)
         except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+        if body.question:
+            return result
+        payload = AnalysisResponse.model_validate(result).model_dump_json(by_alias=True).encode()
+        analysis_cache.put((pid, p['updated'], settings_key), payload)
+        return Response(payload, media_type='application/json')
 
     @router.post('/projects/{pid}/question-conditions/preview')
     def question_condition_preview(pid: str, body: QuestionConditionsRequest):

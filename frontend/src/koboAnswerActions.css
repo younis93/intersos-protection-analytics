@@ -13,6 +13,6 @@
 .kobo-answer-context-menu svg{flex:none}
 @media(max-width:560px){.kobo-answer-context-menu button{min-height:42px}.kobo-answer-actions{gap:6px}}
 
-.kobo-question-customize-export{display:flex;flex-direction:column;align-items:stretch;gap:6px}.kobo-question-customize-export>.kobo-chart-export{margin:0;display:flex}.kobo-question-customize-export>.kobo-chart-export>.kobo-action-menu{width:100%}
+.kobo-question-customize-export{display:flex;flex-direction:column;align-items:stretch;gap:6px}.kobo-question-export-row{display:flex;align-items:stretch;justify-content:flex-end;gap:6px}.kobo-question-export-row>.kobo-chart-export{display:flex;margin:0}.kobo-question-export-row>.kobo-chart-export>.kobo-action-menu{width:100%}.kobo-question-export-row>.kobo-pivot-sort-menu>.app-select-trigger{height:100%}
 
 .kobo-shell .kobo-question .kobo-question-actions{align-items:flex-start}
