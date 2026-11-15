@@ -74,6 +74,21 @@ describe('optional chart labels',()=>{
 describe('value axis visibility',()=>{for(const chart of ['bar','column'] as const)it('hides only the value scale for '+chart,()=>{const spec=chartSpec({...result,chart,appearance:{valueAxis:'hide'}},'en');expect(spec.layout[chart==='bar'?'xaxis':'yaxis']?.showticklabels).toBe(false);expect(spec.layout[chart==='bar'?'yaxis':'xaxis']?.showticklabels).not.toBe(false);expect(spec.data).toEqual(chartSpec({...result,chart},'en').data)});});
 
 
+it('uses Helvetica Neue at 32 px for new titles',()=>{
+ const title=chartSpec({...result,appearance:{title:'Chart title'}},'en').layout.title;
+ expect(title?.font).toMatchObject({family:'Helvetica Neue, Arial, sans-serif',size:32});
+});
+
+it('keeps the title aligned to the plot and adjusts the gap in preview and export',()=>{
+ for(const exporting of [false,true])for(const [titleSpacing,gap] of [['compact',6],['standard',12],['roomy',24],[10,40/3],[0,0]] as const){
+  const spec=chartSpec({...result,appearance:{title:'Chart title',titleSpacing,legend:'hidden'}},'en',exporting);
+  const {height,margin,title}=spec.layout;
+  expect(title).toMatchObject({xref:'paper',yref:'container',yanchor:'bottom'});
+  expect(margin!.t!-(1-title!.y!)*height!).toBeCloseTo(gap*(exporting?2:1));
+  expect(spec.layout.font?.family).toBe('Helvetica Neue, Arial, sans-serif');
+ }
+});
+
 it('formats escaped titles consistently in preview and export',()=>{
  for(const exporting of [false,true])for(const align of ['left','center','right'] as const){
   const spec=chartSpec({...result,appearance:{title:'Title <safe>',titleBold:true,titleItalic:true,titleUnderline:true,titleAlign:align,titleFont:'Georgia',titleSize:24,titleColor:'#123456'}},'en',exporting);

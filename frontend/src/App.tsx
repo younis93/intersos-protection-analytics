@@ -73,8 +73,8 @@ function AnalyticsUnavailable(){
 export default function App() {
   const [page, setPage] = useState<Page>(pageFromUrl);
   const [theme, setTheme] = useState<Theme>(() => {
-    const startupTheme = new URLSearchParams(window.location.search).get("appTheme") as Theme | null;
-    return (localStorage.getItem("app-theme") as Theme) || startupTheme || "glass-light";
+    const startupTheme = new URLSearchParams(window.location.search).get("appTheme");
+    return (localStorage.getItem("app-theme") as Theme) || (startupTheme === "vice-city" ? null : startupTheme as Theme | null) || "glass-light";
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("analytics-sidebar-collapsed") === "true");
   const [metadata, setMetadata] = useState<Metadata | null>(null);

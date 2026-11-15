@@ -3,11 +3,13 @@ import './koboAppearanceControls.css';
 import KoboBulkSettingHeading from './KoboBulkSettingHeading';
 import {RotateCcw} from 'lucide-react';
 import {AppSelect} from './SelectionControls';
-import {appearanceDefaults,resolveAppearance,type KoboAppearance} from './koboAppearance';
+import {appearanceDefaults,koboChartFonts,resolveAppearance,type KoboAppearance} from './koboAppearance';
 const controls:{key:keyof KoboAppearance;label:string;options:[string,string][]}[]=[
  {key:'metric',label:'Chart values',options:[['auto','Automatic'],['count','Count (#)'],['percent','Percentage (%)']]},
  {key:'labels',label:'Data labels',options:[['auto','Automatic'],['hidden','Hide count and percentage text'],['count','Count'],['percent','Percentage'],['both','Both']]},
+ {key:'zeroPercentLabels',label:'0% labels',options:[['show','Show'],['hide','Hide']]},
  {key:'legend',label:'Legend',options:[['auto','Automatic'],['hidden','Hidden'],['top','Top'],['bottom','Bottom'],['left','Left'],['right','Right']]},
+ {key:'fontFamily',label:'Chart font',options:koboChartFonts.map(font=>[font,font])},
  {key:'fontSize',label:'Font size',options:[['0','Automatic'],...['10','12','14','16'].map(n=>[n,n] as [string,string])]},
  {key:'height',label:'Chart height',options:[['0','Automatic'],...['320','420','560','720'].map(n=>[n,`${n} px`] as [string,string])]},
  {key:'valueAxis',label:'Value axis scale',options:[['show','Show'],['hide','Hide']]},

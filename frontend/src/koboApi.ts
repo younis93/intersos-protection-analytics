@@ -32,7 +32,7 @@ export function createKoboApi(workspace?:AnalysisWorkspace){
  list:()=>request<{id:string;name:string;updated:string}[]>('/projects'),
  review:(id:string,form?:File,data?:File,worksheet?:string)=>{const body=new FormData();if(form)body.append('form',form);if(data)body.append('data',data);if(worksheet!==undefined)body.append('worksheet',worksheet);return request<KoboPreview>(`/projects/${id}/review`,body)},
  check:(token:string,mappings:KoboMapping[],policies:Record<string,string>,signal?:AbortSignal,reviewConfig?:KoboReviewConfig)=>request<{warnings:string[];importNotes:import('./koboTypes').KoboImportNote[];reviewedImportNotes:string[];questionImpacts?:{name:string;issues:string[]}[];choiceImpacts?:KoboChoiceImpact[];issues:KoboPreview['issues'];examples:KoboPreview['examples'];linkReview:KoboPreview['linkReview']}>(`/imports/${token}/check`,{mappings,policies,reviewConfig},'POST',signal),
- get:(id:string)=>request<KoboProject>(`/projects/${id}`),
+ get:(id:string,signal?:AbortSignal)=>request<KoboProject>(`/projects/${id}`,undefined,'GET',signal),
  remove:(id:string)=>request(`/projects/${id}`,undefined,'DELETE'),
  save:(id:string,settings:KoboSettings)=>request(`/projects/${id}/settings`,settings,'PUT'),
  saveOnPageHide:(id:string,settings:KoboSettings)=>{

@@ -11,6 +11,19 @@ from backend.test_kobo_answer_order import fixture
 def result(project, settings, qid='answer'):
     return next(q for q in analyze(project, settings)['questions'] if q['id'] == qid)
 
+def test_saved_adjust_mode_does_not_turn_an_unlinked_question_into_a_follow_up():
+    project = fixture()
+    cfg = QuestionSettings(hiddenAnswers=['b'], percentageMode='legacy-respondents',
+                           connectedPercentageMode='adjust', percentageBase='question', breakdowns=['region'])
+    settings = KoboSettings(questions={'answer': cfg})
+    adjusted = result(project, settings)
+    settings.questions['answer'].hiddenAnswerPercentageMode = 'keep-original'
+    original = result(project, settings)
+    assert not adjusted.get('respondentBasis') and not original.get('respondentBasis')
+    assert adjusted['denominator'] == original['denominator']
+    assert adjusted['rows'][0]['percent'] > original['rows'][0]['percent']
+    assert {row['id'] for row in original['rows']} == {'a', 'c'}
+
 
 @pytest.mark.parametrize('mode', ['page', 'own'])
 @pytest.mark.parametrize('percentage', ['legacy-respondents', 'grand-total', 'column-total', 'row-total', 'breakdown-group'])
@@ -125,7 +138,7 @@ def test_live_excel_config_and_seed_values_keep_exclusions(kind, engine):
 @pytest.mark.parametrize('percentage', ['legacy-respondents', 'grand-total', 'column-total', 'row-total', 'breakdown-group'])
 @pytest.mark.parametrize('kind', ['category', 'multiple', 'text'])
 @pytest.mark.parametrize('operation', ['count', 'sum', 'average'])
-def test_original_percentages_preserve_complete_calculations(percentage, kind, operation):
+def test_original_base_preserves_visible_counts_and_values(percentage, kind, operation):
     project = fixture()
     project['form']['questions'][0]['kind'] = kind
     if kind == 'multiple':
@@ -136,16 +149,26 @@ def test_original_percentages_preserve_complete_calculations(percentage, kind, o
     settings = KoboSettings(questions={'answer':cfg}, filters=[{'field':'region','values':['north']}])
     before = deepcopy(project)
     original = result(project, settings)
-    settings.questions['answer'] = cfg.model_copy(update={'hiddenAnswers':['b'], 'hiddenAnswerPercentageMode':'keep-original'})
+    settings.questions['answer'] = cfg.model_copy(update={'hiddenAnswers':['b']})
+    adjusted = result(project, settings)
+    settings.questions['answer'].hiddenAnswerPercentageMode = 'keep-original'
     actual = result(project, settings)
-    assert actual['rows'] == [row for row in original['rows'] if row['id'] != 'b']
-    for key in (['denominator','total','missing','measureTotal','statistics'] if operation == 'count' else ['denominator','total','missing','breakdowns','pivotTotal','measureTotal','statistics']):
-        assert actual.get(key) == original.get(key)
-    assert actual['trend']['series'] == [series for series in original['trend']['series'] if series['id'] != 'b']
+    def without_percent(cells):
+        return [{key: value for key, value in cell.items() if key not in {'percent', 'displayPercent', 'totalPercent', 'series', 'points'}} for cell in cells]
+    assert without_percent(actual['rows']) == without_percent(adjusted['rows'])
+    for kept, shown in zip(actual['rows'], adjusted['rows']):
+        assert without_percent(kept.get('series', [])) == without_percent(shown.get('series', []))
+    for key in ['denominator','total','missing','measureTotal','statistics']:
+        assert actual.get(key) == adjusted.get(key)
+    assert [column['id'] for column in actual['breakdowns']] == [column['id'] for column in adjusted['breakdowns']]
+    assert actual['trend']['periods'] == adjusted['trend']['periods']
+    assert without_percent(actual['trend']['series']) == without_percent(adjusted['trend']['series'])
+    for kept, shown in zip(actual['trend']['series'], adjusted['trend']['series']):
+        assert without_percent(kept['points']) == without_percent(shown['points'])
     assert actual['trend']['percentageSeries'] == original['trend']['series']
     assert project == before
     assert 'Hidden answers remain included' in actual['percentageBasis']
-    assert len(data_rows(project, settings, '', ['answer'], drilldown={'question':'answer','answer':'a'})['rows']) == (4 if kind == 'multiple' else 1)
+    assert len(data_rows(project, settings, '', ['answer'], drilldown={'question':'answer','answer':'a'})['rows']) == (2 if kind == 'multiple' else 1)
 
 
 def test_sixty_forty_and_restore_original_preference():
@@ -159,12 +182,34 @@ def test_sixty_forty_and_restore_original_preference():
     assert result(project, settings)['rows'][0]['percent'] == 60
     cfg.hiddenAnswers = ['a','b','c','__blank__']
     assert result(project, settings)['rows'] == []
-    assert result(project, settings)['denominator'] == 5
+    assert result(project, settings)['denominator'] == 0
     cfg.hiddenAnswers = []
     restored = result(project, KoboSettings.model_validate_json(settings.model_dump_json()))
     assert len(restored['rows']) == 2
     assert cfg.hiddenAnswerPercentageMode == 'keep-original'
     assert QuestionSettings().hiddenAnswerPercentageMode == 'adjust'
+
+
+@pytest.mark.parametrize('mode,expected', [('legacy-respondents',25), ('grand-total',20), ('column-total',20)])
+def test_multiple_choice_chart_other_uses_visible_counts_and_original_base(mode, expected):
+    project = fixture()
+    project['form']['questions'][0]['kind'] = 'multiple'
+    project['records'] = project['records'][:4]
+    for record, answers in zip(project['records'], [['a'], ['a', 'b'], ['c'], ['b']]):
+        record['values'].update(answer=answers, region='north')
+    cfg = QuestionSettings(percentageMode=mode, hiddenAnswers=['b'], breakdowns=['region'], chartTopN=1, chartOther=True)
+    settings = KoboSettings(questions={'answer': cfg})
+    shown = result(project, settings)
+    cfg.hiddenAnswerPercentageMode = 'keep-original'
+    kept = result(project, settings)
+    assert [row['id'] for row in kept['rows']] == ['a','c']
+    assert kept['denominator'] == shown['denominator'] == 2
+    assert [row['count'] for row in kept['rows']] == [1,1]
+    assert [row['percent'] for row in shown['rows']] == [50,50]
+    assert [row['percent'] for row in kept['rows']] == [expected,expected]
+    projected = kept['chartProjection']['rows']
+    assert [(row['id'], row['count']) for row in projected] == [('a',1),('__chart_other__',1)]
+    assert [row['series'][0]['percent'] for row in projected] == [expected,expected]
 
 
 @pytest.mark.parametrize('kind', ['category','multiple'])
@@ -219,12 +264,12 @@ def test_original_hidden_blank_and_repeat_cohort():
     cfg=QuestionSettings(hiddenAnswers=['__blank__','b'],hiddenAnswerPercentageMode='keep-original')
     settings=KoboSettings(hideBlanks=False,questions={'answer':cfg})
     actual=result(project,settings)
-    assert actual['missing']==1 and actual['total']==7
+    assert actual['missing']==0 and actual['total']==3
     assert {row['id'] for row in actual['rows']}=={'c'}
     question=project['form']['questions'][0];question['repeat']='children'
     for record in project['records']:record.update(scope='children',parent='parent')
     project['records'].append(dict(id='parent',parent='',scope='',row=1,sheet=0,values={}))
-    assert result(project,settings)['total']==7
+    assert result(project,settings)['total']==3
 
 
 @pytest.mark.parametrize('mode', ['adjust', 'keep-original'])
@@ -267,7 +312,7 @@ def test_hidden_count_totals_show_visible_share_of_original_base(percentage):
     kept=result(project,settings)
     assert kept['pivotTotal']['count']==247
     assert kept['pivotTotal']['percent']==pytest.approx(247/344*100)
-    assert kept['denominator']==344
+    assert kept['denominator']==247
     assert kept['answerVisibility']['shown']==247
 
 
@@ -275,7 +320,8 @@ def test_hidden_original_breakdown_totals_use_visible_counts():
     project=fixture()
     settings=KoboSettings(questions={'answer':QuestionSettings(hiddenAnswers=['b'],hiddenAnswerPercentageMode='keep-original',breakdowns=['region'])})
     actual=result(project,settings)
+    bases={column['id']:column['denominator'] for column in result(project,KoboSettings(questions={'answer':QuestionSettings(breakdowns=['region'])}))['breakdowns']}
     for column in actual['breakdowns']:
         count=sum(cell['count'] for row in actual['rows'] if row['id']!='__blank__' for cell in row.get('series',[]) if cell['id']==column['id'])
         assert column['totalCount']==count
-        assert column['totalPercent']==(count/column['denominator']*100 if column['denominator'] else None)
+        assert column['totalPercent']==(count/bases[column['id']]*100 if bases[column['id']] else None)

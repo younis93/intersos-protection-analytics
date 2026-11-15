@@ -155,7 +155,7 @@ export function DetentionCases({
   };
   const openFilteredRecords=(event:React.MouseEvent<HTMLDivElement>)=>{
     const target=event.target as HTMLElement;
-    if(target.closest("button,a,input,select"))return;
+    if(target.isContentEditable||target.closest("button,a,input,select,textarea"))return;
     if(!target.closest(".chart-card,.detention-map,.detention-breakdown"))return;
     event.preventDefault();
     const width=226,height=108,padding=10;

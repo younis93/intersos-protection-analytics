@@ -10,7 +10,6 @@ from datetime import datetime
 from .file_security import safe_spreadsheet_value
 from .kobo import label, breakdown_fields, resolved_question_settings
 from .kobo_excel_layout import DATA_HEADERS, EXCEL_DATA_ROWS, unique_sheet_name
-from .kobo_excel_direct import direct_helpers, choice_lookup_rows, structured_column
 
 EXCEL_COLUMNS = 16_384
 
@@ -100,14 +99,15 @@ def query_config(project, snapshot, settings, specs, layouts):
     results = []
     for result in snapshot['questions']:
         q = by_id[result['id']]; cfg = resolved_question_settings(q,settings)
-        from .kobo_connections import connection_plan
+        from .kobo_connections import connection_plan, uses_linked_respondents
         plan = connection_plan(q,cfg,by_id) if cfg else {'enabled':False}
         dimensions = breakdown_fields(cfg, by_id, q) if cfg else []
+        exclude_hidden = cfg and (uses_linked_respondents(cfg, plan) or cfg.hiddenAnswerPercentageMode == 'adjust')
         counts = Counter(row['label'] for row in result.get('percentageRows', result['rows']))
         results.append({'id': q['id'], 'label': result['label'], 'group': q['group'], 'groupLabel': next((g['label'] for g in snapshot['groups'] if g['id'] == q['group']), ''),
             'excludedRecords': [r['id'] for r in project['records'] if q['id'] in r.get('_conditionalExcluded', [])],
             'scope': q['repeat'], 'kind': q['kind'], 'dateUnit': cfg.dateUnit if cfg else 'month', 'trendDateField': cfg.trendDateField if cfg and result.get('trend') else '', 'trendUnit': cfg.trendUnit if cfg else 'month', 'dimensions': [f['id'] for f in dimensions],
-            'bins': result.get('bins', []), 'blank': not settings.hideBlanks and not (cfg and (plan['enabled'] or cfg.hiddenAnswerPercentageMode == 'adjust') and '__blank__' in cfg.hiddenAnswers), 'hiddenAnswers': cfg.hiddenAnswers if cfg and (plan['enabled'] or cfg.hiddenAnswerPercentageMode == 'adjust') and q['kind'] in {'category','multiple','text'} else [],
+            'bins': result.get('bins', []), 'blank': not settings.hideBlanks and not (exclude_hidden and '__blank__' in cfg.hiddenAnswers), 'hiddenAnswers': cfg.hiddenAnswers if exclude_hidden and q['kind'] in {'category','multiple','text'} else [],
             'hiddenAnswerPercentageMode': cfg.hiddenAnswerPercentageMode if cfg else 'adjust',
             'percentageParent': plan['parentId'] if plan['enabled'] and plan['mode']=='keep-original' else '',
             'connected':plan['enabled'], 'connectionTree':plan.get('tree') if not plan.get('reviewIssues') else None,

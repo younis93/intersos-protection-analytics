@@ -21,7 +21,7 @@ export function advancedChartSpec(result:KoboResult&{chartMaximum?:number},langu
  const axis={automargin:true,fixedrange:true,gridcolor:grid,showgrid:appearance.grid==='show'||appearance.grid==='auto'&&!heatmap,zeroline:false};
  const layout:Partial<Layout>={autosize:true,height:Math.max(appearance.height||0,heatmap?rows.length*(exporting?64:48)+210:exporting?750:440),
   paper_bgcolor:exporting?'#fff':'transparent',plot_bgcolor:exporting?'#fff':'transparent',dragmode:false,hovermode:'closest',
-  font:{family:language==='ar'?'Noto Naskh Arabic, Segoe UI, sans-serif':'DM Sans, Segoe UI, sans-serif',color:ink,size:font},
+  font:{color:ink,size:font},
   margin:{l:heatmap?exporting?360:220:80,r:heatmap?100:35,t:40,b:heatmap?150:130},
   xaxis:{...axis,type:'category'},yaxis:{...axis},showlegend:!heatmap&&appearance.legend!=='hidden',
   legend:{orientation:['left','right'].includes(appearance.legend)?'v':'h',x:appearance.legend==='right'?1.02:0,y:appearance.legend==='top'?1.15:-.25}};
@@ -35,17 +35,24 @@ export function advancedChartSpec(result:KoboResult&{chartMaximum?:number},langu
   return {layout,data:trend.series.map(series=>({type:'scatter',mode:appearance.labels==='hidden'?'lines+markers':'lines+markers+text',name:series.label,
    x:trend.periods,y:series.points.map(point=>percentage?point.percent:point.count),connectgaps:false,
    line:{color:result.colors[series.id]||koboThemeColor(series.id,theme)},marker:{color:result.colors[series.id]||koboThemeColor(series.id,theme)},
-   text:series.points.map(point=>point.percent===null&&percentage||appearance.labels==='auto'&&!point.count?'':chartLabel(point.count,point.percent,appearance.labels==='auto'?percentage?'percent':'count':appearance.labels,language,decimals)),textposition:'top center',cliponaxis:false,
+   text:series.points.map(point=>point.percent===null&&percentage||appearance.labels==='auto'&&!point.count?'':chartLabel(point.count,point.percent,appearance.labels==='auto'?percentage?'percent':'count':appearance.labels,language,decimals,appearance.zeroPercentLabels)),textposition:'top center',cliponaxis:false,
    hovertext:series.points.map((point,index)=>`${chartCaption(series.label,42,4)}<br>${trend.periods[index]}<br># ${point.count}<br>${formatPercent(point.percent,decimals,language)}`),hovertemplate:'%{hovertext}<extra></extra>'} as Data))};
  }
  const columns=result.breakdowns;
- if(exporting)layout.width=Math.max(1300,columns.length*180+460);
- layout.xaxis={...axis,type:'category',tickmode:'array',tickvals:columns.map(column=>column.id),ticktext:columns.map(column=>chartCaption(column.label,22,5)),tickangle:0};
- layout.yaxis={...axis,type:'category',autorange:'reversed',tickmode:'array',tickvals:rows.map(row=>row.id),ticktext:rows.map(row=>chartCaption(row.label,30,5))};
+ const columnCaptions=columns.map(column=>chartCaption(column.label,22,exporting?Infinity:5));
+ const rowCaptions=rows.map(row=>chartCaption(row.label,30,exporting?Infinity:5));
+ if(exporting){
+  const lines=(caption:string)=>caption.split('<br>').length;
+  layout.margin!.b=Math.max(150,...columnCaptions.map(caption=>lines(caption)*font*1.3+24));
+  layout.height=Math.max(Number(layout.height),rows.length*Math.max(64,...rowCaptions.map(caption=>lines(caption)*font*1.35+14))+layout.margin!.b+60);
+ }
+ if(exporting)layout.width=Math.max(1300,columns.length*320+460);
+ layout.xaxis={...axis,type:'category',tickmode:'array',tickvals:columns.map(column=>column.id),ticktext:columnCaptions,tickangle:0};
+ layout.yaxis={...axis,type:'category',autorange:'reversed',tickmode:'array',tickvals:rows.map(row=>row.id),ticktext:rowCaptions};
  return {layout,data:[{type:'heatmap',x:columns.map(column=>column.id),y:rows.map(row=>row.id),
   z:rows.map(row=>columns.map(column=>{const entry=row.series?.find(entry=>entry.id===column.id);return percentage?entry?.percent??null:entry?.count??0})),
   colorscale:koboHeatmapScale(theme,result.colors.series===koboThemePalette(theme)[0]?undefined:result.colors.series),zmin:0,...(result.chartMaximum?{zmax:result.chartMaximum}:{}),hoverongaps:false,
-  text:rows.map(row=>columns.map(column=>{const entry=row.series?.find(entry=>entry.id===column.id);return chartLabel(entry?.count??0,entry?.percent??null,appearance.labels==='auto'?percentage?'percent':'count':appearance.labels,language,decimals)})),
+  text:rows.map(row=>columns.map(column=>{const entry=row.series?.find(entry=>entry.id===column.id);return chartLabel(entry?.count??0,entry?.percent??null,appearance.labels==='auto'?percentage?'percent':'count':appearance.labels,language,decimals,appearance.zeroPercentLabels)})),
   texttemplate:appearance.labels==='hidden'?'':'%{text}',textfont:{size:font},
   hovertext:rows.map(row=>columns.map(column=>{const entry=row.series?.find(entry=>entry.id===column.id);return `${chartCaption(row.label,42,4)}<br>${chartCaption(column.label,42,4)}<br># ${entry?.count??0}<br>${formatPercent(entry?.percent??null,decimals,language)}`})),hovertemplate:'%{hovertext}<extra></extra>',
   colorbar:{title:{text:percentage?'%':'#'},ticksuffix:percentage?'%':''}} as unknown as Data]};

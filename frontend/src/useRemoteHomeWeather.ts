@@ -4,9 +4,10 @@ import type {HomeWeatherMode} from './homeWeather';
 
 let lastMode: HomeWeatherMode | null = null;
 
-export function useRemoteHomeWeather() {
+export function useRemoteHomeWeather(enabled: boolean) {
   const [mode, setMode] = useState(lastMode);
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     let pending = false;
     async function refresh() {
@@ -33,6 +34,6 @@ export function useRemoteHomeWeather() {
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, []);
+  }, [enabled]);
   return mode;
 }

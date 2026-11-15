@@ -223,7 +223,7 @@ async function checkWeather(browser, width, theme) {
       await page.waitForFunction(() => document.querySelector('.home-snowman')?.dataset.animation === 'walk');
     }
     await page.getByRole('button', {name: 'Turn on Halloween mode'}).click();
-    await page.locator('.halloween-hud').waitFor();
+    await page.locator('.halloween-dock').waitFor();
     assert.equal(await sky.count(), 0);
     await page.getByRole('button', {name: 'Turn off Halloween mode'}).click();
     await page.locator('.halloween-transition').waitFor({state: 'detached'});

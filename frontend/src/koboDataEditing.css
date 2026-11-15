@@ -55,3 +55,7 @@
 .kobo-response-footer .kobo-response-clear{color:var(--muted);background:transparent;border-color:transparent;padding-inline:0}
 .kobo-dialog.kobo-response-dialog fieldset:disabled{opacity:.65}
 @media(max-width:560px){.kobo-dialog.kobo-response-dialog>header{padding:16px}.kobo-response-body{padding:16px}.kobo-response-footer{padding:12px 16px;flex-wrap:wrap}.kobo-response-footer>div{margin-inline-start:auto}.kobo-dialog.kobo-response-dialog>header>div{grid-template-columns:30px minmax(0,1fr);column-gap:8px}.kobo-dialog.kobo-response-dialog .kobo-edit-symbol{padding:6px}.kobo-dialog.kobo-response-dialog .kobo-edit-symbol svg{width:18px;height:18px}.kobo-dialog.kobo-response-dialog h2{font-size:18px}.kobo-response-preview>div{gap:10px}}
+.kobo-response-rename-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.kobo-response-current .kobo-response-rename-actions button{display:inline-flex;align-items:center;gap:6px;max-width:100%;min-height:32px;padding:4px 9px;text-align:start;font-size:12px}
+.kobo-response-rename-actions button svg{flex:none}
+.kobo-response-rename-actions button span{min-width:0;overflow-wrap:anywhere}

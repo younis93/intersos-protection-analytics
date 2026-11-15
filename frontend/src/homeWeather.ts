@@ -243,7 +243,7 @@ export function mountHomeWeather(home: HTMLElement, mode: HomeWeatherMode) {
       frame = requestAnimationFrame(tick);
       return;
     }
-    const dark = /^(glass-dark|forest)$/.test(document.documentElement.dataset.theme || '');
+    const dark = /^(glass-dark|forest|vice-city)$/.test(document.documentElement.dataset.theme || '');
     const palette = dark ? darkPalette : lightPalette;
     const activeSurfaces = Array.from(home.querySelectorAll<HTMLCanvasElement>('.home-weather-surface')).flatMap(canvas => {
       const parent = canvas.parentElement!;

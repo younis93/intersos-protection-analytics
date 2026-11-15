@@ -1,4 +1,4 @@
-.kobo-dialog.kobo-hidden-manager{width:min(580px,calc(100vw - 24px));max-height:min(760px,calc(100dvh - 32px));box-sizing:border-box;padding:0;overflow:hidden;display:flex;flex-direction:column;color:var(--ink)}
+.kobo-dialog.kobo-hidden-manager{width:min(580px,calc(100vw - 24px));max-height:min(760px,calc(100dvh - 32px));box-sizing:border-box;padding:0;overflow:hidden;display:flex;flex-direction:column;color:var(--ink);background:linear-gradient(var(--panel-strong),var(--panel-strong)),var(--bg);backdrop-filter:none}
 .kobo-hidden-manager>header{display:flex;align-items:center;gap:12px;padding:22px 24px 14px;flex:none}
 .kobo-hidden-manager-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:13px;background:color-mix(in srgb,var(--blue) 9%,var(--panel));color:var(--blue);flex:none}
 .kobo-hidden-manager-icon svg{width:22px;height:22px}.kobo-hidden-manager h2{margin:0;font-size:21px;line-height:1.5}.kobo-hidden-manager header p{margin:2px 0 0;color:var(--muted);font-size:12px}.kobo-hidden-manager>header>button{margin-inline-start:auto;padding:8px}.kobo-hidden-manager>header>button svg{width:18px;height:18px}

@@ -22,6 +22,17 @@ def result(p=None,**config):
 def leaf(field,value,operator='eq'):return dict(type='rule',field=field,operator=operator,value=value)
 def group(*rules,match='all'):return dict(type='group',match=match,rules=list(rules))
 
+@pytest.mark.parametrize('mode', ['grand-total', 'column-total', 'breakdown-group'])
+def test_linked_additive_percentages_respect_hidden_answer_base(mode):
+    config = dict(percentageMode=mode, connectedPercentageMode='adjust', hiddenAnswers=['a'], breakdowns=['region'])
+    adjusted, _ = result(**config)
+    original, _ = result(**config, hiddenAnswerPercentageMode='keep-original')
+    assert adjusted['percentageMode'] == original['percentageMode'] == mode
+    assert not adjusted.get('respondentBasis') and not original.get('respondentBasis')
+    assert [(row['id'],row['percent']) for row in adjusted['rows']] == [('b',100)]
+    assert [(row['id'],row['percent']) for row in original['rows']] == [('b',40)]
+    assert original['denominator'] == adjusted['denominator'] == 4
+
 
 @pytest.mark.parametrize('mode,hidden,expected,total,base',[
     ('adjust',[],[60,40],100,10),('keep-original',[],[6,4],10,100),

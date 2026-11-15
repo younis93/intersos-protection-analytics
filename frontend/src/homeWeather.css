@@ -86,7 +86,54 @@
   opacity: .94;
 }
 
+.home-weather-test-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.home-weather-test-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 38px;
+  padding: 0 9px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.home-weather-test-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.home-weather-test-button[aria-pressed='true'] {
+  border-color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 20%, var(--panel-strong));
+}
+
 @media (max-width: 760px) {
+  .welcome-page[data-home-weather-test] .welcome-home-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    left: 10px;
+  }
+
+  .welcome-page .home-weather-test-buttons {
+    flex-basis: 100%;
+    justify-content: flex-end;
+    pointer-events: none;
+  }
+
+  .welcome-page .home-weather-test-button {
+    height: 32px;
+    pointer-events: auto;
+  }
+
+  main.welcome-page[data-home-weather-test] {
+    padding-top: 118px;
+  }
+
   .welcome-page .welcome-header-compact {
     top: -24px;
   }

@@ -5,9 +5,14 @@ export type SamplingState = {
   page:number;
   removeDuplicateBeneficiaryIds:boolean;
   removeDuplicateContacts:boolean;
+  hotlineOnly:boolean;
+  hotlineOperator:string;
 };
 
-export const initialSamplingState = ():SamplingState => ({search:'',filters:{},page:1,removeDuplicateBeneficiaryIds:false,removeDuplicateContacts:false});
+export const initialSamplingState = ():SamplingState => ({
+  search:'',filters:{},page:1,removeDuplicateBeneficiaryIds:false,removeDuplicateContacts:false,
+  hotlineOnly:false,hotlineOperator:'',
+});
 
 export type SamplingResult = {
   available:boolean;
@@ -19,4 +24,8 @@ export type SamplingResult = {
   pageSize:number;
   filterOptions:Record<string,string[]>;
   quickFilters:string[];
+  emptyReason:string;
+  hotlineMatchReason:string;
+  hotlineOperatorReason:string;
+  hotlineOperators:string[];
 };

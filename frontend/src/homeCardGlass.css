@@ -1,0 +1,73 @@
+.welcome-page .home-card-glass > .workspace-card {
+  --home-glass-tint: 84%;
+  --home-glass-rim: rgb(255 255 255 / 92%);
+  --home-glass-rim-soft: rgb(255 255 255 / 46%);
+  --home-glass-highlight: rgb(255 255 255 / 38%);
+  background: #fff;
+  backdrop-filter: none;
+}
+
+:root[data-theme='glass-dark'] .welcome-page .home-card-glass > .workspace-card {
+  --home-glass-tint: 80%;
+  --home-glass-rim: rgb(203 232 255 / 56%);
+  --home-glass-rim-soft: rgb(154 205 247 / 23%);
+  --home-glass-highlight: rgb(184 224 255 / 9%);
+  background: #162d3f;
+}
+
+/* Keep the existing hues readable over the brighter, tinted light surface. */
+:root[data-theme='glass-light'] .home-card-glass > .workspace-card > :is(.workspace-badge, .workspace-enter) {
+  color: color-mix(in srgb, var(--card-color) 72%, var(--ink));
+}
+
+:root[data-theme='glass-light'] .home-card-glass > .workspace-card > p {
+  color: color-mix(in srgb, var(--muted) 80%, var(--ink));
+}
+
+.welcome-page .home-card-glass > .workspace-card:focus-visible {
+  outline: 2px solid var(--card-color);
+  outline-offset: 3px;
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  @media not (prefers-reduced-transparency: reduce) {
+    .welcome-page .home-card-glass > .workspace-card,
+    :root[data-theme='glass-dark'] .welcome-page .home-card-glass > .workspace-card {
+      background: linear-gradient(150deg, var(--home-glass-highlight), transparent 42%),
+        color-mix(in srgb, var(--panel-strong) var(--home-glass-tint), transparent);
+      -webkit-backdrop-filter: blur(16px) saturate(145%);
+      backdrop-filter: var(--home-glass-refraction, blur(16px)) saturate(145%);
+    }
+
+    .welcome-page .home-card-glass > .workspace-card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      border-radius: inherit;
+      padding: 1px;
+      pointer-events: none;
+      background: linear-gradient(145deg, var(--home-glass-rim), transparent 43%,
+        transparent 66%, var(--home-glass-rim-soft));
+      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      mask-composite: exclude;
+    }
+  }
+}
+
+@media (forced-colors: active) {
+  .welcome-page .home-card-glass > .workspace-card,
+  :root[data-theme='glass-dark'] .welcome-page .home-card-glass > .workspace-card {
+    background: Canvas;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .welcome-page .home-card-glass > .workspace-card::after {
+    content: none;
+  }
+
+  .welcome-page .home-card-glass > .workspace-card:focus-visible {
+    outline-color: Highlight;
+  }
+}

@@ -27,3 +27,26 @@ def apply_display_percentages(rows, breakdowns, denominator, kind, decimals):
             for entry in row.get('series', []):
                 if entry['id'] == column['id']:
                     entry['displayPercent'] = values.get(row['id'])
+
+
+def apply_original_respondent_percentages(result, original):
+    from .kobo_pivot_percentages import percentage, put_percent
+    denominator = original['denominator']
+    decimals = result.get('percentageDecimals', 0)
+    column_bases = {column['id']: column['denominator'] for column in original['breakdowns']}
+    for row in result['rows']:
+        put_percent(row, row['count'], denominator if row['id'] != '__blank__' else None, decimals)
+        for cell in row.get('series', []):
+            put_percent(cell, cell['count'], column_bases.get(cell['id']) if row['id'] != '__blank__' else None, decimals)
+    visible = result['denominator']
+    result['pivotTotal'] = {'count': visible, 'percent': percentage(visible, denominator)}
+    for column in result['breakdowns']:
+        column['totalCount'] = column['denominator']
+        column['totalPercent'] = percentage(column['totalCount'], column_bases.get(column['id']))
+    if (trend := result.get('trend')) and (original_trend := original.get('trend')):
+        period_bases = dict(zip(original_trend['periods'], original_trend['denominators']))
+        for series in trend['series']:
+            for period, point in zip(trend['periods'], series['points']):
+                put_percent(point, point['count'], period_bases.get(period), decimals)
+    if result.get('respondentBasis'):
+        result['respondentBasis'].update(denominator=denominator, hiddenMode='keep-original')

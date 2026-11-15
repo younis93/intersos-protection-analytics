@@ -158,7 +158,7 @@ if ($LaunchOnly) {
     $env:INTERSOS_GITHUB_REPOSITORY = ''
     # pythonw.exe hosts the visible WebView window without creating a second
     # console window for the Python launcher.
-    $LaunchProcess = Start-Process -FilePath $VenvPythonWindowed -ArgumentList "`"$LauncherPath`"" -WorkingDirectory $ProjectRoot -PassThru
+    $LaunchProcess = Start-Process -FilePath $VenvPythonWindowed -ArgumentList @("`"$LauncherPath`"", "--test-home-weather") -WorkingDirectory $ProjectRoot -PassThru
     $LaunchDeadline = (Get-Date).AddSeconds(30)
     $ApplicationWindow = $null
     do {

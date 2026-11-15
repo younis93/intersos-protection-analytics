@@ -45,7 +45,7 @@ function useDropdownPosition(open: boolean, close: () => void) {
       node.style.top = `${Math.max(y + edge, Math.min(top, y + height - edge - menuHeight))}px`;
     };
     position();
-    const firstFocus=node.querySelector<HTMLElement>("input") || node.querySelector<HTMLElement>("[aria-selected=\"true\"]") || node.querySelector<HTMLElement>("button") || node;
+    const firstFocus=node.querySelector<HTMLElement>("input") || node.querySelector<HTMLElement>("[aria-selected=\"true\"]") || node.querySelector<HTMLElement>("select,button:not(:disabled)") || node;
     firstFocus.focus({preventScroll:true});
     const list=firstFocus.closest<HTMLElement>('[data-virtual-rows]');
     if(list&&firstFocus.matches('[role=option]'))list.scrollTop+=firstFocus.getBoundingClientRect().top-list.getBoundingClientRect().top;

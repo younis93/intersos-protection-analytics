@@ -19,6 +19,15 @@ class StyleInfo(ctypes.Structure):
     _fields_ = [("old", wintypes.DWORD), ("new", wintypes.DWORD)]
 
 
+class WindowPos(ctypes.Structure):
+    _fields_ = [
+        ("hwnd", wintypes.HWND), ("insert_after", wintypes.HWND),
+        ("x", ctypes.c_int), ("y", ctypes.c_int),
+        ("width", ctypes.c_int), ("height", ctypes.c_int),
+        ("flags", wintypes.UINT),
+    ]
+
+
 class WindowsWindowFrame:
     STYLE_BITS = 0x00CF0000  # Caption, sizing frame, system menu, min/max boxes.
 
@@ -28,6 +37,8 @@ class WindowsWindowFrame:
         self.hwnd = native.Handle.ToInt64()
         self.native_drag = False
         self.disposed = False
+        self._dragging_from_maximized = False
+        self._handling_drag_restore = False
         self._webview = native.webview
         self._subclass_id = id(self)
         self._user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -52,7 +63,10 @@ class WindowsWindowFrame:
         if not self._comctl.SetWindowSubclass(self.hwnd, self._callback, self._subclass_id, 0):
             raise ctypes.WinError(ctypes.get_last_error())
         self._initialized_handler = self._webview_initialized
+        self._context_menu_handler = self._on_context_menu_requested
+        self._context_menu_core = None
         self._webview.CoreWebView2InitializationCompleted += self._initialized_handler
+        self._enable_editing_context_menu()
         self._enable_native_drag()
         self.apply_style()
         self.refresh_work_area()
@@ -85,8 +99,35 @@ class WindowsWindowFrame:
             self.native_drag = False  # Older runtimes retain the bridge fallback.
         self.controller.publish_state(force=True)
 
+    @staticmethod
+    def _on_context_menu_requested(_sender, args):
+        if not args.ContextMenuTarget.IsEditable:
+            args.Handled = True
+
+    def _enable_editing_context_menu(self):
+        core = self._webview.CoreWebView2
+        if core is None or self._context_menu_core is not None:
+            return
+        try:
+            core.ContextMenuRequested += self._context_menu_handler
+        except Exception:
+            return  # Older runtimes keep the host's default menu policy.
+        try:
+            core.Settings.AreDefaultContextMenusEnabled = True
+        except Exception:
+            core.ContextMenuRequested -= self._context_menu_handler
+            return
+        self._context_menu_core = core
+
+    def _remove_editing_context_menu(self):
+        core = self._context_menu_core
+        if core is not None:
+            self._context_menu_core = None
+            core.ContextMenuRequested -= self._context_menu_handler
+
     def _webview_initialized(self, _sender, args):
         if args.IsSuccess and not self.disposed:
+            self._enable_editing_context_menu()
             self._enable_native_drag()
 
     def monitor_info(self):
@@ -108,6 +149,20 @@ class WindowsWindowFrame:
 
     def _window_proc(self, hwnd, message, wparam, lparam, _subclass_id, _data):
         try:
+            if message == 0x0231:  # WM_ENTERSIZEMOVE
+                self._dragging_from_maximized = bool(self._user32.IsZoomed(hwnd))
+            if message == 0x0047 and self._dragging_from_maximized and not self._user32.IsZoomed(hwnd):  # WM_WINDOWPOSCHANGED
+                self._dragging_from_maximized = False
+                self._handling_drag_restore = True
+                try:
+                    return self._comctl.DefSubclassProc(hwnd, message, wparam, lparam)
+                finally:
+                    self._handling_drag_restore = False
+            if message == 0x0046 and self._handling_drag_restore:  # WM_WINDOWPOSCHANGING
+                # WinForms reapplies its saved bounds while handling the restore.
+                # Windows has already positioned the window under the pointer.
+                position = WindowPos.from_address(lparam)
+                position.flags |= 0x0003  # SWP_NOMOVE | SWP_NOSIZE
             if message == 0x007C and wparam & 0xFFFFFFFF == 0xFFFFFFF0 and not self.controller.fullscreen:
                 # WinForms reapplies FormBorderStyle.None when showing/restoring
                 # the form. Preserve Snap styles in that incoming style change.
@@ -135,6 +190,14 @@ class WindowsWindowFrame:
                 value = self._comctl.DefSubclassProc(hwnd, message, wparam, lparam)
                 self.refresh_work_area()
                 return value
+            if message == 0x0232:  # WM_EXITSIZEMOVE
+                self._dragging_from_maximized = False
+                value = self._comctl.DefSubclassProc(hwnd, message, wparam, lparam)
+                # Paint after Windows applies the final drag or Snap bounds.
+                # Leave painting queued so it cannot block the native drag loop.
+                if not self.disposed and self._webview.Visible:
+                    self._webview.Invalidate(True)
+                return value
             if message == 0x0082:  # WM_NCDESTROY
                 self.dispose()
         except Exception:
@@ -147,5 +210,6 @@ class WindowsWindowFrame:
         self.disposed = True
         try:
             self._webview.CoreWebView2InitializationCompleted -= self._initialized_handler
+            self._remove_editing_context_menu()
         finally:
             self._comctl.RemoveWindowSubclass(self.hwnd, self._callback, self._subclass_id)

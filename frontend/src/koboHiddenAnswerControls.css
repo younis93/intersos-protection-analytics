@@ -1,3 +1,5 @@
+.kobo-percentage-base-control{display:grid;justify-items:center;gap:3px;max-width:100%;min-width:0}
+.kobo-percentage-base-label{font-size:10px;font-weight:600;line-height:1.2;color:inherit}
 .kobo-answer-percentage-buttons{
  display:inline-flex;align-items:stretch;gap:4px;padding:4px;max-width:100%;box-sizing:border-box;
  border:1px solid var(--line);border-radius:12px;background:var(--panel);
@@ -17,5 +19,5 @@
 }
 .kobo-answer-percentage-buttons>button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .kobo-answer-percentage-buttons>button:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
-.kobo-connection-settings>.kobo-answer-percentage-buttons{display:flex;width:100%}
+.kobo-connection-settings>.kobo-percentage-base-control,.kobo-connection-settings>.kobo-percentage-base-control>.kobo-answer-percentage-buttons{width:100%}
 @media(prefers-reduced-motion:reduce){.kobo-answer-percentage-buttons>button{transition:none}}

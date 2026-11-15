@@ -7,7 +7,7 @@ import {useEffect,useState} from 'react';
 import {exportLegalSampling,getLegalSampling} from './api';
 import {formatTableValue,formatYearMonthFilterValue} from './dateFormat';
 import {LegalScrollControls} from './LegalScrollControls';
-import {CheckboxMultiSelect,ExcelDownloadButton} from './SelectionControls';
+import {AppSelect,CheckboxMultiSelect,ExcelDownloadButton} from './SelectionControls';
 import {Pager,TableState} from './TableControls';
 import {useDebouncedValue} from './useDebouncedValue';
 import {ValueTable} from './ValueTable';
@@ -18,16 +18,21 @@ export default function LegalSampling({state,update}:{state:SamplingState;update
   const [data,setData]=useState<SamplingResult|null>(null),[busy,setBusy]=useState(true),[error,setError]=useState('');
   const [drawer,setDrawer]=useState(false),[filterSearch,setFilterSearch]=useState(''),[attempt,setAttempt]=useState(0);
   const search=useDebouncedValue(state.search);
-  const recordFilters=useLegalRecordFilters("sampling","legalservices",state.filters,search,()=>update({page:1}),"sampling",filters=>update({filters,page:1}),{removeDuplicateBeneficiaryIds:state.removeDuplicateBeneficiaryIds,removeDuplicateContacts:state.removeDuplicateContacts});
+  const {hotlineOnly,hotlineOperator}=state;
+  const matching=hotlineOnly||Boolean(hotlineOperator);
+  const recordFilters=useLegalRecordFilters("sampling","legalservices",state.filters,search,()=>update({page:1}),"sampling",filters=>update({filters,page:1}),{
+    removeDuplicateBeneficiaryIds:state.removeDuplicateBeneficiaryIds,removeDuplicateContacts:state.removeDuplicateContacts,
+    hotlineOnly,hotlineOperator,
+  });
   useEffect(()=>{
     const controller=new AbortController();setBusy(true);setError('');
     getLegalSampling({...state,search,filters:recordFilters.requestLegacy,columnFilters:recordFilters.columnFilters},controller.signal).then(result=>{if(!controller.signal.aborted)setData(result)})
       .catch(reason=>{if(!controller.signal.aborted)setError(reason.message||'Unable to load Sampling.')})
       .finally(()=>{if(!controller.signal.aborted)setBusy(false)});
     return()=>controller.abort();
-  },[search,state.filters,state.page,state.removeDuplicateBeneficiaryIds,state.removeDuplicateContacts,attempt,recordFilters.columnFilters]);
+  },[search,state.filters,state.page,state.removeDuplicateBeneficiaryIds,state.removeDuplicateContacts,hotlineOnly,hotlineOperator,attempt,recordFilters.columnFilters]);
   const active=recordFilters.control.filters.length;
-  const changed=recordFilters.columnFilters.length+active+Number(Boolean(state.search))+Number(state.removeDuplicateBeneficiaryIds)+Number(state.removeDuplicateContacts);
+  const changed=recordFilters.columnFilters.length+active+Number(Boolean(state.search))+Number(state.removeDuplicateBeneficiaryIds)+Number(state.removeDuplicateContacts)+Number(matching)+Number(Boolean(hotlineOperator));
   const reset=()=>{recordFilters.clear();update(initialSamplingState())};
   const setFilter=(column:string,values:string[])=>update({page:1,filters:{...state.filters,[column]:values}});
   const options={...Object.fromEntries(Object.keys(state.filters).map(key=>[key,[] as string[]])),...data?.filterOptions};
@@ -47,6 +52,20 @@ export default function LegalSampling({state,update}:{state:SamplingState;update
       </div>
     </LegalScrollControls>
     <div className="glass sampling-options">
+      <div className="sampling-hotline-fields">
+        <div>
+          <AppSelect label="Hotline contact" value={matching?'matched':'all'} disabled={!data?.available||Boolean(data.hotlineMatchReason)}
+            options={[['all','All eligible services'],['matched','With matching hotline contact']]} preserveOrder
+            onChange={value=>update(value==='all'?{hotlineOnly:false,hotlineOperator:'',page:1}:{hotlineOnly:true,page:1})}/>
+          {data?.hotlineMatchReason&&<small>{data.hotlineMatchReason}</small>}
+        </div>
+        <div>
+          <AppSelect label="Hotline Created By" value={hotlineOperator} disabled={!data?.available||Boolean(data.hotlineOperatorReason)}
+            options={[[ '', 'All operators'],...(data?.hotlineOperators||[]).map((operator):[string,string]=>[operator,operator])]}
+            searchable preserveOrder onChange={operator=>update({hotlineOperator:operator,hotlineOnly:matching||Boolean(operator),page:1})}/>
+          {data?.hotlineOperatorReason&&data.hotlineOperatorReason!==data.hotlineMatchReason&&<small>{data.hotlineOperatorReason}</small>}
+        </div>
+      </div>
       <label><input type="checkbox" checked={state.removeDuplicateBeneficiaryIds} onChange={event=>update({removeDuplicateBeneficiaryIds:event.target.checked,page:1})}/>Remove duplicate Beneficiary IDs</label>
       <label><input type="checkbox" checked={state.removeDuplicateContacts} onChange={event=>update({removeDuplicateContacts:event.target.checked,page:1})}/>Remove duplicate contact numbers</label>
     </div>
@@ -54,13 +73,13 @@ export default function LegalSampling({state,update}:{state:SamplingState;update
     <div className="glass legal-table-card studio-records-table">
       <div className="legal-card-heading">
         <label className="studio-table-search"><Search/><input aria-label="Search Sampling" placeholder="Search Sampling data" value={state.search} onChange={event=>update({search:event.target.value,page:1})}/></label>
-        <div className="indicator-total-block detention-table-total"><strong>{(data?.total||0).toLocaleString()}</strong><span>Records</span></div>
+        <div className="indicator-total-block detention-table-total"><strong>{(data?.total||0).toLocaleString()}</strong><span>{matching?'Name matches':'Records'}</span></div>
         <Pager compact page={data?.page||state.page} pageSize={100} total={data?.total||0} onChange={page=>update({page})}/>
       </div>
       {busy&&<TableState className="studio-section-loading">Loading Sampling records…</TableState>}
       {!busy&&!error&&data&&!data.available&&<TableState className="sampling-message">{data.reason}</TableState>}
       {!busy&&!error&&data?.available&&<>
-        {data.total===0&&<TableState className="sampling-message">No eligible legal-services records match these settings. Primary contacts must contain exactly ten digits starting with 77, 78, or 75.</TableState>}
+        {data.total===0&&<TableState className="sampling-message">{data.emptyReason}</TableState>}
         <div className="legal-table-wrap"><ValueTable recordFilters={{...recordFilters.control,showClearAll:false}}><thead><tr>{data.columns.map(column=><th className="no-sort" key={column} scope="col">{column}</th>)}</tr></thead>
           <tbody>{data.rows.map((row,index)=><tr key={index}>{data.columns.map(column=><td key={column}>{formatTableValue(row[column])}</td>)}</tr>)}</tbody>
         </ValueTable></div>

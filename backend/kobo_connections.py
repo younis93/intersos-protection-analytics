@@ -149,7 +149,8 @@ def connection_plan(question, cfg, questions):
         ignored_ids={entry_id(e) for e in ignored_source}
         entries=[e for e in entries if entry_id({'source':e.get('source',question['id']),**e}) not in ignored_ids]
     measured = cfg.calculation and cfg.calculation.operation != 'count'
-    enabled = bool(entries or cfg.connectionSource == 'manual' or cfg.percentageBase == 'parent' or cfg.connectedPercentageMode) and not measured
+    # Adjust can be saved when switching percentage bases on an unlinked question.
+    enabled = bool(entries or cfg.connectionSource == 'manual' or cfg.percentageBase == 'parent' or cfg.connectedPercentageMode == 'keep-original') and not measured
     mode = cfg.connectedPercentageMode or ('keep-original' if cfg.percentageBase == 'parent' else 'adjust')
     tree, review, referenced, diagnostics = None, [], [], []
     if cfg.connectionSource == 'manual':
@@ -207,6 +208,10 @@ def connection_plan(question, cfg, questions):
     if mode == 'keep-original' and not issue: issue = parent_issue
     if measured and cfg.percentageBase == 'parent': issue = 'calculated-measure'
     return {'percentageBaseChange':base_change,'enabled':enabled,'mode':mode,'source':cfg.connectionSource,'tree':tree,'diagnostics':diagnostics,'reviewIssues':list(dict.fromkeys(review)),'parent':parent,'parentId':selected,'parentIssue':parent_issue,'issue':issue,'canKeepOriginal':not review and not parent_issue and not measured and not base_change,'fields':list(dict.fromkeys(referenced))}
+
+
+def uses_linked_respondents(cfg, plan):
+    return plan['enabled'] and (cfg.percentageMode == 'legacy-respondents' or cfg.percentageBase == 'parent' or cfg.connectedPercentageMode == 'keep-original')
 
 
 def parent_field(question, cfg, questions):

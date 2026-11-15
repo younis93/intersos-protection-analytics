@@ -23,8 +23,11 @@ def ids(result):
 @pytest.mark.parametrize("phone,valid", [
     ("7712345678", True), ("7812345678", True), ("7512345678", True), ("٧٧١٢٣٤٥٦٧٨", True),
     ("۷۸۱۲۳۴۵۶۷۸", True), ("77 123-45(678)", True), ("\u200e7712345678", True),
+    ("07712345678", True), ("07812345678", True), ("07512345678", True),
+    ("٠٧٧ ١٢٣-٤٥(٦٧٨)", True), ("۰۷۸۱۲۳۴۵۶۷۸", True),
     ("", False), (None, False), ("77123456", False), ("771234567", False), ("77123456789", False),
-    ("07712345678", False), ("+9647712345678", False), ("7412345678", False), ("7912345678", False),
+    ("0771234567", False), ("007712345678", False), ("+9647712345678", False),
+    ("7412345678", False), ("7912345678", False), ("07412345678", False), ("07912345678", False),
 ])
 def test_exact_primary_phone(phone, valid):
     source = pd.DataFrame([record(phone=phone, **{"Secondary Contact Number": "7712345678"})])
@@ -70,11 +73,28 @@ def test_duplicate_flags_independent_and_reversible():
 
 def test_normalized_contact_duplicates_keep_source_values():
     source = pd.DataFrame([record("older", phone="٧٧١٢٣٤٥٦٧٨", completed="01/01/2026"),
-                           record("newer", phone="77 123-45(678)", completed="02/01/2026")])
-    assert table(source)["total"] == 2
+                           record("newer", phone="077 123-45(678)", completed="02/01/2026")])
+    assert ids(table(source)) == ["newer", "older"]
     result = table(source, removeDuplicateContacts=True)
     assert ids(result) == ["newer"]
-    assert result["rows"][0]["Contact Number"] == "77 123-45(678)"
+    assert result["rows"][0]["Contact Number"] == "077 123-45(678)"
+    sheet = load_workbook(io.BytesIO(export(source, removeDuplicateContacts=True))).active
+    assert sheet.cell(2, result["columns"].index("Contact Number") + 1).value == "077 123-45(678)"
+
+
+def test_sampling_accepts_phone_normalized_by_beneficiaries_import():
+    from .legal_platform import LegalStore
+
+    services = pd.DataFrame([record("S1", phone="", **{"Assessment ID": "A1", "Beneficiary ID": "B1"})])
+    payload = {
+        "beneficiaries": b"Case ID,Name (Filter Color Red),Contact Number\nB1,Test Name,7512345678\n",
+        "assessments": b"Assessment ID,Beneficiary ID\nA1,B1\n",
+        "legalservices": services.to_csv(index=False).encode(),
+    }
+    store = LegalStore.from_files(payload, "sampling import fixture", use_cache=False)
+    result = table(store.frames["legalservices"])
+    assert ids(result) == ["S1"]
+    assert result["rows"][0]["Contact Number"] == "07512345678"
 
 
 def test_search_and_filters_before_dedup_month_and_self_excluding_facets():
@@ -150,6 +170,8 @@ def test_partial_import_unavailable_and_empty_eligible_frame():
         export(None)
     result = table(pd.DataFrame([record(phone="")]))
     assert result["available"] and result["total"] == 0 and result["columns"]
+    assert "All 1 completed Legal Representation records have a blank primary contact number" in result["emptyReason"]
+    assert "11 digits starting with 075, 077, or 078" in result["emptyReason"]
     assert load_workbook(io.BytesIO(export(pd.DataFrame([record(phone="")])))).active.max_row == 1
 
 
@@ -181,3 +203,64 @@ def test_read_only_endpoints_and_validation(monkeypatch):
         assert "sampling.xlsx" in download.headers["content-disposition"]
         assert load_workbook(io.BytesIO(download.content)).active.max_row == 7
     pd.testing.assert_frame_equal(source, original)
+
+
+def test_hotline_match_availability():
+    source = pd.DataFrame([record(**{"Name": "Caller"})])
+    missing_hotline = table(source)
+    assert missing_hotline["total"] == 1
+    assert "Import Hotline" in missing_hotline["hotlineMatchReason"]
+    assert table(source, hotlineOnly=True)["total"] == 0
+    missing_caller = table(source, hotline=pd.DataFrame({"Created By": ["Operator"]}))
+    assert "Name of the caller" in missing_caller["hotlineMatchReason"]
+    hotline = pd.DataFrame({"Name of the caller": ["Caller"]})
+    missing_service_name = table(source.drop(columns="Name"), hotline=hotline)
+    assert "Legal Services is missing the Name" in missing_service_name["hotlineMatchReason"]
+    missing_creator = table(source, hotline=hotline, hotlineOnly=True)
+    assert missing_creator["total"] == 1
+    assert not missing_creator["hotlineMatchReason"]
+    assert "Created By" in missing_creator["hotlineOperatorReason"]
+
+
+def test_hotline_name_matches_operator_before_deduplication_and_across_endpoints(monkeypatch):
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    monkeypatch.setenv("INTERSOS_DEFER_LEGAL_LOAD", "1")
+    from . import main
+
+    source = pd.DataFrame([
+        record("older-match", phone="07712345678", **{"Name": "أَحمد علي", "Beneficiary ID": "B1"}),
+        record("newer-other", completed="02/10/2026", **{"Name": "Different Caller", "Beneficiary ID": "B1"}),
+        record("detained-only", **{"Name": "Detained Person"}),
+        record("word-boundary", **{"Name": "DifferentCaller"}),
+        record("blank", **{"Name": "  "}),
+        record("invalid-phone", phone="", **{"Name": "أَحمد علي"}),
+    ])
+    hotline = pd.DataFrame({
+        "Name of the caller / اسم المتصل": ["احمد   علی", "احمد علي", " DIFFERENT CALLER ", "", None],
+        "Name of the detained person": ["Detained Person"] * 5,
+        "Created By": [" Operator A ", "Operator A", "Operator B", "", None],
+    })
+    frames = {"legalservices": source, "legalhotlines": hotline}
+    monkeypatch.setattr(main, "require_legal_store", lambda: SimpleNamespace(frames=frames))
+    with TestClient(main.app) as client:
+        default = client.post("/api/legal/sampling", json={}).json()
+        assert default["total"] == 5
+        assert default["hotlineOperators"] == ["Operator A", "Operator B"]
+        all_matches = client.post("/api/legal/sampling", json={"hotlineOnly": True}).json()
+        assert ids(all_matches) == ["newer-other", "older-match"]
+
+        query = {"hotlineOperator": "Operator A", "removeDuplicateBeneficiaryIds": True}
+        response = client.post("/api/legal/sampling", json=query)
+        assert response.status_code == 200
+        result = response.json()
+        assert ids(result) == ["older-match"]
+
+        values = client.post("/api/legal/record-values", json={**query, "source": "sampling", "column": "Service ID"})
+        assert values.status_code == 200
+        assert values.json()["values"] == ids(result)
+        download = client.post("/api/legal/sampling/export", json=query)
+        assert download.status_code == 200
+        sheet = load_workbook(io.BytesIO(download.content)).active
+        service = result["columns"].index("Service ID")
+        assert [row[service] for row in sheet.iter_rows(min_row=2, values_only=True)] == ids(result)

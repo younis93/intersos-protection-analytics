@@ -5,7 +5,7 @@ import {displayPercent,formatPercent,percentageDecimals} from './koboPercentages
 import type {KoboResult,KoboRow} from './koboTypes';
 
 export type BreakdownDisplay='count'|'percent'|'both';
-export const koboPivotTotals=(result:Pick<KoboResult,'rows'|'breakdowns'>)=>({row:result.rows.length>1,column:result.breakdowns.length>1});
+export const koboPivotTotals=(result:Pick<KoboResult,'rows'|'breakdowns'|'pivotHasHiddenColumns'>)=>({row:result.rows.length>1,column:result.breakdowns.length>1||result.breakdowns.length>0&&!!result.pivotHasHiddenColumns});
 const clean=(value:string|number)=>String(value).replace(/[\t\r\n]+/g,' ');
 const numeric=(value:number)=>String(Number(value.toFixed(2)));
 

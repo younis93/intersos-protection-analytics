@@ -318,6 +318,8 @@ class SamplingQuery(BaseModel):
     filters: dict[str, list[str]] = {}
     removeDuplicateBeneficiaryIds: bool = False
     removeDuplicateContacts: bool = False
+    hotlineOnly: bool = False
+    hotlineOperator: str = ""
     page: int = 1
     pageSize: int = 100
 
@@ -402,6 +404,8 @@ class RecordValuesQuery(LegalQuery):
     source: Literal['explorer', 'detention', 'studio', 'cases', 'sampling'] = 'explorer'
     removeDuplicateBeneficiaryIds: bool = False
     removeDuplicateContacts: bool = False
+    hotlineOnly: bool = False
+    hotlineOperator: str = ""
     column: str
     valueSearch: str = ''
     offset: int = Field(0, ge=0)
@@ -422,7 +426,13 @@ def legal_record_values(request: RecordValuesQuery):
             frame = store.case_record_frame(request.search, legacy)
         elif request.source == 'sampling':
             from .sampling import pipeline
-            frame, _, _, reason = pipeline(store.frames.get('legalservices'),filters=legacy,search=request.search,removeDuplicateBeneficiaryIds=request.removeDuplicateBeneficiaryIds,removeDuplicateContacts=request.removeDuplicateContacts)
+            frame, _, _, reason = pipeline(
+                store.frames.get('legalservices'), filters=legacy, search=request.search,
+                removeDuplicateBeneficiaryIds=request.removeDuplicateBeneficiaryIds,
+                removeDuplicateContacts=request.removeDuplicateContacts,
+                hotline=store.frames.get('legalhotlines'), hotlineOnly=request.hotlineOnly,
+                hotlineOperator=request.hotlineOperator,
+            )
             if reason: raise ValueError(reason)
         else:
             if request.source == 'detention': result = store.detention_cases(request.search,1,10**9,legacy)
@@ -850,7 +860,8 @@ def legal_sampling(request: SamplingQuery):
     from .sampling import table
     if request.page < 1 or request.pageSize < 1 or request.pageSize > 10000:
         raise HTTPException(400, "Invalid Sampling pagination.")
-    return table(require_legal_store().frames.get("legalservices"), **request.model_dump())
+    frames = require_legal_store().frames
+    return table(frames.get("legalservices"), hotline=frames.get("legalhotlines"), **request.model_dump())
 
 
 @app.post("/api/legal/sampling/export")
@@ -858,7 +869,8 @@ def legal_sampling_export(request: SamplingQuery):
     from .sampling import export
     query = request.model_dump(exclude={"page", "pageSize"})
     try:
-        payload = export(require_legal_store().frames.get("legalservices"), **query)
+        frames = require_legal_store().frames
+        payload = export(frames.get("legalservices"), hotline=frames.get("legalhotlines"), **query)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return Response(payload, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

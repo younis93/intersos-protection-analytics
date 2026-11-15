@@ -96,19 +96,27 @@ def test_abrupt_process_exit_releases_export_ownership(tmp_path):
 def test_native_close_guard_never_evaluates_script_on_the_ui_thread():
     done = threading.Event()
     caller = threading.get_ident()
-    def evaluate(_script):
+    def evaluate(_script, callback):
         assert threading.get_ident() != caller
+        callback(False)
         done.set()
-        return False
     window = SimpleNamespace(evaluate_js=evaluate, destroy=Mock())
     assert guard_export_close(window) is False
     assert done.wait(2)
     window.destroy.assert_not_called()
 
 
-def test_native_close_guard_closes_when_frontend_has_no_exports():
+def test_native_close_guard_waits_for_settings_before_destroying_window():
+    callback_ready = threading.Event()
     done = threading.Event()
-    window = SimpleNamespace(evaluate_js=Mock(return_value=True), destroy=done.set)
+    def evaluate(_script, callback):
+        window.finish = callback
+        callback_ready.set()
+    window = SimpleNamespace(evaluate_js=evaluate, destroy=done.set)
     assert guard_export_close(window) is False
+    assert callback_ready.wait(2)
+    assert not done.is_set()
+    assert guard_export_close(window) is False
+    window.finish(True)
     assert done.wait(2)
     assert guard_export_close(window) is True

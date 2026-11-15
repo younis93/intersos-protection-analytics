@@ -370,7 +370,7 @@ def startup_html(theme: str, failed: bool = False, startup_epoch_ms: int | None 
     shell_script = shell_asset("desktop-titlebar.js")
     shell = f'<style>{shell_style}</style><script>window.__desktopShell=true;window.__desktopIcon={json.dumps(icon_uri)};window.__desktopState={json.dumps({"maximized": True, "fullscreen": False, "version": APP_VERSION})};</script>'
     return f"""<!doctype html><html data-theme="{theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>:root{{--blue:{blue};--bg:{background};--ink:{ink};--muted:{muted};--panel:{panel};--panel-strong:{panel_strong};--line:{line};--startup-offset:-{animation_offset}ms}}*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;color:var(--ink);background:var(--bg);font-family:'Segoe UI',sans-serif}}.startup{{position:fixed;inset:0;display:grid;place-items:center;overflow:hidden;background:color-mix(in srgb,var(--blue) 6%,var(--bg));isolation:isolate}}.processing-ring-field{{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;background:radial-gradient(ellipse at 20% 25%,color-mix(in srgb,var(--blue) 10%,transparent),transparent 65%),radial-gradient(ellipse at 85% 80%,color-mix(in srgb,#52b6d8 12%,transparent),transparent 65%)}}.card{{position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,1fr);justify-items:center;width:min(440px,calc(100vw - 48px));padding:44px 42px 34px;border:1px solid color-mix(in srgb,var(--blue) 14%,var(--panel-strong));border-radius:28px;background:var(--panel-strong);box-shadow:0 24px 80px color-mix(in srgb,var(--blue) 12%,transparent);text-align:center;animation:card-enter .58s cubic-bezier(.22,1,.36,1) both}}.mark{{position:relative;isolation:isolate;display:grid;place-items:center;width:76px;height:76px;min-width:76px;min-height:76px;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);margin-bottom:32px;border:1px solid color-mix(in srgb,var(--blue) 24%,var(--line));border-radius:24px;background:color-mix(in srgb,var(--blue) 8%,var(--panel-strong));animation:none}}.mark:before{{content:"";position:absolute;z-index:-1;inset:-9px;border:1px solid color-mix(in srgb,var(--blue) 25%,transparent);border-radius:31px;opacity:.55}}.logo{{position:relative;z-index:2;display:grid;place-items:center;width:54px;height:54px;overflow:hidden;border-radius:8px;}}.mark img{{position:relative;z-index:2;display:block;width:54px;height:54px;object-fit:contain}}.mark b{{position:relative;z-index:2;color:var(--blue);font-size:34px}}.orbit{{position:absolute;z-index:1;inset:-14px;border:1px solid color-mix(in srgb,var(--blue) 28%,transparent);border-radius:34px;animation:orbit 3.8s linear infinite;animation-delay:var(--startup-offset)}}.orbit:after{{content:"";position:absolute;width:7px;height:7px;top:5px;right:6px;border-radius:50%;background:var(--blue);box-shadow:0 0 14px color-mix(in srgb,var(--blue) 72%,transparent)}}.eyebrow{{color:var(--blue);font-size:9px;font-weight:700;letter-spacing:.15em}}h1{{margin:7px 0 8px;font-size:28px;letter-spacing:-.035em}}p{{margin:0;color:var(--muted);font-size:13px}}.progress{{position:relative;width:100%;height:7px;margin:30px 0 25px;overflow:hidden;border-radius:99px;background:color-mix(in srgb,var(--muted) 13%,transparent)}}.progress:after{{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 1px 2px color-mix(in srgb,var(--ink) 8%,transparent)}}.progress i{{display:block;width:38%;height:100%;border-radius:inherit;background:linear-gradient(90deg,color-mix(in srgb,var(--blue) 55%,#fff),var(--blue),color-mix(in srgb,var(--blue) 55%,#fff));animation:progress 1.2s ease-in-out infinite;animation-delay:var(--startup-offset)}}footer{{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px}}footer svg{{width:15px;color:var(--blue)}}@keyframes card-enter{{from{{opacity:0;transform:translateY(14px) scale(.985)}}to{{opacity:1;transform:none}}}}@keyframes breathe{{0%,100%{{transform:scale(1);box-shadow:0 14px 34px color-mix(in srgb,var(--blue) 16%,transparent)}}50%{{transform:scale(1.035);box-shadow:0 18px 42px color-mix(in srgb,var(--blue) 25%,transparent)}}}}@keyframes orbit{{to{{transform:rotate(360deg)}}}}@keyframes progress{{0%{{transform:translateX(-110%)}}100%{{transform:translateX(290%)}}}}@media(max-width:560px){{.card{{width:min(420px,calc(100vw - 32px));padding:37px 25px 29px;border-radius:24px}}h1{{font-size:25px}}}}@media(prefers-reduced-motion:reduce){{.card,.mark,.orbit{{animation:none!important}}.progress i{{animation-duration:2s}}}}</style></head>
+<style>:root{{--blue:{blue};--bg:{background};--ink:{ink};--muted:{muted};--panel:{panel};--panel-strong:{panel_strong};--line:{line};--startup-offset:-{animation_offset}ms}}*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;color:var(--ink);background:var(--bg);font-family:'Segoe UI',sans-serif}}.startup{{position:fixed;inset:0;display:grid;place-items:center;overflow:hidden;background:color-mix(in srgb,var(--blue) 6%,var(--bg));isolation:isolate}}.processing-ring-field{{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;background:radial-gradient(ellipse at 20% 25%,color-mix(in srgb,var(--blue) 10%,transparent),transparent 65%),radial-gradient(ellipse at 85% 80%,color-mix(in srgb,#52b6d8 12%,transparent),transparent 65%)}}.card{{position:relative;z-index:1;display:grid;grid-template-columns:minmax(0,1fr);justify-items:center;width:min(440px,calc(100vw - 48px));padding:44px 42px 34px;border:1px solid color-mix(in srgb,var(--blue) 14%,var(--panel-strong));border-radius:28px;background:var(--panel-strong);box-shadow:0 24px 80px color-mix(in srgb,var(--blue) 12%,transparent);text-align:center}}.mark{{position:relative;isolation:isolate;display:grid;place-items:center;width:76px;height:76px;min-width:76px;min-height:76px;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);margin-bottom:32px;border:1px solid color-mix(in srgb,var(--blue) 24%,var(--line));border-radius:24px;background:color-mix(in srgb,var(--blue) 8%,var(--panel-strong));animation:none}}.mark:before{{content:"";position:absolute;z-index:-1;inset:-9px;border:1px solid color-mix(in srgb,var(--blue) 25%,transparent);border-radius:31px;opacity:.55}}.logo{{position:relative;z-index:2;display:grid;place-items:center;width:54px;height:54px;overflow:hidden;border-radius:8px;}}.mark img{{position:relative;z-index:2;display:block;width:54px;height:54px;object-fit:contain}}.mark b{{position:relative;z-index:2;color:var(--blue);font-size:34px}}.orbit{{position:absolute;z-index:1;inset:-14px;border:1px solid color-mix(in srgb,var(--blue) 28%,transparent);border-radius:34px;animation:orbit 3.8s linear infinite;animation-delay:var(--startup-offset)}}.orbit:after{{content:"";position:absolute;width:7px;height:7px;top:5px;right:6px;border-radius:50%;background:var(--blue);box-shadow:0 0 14px color-mix(in srgb,var(--blue) 72%,transparent)}}.eyebrow{{color:var(--blue);font-size:9px;font-weight:700;letter-spacing:.15em}}h1{{margin:7px 0 8px;font-size:28px;letter-spacing:-.035em}}p{{margin:0;color:var(--muted);font-size:13px}}.progress{{position:relative;width:100%;height:7px;margin:30px 0 25px;overflow:hidden;border-radius:99px;background:color-mix(in srgb,var(--muted) 13%,transparent)}}.progress:after{{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 1px 2px color-mix(in srgb,var(--ink) 8%,transparent)}}.progress i{{display:block;width:38%;height:100%;border-radius:inherit;background:linear-gradient(90deg,color-mix(in srgb,var(--blue) 55%,#fff),var(--blue),color-mix(in srgb,var(--blue) 55%,#fff));animation:progress 1.2s ease-in-out infinite;animation-delay:var(--startup-offset)}}footer{{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px}}footer svg{{width:15px;color:var(--blue)}}@keyframes breathe{{0%,100%{{transform:scale(1);box-shadow:0 14px 34px color-mix(in srgb,var(--blue) 16%,transparent)}}50%{{transform:scale(1.035);box-shadow:0 18px 42px color-mix(in srgb,var(--blue) 25%,transparent)}}}}@keyframes orbit{{to{{transform:rotate(360deg)}}}}@keyframes progress{{0%{{transform:translateX(-110%)}}100%{{transform:translateX(290%)}}}}@media(max-width:560px){{.card{{width:min(420px,calc(100vw - 32px));padding:37px 25px 29px;border-radius:24px}}h1{{font-size:25px}}}}@media(prefers-reduced-motion:reduce){{.mark,.orbit{{animation:none!important}}.progress i{{animation-duration:2s}}}}</style></head>
 <body>{shell}<div id="root"><section class="startup" role="status" aria-live="polite" aria-label="Starting Iraq Data Analysis" aria-busy="true"><canvas class="processing-ring-field" aria-hidden="true"></canvas><div class="card"><div class="mark">{orbit}{logo}</div><span class="eyebrow">IRAQ DATA ANALYSIS</span><h1>{heading if failed else 'Preparing your workspace'}</h1><p>{detail}</p>{progress}<footer><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"/><path d="m9 12 2 2 4-4"/></svg><span>Local and private data workspace</span></footer></div></section></div><script>{shell_script}</script>{field_script}</body></html>"""
 
 
@@ -904,11 +904,16 @@ class NativeFullscreenController:
         native = self.window.native
         def move():
             user32 = ctypes.windll.user32
+            from ctypes import wintypes
+            cursor = wintypes.POINT()
+            if not user32.GetCursorPos(ctypes.byref(cursor)):
+                return
+            position = (cursor.x & 0xFFFF) | ((cursor.y & 0xFFFF) << 16)
             user32.ReleaseCapture()
             send = user32.SendMessageW
             send.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
             send.restype = ctypes.c_ssize_t
-            send(native.Handle.ToInt64(), 0x00A1, hit, 0)  # WM_NCLBUTTONDOWN
+            send(native.Handle.ToInt64(), 0x00A1, hit, position)  # WM_NCLBUTTONDOWN
         native.BeginInvoke(Action(move))
         return True
 
@@ -955,7 +960,7 @@ class NativeFullscreenController:
 
 
 def guard_export_close(window: Any) -> bool:
-    """Let the frontend offer Keep exporting before the native window closes."""
+    """Check exports and wait for project settings before closing the window."""
     if getattr(window, '_export_close_allowed', False):
         return True
     if getattr(window, '_export_close_checking', False):
@@ -966,10 +971,25 @@ def guard_export_close(window: Any) -> bool:
         # WebView2 script evaluation needs the UI thread. Never wait for it in
         # the synchronous Windows FormClosing callback.
         try:
-            allowed = window.evaluate_js('window.intersosRequestExportClose ? window.intersosRequestExportClose() : true') is not False
-        except Exception:
-            allowed = True  # The renderer can be absent at startup or after a crash.
-        try:
+            allowed = False
+            try:
+                decision = []
+                completed = threading.Event()
+
+                def receive(result):
+                    decision.append(result)
+                    completed.set()
+
+                window.evaluate_js(
+                    '(async () => {'
+                    'if (window.intersosRequestExportClose?.() === false) return false;'
+                    'return window.intersosFlushProjectSettings ? await window.intersosFlushProjectSettings() : true;'
+                    '})()',
+                    callback=receive,
+                )
+                allowed = completed.wait(30) and decision[0] is True
+            except Exception:
+                allowed = True  # The renderer can be absent at startup or after a crash.
             if allowed:
                 window._export_close_allowed = True
                 window.destroy()
@@ -1001,7 +1021,6 @@ class DesktopApi:
     def close_after_exports(self) -> bool:
         from backend.kobo_excel import jobs
         jobs.close()
-        self._fullscreen.window._export_close_allowed = True
         self._fullscreen.window.destroy()
         return True
 
@@ -1241,7 +1260,8 @@ def main() -> None:
     startup_epoch_ms = int(time.time() * 1000)
     startup_page = saved_startup_page()
     startup_route = "#/" if "--home" in sys.argv else STARTUP_ROUTES[startup_page]
-    url = f"http://127.0.0.1:{port}/?appTheme={startup_theme}&startupPage={startup_page}&startupEpoch={startup_epoch_ms}{startup_route}"
+    weather_test = "&homeWeatherTest=1" if not getattr(sys, "frozen", False) and "--test-home-weather" in sys.argv else ""
+    url = f"http://127.0.0.1:{port}/?appTheme={startup_theme}&startupPage={startup_page}&startupEpoch={startup_epoch_ms}{weather_test}{startup_route}"
 
     webview.settings["ALLOW_DOWNLOADS"] = True
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True

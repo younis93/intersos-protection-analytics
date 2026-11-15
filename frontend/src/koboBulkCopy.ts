@@ -1,21 +1,21 @@
 import {questionFilterNote} from './koboQuestionFilterState';
 import {koboTableHtml,koboTableText} from './koboTableData';
-import {resolvePivotSort,sortPivotRows,type PivotSort} from './koboPivotSort';
+import {resultWithPivotOrdering,type PivotSort} from './koboPivotSort';
 import type {KoboAnalysis} from './koboTypes';
 
 const escape=(value:string)=>value.replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]!));
 export async function buildKoboBulkCopy(analysis:KoboAnalysis,stores?:Map<string,Map<string,unknown>>,progress?:(message:string)=>void){
  const html:string[]=[],text:string[]=[];
- for(const [index,result] of analysis.questions.entries()){
-  const display=analysis.settings.questions[result.id]?.breakdownDisplay||result.breakdownDisplay||'both';
-  const retained=stores?.get(result.id)?.get('pivotSort') as PivotSort|null|undefined;
-  const sort=resolvePivotSort(result,display,result.pivotSort||retained);
-  const rows=result.pivotSort?result.rows:sortPivotRows(result,sort,analysis.settings.language);
+ for(const [index,source] of analysis.questions.entries()){
+  const config=analysis.settings.questions[source.id];
+  const display=config?.breakdownDisplay||source.breakdownDisplay||'both';
+  const retained=stores?.get(source.id)?.get('pivotSort') as PivotSort|null|undefined;
+  const result=resultWithPivotOrdering(source,config,display,analysis.settings.language,config?.pivotSort??source.pivotSort??retained);
   const notes=[questionFilterNote(result.filterMode)||'Uses page filters.',...(result.filterSummary||analysis.filterSummary),`Percentage basis: ${result.percentageBasis}`];
-  const table=koboTableHtml(result,display,rows).match(/<body>([\s\S]*)<\/body>/)?.[1];
+  const table=koboTableHtml(result,display).match(/<body>([\s\S]*)<\/body>/)?.[1];
   if(!table)throw new Error(`Unable to format the pivot for ${result.label}. No tables were copied.`);
   html.push(`<section><h2>${escape(result.label)}</h2><p>${notes.map(escape).join('<br>')}</p>${table}</section>`);
-  text.push(`${notes.join('\r\n')}\r\n${koboTableText(result,display,rows)}`);
+  text.push(`${notes.join('\r\n')}\r\n${koboTableText(result,display)}`);
   progress?.(`Preparing table ${index+1} of ${analysis.questions.length}`);
   if(index%8===0)await new Promise<void>(resolve=>setTimeout(resolve,0));
  }

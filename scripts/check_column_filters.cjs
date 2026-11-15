@@ -16,6 +16,21 @@ function Harness(){return <main style={{padding:32}}><h1 style={{fontSize:20}}>P
  await page.getByRole('button',{name:'Filter Project',exact:true}).first().click();popup=page.getByRole('dialog',{name:'Filter Project',exact:true});await popup.getByLabel('Erbil',{exact:true}).waitFor();await popup.getByRole('button',{name:'Deselect all',exact:true}).click();await popup.getByLabel('Erbil',{exact:true}).check();await popup.getByRole('button',{name:'Apply',exact:true}).click();assert.equal(await total.textContent(),'400');assert.equal(await page.getByRole('button',{name:'Previous page',exact:true}).first().isDisabled(),true);
  await page.getByRole('button',{name:'Filter Age',exact:true}).first().click();popup=page.getByRole('dialog',{name:'Filter Age',exact:true});await popup.getByRole('tab',{name:'Conditions',exact:true}).click();await popup.getByRole('button',{name:'Condition',exact:true}).click();await popup.getByRole('option',{name:'At least',exact:true}).click();await popup.getByLabel('Value',{exact:true}).fill('40');await popup.getByRole('button',{name:'Apply',exact:true}).click();assert.equal(Number(await total.textContent()),Array.from({length:1200},(_,i)=>i).filter(i=>i%3===0&&18+i%40>=40).length);
  await page.getByRole('button',{name:'Clear all',exact:true}).first().click();assert.equal(await total.textContent(),'1200');
+ await page.getByRole('button',{name:'Filter Beneficiary ID',exact:true}).first().click();
+ popup=page.getByRole('dialog',{name:'Filter Beneficiary ID',exact:true});
+ await popup.getByLabel('0000',{exact:true}).waitFor();
+ await page.setViewportSize({width:1000,height:340});
+ for(const name of ['Apply','Cancel']){
+   const button=popup.getByRole('button',{name,exact:true});
+   const bounds=await button.boundingBox();
+   assert(bounds&&bounds.y>=0&&bounds.y+bounds.height<=340,`${name} must stay in the viewport`);
+   assert(await button.evaluate(node=>{
+     const {x,y,width,height}=node.getBoundingClientRect();
+     return node.contains(document.elementFromPoint(x+width/2,y+height/2));
+   }),`${name} must be clickable without scrolling`);
+ }
+ await popup.getByRole('button',{name:'Cancel',exact:true}).click();
+ await page.setViewportSize({width:1440,height:900});
  await page.getByRole('button',{name:'Filter Beneficiary ID',exact:true}).first().click();popup=page.getByRole('dialog',{name:'Filter Beneficiary ID',exact:true});await popup.getByLabel('Search column values').fill('1');await popup.getByText(/matching values$/).waitFor();await popup.getByRole('button',{name:'Select all matching',exact:true}).click();await popup.getByRole('button',{name:'Apply',exact:true}).click();assert.equal(Number(await total.textContent()),Array.from({length:1200},(_,i)=>String(i).padStart(4,'0')).filter(id=>id.includes('1')).length);
  await page.getByRole('button',{name:'Filter Beneficiary ID',exact:true}).first().click();popup=page.getByRole('dialog',{name:'Filter Beneficiary ID',exact:true});await popup.getByLabel('Search column values').fill('0777');await popup.getByLabel('0777',{exact:true}).waitFor();await popup.getByLabel('0777',{exact:true}).check();await popup.getByRole('button',{name:'Apply',exact:true}).click();assert.equal(Number(await total.textContent()),Array.from({length:1200},(_,i)=>String(i).padStart(4,'0')).filter(id=>id.includes('1')).length+1);
  await page.getByRole('button',{name:'Clear all',exact:true}).first().click();await page.getByRole('button',{name:'Filter Project',exact:true}).first().click();popup=page.getByRole('dialog',{name:'Filter Project',exact:true});await popup.getByRole('button',{name:'Deselect all',exact:true}).click();await popup.getByRole('button',{name:'Apply',exact:true}).click();assert.equal(await total.textContent(),'0');await page.getByRole('button',{name:'Clear all',exact:true}).first().click();

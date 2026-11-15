@@ -1,0 +1,140 @@
+.welcome-page.is-vice-city {
+  color-scheme: dark;
+  accent-color: var(--blue);
+  --bg: #0B0B0F;
+  --panel-strong: #14141C;
+  --panel: rgba(20, 20, 28, .72);
+  --ink: #FFFFFF;
+  --muted: #B4B4C7;
+  --blue: #FF5E8E;
+  --vice-peach: #E39986;
+  --vice-focus: #38BDF8;
+  --vice-sunset: linear-gradient(135deg, #FF5E8E 0%, #E39986 35%, #826092 70%, #64759D 100%);
+  --vice-button-glow: 0 4px 20px rgba(255, 94, 142, .3);
+  --line: rgba(255, 255, 255, .1);
+  --vice-highlight-line: rgba(255, 94, 142, .45);
+  --shadow: 0 20px 54px rgba(0, 0, 0, .48);
+  --filter-control-surface: var(--panel-strong);
+}
+
+.welcome-page.is-vice-city :is(.glass, [role='dialog'], .pivot-modal) {
+  background: var(--panel);
+  border-color: var(--line);
+  box-shadow: var(--shadow);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.welcome-page.is-vice-city :is(.app-select:not(.checkbox-multi-select), .app-select-menu) {
+  background-color: var(--panel-strong) !important;
+}
+
+.welcome-page.is-vice-city :is(.theme-select, .pro-select option, .theme-select option) {
+  background-color: var(--panel-strong);
+  color: var(--ink);
+}
+
+.welcome-page.is-vice-city :is(.theme-select, .pro-select) select {
+  color-scheme: dark;
+}
+
+.welcome-page.is-vice-city :is(.soft, .app-select, .primary, [role='dialog']):is(:hover, :focus-within):not(:disabled) {
+  border-color: var(--vice-highlight-line);
+}
+
+.welcome-page.is-vice-city :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--vice-focus);
+  outline-offset: 3px;
+}
+
+.welcome-page.is-vice-city :is(.primary, button.primary) {
+  /* A translucent highlight keeps the dark label legible across the purple and blue stops. */
+  background: linear-gradient(#ffffff2e, #ffffff2e), var(--vice-sunset);
+  border-color: var(--line);
+  color: var(--bg);
+  box-shadow: var(--vice-button-glow);
+  transition: background-color .2s ease, border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+
+.welcome-page.is-vice-city :is(.primary, button.primary):not(:disabled):is(:hover, :active) {
+  background: linear-gradient(#e3998657, #e3998657), var(--vice-sunset);
+  border-color: var(--vice-highlight-line);
+  box-shadow: 0 6px 24px rgba(255, 94, 142, .4);
+}
+
+.welcome-page.is-vice-city :is(h1, .welcome-logo-word, .workspace-card > strong) {
+  font-weight: 800;
+  letter-spacing: -.02em;
+  text-transform: uppercase;
+}
+
+.welcome-page.is-vice-city {
+  background: var(--bg);
+}
+
+.vice-city-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  background-color: var(--bg);
+}
+
+.vice-city-backdrop picture,
+.vice-city-backdrop picture::after,
+.vice-city-backdrop::after {
+  position: absolute;
+  inset: 0;
+}
+
+.vice-city-backdrop img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center bottom;
+}
+
+.vice-city-backdrop picture::after {
+  content: '';
+  background: linear-gradient(#e8b4cd38, transparent 25%, transparent 75%, #c5a6e660);
+  backdrop-filter: blur(2px);
+  mask-image: linear-gradient(black, transparent 25%, transparent 75%, black);
+}
+
+.vice-city-backdrop::after {
+  content: '';
+  background:
+    radial-gradient(ellipse at 50% 47%, #0b0b0f8c 0%, transparent 68%),
+    linear-gradient(180deg, #0b0b0fb8, #0b0b0f38 58%, #0b0b0f66 87%, #0b0b0fc4);
+}
+
+.welcome-page.is-vice-city .workspace-card {
+  background: var(--panel);
+  border-color: var(--line);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+}
+
+.welcome-page.is-vice-city .workspace-card:is(:hover, :focus-visible) {
+  border-color: var(--vice-highlight-line);
+  box-shadow: var(--shadow), var(--vice-button-glow);
+}
+
+.welcome-page.is-vice-city .workspace-violet {
+  --card-color: var(--vice-peach);
+}
+
+.welcome-page.is-vice-city .workspace-teal {
+  --card-color: var(--vice-focus);
+}
+
+@media (max-width: 760px) {
+  .vice-city-backdrop picture {
+    top: 30%;
+    mask-image: linear-gradient(transparent, black 32%);
+  }
+}

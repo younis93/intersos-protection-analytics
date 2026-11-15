@@ -1,10 +1,50 @@
-import type {KoboResult,KoboRow} from './koboTypes';
+import type {KoboQuestionSettings,KoboResult,KoboRow} from './koboTypes';
+import {displayPercent} from './koboPercentages';
+import {pivotBottomPercent,pivotColumnTotal,pivotValue} from './koboPivotValues';
 
 export type PivotSort={id:string;label:string;metric:'answer'|'count'|'percent';series?:string[];direction:'asc'|'desc'};
+export type PivotColumnSort={answer?:string|null;metric:'name'|'count'|'percent';direction:'asc'|'desc'};
+
+/** Column visibility is presentation-only. Keep the original totals and percentage bases. */
+export function resultWithPivotColumns(result:KoboResult,settings?:Pick<KoboQuestionSettings,'pivotColumnSort'|'hiddenPivotColumns'>,language='en'):KoboResult{
+ const sort=settings?.pivotColumnSort,hiddenIds=settings?.hiddenPivotColumns;
+ if(result.breakdowns.length===0||!sort&&!hiddenIds?.length)return result;
+ const hidden=new Set(hiddenIds);
+ let breakdowns=result.breakdowns.filter(column=>!hidden.has(column.id));
+ const row=sort?.answer?result.rows.find(row=>row.id===sort.answer):undefined;
+ const active=sort&&(!sort.answer||row);
+ if(active&&sort){
+  const cells=new Map(row?.series?.map(cell=>[cell.id,cell]));
+  const collator=new Intl.Collator(language,{numeric:true,sensitivity:'base'});
+  const parent=(column:KoboResult['breakdowns'][number])=>JSON.stringify(column.values?.slice(0,-1)??[]);
+  const parents=new Map([...new Set(breakdowns.map(parent))].map((key,index)=>[key,index]));
+  const entries=breakdowns.map(column=>({
+   column,parent:parents.get(parent(column))!,
+   value:sort.metric==='name'?column.labels?.at(-1)??column.label
+    :row?sort.metric==='percent'?displayPercent(cells.get(column.id)):pivotValue(result,cells.get(column.id))
+    :sort.metric==='percent'?pivotBottomPercent(result,column):pivotColumnTotal(result,column)
+  }));
+  entries.sort((a,b)=>{
+   if(a.parent!==b.parent)return a.parent-b.parent;
+   if(a.value==null||b.value==null)return Number(a.value==null)-Number(b.value==null);
+   const comparison=typeof a.value==='string'&&typeof b.value==='string'?collator.compare(a.value,b.value):Number(a.value)-Number(b.value);
+   return comparison*(sort.direction==='asc'?1:-1);
+  });
+  breakdowns=entries.map(entry=>entry.column);
+ }
+ if(breakdowns.length===result.breakdowns.length)return active?{...result,breakdowns}:result;
+ const visibleRows=(rows:KoboRow[])=>rows.map(row=>({...row,series:row.series?.filter(cell=>!hidden.has(cell.id))}));
+ return {...result,breakdowns,rows:visibleRows(result.rows),pivotHasHiddenColumns:true,
+  chartProjection:result.chartProjection?{...result.chartProjection,rows:visibleRows(result.chartProjection.rows)}:result.chartProjection};
+}
+
+export function resultWithPivotOrdering(result:KoboResult,settings:Pick<KoboQuestionSettings,'pivotSort'|'pivotColumnSort'|'hiddenPivotColumns'>|undefined,display:'count'|'percent'|'both',language:string,manual=settings?.pivotSort){
+ return resultWithPivotColumns(resultWithPivotSort(result,manual,display,language,settings?.hiddenPivotColumns),settings,language);
+}
 
 /** Apply the pending settings to both views before the analysis request completes. */
-export function resultWithPivotSort(result:KoboResult,manual:PivotSort|null|undefined,display:'count'|'percent'|'both',language:string):KoboResult{
- const selected=resolvePivotSort(result,display,manual);
+export function resultWithPivotSort(result:KoboResult,manual:PivotSort|null|undefined,display:'count'|'percent'|'both',language:string,hiddenIds:string[]=[]):KoboResult{
+ const selected=resolvePivotSort(result,display,manual?.series?.some(id=>hiddenIds.includes(id))?null:manual);
  const rows=sortPivotRows(result,selected,language);
  const order=new Map(rows.map((row,index)=>[row.id,index]));
  const rank=(id:string)=>order.get(id)??rows.length;
@@ -34,11 +74,11 @@ export function sortPivotRows(result:Pick<KoboResult,'rows'|'breakdowns'>&Partia
  const denominator=ids?result.breakdowns.filter(column=>ids.has(column.id)).reduce((sum,column)=>sum+column.denominator,0):0;
  const value=(row:KoboRow):number|string|null=>{
   if(sort.metric==='answer')return row.label;
-  if(!ids)return sort.metric==='count'?(result.measure?row.value??null:row.count):row.percent;
+  if(!ids)return sort.metric==='count'?(result.measure?row.value??null:row.count):displayPercent(row);
   const values=row.series?.filter(series=>ids.has(series.id));
-  if(!values?.length||sort.metric==='percent'&&values.every(series=>series.percent==null))return null;
+  if(!values?.length||sort.metric==='percent'&&values.every(series=>displayPercent(series)==null))return null;
   if(sort.metric==='count'&&result.measure)return values[0].value??null;
-  if(sort.metric==='percent'&&values.length===1)return values[0].percent;
+  if(sort.metric==='percent'&&values.length===1)return displayPercent(values[0]);
   const count=values.reduce((sum,series)=>sum+series.count,0);
   return sort.metric==='count'?count:denominator?count/denominator*100:null;
  };

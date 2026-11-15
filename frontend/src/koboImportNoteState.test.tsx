@@ -24,7 +24,7 @@ describe('persistent import note review',()=>{
   expect(html).not.toContain('Previously accepted');
  });
  it('uses one Review entry point with an explicit pending-note badge',()=>{
-  const header=(notes:KoboImportNote[])=>renderToStaticMarkup(<KoboProjectHeader project={{id:'p',name:'Project',settings:{language:'en'},importNotes:notes} as KoboProject} counts={null} exportDisabled onReupload={()=>{}} onReview={()=>{}} onQualityReview={()=>{}} onPdf={()=>{}} onExcel={async()=>{}} onRename={()=>{}} onIndicators={()=>{}} onBinaryExcel={async()=>{}} onBackup={()=>{}} backupBusy={false}/>);
+  const header=(notes:KoboImportNote[])=>renderToStaticMarkup(<KoboProjectHeader saveStatus="Saved locally" project={{id:'p',name:'Project',settings:{language:'en'},importNotes:notes} as KoboProject} counts={null} exportDisabled onReupload={()=>{}} onReview={()=>{}} onQualityReview={()=>{}} onPdf={()=>{}} onExcel={async()=>{}} onRename={()=>{}} onIndicators={()=>{}} onBinaryExcel={async()=>{}} onBackup={()=>{}} backupBusy={false}/>);
   const pending=header([note]);expect(pending).toContain('aria-label="Review"');expect(pending).toContain('1 note');expect(pending).toContain('1 unreviewed import note');expect(pending).not.toContain('Important notes');
   expect(header([{...note,reviewed:true}])).not.toContain('kobo-review-note-badge');
  });

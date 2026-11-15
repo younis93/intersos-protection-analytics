@@ -61,8 +61,18 @@
 
 .kobo-answer-column-heading{display:flex;flex-direction:column;align-items:center;gap:5px;padding:2px 0 5px}
 .kobo-pivot-table .kobo-answer-percentage-buttons{display:inline-flex;align-items:stretch;gap:3px;padding:3px;border:1px solid #ffffff40;border-radius:8px;background:#102f4926;max-width:100%;box-sizing:border-box}
-.kobo-shell .kobo-pivot-table .kobo-answer-percentage-buttons button{display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:5px;padding:6px 7px;min-height:30px;white-space:nowrap;background:transparent;color:#e0edfa;font:inherit;font-size:10px;font-weight:600;line-height:1.2;box-shadow:none;cursor:pointer;transition:background .15s,color .15s}
+.kobo-shell .kobo-pivot-table .kobo-answer-percentage-buttons button{display:inline-flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:5px;padding:6px 7px;min-height:30px;white-space:normal;text-align:center;overflow-wrap:normal;background:transparent;color:#e0edfa;font:inherit;font-size:10px;font-weight:600;line-height:1.2;box-shadow:none;cursor:pointer;transition:background .15s,color .15s}
 .kobo-shell .kobo-pivot-table .kobo-answer-percentage-buttons button:hover{background:#ffffff20;color:#fff}
 .kobo-shell .kobo-pivot-table .kobo-answer-percentage-buttons button[aria-pressed=true]{background:#fff;color:#173f62;box-shadow:0 1px 3px #0002}
 .kobo-shell .kobo-pivot-table .kobo-answer-percentage-buttons button:focus-visible{outline:2px solid #fff;outline-offset:2px}
 @media(prefers-reduced-motion:reduce){.kobo-shell .kobo-pivot-table .kobo-answer-percentage-buttons button{transition:none}}
+.kobo-pivot-table thead .kobo-answer-actions>button.kobo-answer-menu-trigger{color:inherit}
+.kobo-pivot-sort-options{display:grid;gap:10px;box-sizing:border-box;width:100%;padding:6px}
+.kobo-pivot-sort-menu>.kobo-action-popup{width:min(310px,calc(100vw - 24px))!important}
+.kobo-pivot-sort-axis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;gap:8px;min-width:0}
+.kobo-pivot-sort-options .app-select{box-sizing:border-box;width:100%;min-width:0;margin:0}
+.kobo-pivot-sort-options .app-select-trigger{text-align:start}
+.kobo-pivot-sort-axis>button.soft{box-sizing:border-box;display:grid;place-items:center;width:100%;min-width:0;min-height:34px;margin:0;padding:5px 8px;font-size:12px}
+.kobo-pivot-sort-options details{min-width:0;border-top:1px solid var(--line);padding-top:7px}
+.kobo-pivot-sort-options summary{padding:4px 2px;font-size:12px;color:var(--muted);cursor:pointer;overflow-wrap:anywhere}
+.kobo-pivot-sort-options details[open] .app-select{margin-top:6px}

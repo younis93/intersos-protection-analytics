@@ -19,7 +19,7 @@ def test_appearance_roundtrip_preserves_results_and_settings_version(sample, lab
     project = copy.deepcopy(sample[0])
     settings = KoboSettings(questions={'group/needs': QuestionSettings(breakdowns=['group/gender'])})
     before = analyze(project, settings)
-    settings.questions['group/needs'].appearance = ChartAppearance(metric='percent', labels=labels, legend='right', fontSize=14, height=560, grid='hide', bars='stack')
+    settings.questions['group/needs'].appearance = ChartAppearance(metric='percent', labels=labels, zeroPercentLabels='hide', legend='right', fontSize=14, height=560, grid='hide', bars='stack')
     after = analyze(project, settings)
     original = next(q for q in before['questions'] if q['id'] == 'group/needs')
     changed = next(q for q in after['questions'] if q['id'] == 'group/needs')
@@ -27,6 +27,7 @@ def test_appearance_roundtrip_preserves_results_and_settings_version(sample, lab
     assert changed['denominator'] == original['denominator']
     assert changed['breakdownDisplay'] == original['breakdownDisplay']
     assert QuestionResult.model_validate(changed).appearance.metric == 'percent'
+    assert QuestionResult.model_validate(changed).appearance.zeroPercentLabels == 'hide'
     assert KoboSettings.model_validate(settings.model_dump()).questions['group/needs'].appearance.height == 560
     assert KoboSettings.model_validate_json(settings.model_dump_json()).questions['group/needs'].appearance.labels == labels
     assert settings.version == 1
@@ -34,6 +35,18 @@ def test_appearance_roundtrip_preserves_results_and_settings_version(sample, lab
 
 def test_legacy_settings_and_result_default_to_automatic():
     assert QuestionSettings().appearance == ChartAppearance()
+    assert ChartAppearance().fontFamily == 'Helvetica Neue'
+
+
+@pytest.mark.parametrize('spacing', ['roomy', 4.5, 0, 36])
+def test_chart_font_and_spacing_survive_saved_settings_and_analysis(sample, spacing):
+    settings = KoboSettings(questions={'group/needs': QuestionSettings(appearance={'fontFamily': 'Aptos', 'titleFont': 'Helvetica Neue', 'titleSpacing': spacing})})
+    restored = KoboSettings.model_validate_json(settings.model_dump_json())
+    result = next(q for q in analyze(sample[0], restored)['questions'] if q['id'] == 'group/needs')
+    appearance = QuestionResult.model_validate(result).appearance
+    assert appearance.fontFamily == 'Aptos'
+    assert appearance.titleSpacing == spacing
+    assert appearance.titleFont == 'Helvetica Neue'
 
 
 @pytest.mark.parametrize('value', [{'metric':'both'}, {'height':99999}, {'fontSize':-1}, {'legend':'elsewhere'}, {'bars':'normalized'}])

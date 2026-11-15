@@ -19,6 +19,13 @@ export function createGraveyardScene(canvas:HTMLCanvasElement){
   const ctx=canvas.getContext('2d');if(!ctx)return null;
   const landscape=document.createElement('canvas'),paint=landscape.getContext('2d');if(!paint)return null;
   let width=0,height=0,lastTime=NaN,lastReduced=false;
+  function gravestone(c:CanvasRenderingContext2D,i:number,h:number,shift=0){
+    const x=i*95+24,y=h*.86+Math.sin(i*2)*18,size=15+(i%3)*5;
+    c.save();c.translate(x+shift*3,y);c.rotate(Math.sin(i*4)*.13+shift*.14);
+    c.fillStyle=i%2?'#131727':'#17192a';
+    c.beginPath();c.roundRect(-size*.45,-size*1.5,size*.9,size*1.6,[size*.4,size*.4,1,1]);c.fill();
+    c.restore();
+  }
   function build(w:number,h:number){
     width=w;height=h;canvas.width=w;canvas.height=h;landscape.width=w;landscape.height=h;
     const c=paint!;
@@ -40,12 +47,7 @@ export function createGraveyardScene(canvas:HTMLCanvasElement){
     c.fillStyle='#090c16';c.beginPath();c.moveTo(0,h);c.lineTo(0,h*.78);
     for(let x=0;x<=w+20;x+=20)c.lineTo(x,h*.82+Math.sin(x*.008)*h*.025+Math.cos(x*.017)*8);
     c.lineTo(w,h);c.closePath();c.fill();
-    for(let i=0;i<Math.ceil(w/95);i++){
-      const x=i*95+24,y=h*.86+Math.sin(i*2)*18,size=15+(i%3)*5;
-      c.save();c.translate(x,y);c.rotate(Math.sin(i*4)*.13);c.fillStyle=i%2?'#131727':'#17192a';
-      c.beginPath();c.roundRect(-size*.45,-size*1.5,size*.9,size*1.6,[size*.4,size*.4,1,1]);c.fill();
-      c.restore();
-    }
+    for(let i=0;i<Math.ceil(w/95);i++)if(i%4!==1)gravestone(c,i,h);
     c.strokeStyle='#151b2a';c.lineWidth=2;
     for(let x=0;x<w;x+=26){const y=h*.88+Math.sin(x*.012)*7;c.beginPath();c.moveTo(x,y+37);c.lineTo(x+Math.sin(x)*3,y);c.lineTo(x-3,y+7);c.moveTo(x,y);c.lineTo(x+3,y+7);c.stroke()}
     for(const y of [h*.9,h*.92]){c.beginPath();c.moveTo(0,y);c.lineTo(w,y-6);c.stroke()}
@@ -67,6 +69,11 @@ export function createGraveyardScene(canvas:HTMLCanvasElement){
     if(resized)build(w,h);lastTime=time;lastReduced=reduced;
     ctx.clearRect(0,0,w,h);ctx.drawImage(landscape,0,0);
     const t=reduced?0:time;
+    for(let i=1;i<Math.ceil(w/95);i+=4){
+      const cycle=(t+i*2)%19;
+      const shift=!reduced&&cycle>15?Math.sin((cycle-15)*Math.PI/4):0;
+      gravestone(ctx,i,h,shift);
+    }
     // Translucent clouds pass slowly over the moon; low fog stays below the cards.
     for(let i=0;i<4;i++){
       const x=((i*w*.34+t*(i%2?3:-2)+w*3)%(w*1.5))-w*.2,y=i<2?h*.17+i*22:h*.81+(i-2)*55;

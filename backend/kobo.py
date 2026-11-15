@@ -15,7 +15,7 @@ import uuid
 from collections import Counter, defaultdict
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import openpyxl
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -60,19 +60,28 @@ class KoboFilter(BaseModel):
         return self
 
 
+ChartFont = Literal[
+    'Helvetica Neue', 'Aptos', 'Arial', 'Arial Narrow', 'Calibri', 'Cambria', 'Century Gothic', 'Consolas', 'Courier New',
+    'Garamond', 'Georgia', 'Palatino Linotype', 'Segoe UI', 'Tahoma', 'Times New Roman', 'Trebuchet MS', 'Verdana'
+]
+
+
 class ChartAppearance(BaseModel):
     title: str = Field('', max_length=200)
     titleBold: bool = False
     titleItalic: bool = False
     titleUnderline: bool = False
     titleAlign: Literal['left', 'center', 'right'] = 'center'
-    titleFont: Literal['inherit', 'Arial', 'Calibri', 'Georgia', 'Times New Roman', 'Tahoma', 'Verdana'] = 'inherit'
-    titleSize: int = Field(0, ge=0, le=48)
+    titleFont: Literal['inherit', ChartFont] = 'Helvetica Neue'
+    titleSize: int = Field(32, ge=0, le=48)
+    titleSpacing: Literal['compact', 'standard', 'roomy'] | Annotated[float, Field(strict=True, ge=0, le=36)] = 9.0
     titleColor: str = Field('', pattern=r'^$|^#[0-9a-fA-F]{6}$')
     valueAxis: Literal['show', 'hide'] = 'show'
     metric: Literal['auto', 'count', 'percent'] = 'auto'
     labels: Literal['auto', 'hidden', 'count', 'percent', 'both'] = 'auto'
+    zeroPercentLabels: Literal['show', 'hide'] = 'show'
     legend: Literal['auto', 'hidden', 'top', 'bottom', 'left', 'right'] = 'auto'
+    fontFamily: ChartFont = 'Helvetica Neue'
     fontSize: Literal[0, 10, 12, 14, 16] = 0
     height: Literal[0, 320, 420, 560, 720] = 0
     grid: Literal['auto', 'show', 'hide'] = 'auto'
@@ -84,6 +93,12 @@ class PivotSort(BaseModel):
     label: str
     metric: Literal['answer', 'count', 'percent']
     series: list[str] | None = None
+    direction: Literal['asc', 'desc']
+
+
+class PivotColumnSort(BaseModel):
+    answer: str | None = None
+    metric: Literal['name', 'count', 'percent']
     direction: Literal['asc', 'desc']
 
 
@@ -101,6 +116,8 @@ class QuestionSettings(BaseModel):
     percentageBase: Literal['question', 'parent'] = 'question'
     percentageParent: str = ''
     pivotSort: PivotSort | None = None
+    pivotColumnSort: PivotColumnSort | None = None
+    hiddenPivotColumns: list[str] = Field(default_factory=list)
     filterMode: Literal['page', 'own', 'additional'] = 'page'
     ownFilters: list[KoboFilter] = Field(default_factory=list)
     hiddenAnswers: list[str] = Field(default_factory=list)
@@ -564,6 +581,13 @@ class ProjectStore:
         with self.connect() as db:
             return [{'id': r[0], 'name': r[1], 'updated': r[2]} for r in db.execute('SELECT id,name,updated FROM projects ORDER BY updated DESC')]
 
+    def project_revision(self, pid):
+        with self.connect() as db:
+            row = db.execute('SELECT updated FROM projects WHERE id=?', (pid,)).fetchone()
+        if not row:
+            raise KeyError('Project not found.')
+        return row[0]
+
     def create(self, name, payload, form_raw, data_raw, settings: KoboSettings | None = None):
         pid = uuid.uuid4().hex
         settings = (settings or new_project_settings(payload['form'], payload.get('records'))).model_dump()
@@ -586,7 +610,7 @@ class ProjectStore:
         project = annotate(project)
         from .kobo_question_conditions import annotate as annotate_question_conditions
         project = annotate_question_conditions(project)
-        from .kobo_connections import condition_review,form_question_index
+        from .kobo_connections import condition_review
         from .kobo_shared_dependencies import context as connection_source_context
         _,source_questions=connection_source_context(project)
         source_settings=KoboSettings.model_validate(project['settings'])
@@ -870,22 +894,23 @@ def active_question_filters(cfg):
 
 def question_cohort(question, records, cfg, questions, lookup, *, apply_connections=True):
     """Resolve a question cohort once, using ancestor values for repeat filters."""
-    from .kobo_connections import connection_plan
+    from .kobo_connections import connection_plan, uses_linked_respondents
     from .kobo_connection_rules import matches_tree
     from .kobo_measures import record_value
     plan = connection_plan(question,cfg,questions) if apply_connections else {'enabled':False}
-    hidden = set(cfg.hiddenAnswers) if (plan['enabled'] or cfg.hiddenAnswerPercentageMode == 'adjust') and question['kind'] in {'category','multiple','text'} else set()
-    kinds = {key:field['kind'] for key,field in questions.items()}
+    hidden = set(cfg.hiddenAnswers) if (uses_linked_respondents(cfg, plan) or cfg.hiddenAnswerPercentageMode == 'adjust') and question['kind'] in {'category','multiple','text'} else set()
+    tree = plan['tree'] if plan['enabled'] and not plan['reviewIssues'] else None
+    kinds = {key: field['kind'] for key, field in questions.items()} if tree else {}
     def visible(record):
         if question['id'] in record.get('_conditionalExcluded', []): return False
-        value = record['values'].get(question['id'])
-        codes = {'__blank__'} if missing(value) else set(value) if question['kind']=='multiple' else {str(value)}
-        if hidden.intersection(codes): return False
+        if hidden:
+            value = record['values'].get(question['id'])
+            codes = {'__blank__'} if missing(value) else set(value) if question['kind']=='multiple' else {str(value)}
+            if hidden.intersection(codes): return False
         if not plan['enabled']: return True
-        if plan['tree'] and not plan['reviewIssues'] and not matches_tree(plan['tree'],lambda key:record_value(record,questions[key],lookup),kinds): return False
+        if tree and not matches_tree(tree,lambda key:record_value(record,questions[key],lookup),kinds): return False
         return plan['mode']!='keep-original' or not plan['parent'] or not missing(record_value(record,plan['parent'],lookup))
     if cfg.filterMode not in {'own', 'additional'}: return [r for r in records if r['scope'] == question['repeat'] and visible(r)]
-    from .kobo_measures import record_value
     for rule in cfg.ownFilters:
         field = questions.get(rule.field)
         if not field: raise ValueError('Question filter references an unavailable field.')
@@ -920,45 +945,33 @@ def answer_visibility_summary(q, records, cfg, questions, lookup):
 
 def question_result(q: dict, records: list[dict], settings: KoboSettings, questions: dict, lookup: dict):
     cfg = resolved_question_settings(q, settings)
-    from .kobo_connections import connection_plan
+    from .kobo_connections import connection_plan, uses_linked_respondents
     plan = connection_plan(q,cfg,questions)
     if plan['enabled'] and (cfg.percentageBase == 'parent' or cfg.connectedPercentageMode == 'keep-original'): cfg = cfg.model_copy(update={'percentageMode':'legacy-respondents'})
-    if not plan['enabled'] and cfg.hiddenAnswerPercentageMode == 'keep-original' and cfg.hiddenAnswers and q['kind'] in {'category','multiple','text'}:
-        original_settings = settings.model_copy(update={'questions': {**settings.questions, q['id']: cfg.model_copy(update={'hiddenAnswers': []})}})
-        result = question_result(q, records, original_settings, questions, lookup)
-        result['percentageRows'] = result['rows']
-        result['rows'] = [row for row in result['rows'] if row['id'] not in cfg.hiddenAnswers]
-        if result.get('trend'):
-            result['trend']['percentageSeries'] = result['trend']['series']
-            result['trend']['series'] = [series for series in result['trend']['series'] if series['id'] not in cfg.hiddenAnswers]
+    if not uses_linked_respondents(cfg, plan) and cfg.hiddenAnswerPercentageMode == 'keep-original' and cfg.hiddenAnswers and q['kind'] in {'category','multiple','text'}:
+        def calculate(**updates):
+            scoped = settings.model_copy(update={'questions': {
+                **settings.questions, q['id']: cfg.model_copy(update={'chartTopN': None, **updates})}})
+            return question_result(q, records, scoped, questions, lookup)
+
+        original = calculate(hiddenAnswers=[])
+        result = calculate(hiddenAnswerPercentageMode='adjust')
+        result['percentageRows'] = original['rows']
+        if result.get('trend') and original.get('trend'):
+            result['trend']['percentageSeries'] = original['trend']['series']
+        if cfg.percentageMode == 'legacy-respondents':
+            from .kobo_percentages import apply_original_respondent_percentages
+            apply_original_respondent_percentages(result, original)
+        else:
+            from .kobo_pivot_percentages import apply_pivot_percentages
+            apply_pivot_percentages(result, cfg, original)
         result['percentageBasis'] += ' · Hidden answers remain included in percentage totals.'
-        result['answerVisibility'] = answer_visibility_summary(q, records, cfg, questions, lookup)
-        # Totals describe the visible answers while percentages retain the original base.
-        if not result.get('measure'):
-            modern = cfg.percentageMode != 'legacy-respondents'
-            visible_ids = {row['id'] for row in result['rows'] if row['id'] != '__blank__'}
-            visible_cohort = question_cohort(q, records, cfg.model_copy(update={'hiddenAnswers':[]}), questions, lookup)
-            def contributes(record):
-                value = record['values'].get(q['id'])
-                return not missing(value) and bool(visible_ids.intersection(value if isinstance(value,list) else [str(value)]))
-            visible = sum(row['count'] for row in result['rows']) if modern else sum(contributes(record) for record in visible_cohort)
-            base = (result.get('pivotTotal') or {}).get('count', result['denominator'])
-            result['pivotTotal'] = {'count': visible, 'percent': visible / base * 100 if base else None}
-            for column in result['breakdowns']:
-                original_count = column.get('totalCount', column['denominator'])
-                original_percent = column.get('totalPercent', 100 if column['denominator'] else None)
-                count = sum(cell['count'] for row in result['rows'] for cell in row.get('series', []) if cell['id'] == column['id']) if modern or q['kind'] != 'multiple' else None
-                if count is None:
-                    dimensions = breakdown_fields(cfg, questions, q)
-                    count = sum(contributes(record) and list(breakdown_values(record, dimensions, lookup)) == column.get('values', []) for record in visible_cohort)
-                column['totalCount'] = count
-                column['totalPercent'] = count / original_count * original_percent if original_count and original_percent is not None else None
-        if result.get('respondentBasis'): result['respondentBasis']['hiddenMode'] = 'keep-original'
+        result['chartTopN'] = cfg.chartTopN
         from .kobo_chart_projection import project_chart
         from .kobo_pivot_sort import apply_pivot_sort
         result = apply_pivot_sort(result, cfg)
         if not (result.get('chartProjection') or {}).get('axisOrder'):
-            result['chartProjection'] = project_chart(result, cfg, q)
+            result['chartProjection'] = project_chart(result, cfg, q, original=original)
         return result
     cohort = question_cohort(q, records, cfg, questions, lookup)
     answered = [r for r in cohort if not missing(r['values'].get(q['id']))]
