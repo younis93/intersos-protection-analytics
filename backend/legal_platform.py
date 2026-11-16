@@ -16,7 +16,7 @@ from functools import lru_cache, wraps
 from pathlib import Path
 from threading import Lock, RLock
 from time import perf_counter
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 from uuid import uuid4
 
 import pandas as pd
@@ -496,6 +496,36 @@ def _flag_schema(columns):
     return (primary, name, case_id, assessment_id, service_id, lawyer, project, location, phone, dob, awareness_id, session_topic, spouse_name, spouse_dob, marital_status, assessment_date, identification_date, awareness_date, created_on, assessment_status, closure_request, legal_service_needed, detained, immigration_charge, service_type, document_type, court_verdict_detail, other_document_detail, legal_concern_specified, legal_concern, detention_governorate, service_date)
 
 
+def read_legal_csv_files(
+    paths: Iterable[Path], operation: ImportOperation | None = None,
+    progress: Callable[[int], None] | None = None,
+) -> dict[str, bytes]:
+    selected: dict[str, tuple[int, Path]] = {}
+    for path in paths:
+        if path.suffix.lower() != ".csv":
+            continue
+        parsed = versioned_dataset_name(path.name)
+        if not parsed:
+            continue
+        name, version = parsed
+        current = selected.get(name)
+        if current is None or version > current[0] or (version == current[0] and path.stat().st_mtime > current[1].stat().st_mtime):
+            selected[name] = (version, path)
+
+    if operation:
+        operation.plan(import_plan(selected))
+    payload = {}
+    for name, (_, path) in selected.items():
+        if operation:
+            operation.start(f"Reading:{name}")
+        payload[name] = path.read_bytes()
+        if operation:
+            operation.finish(f"Reading:{name}")
+            if progress:
+                progress(operation.snapshot()["percent"])
+    return payload
+
+
 @dataclass
 class LegalStore:
     frames: dict[str, pd.DataFrame]
@@ -508,6 +538,7 @@ class LegalStore:
     data_revision: str = field(default_factory=lambda: uuid4().hex, init=False)
     import_timings: dict[str, float] = field(default_factory=dict, init=False, repr=False)
     source_files: dict[str, bytes] = field(default_factory=dict, init=False, repr=False)
+    session_upload: bool = field(default=False, init=False, repr=False)
     _persistent_cache_identity: str | None = field(default=None, init=False, repr=False)
     _overview_prepared: OrderedDict = field(default_factory=OrderedDict, init=False, repr=False)
     _metadata_cache: dict[str, Any] | None = field(default=None, init=False, repr=False)
@@ -550,24 +581,8 @@ class LegalStore:
     @classmethod
     def from_folder(cls, path: Path, progress: Callable[[int], None] | None = None, *, exclusions: Any = (), operation: ImportOperation | None = None, reconcile_exclusions: Callable | None = None, use_cache: bool = True) -> "LegalStore":
         standalone = operation is None
-        selected: dict[str, tuple[int, Path]] = {}
-        for file in path.iterdir():
-            if not file.is_file() or file.suffix.lower() != ".csv": continue
-            parsed = versioned_dataset_name(file.name)
-            if not parsed: continue
-            name, version = parsed
-            current = selected.get(name)
-            if current is None or version > current[0] or (version == current[0] and file.stat().st_mtime > current[1].stat().st_mtime):
-                selected[name] = (version, file)
         operation = operation or ImportOperation(source=path.name)
-        operation.plan(import_plan(selected))
-        payload: dict[str, bytes] = {}
-        total = max(len(selected), 1)
-        for index, (name, (_, file)) in enumerate(selected.items(), start=1):
-            operation.start(f"Reading:{name}")
-            payload[name] = file.read_bytes()
-            operation.finish(f"Reading:{name}")
-            if progress: progress(operation.snapshot()["percent"])
+        payload = read_legal_csv_files((file for file in path.iterdir() if file.is_file()), operation, progress)
         result = cls.from_files(payload, str(path.resolve()), progress, exclusions=exclusions, operation=operation, reconcile_exclusions=reconcile_exclusions, use_cache=use_cache)
         if standalone:
             callbacks, operation.completion_callbacks = operation.completion_callbacks, []

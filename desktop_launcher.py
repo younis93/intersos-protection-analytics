@@ -507,14 +507,22 @@ def initialize_desktop(window_title: str, theme: str) -> None:
     apply_windows_branding(window_title, theme)
 
 
+legal_startup_restored = threading.Event()
+legal_startup_restored.set()
+
+
 def start_legal_restore(backend_main: Any, metrics: StartupMetrics | None = None) -> threading.Thread:
     """Load the remembered Legal source without delaying the desktop window."""
     backend_main.legal_store_loading = True
+    legal_startup_restored.clear()
     def restore() -> None:
-        selection = saved_legal_source_selection()
-        if metrics:
-            metrics.mark("legal-source-selected", json.dumps({"settings": str(settings_path()), **selection}))
-        backend_main.load_initial_legal_store(source_selection=selection)
+        try:
+            selection = saved_legal_source_selection()
+            if metrics:
+                metrics.mark("legal-source-selected", json.dumps({"settings": str(settings_path()), **selection}))
+            backend_main.load_initial_legal_store(source_selection=selection)
+        finally:
+            legal_startup_restored.set()
         if metrics:
             store = backend_main.legal_store
             metrics.mark("legal-source-restored", json.dumps({
@@ -1007,6 +1015,7 @@ class DesktopApi:
         # graph forever after a window is attached.
         self._fullscreen = fullscreen
         self._legal_import_progress = 0
+        self._legal_entry_lock = threading.Lock()
 
     def record_renderer_event(self, kind: str) -> bool:
         if kind not in {'error','unhandledrejection'}:return False
@@ -1166,22 +1175,9 @@ class DesktopApi:
         if not paths or any(not path.is_file() or path.suffix.lower() != ".csv" for path in paths):
             raise ValueError("The selected CSV files are no longer available.")
         from backend import main as backend_main
-        from backend.legal_platform import LegalStore, versioned_dataset_name
-        from backend.import_progress import import_plan
-        selected: dict[str, tuple[int, Path]] = {}
-        for path in paths:
-            parsed = versioned_dataset_name(path.name)
-            if not parsed: continue
-            name, version = parsed
-            current = selected.get(name)
-            if current is None or version > current[0] or (version == current[0] and path.stat().st_mtime > current[1].stat().st_mtime): selected[name] = (version, path)
+        from backend.legal_platform import LegalStore, read_legal_csv_files
         def prepare(operation):
-            operation.plan(import_plan(selected))
-            payload = {}
-            for name, (_, path) in selected.items():
-                operation.start(f"Reading:{name}")
-                payload[name] = path.read_bytes()
-                operation.finish(f"Reading:{name}")
+            payload = read_legal_csv_files(paths, operation)
             return LegalStore.from_files(payload, "Selected Legal Platform CSV files", exclusions=backend_main.duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=backend_main.prepare_import_exclusions, use_cache=use_cache)
         return self._load_legal_candidate(prepare, lambda: save_legal_files(paths), operationId, "files")
 
@@ -1190,6 +1186,52 @@ class DesktopApi:
         if not paths:
             raise ValueError("No previously selected Legal Platform CSV files are available.")
         return self.process_legal_files([str(path) for path in paths], operationId, use_cache=False)
+
+    def check_legal_source_on_entry(self, operationId: str | None = None) -> None:
+        # A quick return to Home and back may overlap the preceding entry check.
+        with self._legal_entry_lock:
+            legal_startup_restored.wait()
+            self._check_saved_legal_source(operationId)
+
+    def _check_saved_legal_source(self, operation_id: str | None) -> None:
+        from backend import main as backend_main
+        from backend.import_progress import legal_import_tracker
+        from backend.legal_platform import LegalStore, read_legal_csv_files
+
+        operation = legal_import_tracker.begin(operation_id, source="home")
+        try:
+            active = backend_main.legal_store
+            task = "Checking source files"
+            if active is None or not active.session_upload:
+                selection = saved_legal_source_selection()
+                if selection["error"] and active is not None:
+                    raise ValueError(selection["error"])
+                if not selection["error"]:
+                    if selection["kind"] == "folder":
+                        folder = Path(selection["folder"]).resolve()
+                        if not folder.is_dir():
+                            raise ValueError("The selected Legal Platform folder is no longer available.")
+                        paths = (path for path in folder.iterdir() if path.is_file())
+                        source = str(folder)
+                    else:
+                        paths = [Path(path) for path in selection["files"]]
+                        if any(not path.is_file() or path.suffix.lower() != ".csv" for path in paths):
+                            raise ValueError("The selected CSV files are no longer available.")
+                        source = "Selected Legal Platform CSV files"
+                    payload = read_legal_csv_files(paths, operation)
+                    if active is None or active.source_files != payload:
+                        candidate = LegalStore.from_files(
+                            payload, source, exclusions=backend_main.duplicate_exclusions.exclusion_rows(),
+                            operation=operation, reconcile_exclusions=backend_main.prepare_import_exclusions,
+                        )
+                        backend_main.publish_legal_candidate(candidate, operation)
+                        return
+            operation.replan([task])
+            operation.finish(task)
+            operation.complete()
+        except Exception as exc:
+            operation.fail(exc)
+            raise
 
 
 def should_recover_native_runtime(error: Exception) -> bool:

@@ -172,7 +172,27 @@ export function LegalPageNavigation({items,page,onNavigate,loadStatuses,sendIssu
   </button>)}</nav>;
 }
 
-export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void}) {
+async function checkSavedLegalSource(operationId:string) {
+  const nativeApi=()=> (window as Window & {
+    pywebview?:{api?:{check_legal_source_on_entry?:(operationId:string)=>Promise<void>}};
+  }).pywebview?.api;
+  if(!nativeApi()?.check_legal_source_on_entry){
+    await new Promise<void>(resolve=>{
+      const ready=()=>{
+        window.removeEventListener("pywebviewready",ready);
+        window.clearTimeout(timeout);
+        resolve();
+      };
+      const timeout=window.setTimeout(ready,3000);
+      window.addEventListener("pywebviewready",ready,{once:true});
+    });
+  }
+  const api=nativeApi();
+  if(!api?.check_legal_source_on_entry)throw new Error("Unable to check the saved Legal Platform source.");
+  await api.check_legal_source_on_entry(operationId);
+}
+
+export default function LegalPlatform({onStartupReady,checkSavedSource=false}:{onStartupReady?:()=>void;checkSavedSource?:boolean}) {
   const [metadata, setMetadataState] = useState<LegalMetadata | null>(null),
     [metadataLoading, setMetadataLoading] = useState(true),
     [requestedPage, setPageState] = useState<LegalPage>(legalPageFromUrl),
@@ -197,8 +217,9 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
     setMetadataState(next);
   }, []);
   const [importOperationId,setImportOperationId]=useState<string|null>(null);
+  const [entryOperationId]=useState(()=>checkSavedSource?crypto.randomUUID():null);
   const restoringData=Boolean(!metadata?.ready&&(metadataLoading||metadata?.loading));
-  const importProgress=useImportProgress(uploading||restoringData,uploading?importOperationId:null);
+  const importProgress=useImportProgress(uploading||restoringData,uploading?importOperationId:entryOperationId);
   const [processingResult,setProcessingResult]=useState<LegalImportProgress|null>(null);
   const [cancelPending,setCancelPending]=useState(false),[cancelError,setCancelError]=useState('');
   const uploadController=useRef<AbortController|null>(null);
@@ -349,9 +370,19 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
     window.location.hash = `/legal/${next}`;
     legalShell.current?.querySelector<HTMLElement>(":scope > main")?.scrollTo({ top: 0, behavior: "auto" });
   };
+  const entrySourceCheck=useRef<Promise<void>|null>(null);
   useEffect(() => {
     let cancelled=false;
     const load=async()=>{
+      if(entryOperationId){
+        entrySourceCheck.current??=checkSavedLegalSource(entryOperationId);
+        try{
+          await entrySourceCheck.current;
+        }catch(reason){
+          const message=reason instanceof Error?reason.message:String(reason);
+          if(!cancelled&&!message.includes("Import cancelled"))setError(message);
+        }
+      }
       let lastError:unknown;
       for(let attempt=0;attempt<3&&!cancelled;attempt++){
         const controller=new AbortController();
@@ -369,7 +400,7 @@ export default function LegalPlatform({onStartupReady}:{onStartupReady?:()=>void
     };
     void load().finally(()=>{if(!cancelled){setMetadataLoading(false);onStartupReady?.()}});
     return()=>{cancelled=true};
-  }, [onStartupReady]);
+  }, [entryOperationId,onStartupReady]);
   useEffect(()=>{
     if(metadataLoading||metadata?.ready||!metadata?.loading)return;
     return pollLegalMetadata(setMetadata);

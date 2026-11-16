@@ -1,4 +1,7 @@
+import os
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from unittest.mock import patch
 
 import pytest
@@ -7,7 +10,7 @@ from fastapi.testclient import TestClient
 import desktop_launcher as launcher
 from backend import main, legal_processing_cache as cache
 from backend.import_progress import ImportTracker, ImportOperation, ImportCancelled
-from backend.test_legal_platform import required_payload
+from backend.test_legal_platform import csv, required_payload
 
 
 @pytest.fixture
@@ -72,6 +75,106 @@ def test_missing_remembered_source_does_not_fall_back_to_cache(source, kind):
     assert main.legal_store is previous
     assert launcher.settings_path().read_bytes() == saved
     assert (cache.cache_directory() / "snapshot.bin").read_bytes() == snapshot
+
+
+@pytest.mark.parametrize("kind", ["folder", "files"])
+def test_home_entry_checks_csv_content_and_keeps_unchanged_revision(source, kind):
+    folder, paths, api = source
+    if kind == "folder":
+        api.process_legal_folder(str(folder))
+    else:
+        api.process_legal_files([str(path) for path in paths])
+    original = main.legal_store
+    api.check_legal_source_on_entry()
+    assert main.legal_store is original
+
+    path = paths[0]
+    details = path.stat()
+    raw = path.read_bytes()
+    changed = raw.replace(b"B1", b"C1")
+    assert changed != raw
+    path.write_bytes(changed)
+    os.utime(path, ns=(details.st_atime_ns, details.st_mtime_ns))
+    api.check_legal_source_on_entry()
+    current = main.legal_store
+    assert current.revision != original.revision
+    assert current.source_files["beneficiaries"] == changed
+
+    path.unlink()
+    with pytest.raises(ValueError):
+        api.check_legal_source_on_entry()
+    assert main.legal_store is current
+    path.write_bytes(raw)
+    api.check_legal_source_on_entry()
+    assert main.legal_store.source_files["beneficiaries"] == raw
+
+
+def test_home_entry_reselects_folder_versions(source):
+    folder, paths, api = source
+    api.process_legal_folder(str(folder))
+    raw = paths[0].read_bytes()
+    changed = raw.replace(b"B1", b"C1")
+    newer = folder / "beneficiaries (2).csv"
+    newer.write_bytes(changed)
+    optional = folder / "awareness.csv"
+    optional.write_bytes(csv(**{"Awareness ID": ["AW1"]}))
+    api.check_legal_source_on_entry()
+    assert main.legal_store.source_files["beneficiaries"] == changed
+    assert main.legal_store.metadata()["availability"]["awareness"]
+    newer.unlink()
+    optional.unlink()
+    api.check_legal_source_on_entry()
+    assert main.legal_store.source_files["beneficiaries"] == raw
+    assert not main.legal_store.metadata()["availability"]["awareness"]
+
+
+def test_home_entry_waits_for_startup_restore(source, monkeypatch):
+    folder, paths, api = source
+    api.process_legal_folder(str(folder))
+    restored = Event()
+    finish_startup = Event()
+    load = main.load_initial_legal_store
+
+    def pause_after_startup_reads_source(**kwargs):
+        load(**kwargs)
+        restored.set()
+        finish_startup.wait(10)
+
+    monkeypatch.setattr(main, "load_initial_legal_store", pause_after_startup_reads_source)
+    monkeypatch.setattr(main, "legal_import_tracker", ImportTracker())
+    for name in ("legal_store_loading", "legal_store_restore_error", "REMEMBERED_LEGAL_SOURCE",
+                 "REMEMBERED_LEGAL_FOLDER", "REMEMBERED_LEGAL_SOURCE_CONFIGURED", "REMEMBERED_LEGAL_FILES"):
+        monkeypatch.setattr(main, name, getattr(main, name))
+    worker = launcher.start_legal_restore(main)
+    try:
+        assert restored.wait(10)
+        old_store = main.legal_store
+        changed = paths[0].read_bytes().replace(b"B1", b"C1")
+        paths[0].write_bytes(changed)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            check = executor.submit(api.check_legal_source_on_entry)
+            assert main.legal_store is old_store
+            finish_startup.set()
+            check.result(timeout=10)
+        assert main.legal_store.source_files["beneficiaries"] == changed
+    finally:
+        finish_startup.set()
+        worker.join(10)
+
+
+def test_home_entry_preserves_current_session_upload(source, monkeypatch):
+    folder, paths, api = source
+    api.process_legal_folder(str(folder))
+    monkeypatch.setattr(main, "legal_import_tracker", ImportTracker())
+    response = TestClient(main.app).post(
+        "/api/legal/upload",
+        files=[("files", (path.name, path.read_bytes(), "text/csv")) for path in paths],
+    )
+    assert response.status_code == 200
+    uploaded = main.legal_store
+    paths[0].unlink()
+    api.check_legal_source_on_entry()
+    assert main.legal_store is uploaded
 
 
 def test_startup_restores_saved_folder_from_cache(source, monkeypatch):

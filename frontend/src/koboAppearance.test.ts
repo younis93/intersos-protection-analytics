@@ -7,8 +7,8 @@ import {questionDefaults,type KoboResult,type KoboSettings,type KoboQuestion} fr
 const result={id:'q',name:'q',label:'Needs',kind:'multiple',denominator:2,missing:0,total:2,rows:[{id:'a',label:'Refugee registered with UNHCR or authorities',count:2,percent:100,series:[{id:'f',count:1,percent:50}]},{id:'b',label:'IDP',count:1,percent:50,series:[{id:'f',count:2,percent:100}]}],breakdowns:[{id:'f',label:'Female',denominator:2}],breakdownFields:[{id:'sex',label:'Sex'}],statistics:{},colors:{},chart:'column'} as KoboResult;
 describe('Kobo reporting appearance',()=>{
  it('keeps titles optional and adds wrapped plain-text titles to screen and exported charts',()=>{
-  for(const chart of ['bar','column','line','pie','donut','heatmap'] as const)for(const exporting of [false,true]){
-   const source={...result,chart};
+  for(const chart of ['bar','column','line','histogram','pie','donut','heatmap'] as const)for(const exporting of [false,true]){
+   const source={...result,chart,breakdowns:chart==='pie'||chart==='donut'?[]:result.breakdowns};
    const plain=chartSpec(source,'en',exporting);
    expect(plain.layout.title).toBeUndefined();
    expect(chartSpec({...source,appearance:{title:'   '}},'en',exporting)).toEqual(plain);
@@ -79,13 +79,63 @@ it('uses Helvetica Neue at 32 px for new titles',()=>{
  expect(title?.font).toMatchObject({family:'Helvetica Neue, Arial, sans-serif',size:32});
 });
 
-it('keeps the title aligned to the plot and adjusts the gap in preview and export',()=>{
+it('wraps, truncates, or rotates the category captions without changing the answers',()=>{
+ const wrapped=chartSpec(result,'en',false,undefined,320);
+ const truncated=chartSpec({...result,appearance:{categoryLabels:'truncate'}},'en',false,undefined,320);
+ const rotated=chartSpec({...result,appearance:{categoryLabels:'rotate'}},'en',false,undefined,320);
+ expect(wrapped.layout.xaxis?.ticktext?.[0]).toContain('<br>');
+ expect(truncated.layout.xaxis?.ticktext?.[0]).toMatch(/^[^<]*…$/);
+ expect(rotated.layout.xaxis?.tickangle).toBe(-45);
+ expect(rotated.layout.margin!.b!).toBeGreaterThan(truncated.layout.margin!.b!);
+ expect(rotated.layout.xaxis?.tickvals).toEqual(wrapped.layout.xaxis?.tickvals);
+ expect(rotated.data[0]).toMatchObject({customdata:Reflect.get(wrapped.data[0],'customdata')});
+});
+
+it('ignores a value axis maximum saved by an older version',()=>{
+ const appearance={title:'Old chart',valueAxisMaximum:100};
+ const restored=chartSpec({...result,appearance},'en');
+ expect(restored.layout.yaxis?.range).toEqual(chartSpec({...result,appearance:{title:'Old chart'}},'en').layout.yaxis?.range);
+});
+
+it('shares the chosen font while sizing answer labels independently from the title',()=>{
+ const source={...result,chart:'bar',appearance:{title:'Needs',fontFamily:'Georgia',fontSize:24,titleSize:18}} as KoboResult;
+ for(const exporting of [false,true]){
+  const spec=chartSpec(source,'en',exporting);
+  expect(spec.layout.title?.font).toMatchObject({family:'Georgia, Arial, sans-serif',size:exporting?36:18});
+  expect(spec.layout.font).toMatchObject({family:'Georgia, Arial, sans-serif',size:24*(exporting?2.3:1)});
+  expect(spec.data[0]).toMatchObject({outsidetextfont:{size:24*(exporting?2.3:1)}});
+ }
+});
+
+it('keeps the title aligned to the chart canvas and adjusts the gap in preview and export',()=>{
  for(const exporting of [false,true])for(const [titleSpacing,gap] of [['compact',6],['standard',12],['roomy',24],[10,40/3],[0,0]] as const){
   const spec=chartSpec({...result,appearance:{title:'Chart title',titleSpacing,legend:'hidden'}},'en',exporting);
   const {height,margin,title}=spec.layout;
-  expect(title).toMatchObject({xref:'paper',yref:'container',yanchor:'bottom'});
-  expect(margin!.t!-(1-title!.y!)*height!).toBeCloseTo(gap*(exporting?2:1));
+  const inset=exporting?32:16;
+  expect(title).toMatchObject({xref:'container',yref:'container',yanchor:'bottom',pad:{l:inset,r:inset}});
+  const fontDescent=Math.ceil(title!.font!.size!*.25);
+  expect(margin!.t!-(1-title!.y!)*height!-fontDescent).toBeCloseTo(gap*(exporting?2:1));
   expect(spec.layout.font?.family).toBe('Helvetica Neue, Arial, sans-serif');
+ }
+});
+
+it('keeps a wrapped title above a top legend',()=>{
+ const appearance={title:'Needs',legend:'top',titleSize:24} as const;
+ const short=chartSpec({...result,chart:'bar',appearance},'en',false,undefined,320).layout;
+ const long=chartSpec({...result,chart:'bar',appearance:{...appearance,title:'A long title that wraps onto several lines on a narrow screen'}},'en',false,undefined,320).layout;
+ expect(long.title?.text).toContain('<br>');
+ expect((1-long.title!.y!)*long.height!).toBeCloseTo((1-short.title!.y!)*short.height!);
+ expect(long.margin!.t!).toBeGreaterThan(short.margin!.t!);
+});
+
+it('sizes bar chart gutters to the displayed category captions',()=>{
+ for(const exporting of [false,true])for(const calculated of [false,true]){
+  const measure=calculated?{operation:'sum',field:'amount',label:'Amount',unit:'',parentValuesRepeated:false}:undefined;
+  const source={...result,chart:'bar',measure} as KoboResult;
+  const short={...source,rows:source.rows.map((row,index)=>({...row,label:index?'IDP':'Refugee'}))};
+  const spec=chartSpec(source,'en',exporting,undefined,320);
+  expect(spec.layout.margin!.l!).toBeGreaterThan(chartSpec(short,'en',exporting,undefined,320).layout.margin!.l!);
+  expect(spec.layout.yaxis?.ticktext?.[0]).toContain('<br>');
  }
 });
 

@@ -4,6 +4,7 @@ import {ruleIssue} from './koboConnectionHealth';
 import {KoboConnectionControls} from './KoboConnections';
 import {useKoboUnsavedChanges} from './useKoboUnsavedChanges';
 import KoboAppearanceControls from './KoboAppearanceControls';
+import KoboSettingsSelect from './KoboSettingsSelect';
 import {lazy,Suspense,useEffect,useId,useMemo,useRef,useState} from 'react';
 import {BarChart3,ChartColumn,ChartLine,Check,ChevronDown,Palette,PieChart,RotateCcw,SlidersHorizontal,X} from 'lucide-react';
 import {AppSelect,useDropdownPosition} from './SelectionControls';
@@ -40,7 +41,7 @@ export function ColorControl({entry,value,suggestions,disabled,onChange,onValidi
 
 export default function KoboCustomize({result,project,settings,onApply,onClose}:{result:KoboResult;project:KoboProject;settings:KoboSettings;onApply:(draft:KoboQuestionSettings)=>void;onClose:()=>void}){
  const dialog=useRef<HTMLDialogElement>(null),base=useRef(settings),initial=useRef(customizeDraft(result,settings)),original=useRef(result);
- const[draft,setDraft]=useState(()=>initial.current),[section,setSection]=useState<Section>(result.connectionEditor?'values':'chart'),[mobilePane,setMobilePane]=useState<'settings'|'preview'>('settings');
+ const[draft,setDraft]=useState(()=>initial.current),[section,setSection]=useState<Section>(result.connectionEditor?'values':'appearance'),[mobilePane,setMobilePane]=useState<'settings'|'preview'>('settings');
  const[preview,setPreview]=useState(()=>({key:calculationKey(initial.current),result})),[busy,setBusy]=useState(false),[error,setError]=useState(''),[retry,setRetry]=useState(0);
  const[invalidColors,setInvalidColors]=useState<Set<string>>(new Set()),[colorRevision,setColorRevision]=useState(0),[colorLimit,setColorLimit]=useState(20),[selectedPalette,setSelectedPalette]=useState(initial.current.palette||'');
  const[customTopN,setCustomTopN]=useState(()=>!!initial.current.chartTopN&&![5,10,20].includes(initial.current.chartTopN));
@@ -67,6 +68,13 @@ export default function KoboCustomize({result,project,settings,onApply,onClose}:
  const fields=useMemo(()=>project.form.questions.filter(question=>['category','text'].includes(question.kind)&&(!question.repeat||question.repeat===result.repeat)),[project.form.questions,result.repeat]);
  const dateFields=project.form.questions.filter(field=>field.kind==='date'&&!field.identifying&&(!field.repeat||field.repeat===result.repeat||result.repeat.startsWith(field.repeat+'/')));
  const types=[{id:'bar',label:'Bar',Icon:BarChart3,reason:''},{id:'column',label:'Column',Icon:ChartColumn,reason:''},{id:'line',label:'Line',Icon:ChartLine,reason:result.kind==='text'?'Use a category, multiple-choice, number or date question.':''},{id:'histogram',label:'Histogram',Icon:ChartColumn,reason:result.kind!=='number'?'Requires a numeric question.':''},{id:'heatmap',label:'Heatmap',Icon:SlidersHorizontal,reason:!breakdowns.length?'Add at least one breakdown.':''},{id:'pie',label:'Pie',Icon:PieChart,reason:breakdowns.length||['number','date'].includes(result.kind)?'Requires categorical answers without breakdowns.':''},{id:'donut',label:'Donut',Icon:PieChart,reason:breakdowns.length||['number','date'].includes(result.kind)?'Requires categorical answers without breakdowns.':''}];
+ const calculated=!!draft.calculation&&draft.calculation.operation!=='count';
+ const trendSource=draft.chart==='line'&&['category','multiple','number'].includes(result.kind);
+ const usingDateField=trendSource&&!!draft.trendDateField;
+ const canRank=result.kind!=='date'&&!usingDateField&&draft.chart!=='histogram'&&(result.kind!=='number'||draft.numericMode==='values');
+ const supportsOther=!draft.calculation||['count','sum'].includes(draft.calculation.operation);
+ const chartTypes=types.map(type=>({...type,reason:type.reason||(calculated&&['pie','donut','histogram'].includes(type.id)?'Unavailable with calculated values.':'')}));
+ const orderedTypes=[...chartTypes.filter(type=>!type.reason),...chartTypes.filter(type=>type.reason)];
  const entries=colorEntries(shown),palette=koboPalettes.find(value=>value.name===selectedPalette);
  const entryKey=JSON.stringify(entries.map(entry=>entry.id));
  useEffect(()=>{const ids=new Set(entries.map(entry=>entry.id));setInvalidColors(current=>[...current].some(id=>!ids.has(id))?new Set([...current].filter(id=>ids.has(id))):current)},[entryKey]);
@@ -96,14 +104,75 @@ export default function KoboCustomize({result,project,settings,onApply,onClose}:
      <section className="kobo-values-card" aria-label={text('Calculation','الحساب')}><header><h4>{text('Calculation','الحساب')}</h4></header><AppSelect label={text('Calculation','الحساب')} value={draft.calculation?.operation||'count'} options={[["count",text("Count","العدد")],["unique",text("Unique count","العدد الفريد")],["sum",text("Sum","المجموع")],["average",text("Average","المتوسط")],["median",text("Median","الوسيط")]]} onChange={operation=>changeCalculation(operation as NonNullable<KoboQuestionSettings['calculation']>['operation'])}/>{draft.calculation&&draft.calculation.operation!=='count'&&<><AppSelect label={text('Value column','عمود القيمة')} searchable value={draft.calculation.field} options={[["",text("Choose a value column","اختر عمود القيمة")],...project.form.questions.filter(field=>field.kind!=='multiple'&&(draft.calculation!.operation==='unique'||field.kind==='number')&&(!field.repeat||field.repeat===result.repeat||result.repeat.startsWith(field.repeat+'/'))).map(field=>[field.id,koboLabel(field,settings.language)] as [string,string])]} onChange={field=>patch({calculation:{...draft.calculation!,field}})}/><label className="kobo-field">{text('Decimal places','المنازل العشرية')}<input aria-label={text('Calculation decimal places','المنازل العشرية للحساب')} type="number" min={0} max={6} value={draft.calculation.decimals} disabled={draft.calculation.operation==='unique'} onChange={event=>patch({calculation:{...draft.calculation!,decimals:Math.max(0,Math.min(6,Number(event.target.value)||0))}})}/></label><p className="kobo-values-hint">{text('Blank values are excluded. Click a result to inspect its contributing records.','تُستبعد القيم الفارغة. انقر على النتيجة للاطلاع على السجلات المساهمة.')}</p></>}<p className="kobo-values-hint">{calculationHint}</p></section>
      <KoboConnectionControls section="connection" result={shown} project={project} value={draft} language={settings.language} onChange={patch}/>
     </div>
-    <div hidden={section!=='chart'} className="kobo-customize-section"><h3 dir="auto">{text('Chart appearance','مظهر الرسم البياني')}</h3><div className="kobo-appearance-control kobo-chart-title-control" dir={settings.language==='ar'?'rtl':'ltr'}><label><span className="kobo-chart-title-label">{text('Chart title','عنوان الرسم البياني')}</span><input type="text" dir="auto" aria-label={text('Chart title (optional)','عنوان الرسم البياني (اختياري)')} maxLength={200} placeholder={text('Enter an optional title','أدخل عنواناً اختيارياً')} value={draft.appearance?.title||''} onChange={event=>patch({appearance:{...draft.appearance,title:event.target.value}})}/></label><KoboTitleFormatting value={draft.appearance} language={settings.language} onChange={appearance=>patch({appearance})}/></div><div className="kobo-chart-types" role="group" aria-label="Chart type">{types.map(type=><button type="button" key={type.id} aria-pressed={draft.chart===type.id} disabled={!!type.reason||!!draft.calculation&&draft.calculation.operation!=='count'&&['pie','donut','histogram'].includes(type.id)} title={type.reason||type.label} onClick={()=>patch({chart:type.id as KoboQuestionSettings['chart'],...(type.id==='histogram'?{numericMode:'bins' as const}:{})})}><type.Icon aria-hidden="true"/><span>{type.label}</span>{type.reason&&<small>{type.reason}</small>}</button>)}</div>
-     <section className="kobo-chart-categories" aria-label={text('Chart categories','فئات الرسم البياني')}><header><h4>{text('Chart categories','فئات الرسم البياني')}</h4><span>{text('Chart only','الرسم فقط')}</span></header><label className="kobo-category-toggle"><input type="checkbox" checked={!!draft.chartTopN} disabled={result.kind==='date'||draft.chart==='histogram'||result.kind==='number'&&(draft.numericMode==='bins'||draft.numericMode==='auto')} onChange={event=>patch({chartTopN:event.target.checked?10:null})}/><span><strong>{text('Show Top N','عرض أعلى الفئات')}</strong><small>{text('Focus on the highest-ranking answers.','التركيز على الإجابات الأعلى ترتيباً.')}</small></span><span className="kobo-category-switch" aria-hidden="true"/></label>{draft.chartTopN&&<div className="kobo-category-options"><AppSelect label="Top N preset" value={!customTopN&&[5,10,20].includes(draft.chartTopN)?String(draft.chartTopN):'custom'} options={[["5","Top 5"],["10","Top 10"],["20","Top 20"],["custom","Custom"]]} onChange={value=>{setCustomTopN(value==='custom');if(value!=='custom')patch({chartTopN:Number(value)})}}/><label className="kobo-field">Number of categories<input aria-label="Number of top chart categories" type="number" min={1} max={1000000} value={draft.chartTopN} onChange={event=>{if(Number.isInteger(event.target.valueAsNumber)&&event.target.valueAsNumber>0)patch({chartTopN:Math.min(1000000,event.target.valueAsNumber)})}}/></label><label className="kobo-check"><input type="checkbox" checked={!!draft.chartOther} disabled={!!draft.calculation&&!['count','sum'].includes(draft.calculation.operation)} onChange={event=>patch({chartOther:event.target.checked})}/><span>{text('Combine remaining answers as Other','دمج الإجابات المتبقية ضمن أخرى')}</span></label></div>}<p className="kobo-category-note">{result.kind==='date'||draft.chart==='histogram'||result.kind==='number'&&draft.numericMode!=='values'?'Date axes and numeric bins retain their natural order. Top N is available for categorical charts and exact values.':text('Ranked by Count or your selected calculation. Tables and percentage bases still include every answer. Other is available for Count and Sum.','تُرتب حسب العدد أو الحساب المحدد. تظل جميع الإجابات ضمن الجداول وقواعد النسب. خيار أخرى متاح للعدد والمجموع.')}</p></section>
-     <AppSelect label="Answer order" value={draft.answerSort} options={[["form","Form order"],["count-desc","Count high to low"],["count-asc","Count low to high"],["label-asc","Label A-Z"],["label-desc","Label Z-A"]]} onChange={value=>patch({answerSort:value as KoboQuestionSettings['answerSort']})}/>
-     {result.kind==='number'&&<><AppSelect label="Distribution" disabled={draft.chart==='histogram'} value={draft.chart==='histogram'?'bins':draft.numericMode} options={[["auto","Automatic"],["values","Exact values"],["bins","Equal-width bins"]]} onChange={value=>patch({numericMode:value as KoboQuestionSettings['numericMode']})}/><label className="kobo-field">Number of bins<input aria-label="Number of bins" type="number" min={1} max={100} value={draft.bins} disabled={draft.chart!=='histogram'&&draft.numericMode==='values'} onChange={event=>{if(Number.isFinite(event.target.valueAsNumber))patch({bins:Math.max(1,Math.min(100,event.target.valueAsNumber))})}}/></label></>}
-     {draft.chart==='line'&&['category','multiple','number'].includes(result.kind)&&<><AppSelect label="Date field" searchable value={draft.trendDateField||''} options={[["",result.kind==='number'?'No date field - numeric distribution':'Choose a date field'],...dateFields.map(field=>[field.id,koboLabel(field,settings.language)] as [string,string])]} onChange={value=>patch({trendDateField:value})}/>{draft.trendDateField&&<AppSelect label="Time grouping" value={draft.trendUnit||'month'} options={[["day","Day"],["month","Month"],["year","Year"]]} onChange={value=>patch({trendUnit:value as KoboQuestionSettings['trendUnit']})}/>}<p>Date trends show answers over time. Pivot breakdowns remain in the table and are not added to the trend chart.</p>{!dateFields.length&&<p>No compatible non-identifying date fields are available.</p>}</>}
-     {result.kind==='date'&&<AppSelect label="Time grouping" value={draft.dateUnit} options={[["day","Day"],["month","Month"],["year","Year"]]} onChange={value=>patch({dateUnit:value as KoboQuestionSettings['dateUnit']})}/>}
+    <div hidden={section!=='chart'} className="kobo-customize-section">
+     <section className="kobo-setting-group">
+      <h3>{text('Chart type','نوع الرسم البياني')}</h3>
+      <div className="kobo-chart-types" role="group" aria-label="Chart type">
+       {orderedTypes.map(type=><button type="button" key={type.id} aria-pressed={draft.chart===type.id} disabled={!!type.reason}
+        title={type.reason||type.label} onClick={()=>patch({chart:type.id as KoboQuestionSettings['chart'],...(type.id==='histogram'?{numericMode:'bins' as const}:{})})}>
+        <type.Icon aria-hidden="true"/><span>{type.label}</span>{type.reason&&<small>{type.reason}</small>}
+       </button>)}
+      </div>
+     </section>
+     {(result.kind==='number'||result.kind==='date'||trendSource)&&<section className="kobo-setting-group">
+      <h3>{text('Distribution & time','التوزيع والوقت')}</h3>
+      {trendSource&&<>
+       <KoboSettingsSelect label="Date field" searchable value={draft.trendDateField||''}
+        options={[["",result.kind==='number'?'No date field - numeric distribution':'Choose a date field'],...dateFields.map(field=>[field.id,koboLabel(field,settings.language)] as [string,string])]}
+        onChange={value=>patch({trendDateField:value})}/>
+       {usingDateField&&<><AppSelect label="Time grouping" preserveOrder value={draft.trendUnit||'month'} options={[["day","Day"],["month","Month"],["year","Year"]]}
+        onChange={value=>patch({trendUnit:value as KoboQuestionSettings['trendUnit']})}/>
+        <small>Pivot breakdowns stay in the table while the chart shows answers over time.</small></>}
+       {!dateFields.length&&<small>No compatible non-identifying date fields are available.</small>}
+      </>}
+      {result.kind==='number'&&!usingDateField&&<>
+       {draft.chart!=='histogram'&&<AppSelect label="Distribution" preserveOrder value={draft.numericMode} options={[["auto","Automatic"],["values","Exact values"],["bins","Equal-width bins"]]}
+        onChange={value=>patch({numericMode:value as KoboQuestionSettings['numericMode']})}/>}
+       {(draft.chart==='histogram'||draft.numericMode!=='values')&&<label className="kobo-field">Number of bins
+        <input aria-label="Number of bins" type="number" min={1} max={100} value={draft.bins}
+         onChange={event=>{if(Number.isFinite(event.target.valueAsNumber))patch({bins:Math.max(1,Math.min(100,event.target.valueAsNumber))})}}/>
+       </label>}
+      </>}
+      {result.kind==='date'&&<AppSelect label="Time grouping" preserveOrder value={draft.dateUnit} options={[["day","Day"],["month","Month"],["year","Year"]]}
+       onChange={value=>patch({dateUnit:value as KoboQuestionSettings['dateUnit']})}/>}
+     </section>}
+     <section className="kobo-setting-group">
+      <h3>{text('Categories & order','الفئات والترتيب')}</h3>
+      <AppSelect label="Answer order" preserveOrder value={draft.answerSort} options={[["form","Form order"],["count-desc","Count high to low"],["count-asc","Count low to high"],["label-asc","Label A-Z"],["label-desc","Label Z-A"]]}
+       onChange={value=>patch({answerSort:value as KoboQuestionSettings['answerSort']})}/>
+      {canRank?<div className="kobo-chart-categories">
+       <label className="kobo-category-toggle">
+        <input type="checkbox" checked={!!draft.chartTopN} onChange={event=>patch({chartTopN:event.target.checked?10:null})}/>
+        <span><strong>{text('Show Top N','عرض أعلى الفئات')}</strong><small>{text('Limit the chart to the highest-ranking answers.','عرض الإجابات الأعلى ترتيباً في الرسم فقط.')}</small></span>
+        <span className="kobo-category-switch" aria-hidden="true"/>
+       </label>
+       {draft.chartTopN&&<div className="kobo-category-options">
+        <AppSelect label="Top N preset" preserveOrder value={!customTopN&&[5,10,20].includes(draft.chartTopN)?String(draft.chartTopN):'custom'}
+         options={[["5","Top 5"],["10","Top 10"],["20","Top 20"],["custom","Custom"]]}
+         onChange={value=>{setCustomTopN(value==='custom');if(value!=='custom')patch({chartTopN:Number(value)})}}/>
+        <label className="kobo-field">Number of categories
+         <input aria-label="Number of top chart categories" type="number" min={1} max={1000000} value={draft.chartTopN}
+          onChange={event=>{if(Number.isInteger(event.target.valueAsNumber)&&event.target.valueAsNumber>0)patch({chartTopN:Math.min(1000000,event.target.valueAsNumber)})}}/>
+        </label>
+        {supportsOther&&<label className="kobo-check"><input type="checkbox" checked={!!draft.chartOther} onChange={event=>patch({chartOther:event.target.checked})}/>
+         <span>{text('Combine remaining answers as Other','دمج الإجابات المتبقية ضمن أخرى')}</span></label>}
+       </div>}
+      </div>:<small>Time axes and numeric bins keep their natural order. Answer order can still apply to the table.</small>}
+     </section>
     </div>
-    <div hidden={section!=='appearance'} className="kobo-customize-section"><KoboAppearanceControls showTitle={false} measured={!!draft.calculation&&!['count','sum'].includes(draft.calculation.operation)} value={draft.appearance} onChange={appearance=>patch({appearance})} chart={shown.chart} breakdowns={breakdowns.length>0}/></div>
+    <div hidden={section!=='appearance'} className="kobo-customize-section">
+     <KoboAppearanceControls showTitle={false} value={draft.appearance} onChange={appearance=>patch({appearance})}
+      chart={shown.chart} breakdowns={breakdowns.length>0} measured={calculated&&draft.calculation?.operation!=='sum'}
+      calculated={calculated} legacyMeasure={calculated&&draft.percentageMode==='legacy-respondents'} trend={!!shown.trend||usingDateField}
+      typography={<div className="kobo-appearance-control kobo-chart-title-control" dir={settings.language==='ar'?'rtl':'ltr'}>
+       <label><span className="kobo-chart-title-label">{text('Chart title','عنوان الرسم البياني')}</span>
+        <input type="text" className="kobo-chart-title-input" dir="auto" aria-label={text('Chart title (optional)','عنوان الرسم البياني (اختياري)')} maxLength={200}
+         placeholder={text('Enter an optional title','أدخل عنواناً اختيارياً')} value={draft.appearance?.title||''}
+         onChange={event=>patch({appearance:{...draft.appearance,title:event.target.value}})}/>
+       </label>
+       <KoboTitleFormatting value={draft.appearance} language={settings.language} onChange={appearance=>patch({appearance})}/>
+      </div>}/>
+    </div>
     <div hidden={section!=='breakdowns'} className="kobo-customize-section"><h3>Pivot breakdowns</h3><p>Choose up to three levels. Each level groups columns within the previous one.</p><div className="kobo-customize-breakdowns">{[0,1,2].map(index=><div key={index}><span>{index+1}</span><AppSelect label={`Breakdown ${index+1}`} searchable disabled={index>breakdowns.length} value={breakdowns[index]||''} options={[["",index===0?'No breakdown':'None'],...fields.filter(question=>question.id===breakdowns[index]||!breakdowns.includes(question.id)).map(question=>[question.id,koboLabel(question,settings.language)] as [string,string])]} onChange={value=>changeBreakdown(index,value)}/><button type="button" className="soft" disabled={!breakdowns[index]} aria-label={`Remove breakdown ${index+1}`} onClick={()=>changeBreakdown(index,'')}><X/></button></div>)}</div>
      {(!draft.calculation||['count','sum'].includes(draft.calculation.operation))&&<AppSelect label="Table values" value={draft.breakdownDisplay||'both'} options={[["count","# only"],["percent","% only"],["both","# and %"]]} onChange={value=>patch({breakdownDisplay:value as KoboQuestionSettings['breakdownDisplay']})}/>}
     </div>

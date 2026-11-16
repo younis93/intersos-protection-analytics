@@ -12,7 +12,7 @@ from openpyxl.utils import get_column_letter
 from .excel_export import Font, PatternFill, append_frame
 from .legal_platform import (
     DATE_HINT, EXPLORER_DATE_FORMAT, _safe_export, clean_id, display_value,
-    YEAR_MONTH, distinct_transform, filter_rows, format_excel_dates, normalize_name, phone_digits,
+    REVIEW_EXPORT_PROJECT_SHEETS, YEAR_MONTH, distinct_transform, filter_rows, format_excel_dates, normalize_name, phone_digits,
 )
 from .filter_selection import selection_mask, selection_value
 from .hotline_review import FIELDS as HOTLINE_FIELDS
@@ -215,22 +215,31 @@ def table(frame, *, page=1, pageSize=100, hotline=None, **query):
 
 
 def export(frame, **query):
-    selected, _, _, reason = pipeline(frame, **query)
+    selected, fields, _, reason = pipeline(frame, **query)
     if reason:
         raise ValueError(reason)
+    if selected.empty:
+        raise ValueError("No eligible Sampling records match these settings.")
+
+    projects = selected[fields["project"]] if fields["project"] else pd.Series("", index=selected.index)
+    regions = projects.map(text).map(REVIEW_EXPORT_PROJECT_SHEETS).fillna("Other")
     selected = _safe_export(selected)
     workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "Sampling"
-    append_frame(sheet, selected)
-    sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = sheet.dimensions
-    for cell in sheet[1]:
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="1D4ED8")
-    for index, column in enumerate(selected.columns, 1):
-        width = max([len(str(column))] + [len(str(value)) for value in selected[column].head(250)]) + 2
-        sheet.column_dimensions[get_column_letter(index)].width = min(45, max(12, width))
+    workbook.remove(workbook.active)
+    for region, title in (("South Iraq", "South"), ("North Iraq", "North"), ("AMAL Camp", "AMAL Camp"), ("Other", "Other")):
+        rows = selected.loc[regions.eq(region)]
+        if rows.empty:
+            continue
+        sheet = workbook.create_sheet(title)
+        append_frame(sheet, rows)
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = sheet.dimensions
+        for cell in sheet[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="1D4ED8")
+        for index, column in enumerate(rows.columns, 1):
+            width = max([len(str(column))] + [len(str(value)) for value in rows[column].head(250)]) + 2
+            sheet.column_dimensions[get_column_letter(index)].width = min(45, max(12, width))
     format_excel_dates(workbook, EXPLORER_DATE_FORMAT)
     output = io.BytesIO()
     workbook.save(output)

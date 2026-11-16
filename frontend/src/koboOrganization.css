@@ -166,4 +166,4 @@
 .kobo-answers .kobo-table-wrap td:last-child{white-space:pre-wrap;overflow-wrap:anywhere;text-align:start}
 .kobo-answers .kobo-table-wrap th:first-child,.kobo-answers .kobo-table-wrap td:first-child{min-width:70px;width:100px}
 .kobo-answers .kobo-dialog-actions>.kobo-toolbar{font-size:11px}
-@media(max-width:540px){.kobo-answers .kobo-dialog-actions>.kobo-toolbar{width:100%;justify-content:space-between}.kobo-shell .kobo-question-actions>button,.kobo-shell .kobo-question-customize-export>button{font-size:11px;padding:8px 10px}}
+@media(max-width:540px){.kobo-answers .kobo-dialog-actions>.kobo-toolbar{width:100%;justify-content:space-between}.kobo-shell .kobo-question-primary-actions>button,.kobo-shell .kobo-question-customize-actions>button{font-size:11px;padding:8px 10px}}

@@ -9,7 +9,7 @@ export function bulkQuestionSettings(question:KoboQuestion,settings:KoboSettings
  const current=questionSettingsFor(question,settings.questions[question.id],settings.percentageDefault),next={...current};
  if(draft.chart!==undefined)next.chart=draft.chart;
  if(['category','multiple','number'].includes(question.kind)){if(draft.trendDateField!==undefined)next.trendDateField=draft.trendDateField;if(draft.trendUnit!==undefined)next.trendUnit=draft.trendUnit}
- if(draft.appearance!==undefined)next.appearance={...current.appearance,...draft.appearance};
+ if(draft.appearance!==undefined)next.appearance={...current.appearance,...(draft.appearance.fontFamily?{titleFont:'inherit' as const}:{}),...draft.appearance};
  if(draft.breakdowns!==undefined){
   const previous=current.breakdowns?.length?current.breakdowns:current.breakdown?[current.breakdown]:[];
   next.pointColors={};next.breakdown='';next.breakdowns=draft.breakdowns.filter(id=>id!==question.id);

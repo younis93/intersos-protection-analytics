@@ -312,7 +312,8 @@ def _metric_pivot(book, cache, visible, result, position):
 
 
 def _chart_labels(report, chart, result, metrics, project, settings, totals=None, final_styles=None):
-    mode = result.get('appearance', {}).get('labels', 'auto')
+    appearance = result.get('appearance', {})
+    mode = appearance.get('labels', 'auto')
     series_count = chart.SeriesCollection().Count
     if mode == 'hidden':
         for index in range(1, series_count+1): chart.SeriesCollection(index).HasDataLabels = False
@@ -322,16 +323,22 @@ def _chart_labels(report, chart, result, metrics, project, settings, totals=None
     start = sheet.UsedRange.Row + sheet.UsedRange.Rows.Count + 3
     columns = native_breakdown_columns(project, result, settings)
     reference = pivot_reference(totals) if totals is not None else None
-    font = result.get('appearance', {}).get('fontSize') or 11
+    font = appearance.get('fontSize') or 11
     kind = result.get('_excelChartKind', result['chart']); horizontal = kind == 'bar'
-    stacked = result.get('appearance', {}).get('bars') == 'stack' and bool(result['breakdowns'])
+    stacked = appearance.get('bars') == 'stack' and bool(result['breakdowns'])
+    supports_placement = kind in {'bar', 'column', 'histogram'}
+    force_inside = supports_placement and appearance.get('labelPosition') == 'inside'
+    force_outside = supports_placement and not force_inside and not stacked
     try: width, height = float(chart.PlotArea.InsideWidth), float(chart.PlotArea.InsideHeight)
     except Exception: width, height = 500, 300
     thickness = (height if horizontal else width)/max(1, len(result['rows']))/(1 if stacked else series_count)*.8
     prepared = []
     for index in range(1, series_count+1):
         series = chart.SeriesCollection(index); series.ApplyDataLabels()
-        series.DataLabels().Font.Size = font; series.DataLabels().Font.Bold = True
+        label_font = series.DataLabels().Font
+        label_font.Name = appearance.get('fontFamily', 'Helvetica Neue')
+        label_font.Size = font
+        label_font.Bold = True
         points = min(series.Points().Count, len(result['rows']))
         effective_mode = (metrics[(index-1) % len(metrics)] if metrics else 'count') if mode == 'auto' else mode
         column = columns[min((index-1)//len(metrics), len(columns)-1)] if columns else None
@@ -367,7 +374,7 @@ def _chart_labels(report, chart, result, metrics, project, settings, totals=None
         entries = [next((entry for entry in answer.get('series', []) if column and entry['id'] == column['id']), answer) for answer in chart_answers[:points]]
         values = [abs(float(entry.get('percent' if data_metric == 'percent' else 'count', values[i] if i < len(values) else 0) or 0)) for i, entry in enumerate(entries)]
         maximum = max(values, default=0)
-        if kind in {'bar', 'column'}:
+        if kind in {'bar', 'column'} or force_inside or force_outside:
             try: maximum = max(maximum, float(chart.Axes(2, series.AxisGroup).MaximumScale))
             except Exception: pass
         for point_index in range(1, points+1):
@@ -383,17 +390,32 @@ def _chart_labels(report, chart, result, metrics, project, settings, totals=None
             small = not _label_fits(text, magnitude, maximum, width if horizontal else height, thickness, font, horizontal)
             visible = not (mode == 'auto' and magnitude <= 0 or kind in {'bar', 'column'} and stacked and small)
             position = (3 if stacked or not small else 2) if kind in {'bar', 'column'} else 0 if kind == 'line' else 2
-            fill = answer_color(result, column['id'] if column else answer['id']) if kind in {'bar', 'column'} and position == 3 else None
+            size = None
+            if force_inside:
+                position = 3
+                size = font
+                extent = width if horizontal else height
+                minimum_font = min(8, font)
+                while size > minimum_font and not _label_fits(text, magnitude, maximum, extent, thickness, size, horizontal):
+                    size -= 1
+                fits = _label_fits(text, magnitude, maximum, extent, thickness, size, horizontal)
+                visible = (mode != 'auto' or magnitude > 0) and (fits or not stacked)
+                if not fits and not stacked:
+                    position = 2
+                    size = None
+            elif force_outside:
+                position = 2
+            fill = answer_color(result, column['id'] if column else answer['id']) if position == 3 else None
             color = _label_ink(_rgb(fill)) if fill else '#263746'
             # Connecting slicers can recreate PivotChart series. Retain the chart
             # and indices instead of COM series objects that Excel invalidates.
-            style = (chart, index, point_index, visible, font, position, color, formula)
+            style = (chart, index, point_index, visible, font, position, color, formula, size)
             if final_styles is not None: final_styles.append(style)
             else: _apply_label_style(style)
 
 
 def _apply_label_style(style, series_cache=None):
-    chart, series_index, index, visible, font, position, color, formula = style
+    chart, series_index, index, visible, font, position, color, formula, size = style
     key = (id(chart), series_index)
     series = series_cache.get(key) if series_cache is not None else None
     if series is None:
@@ -413,6 +435,7 @@ def _apply_label_style(style, series_cache=None):
         point.HasDataLabel = True
         label = point.DataLabel; label.Formula = formula
         label.Font.Color = _rgb(color)
+        if size is not None: label.Font.Size = size
         label.Position = position
     except Exception:
         # Preserve formula links when an Excel version cannot apply a positioning option.
@@ -462,6 +485,7 @@ def _chart(report, pivot, result, left, top, metrics, project, settings, totals=
         chart.Axes(1).TickLabelSpacing = 1
     font_family = appearance.get('fontFamily', 'Helvetica Neue')
     chart.ChartArea.Font.Name = font_family
+    if appearance.get('fontSize'): chart.ChartArea.Font.Size = appearance['fontSize']
     chart.HasTitle = True; chart.ChartTitle.Text = (appearance.get('title') or result['label'])[:255]
     title_font = appearance.get('titleFont', 'inherit')
     chart.ChartTitle.Font.Name = font_family if title_font == 'inherit' else title_font
@@ -469,7 +493,6 @@ def _chart(report, pivot, result, left, top, metrics, project, settings, totals=
     legend = appearance.get('legend', 'auto')
     chart.HasLegend = (bool(result['breakdowns']) or kind in {'pie', 'donut'}) if legend == 'auto' else legend != 'hidden'
     if chart.HasLegend and legend != 'auto': chart.Legend.Position = {'top': -4160, 'bottom': -4107, 'left': -4131, 'right': -4152}[legend]
-    if appearance.get('fontSize'): chart.ChartArea.Font.Size = appearance['fontSize']
     if kind not in {'pie', 'donut'}:
         for axis_type in (1, 2):
             for group in (1, 2):
