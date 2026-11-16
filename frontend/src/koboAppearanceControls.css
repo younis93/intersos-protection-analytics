@@ -10,12 +10,24 @@
 .kobo-appearance-radios input{accent-color:var(--blue);width:15px;height:15px;flex:none;margin:0}.kobo-appearance-radios label:focus-within{outline:2px solid var(--blue);outline-offset:2px}.kobo-appearance-radios:disabled{opacity:.5}.kobo-appearance-radios:disabled label{cursor:not-allowed}.kobo-appearance-mixed{display:block;margin:0 0 9px;font-size:11px;color:var(--muted)}
 
 .kobo-dialog .kobo-chart-title-control>label{gap:6px;margin:0}
-.kobo-dialog .kobo-chart-title-control>label>input{min-height:36px;padding:8px 10px;border-color:var(--line);border-radius:7px;font-size:13px}
+.kobo-dialog .kobo-appearance-control .kobo-chart-title-label{font-size:14px;font-weight:700}
+.kobo-dialog .kobo-appearance-control>label>.kobo-chart-title-input{min-height:48px;padding:10px 13px;border-color:color-mix(in srgb,var(--blue) 48%,var(--line));border-radius:9px;font-size:18px;font-weight:650}
+.kobo-dialog .kobo-appearance-control>label>.kobo-chart-title-input::placeholder{font-size:14px;font-weight:500}
 .kobo-title-formatting{display:grid;gap:8px;min-width:0;margin-top:12px;padding-top:7px;border-top:1px solid var(--line)}
+.kobo-title-style-fields{display:grid;gap:8px;min-width:0}
 .kobo-title-format-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .kobo-dialog .kobo-title-format-header h4{margin:0;color:var(--ink);font-size:12px;font-weight:650}
 .kobo-title-font-grid,.kobo-title-detail-grid,.kobo-title-toolbar{display:grid;gap:8px;min-width:0}
-.kobo-title-font-grid{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}
+.kobo-title-font-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.kobo-setting-group{display:grid;gap:12px;min-width:0;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+.kobo-setting-group>h3{margin:0}
+.kobo-setting-group .app-select{width:100%;min-width:0;box-sizing:border-box;margin:0}
+.kobo-setting-group .app-select-trigger{min-width:0}
+.kobo-setting-group .kobo-appearance-control{min-width:0}
+.kobo-setting-group .kobo-appearance-radios{padding:4px 0 0;border:0;border-radius:0;background:transparent}
+.kobo-setting-group .kobo-appearance-radios>legend{padding:0}
+.kobo-setting-group .kobo-appearance-control>small{display:block;margin-top:5px}
+.kobo-customize .kobo-setting-group .kobo-chart-categories{padding:0;border:0;background:transparent}
 .kobo-title-detail-grid{grid-template-columns:52px minmax(0,1fr)}
 .kobo-title-toolbar{grid-template-columns:repeat(2,minmax(0,1fr))}
 .kobo-title-segments{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;min-width:0;padding:2px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong)}

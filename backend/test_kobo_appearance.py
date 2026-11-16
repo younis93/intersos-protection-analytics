@@ -19,7 +19,7 @@ def test_appearance_roundtrip_preserves_results_and_settings_version(sample, lab
     project = copy.deepcopy(sample[0])
     settings = KoboSettings(questions={'group/needs': QuestionSettings(breakdowns=['group/gender'])})
     before = analyze(project, settings)
-    settings.questions['group/needs'].appearance = ChartAppearance(metric='percent', labels=labels, zeroPercentLabels='hide', legend='right', fontSize=14, height=560, grid='hide', bars='stack')
+    settings.questions['group/needs'].appearance = ChartAppearance(metric='percent', labels=labels, labelPosition='outside', zeroPercentLabels='hide', legend='right', fontSize=14, height=560, grid='hide', bars='stack', categoryLabels='rotate')
     after = analyze(project, settings)
     original = next(q for q in before['questions'] if q['id'] == 'group/needs')
     changed = next(q for q in after['questions'] if q['id'] == 'group/needs')
@@ -28,6 +28,8 @@ def test_appearance_roundtrip_preserves_results_and_settings_version(sample, lab
     assert changed['breakdownDisplay'] == original['breakdownDisplay']
     assert QuestionResult.model_validate(changed).appearance.metric == 'percent'
     assert QuestionResult.model_validate(changed).appearance.zeroPercentLabels == 'hide'
+    assert QuestionResult.model_validate(changed).appearance.labelPosition == 'outside'
+    assert QuestionResult.model_validate(changed).appearance.categoryLabels == 'rotate'
     assert KoboSettings.model_validate(settings.model_dump()).questions['group/needs'].appearance.height == 560
     assert KoboSettings.model_validate_json(settings.model_dump_json()).questions['group/needs'].appearance.labels == labels
     assert settings.version == 1
@@ -36,25 +38,29 @@ def test_appearance_roundtrip_preserves_results_and_settings_version(sample, lab
 def test_legacy_settings_and_result_default_to_automatic():
     assert QuestionSettings().appearance == ChartAppearance()
     assert ChartAppearance().fontFamily == 'Helvetica Neue'
+    assert 'valueAxisMaximum' not in ChartAppearance.model_validate({'valueAxisMaximum': 100}).model_dump()
+    assert ChartAppearance(labelPosition='auto').labelPosition == 'outside'
 
 
 @pytest.mark.parametrize('spacing', ['roomy', 4.5, 0, 36])
 def test_chart_font_and_spacing_survive_saved_settings_and_analysis(sample, spacing):
-    settings = KoboSettings(questions={'group/needs': QuestionSettings(appearance={'fontFamily': 'Aptos', 'titleFont': 'Helvetica Neue', 'titleSpacing': spacing})})
+    settings = KoboSettings(questions={'group/needs': QuestionSettings(appearance={'fontFamily': 'Aptos', 'fontSize': 24, 'titleFont': 'Helvetica Neue', 'titleSpacing': spacing})})
     restored = KoboSettings.model_validate_json(settings.model_dump_json())
     result = next(q for q in analyze(sample[0], restored)['questions'] if q['id'] == 'group/needs')
     appearance = QuestionResult.model_validate(result).appearance
     assert appearance.fontFamily == 'Aptos'
+    assert appearance.fontSize == 24
     assert appearance.titleSpacing == spacing
     assert appearance.titleFont == 'Helvetica Neue'
 
 
-@pytest.mark.parametrize('value', [{'metric':'both'}, {'height':99999}, {'fontSize':-1}, {'legend':'elsewhere'}, {'bars':'normalized'}])
+@pytest.mark.parametrize('value', [{'metric':'both'}, {'height':99999}, {'fontSize':-1}, {'legend':'elsewhere'}, {'bars':'normalized'}, {'categoryLabels':'other'}])
 def test_invalid_appearance_rejected(value):
     with pytest.raises(ValidationError): QuestionSettings(appearance=value)
 
 
-def test_native_automatic_labels_follow_series_metric_and_keep_formulas(monkeypatch):
+@pytest.mark.parametrize(('appearance', 'position'), [({}, 2), ({'labelPosition': 'auto'}, 2), ({'labelPosition': 'inside'}, 3)])
+def test_native_labels_follow_series_metric_and_keep_formulas(monkeypatch, appearance, position):
     from types import SimpleNamespace as NS
     from unittest.mock import Mock
     import backend.kobo_excel as native
@@ -74,7 +80,7 @@ def test_native_automatic_labels_follow_series_metric_and_keep_formulas(monkeypa
     chart = Mock()
     collection = Mock(Count=2, side_effect=lambda index: series[index-1])
     chart.SeriesCollection.side_effect = lambda index=None: collection if index is None else series[index-1]
-    result = {'id':'q', 'chart':'bar', 'rows':[{'id':'a'}, {'id':'b'}], 'breakdowns':[], 'colors': {'a': '#174A7E'}, 'appearance':{}}
+    result = {'id':'q', 'chart':'bar', 'rows':[{'id':'a'}, {'id':'b'}], 'breakdowns':[], 'colors': {'a': '#174A7E'}, 'appearance':appearance}
     native._chart_labels(Mock(), chart, result, ['count','percent'], {}, KoboSettings())
     written = sheet.Range.return_value.Formula
     assert 'TEXT(SUMIFS' in written[0][0]
@@ -82,8 +88,8 @@ def test_native_automatic_labels_follow_series_metric_and_keep_formulas(monkeypa
     assert ' / ' not in written[0][0]
     assert sheet.Range.call_args.args == ('A6:B7',)
     assert points_by_series[0][0].DataLabel.Formula.startswith("='_Kobo chart labels'!")
-    assert points_by_series[0][0].DataLabel.Position == 3
-    assert points_by_series[0][0].DataLabel.Font.Color == 0xFFFFFF
+    assert points_by_series[0][0].DataLabel.Position == position
+    assert points_by_series[0][0].DataLabel.Font.Color == native._rgb('#ffffff' if position == 3 else '#263746')
     assert series[0].DataLabels().Font.Size == 11
     assert series[0].DataLabels().Font.Bold is True
     assert points_by_series[0][1].HasDataLabel is False
@@ -110,12 +116,14 @@ def test_deferred_native_labels_reacquire_series_after_slicer_refresh():
     chart = Mock()
     collection = Mock(Count=1, side_effect=lambda index: fresh)
     chart.SeriesCollection.side_effect = lambda index=None: collection if index is None else fresh
-    _apply_label_style((chart, 1, 1, True, 11, 3, '#ffffff', "='_Kobo chart labels'!$A$5"))
+    _apply_label_style((chart, 1, 1, True, 11, 3, '#ffffff', "='_Kobo chart labels'!$A$5", 8))
     assert point.HasDataLabel
     assert point.DataLabel.Formula == "='_Kobo chart labels'!$A$5"
+    assert point.DataLabel.Font.Size == 8
+    assert point.DataLabel.Position == 3
     assert fresh.DataLabels().Font.Bold
     # An initially empty slicer intersection can remove the former points.
-    _apply_label_style((chart, 1, 2, True, 11, 3, '#ffffff', '=A6'))
+    _apply_label_style((chart, 1, 2, True, 11, 3, '#ffffff', '=A6', None))
     assert fresh.Points.call_args.args == ()
 
 

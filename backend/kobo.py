@@ -72,20 +72,27 @@ class ChartAppearance(BaseModel):
     titleItalic: bool = False
     titleUnderline: bool = False
     titleAlign: Literal['left', 'center', 'right'] = 'center'
-    titleFont: Literal['inherit', ChartFont] = 'Helvetica Neue'
+    titleFont: Literal['inherit', ChartFont] = 'inherit'
     titleSize: int = Field(32, ge=0, le=48)
     titleSpacing: Literal['compact', 'standard', 'roomy'] | Annotated[float, Field(strict=True, ge=0, le=36)] = 9.0
     titleColor: str = Field('', pattern=r'^$|^#[0-9a-fA-F]{6}$')
     valueAxis: Literal['show', 'hide'] = 'show'
+    categoryLabels: Literal['wrap', 'truncate', 'rotate'] = 'wrap'
     metric: Literal['auto', 'count', 'percent'] = 'auto'
     labels: Literal['auto', 'hidden', 'count', 'percent', 'both'] = 'auto'
+    labelPosition: Literal['inside', 'outside'] = 'outside'
     zeroPercentLabels: Literal['show', 'hide'] = 'show'
     legend: Literal['auto', 'hidden', 'top', 'bottom', 'left', 'right'] = 'auto'
     fontFamily: ChartFont = 'Helvetica Neue'
-    fontSize: Literal[0, 10, 12, 14, 16] = 0
+    fontSize: Literal[0, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 26, 28] = 0
     height: Literal[0, 320, 420, 560, 720] = 0
     grid: Literal['auto', 'show', 'hide'] = 'auto'
     bars: Literal['group', 'stack'] = 'group'
+
+    @field_validator('labelPosition', mode='before')
+    @classmethod
+    def migrate_label_position(cls, value):
+        return 'outside' if value == 'auto' else value
 
 
 class PivotSort(BaseModel):

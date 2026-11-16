@@ -1,7 +1,8 @@
 import {useKoboUnsavedChanges} from './useKoboUnsavedChanges';
 import KoboBulkSettingHeading from './KoboBulkSettingHeading';
 import {appearanceDefaults,resolveAppearance,type KoboAppearance} from './koboAppearance';
-import KoboAppearanceControls from './KoboAppearanceControls';
+import KoboAppearanceControls,{appearanceSettingApplies,gridlineChoice} from './KoboAppearanceControls';
+import KoboSettingsSelect from './KoboSettingsSelect';
 import {lazy,Suspense,useEffect,useMemo,useRef,useState} from 'react';
 import {BarChart3,ChartColumn,ChartLine,ChevronDown,Palette,PieChart,RotateCcw,SlidersHorizontal,X} from 'lucide-react';
 import {AppSelect} from './SelectionControls';
@@ -27,10 +28,48 @@ export default function KoboBulkCustomize({project,settings,analysis,onApply,onC
  const pending=!!target&&(busy||preview?.key!==key),dirty=Object.values(draft).some(value=>value!==undefined);
  const originals=useMemo(()=>targets.map(question=>({question,cfg:bulkQuestionSettings(question,base.current,{})})),[targets]);
  const shared=(key:keyof KoboBulkDraft)=>sharedBulkValue(originals.filter(({question})=>key==='numericMode'||key==='bins'?question.kind==='number':key==='dateUnit'?question.kind==='date':true).map(({cfg})=>key==='breakdowns'?(cfg.breakdowns?.length?cfg.breakdowns:cfg.breakdown?[cfg.breakdown]:[]):cfg[key]??(key==='chart'||key==='palette'?null:undefined)));
- const sharedAppearance=Object.fromEntries(Object.keys(appearanceDefaults).map(key=>[key,sharedBulkValue(originals.map(({cfg})=>resolveAppearance(cfg.appearance)[key as keyof KoboAppearance]))]));
+ const targetCharts=useMemo(()=>{
+  const results=new Map(original.current.questions.map(result=>[result.id,result]));
+  return targets.map(question=>{
+   const next=bulkQuestionSettings(question,base.current,draft);
+   const result=results.get(question.id);
+   const chart=next.chart||(draft.chart===undefined&&result?.chart)||(question.kind==='date'?'line':'column');
+   const calculated=!!next.calculation&&next.calculation.operation!=='count';
+   const usesDateField=chart==='line'&&!!next.trendDateField&&['category','multiple','number'].includes(question.kind);
+   return {question,config:next,usesDateField,context:{
+    chart,breakdowns:!!(next.breakdowns?.length||next.breakdown),appearance:next.appearance,
+    calculated,measured:calculated&&next.calculation?.operation!=='sum',
+    legacyMeasure:calculated&&next.percentageMode==='legacy-respondents',
+    trend:chart==='line'&&(usesDateField||question.kind==='date'||!!result?.trend&&draft.chart===undefined&&draft.trendDateField===undefined),
+   }};
+  });
+ },[targets,draft]);
+ const sharedAppearance=Object.fromEntries(Object.keys(appearanceDefaults).map(name=>{
+  const key=name as keyof KoboAppearance;
+  const values=originals.flatMap(({cfg},index)=>{
+   const context=targetCharts[index].context;
+   if(!appearanceSettingApplies(key,context))return [];
+   return [key==='grid'?gridlineChoice(cfg.appearance?.grid,context.chart):resolveAppearance(cfg.appearance)[key]];
+  });
+  return [key,sharedBulkValue(values)];
+ }));
+ const numericCharts=targetCharts.filter(item=>item.question.kind==='number'&&!item.usesDateField);
+ const dateTargets=targetCharts.some(item=>item.question.kind==='date');
+ const trendTargets=targetCharts.some(item=>(draft.chart==='line'||item.context.chart==='line')&&['category','multiple','number'].includes(item.question.kind));
+ const showTrendGrouping=targetCharts.some(item=>item.usesDateField);
+ const showDistribution=numericCharts.some(item=>item.context.chart!=='histogram');
+ const showBins=numericCharts.some(item=>item.context.chart==='histogram'||item.config.numericMode!=='values');
  const commonBreakdowns=shared('breakdowns'),levels=draft.breakdowns??(commonBreakdowns.value as string[]|undefined)??[];
  const dateFields=project.form.questions.filter(field=>field.kind==='date'&&!field.identifying&&targets.filter(q=>['category','multiple','number'].includes(q.kind)).every(q=>!field.repeat||field.repeat===q.repeat||q.repeat.startsWith(field.repeat+'/')));
- const chartReason=(id:string)=>id==='histogram'&&!targets.some(q=>q.kind==='number')?'Requires a numeric question.':id==='heatmap'&&!targets.some(q=>(draft.breakdowns??settings.questions[q.id]?.breakdowns??(settings.questions[q.id]?.breakdown?[settings.questions[q.id].breakdown]:[])).some(field=>field!==q.id))?'Add a breakdown first.':'';
+ const chartReason=(id:string)=>{
+  if(id==='histogram'&&!targetCharts.some(({question,context})=>question.kind==='number'&&!context.calculated))return 'Requires a numeric question without calculated values.';
+  if(id==='heatmap'&&!targetCharts.some(({context})=>context.breakdowns))return 'Add a breakdown first.';
+  if((id==='pie'||id==='donut')&&!targetCharts.some(({question,context})=>!['number','date'].includes(question.kind)&&!context.breakdowns&&!context.calculated))return 'Requires categorical answers without breakdowns or calculated values.';
+  if(id==='line'&&!targets.some(question=>['category','multiple','number','date'].includes(question.kind)))return 'Requires category, multiple-choice, number or date answers.';
+  return '';
+ };
+ const typeOptions=chartTypes.map(type=>({...type,reason:chartReason(type.id)}));
+ const orderedTypes=[...typeOptions.filter(type=>!type.reason),...typeOptions.filter(type=>type.reason)];
  const undo=(keys:(keyof KoboBulkDraft)[])=>{setDraft(current=>{const next={...current};keys.forEach(key=>delete next[key]);return next});if(keys.includes('palette')||keys.includes('colors')){setInvalid(new Set());setColorRevision(value=>value+1)}};
  const heading=(label:string,key:keyof KoboBulkDraft,keys:(keyof KoboBulkDraft)[]=[key])=><KoboBulkSettingHeading label={label} changed={keys.some(key=>draft[key]!==undefined)} mixed={keys.some(key=>shared(key).mixed)} onUndo={()=>undo(keys)}/>;
  const selected=(key:keyof KoboBulkDraft)=>draft[key]!==undefined?String(draft[key]??'auto'):shared(key).mixed?'__mixed__':String(shared(key).value??'auto');
@@ -59,16 +98,54 @@ export default function KoboBulkCustomize({project,settings,analysis,onApply,onC
    <section id="kobo-customize-settings" className="kobo-customize-settings" aria-label="Shared settings">
     <nav className="kobo-customize-tabs" aria-label="Shared customize sections">{([{id:'chart',label:'Chart',Icon:BarChart3},{id:'appearance',label:'Appearance',Icon:SlidersHorizontal},{id:'breakdowns',label:'Breakdowns',Icon:SlidersHorizontal},{id:'colors',label:'Colors',Icon:Palette}] as const).map(tab=><button key={tab.id} type="button" aria-pressed={section===tab.id} onClick={()=>setSection(tab.id)}><tab.Icon/>{tab.label}</button>)}</nav>
     <div hidden={section!=='chart'} className="kobo-customize-section">
-     <h3>Chart appearance</h3><p>Edit any setting directly. Only changed settings will apply to enabled questions.</p>
-     {heading('Chart type','chart')}
-     <div className="kobo-chart-types" role="group" aria-label="Shared chart type">{chartTypes.map(type=><button key={type.id} type="button" aria-pressed={selected('chart')===type.id} disabled={!!chartReason(type.id)} title={chartReason(type.id)||type.label} onClick={()=>patch({chart:(type.id==='auto'?null:type.id) as KoboQuestionSettings['chart']})}><type.Icon/><span>{type.label}</span>{chartReason(type.id)&&<small>{chartReason(type.id)}</small>}</button>)}</div><p className="kobo-bulk-hint">Histogram applies to numeric questions; Heatmap requires breakdowns. Choose a date field for answer trends. Incompatible questions use Bar. Pie and Donut apply to categorical answers without breakdowns.</p>
-     {selected('chart')==='line'&&<>{heading('Date field','trendDateField')}<AppSelect label="Shared date field" searchable value={selected('trendDateField')==='auto'?'':selected('trendDateField')} options={options('trendDateField',[["","No shared date field"],...dateFields.map(field=>[field.id,koboLabel(field,settings.language)] as [string,string])])} onChange={value=>{if(value!=='__mixed__')patch({trendDateField:value})}}/>{heading('Trend grouping','trendUnit')}<AppSelect label="Shared trend grouping" value={selected('trendUnit')==='auto'?'month':selected('trendUnit')} options={options('trendUnit',[["day","Day"],["month","Month"],["year","Year"]])} onChange={value=>{if(value!=='__mixed__')patch({trendUnit:value as KoboQuestionSettings['trendUnit']})}}/><p>Answer trends use dates from these fields, including hidden date metadata. Pivot breakdowns stay in the tables and are not added to trend charts.</p></>}
-     {heading('Answer order','answerSort')}
-     <AppSelect label="Shared answer order" value={selected('answerSort')} options={options('answerSort',[["form","Form order"],["count-desc","Count high to low"],["count-asc","Count low to high"],["label-asc","Label A-Z"],["label-desc","Label Z-A"]])} onChange={value=>{if(value!=='__mixed__')patch({answerSort:value as KoboQuestionSettings['answerSort']})}}/>
-     {targets.some(question=>question.kind==='number')&&<>{heading('Numeric distribution','numericMode')}<AppSelect label="Shared distribution" disabled={selected('chart')==='histogram'} value={selected('chart')==='histogram'?'bins':selected('numericMode')} options={options('numericMode',[["auto","Automatic"],["values","Exact values"],["bins","Equal-width bins"]])} onChange={value=>{if(value!=='__mixed__')patch({numericMode:value as KoboQuestionSettings['numericMode']})}}/>{heading('Number of bins','bins')}<label className="kobo-field">Number of bins<input type="number" min={1} max={100} disabled={selected('chart')!=='histogram'&&selected('numericMode')!=='bins'} placeholder={shared('bins').mixed?'Mixed values':''} value={draft.bins??(shared('bins').value as number|undefined)??''} onChange={event=>{const value=event.target.valueAsNumber;if(Number.isFinite(value))patch({bins:Math.max(1,Math.min(100,value))})}}/></label></>}
-     {targets.some(question=>question.kind==='date')&&<>{heading('Date grouping','dateUnit')}<AppSelect label="Shared time grouping" value={selected('dateUnit')} options={options('dateUnit',[["day","Day"],["month","Month"],["year","Year"]])} onChange={value=>{if(value!=='__mixed__')patch({dateUnit:value as KoboQuestionSettings['dateUnit']})}}/></>}
+     <section className="kobo-setting-group">
+      <h3>Chart type</h3>
+      {heading('Chart type','chart')}
+      <div className="kobo-chart-types" role="group" aria-label="Shared chart type">
+       {orderedTypes.map(type=><button key={type.id} type="button" aria-pressed={selected('chart')===type.id} disabled={!!type.reason}
+        title={type.reason||type.label} onClick={()=>patch({chart:(type.id==='auto'?null:type.id) as KoboQuestionSettings['chart']})}>
+        <type.Icon aria-hidden="true"/><span>{type.label}</span>{type.reason&&<small>{type.reason}</small>}
+       </button>)}
+      </div>
+      <small>Incompatible questions use Bar.</small>
+     </section>
+     {(trendTargets||showDistribution||showBins||dateTargets||draft.numericMode!==undefined||draft.bins!==undefined||draft.trendDateField!==undefined||draft.trendUnit!==undefined)&&<section className="kobo-setting-group">
+      <h3>Distribution &amp; time</h3>
+      {(trendTargets||draft.trendDateField!==undefined)&&heading('Date field','trendDateField')}
+      {trendTargets&&<KoboSettingsSelect label="Shared date field" searchable value={selected('trendDateField')==='auto'?'':selected('trendDateField')}
+       options={options('trendDateField',[["","No shared date field"],...dateFields.map(field=>[field.id,koboLabel(field,settings.language)] as [string,string])])}
+       onChange={value=>{if(value!=='__mixed__')patch({trendDateField:value})}}/>}
+      {(showTrendGrouping||draft.trendUnit!==undefined)&&heading('Trend grouping','trendUnit')}
+      {showTrendGrouping&&<AppSelect label="Shared trend grouping" preserveOrder value={selected('trendUnit')==='auto'?'month':selected('trendUnit')}
+       options={options('trendUnit',[["day","Day"],["month","Month"],["year","Year"]])}
+       onChange={value=>{if(value!=='__mixed__')patch({trendUnit:value as KoboQuestionSettings['trendUnit']})}}/>}
+      {(showDistribution||draft.numericMode!==undefined)&&heading('Numeric distribution','numericMode')}
+      {showDistribution&&<AppSelect label="Shared distribution" preserveOrder value={selected('numericMode')}
+       options={options('numericMode',[["auto","Automatic"],["values","Exact values"],["bins","Equal-width bins"]])}
+       onChange={value=>{if(value!=='__mixed__')patch({numericMode:value as KoboQuestionSettings['numericMode']})}}/>}
+      {(showBins||draft.bins!==undefined)&&heading('Number of bins','bins')}
+      {showBins&&<label className="kobo-field">Number of bins<input type="number" min={1} max={100}
+       placeholder={shared('bins').mixed?'Mixed values':''} value={draft.bins??(shared('bins').value as number|undefined)??''}
+       onChange={event=>{const value=event.target.valueAsNumber;if(Number.isFinite(value))patch({bins:Math.max(1,Math.min(100,value))})}}/></label>}
+      {dateTargets&&<>{heading('Date grouping','dateUnit')}
+       <AppSelect label="Shared time grouping" preserveOrder value={selected('dateUnit')} options={options('dateUnit',[["day","Day"],["month","Month"],["year","Year"]])}
+        onChange={value=>{if(value!=='__mixed__')patch({dateUnit:value as KoboQuestionSettings['dateUnit']})}}/>
+      </>}
+     </section>}
+     <section className="kobo-setting-group">
+      <h3>Categories &amp; order</h3>
+      {heading('Answer order','answerSort')}
+      <AppSelect label="Shared answer order" preserveOrder value={selected('answerSort')}
+       options={options('answerSort',[["form","Form order"],["count-desc","Count high to low"],["count-asc","Count low to high"],["label-asc","Label A-Z"],["label-desc","Label Z-A"]])}
+       onChange={value=>{if(value!=='__mixed__')patch({answerSort:value as KoboQuestionSettings['answerSort']})}}/>
+     </section>
     </div>
-    <div hidden={section!=='appearance'} className="kobo-customize-section"><KoboAppearanceControls bulk sharedValues={Object.fromEntries(Object.entries(sharedAppearance).map(([key,shared])=>[key,shared.value])) as KoboAppearance} mixedKeys={Object.entries(sharedAppearance).filter(([,shared])=>shared.mixed).map(([key])=>key as keyof KoboAppearance)} value={draft.appearance} onChange={appearance=>patch({appearance:Object.keys(appearance).length?appearance:undefined})} chart={shown?.chart||'bar'} breakdowns={!!shown?.breakdowns.length}/></div>
+    <div hidden={section!=='appearance'} className="kobo-customize-section">
+     <KoboAppearanceControls bulk sharedValues={Object.fromEntries(Object.entries(sharedAppearance).map(([key,shared])=>[key,shared.value])) as KoboAppearance}
+      mixedKeys={Object.entries(sharedAppearance).filter(([,shared])=>shared.mixed).map(([key])=>key as keyof KoboAppearance)}
+      value={draft.appearance} onChange={appearance=>patch({appearance:Object.keys(appearance).length?appearance:undefined})}
+      chart={shown?.chart||'bar'} breakdowns={!!shown?.breakdowns.length} targets={targetCharts.map(item=>item.context)}/>
+    </div>
     <div hidden={section!=='breakdowns'} className="kobo-customize-section"><h3>Shared breakdowns</h3><p>Use up to three fields across enabled questions. A field is omitted from its own question’s breakdowns.</p>
      {heading('Breakdown fields','breakdowns')}
      <div className="kobo-customize-breakdowns">{[0,1,2].map(index=><div key={index}><span>{index+1}</span><AppSelect label={`Shared breakdown ${index+1}`} searchable disabled={index>levels.length} value={levels[index]||''} options={[["",index===0&&commonBreakdowns.mixed&&draft.breakdowns===undefined?'Mixed values':index===0?'No breakdown':'None'],...fields.filter(field=>field.id===levels[index]||!levels.includes(field.id)).map(field=>[field.id,koboLabel(field,settings.language)] as [string,string])]} onChange={value=>changeLevel(index,value)}/><button type="button" className="soft" disabled={!levels[index]} aria-label={`Remove shared breakdown ${index+1}`} onClick={()=>changeLevel(index,'')}><X/></button></div>)}</div>
