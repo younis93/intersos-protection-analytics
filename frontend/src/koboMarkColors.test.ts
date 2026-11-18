@@ -1,5 +1,6 @@
 import {describe,it,expect} from 'vitest';
 import {chartSpec} from './koboChartSpec';
+import {koboPdfChartPanels,koboScreenChartPage} from './koboChartDensity';
 import {editMarkColor,markTargetFromPoint,markColor,markColorKey,resultWithColors} from './koboMarkColors';
 import {questionDefaults,type KoboResult} from './koboTypes';
 
@@ -51,5 +52,43 @@ describe('individual chart colors',()=>{
   expect(reset.pointColors).toEqual({[other]:'#00FF00'});expect(cfg.pointColors[key]).toBe('#FF0000');
   expect(markColor(resultWithColors(base,reset),target)).not.toBe('#FF0000');
   expect(markColorKey({...base,breakdownFields:[{id:'other',label:'Other'}]},target)).not.toBe(key);
+ });
+});
+
+describe('one color for all bars',()=>{
+ const color='#EF7654';
+ const individual={...questionDefaults,palette:'Solid blue' as const,colors:base.colors,pointColors:{[markColorKey(base,{answer:'b',breakdown:'f'})]:'#FF0000'}};
+ const solid={...individual,allBarsColor:color};
+ const fills=(spec:ReturnType<typeof chartSpec>)=>spec.data.map(trace=>(trace as {marker?:{color?:string[]}}).marker?.color);
+
+ it.each(['bar','column','histogram'] as const)('colors every %s mark in grouped and stacked charts',chart=>{
+  for(const bars of ['group','stack'] as const){
+   const result={...base,chart,appearance:{bars}};
+   expect(fills(chartSpec(result,'en',false,'forest',900,solid))).toEqual([[color,color],[color,color]]);
+   expect(fills(chartSpec(resultWithColors(result,solid),'en',true))).toEqual([[color,color],[color,color]]);
+   expect(fills(chartSpec(resultWithColors(result,{...solid,allBarsColor:null}),'en'))).toEqual([['#123456','#FF0000'],['#789ABC','#789ABC']]);
+  }
+ });
+
+ it('colors ungrouped and calculated marks',()=>{
+  const plain={...base,breakdowns:[]};
+  expect(fills(chartSpec(resultWithColors(plain,solid),'en'))).toEqual([[color,color]]);
+  const measured:KoboResult={...plain,measure:{operation:'sum',field:'amount',decimals:0,label:'Total amount',unit:'',parentValuesRepeated:false},rows:plain.rows.map(row=>({...row,value:10}))};
+  expect(fills(chartSpec(measured,'en',false,'forest',900,solid))).toEqual([[color,color]]);
+ });
+
+ it.each(['pie','donut'] as const)('keeps %s colors in slices, paged fallback bars and PDF panels',chart=>{
+  const result={...base,chart,breakdowns:[],colors:{a:'#123456',b:'#789ABC'},allBarsColor:color};
+  const trace=chartSpec(result,'en').data[0] as {marker:{colors:string[]}};
+  expect(trace.marker.colors).toEqual(['#123456','#789ABC']);
+  const rows=Array.from({length:101},(_,index)=>({...base.rows[0],id:`row-${index}`}));
+  const large={...result,rows};
+  const page=koboScreenChartPage(large,rows,1).result;
+  const panels=koboPdfChartPanels(large);
+  expect(page.chart).toBe('bar');
+  expect(panels[0].chart).toBe('bar');
+  for(const panel of [page,...panels]){
+   expect(fills(chartSpec(resultWithColors(panel,solid),'en',true))).toEqual([panel.rows.map(()=> '#1683D8')]);
+  }
  });
 });

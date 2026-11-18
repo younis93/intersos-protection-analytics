@@ -2,6 +2,7 @@ import {koboThemeColor,currentKoboTheme} from './koboThemeColors';
 import {resolveKoboColors} from './koboCustomizeOptions';
 import type {Theme} from './types';
 import type {KoboQuestionSettings,KoboResult} from './koboTypes';
+import type {KoboChartPanel} from './koboChartDensity';
 
 export type KoboMarkTarget={answer:string;breakdown?:string};
 export function markTargetFromPoint(result:KoboResult,customdata:unknown):KoboMarkTarget|null{
@@ -13,7 +14,11 @@ export function markTargetFromPoint(result:KoboResult,customdata:unknown):KoboMa
 }
 export const markColorKey=(result:KoboResult,target:KoboMarkTarget)=>JSON.stringify([(result.breakdownFields||[]).map(field=>field.id),target.breakdown??null,target.answer]);
 export const usesPointColor=(result:KoboResult)=>result.breakdowns.length>0||result.chart==='line';
-export function markColor(result:KoboResult,target:KoboMarkTarget,theme:Theme=currentKoboTheme()){
+export const supportsAllBarsColor=(chart:KoboResult['chart'])=>chart==='bar'||chart==='column'||chart==='histogram';
+export const activeAllBarsColor=(result:KoboChartPanel)=>supportsAllBarsColor(result.sourceChart??result.chart)?result.allBarsColor:null;
+export function markColor(result:KoboChartPanel,target:KoboMarkTarget,theme:Theme=currentKoboTheme()){
+ const allBarsColor=activeAllBarsColor(result);
+ if(allBarsColor)return allBarsColor;
  const override=result.pointColors?.[markColorKey(result,target)];
  if(usesPointColor(result)&&override)return override;
  if(target.breakdown!==undefined)return result.colors[target.breakdown]||koboThemeColor(target.breakdown,theme);
@@ -26,4 +31,4 @@ export function editMarkColor(result:KoboResult,cfg:KoboQuestionSettings,target:
  if(color===null)delete map[key];else map[key]=color;
  return next;
 }
-export const resultWithColors=(result:KoboResult,cfg:KoboQuestionSettings,theme:Theme=currentKoboTheme()):KoboResult=>({...result,colors:resolveKoboColors(result,cfg.palette,cfg.colors,theme),pointColors:cfg.pointColors||{}});
+export const resultWithColors=(result:KoboChartPanel,cfg:KoboQuestionSettings,theme:Theme=currentKoboTheme()):KoboChartPanel=>({...result,colors:resolveKoboColors(result,cfg.palette,cfg.colors,theme),pointColors:cfg.pointColors||{},allBarsColor:cfg.allBarsColor});

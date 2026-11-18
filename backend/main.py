@@ -27,7 +27,7 @@ from openpyxl import Workbook
 from .excel_export import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from .legal_platform import LegalStore, FILES, REGISTERED_RULES, clean_id, versioned_dataset_name, format_excel_dates
+from .legal_platform import LegalStore, FILES, REGISTERED_RULES, clean_id, versioned_dataset_name, format_excel_dates, read_legal_csv_files
 from .file_security import safe_spreadsheet_value, validate_xlsx_archive
 from .duplicate_exclusions import DuplicateExclusionRegistry
 from .indicator_reporting import build_indicator_report, build_indicator_workbook, build_narrative_workbook
@@ -105,17 +105,6 @@ async def read_upload_limited(file: UploadFile, limit: int = MAX_UPLOAD_BYTES) -
             raise HTTPException(413, "Workbook must be 100 MB or smaller.")
         chunks.append(chunk)
     return b"".join(chunks)
-
-
-def remembered_legal_file_payload(paths: list[Path]) -> dict[str, bytes]:
-    selected: dict[str, tuple[int, Path]] = {}
-    for path in paths:
-        parsed = versioned_dataset_name(path.name)
-        if not parsed: continue
-        name, version = parsed
-        current = selected.get(name)
-        if current is None or version > current[0] or (version == current[0] and path.stat().st_mtime > current[1].stat().st_mtime): selected[name] = (version, path)
-    return {name: path.read_bytes() for name, (_, path) in selected.items()}
 
 
 duplicate_exclusions = DuplicateExclusionRegistry()
@@ -197,7 +186,7 @@ def load_initial_legal_store(*, source_selection: dict[str, Any] | None = None) 
         use_files=REMEMBERED_LEGAL_SOURCE=="files"
         if REMEMBERED_LEGAL_SOURCE_CONFIGURED:
             if use_files:
-                candidate = LegalStore.from_files(remembered_legal_file_payload(REMEMBERED_LEGAL_FILES), "Selected Legal Platform CSV files", exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=prepare_import_exclusions) if REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else None
+                candidate = LegalStore.from_files(read_legal_csv_files(REMEMBERED_LEGAL_FILES, operation), "Selected Legal Platform CSV files", exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=prepare_import_exclusions) if REMEMBERED_LEGAL_FILES and all(path.is_file() for path in REMEMBERED_LEGAL_FILES) else None
                 unavailable = "The last selected Legal Platform CSV files are unavailable: " + ", ".join(map(str, REMEMBERED_LEGAL_FILES)) + ". Choose a new source."
             else:
                 candidate = LegalStore.from_folder(REMEMBERED_LEGAL_FOLDER, exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=prepare_import_exclusions) if REMEMBERED_LEGAL_FOLDER and REMEMBERED_LEGAL_FOLDER.is_dir() else None
@@ -254,6 +243,14 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http
 
 @app.middleware("http")
 async def prevent_stale_api_state(request, call_next):
+    path = request.url.path.split('/')
+    if path[:3] == ['', 'api', 'assistant'] or (len(path) == 6 and path[-1] == 'assistant' and path[2] in {'custom', 'kobo'}):
+        host = request.url.hostname
+        origin = request.headers.get('origin')
+        local_origins = {str(request.base_url).rstrip('/'), 'http://localhost:5173', 'http://127.0.0.1:5173'}
+        if host not in {'localhost', '127.0.0.1', '::1'} or (origin and origin not in local_origins):
+            return Response(status_code=403, content="The assistant is available in the local application.",
+                            headers={"Cache-Control": "no-store"})
     if request.url.path.startswith("/api/") and LOCAL_SESSION_TOKEN:
         supplied_token = request.cookies.get(SESSION_COOKIE, "")
         if not secrets.compare_digest(supplied_token, LOCAL_SESSION_TOKEN):
@@ -338,6 +335,12 @@ class DuplicateExclusionRequest(BaseModel):
 
 class BulkDuplicateExclusionRequest(BaseModel):
     records: list[DuplicateExclusionRequest]
+
+
+class DuplicateRecheckNoticeRequest(BaseModel):
+    dataset: Literal["beneficiaries", "assessments", "legalservices", "awareness", "legalhotlines"]
+    pendingSince: str = Field(min_length=1, max_length=64)
+    previouslySeen: bool = False
 
 
 class IndicatorReportRequest(BaseModel):
@@ -551,6 +554,7 @@ async def legal_upload(files: list[UploadFile] = File(...), operationId: str | N
             if total > MAX_UPLOAD_BYTES: raise HTTPException(413, "Legal Platform files must total 100 MB or smaller.")
             if version >= versions.get(key, -1):payload[key]=raw;versions[key]=version
         candidate = await run_in_threadpool(LegalStore.from_files, payload, "Selected Legal Platform folder", exclusions=duplicate_exclusions.exclusion_rows(), operation=operation, reconcile_exclusions=prepare_import_exclusions)
+        candidate.session_upload = True
         return publish_legal_candidate(candidate, operation)
     except ImportBusyError as exc:
         raise HTTPException(409, str(exc)) from exc
@@ -702,6 +706,13 @@ def duplicate_exclusion_payload() -> dict[str, object]:
 @app.get("/api/legal/duplicate-exclusions")
 def list_duplicate_exclusions():
     return duplicate_exclusion_payload()
+
+
+@app.post("/api/legal/duplicate-exclusions/recheck-notice")
+def claim_duplicate_recheck_notice(request: DuplicateRecheckNoticeRequest):
+    return {"show": duplicate_exclusions.claim_recheck_notice(
+        request.dataset, request.pendingSince, request.previouslySeen,
+    )}
 
 
 @app.post("/api/legal/duplicate-exclusions")
@@ -1257,6 +1268,11 @@ app.include_router(make_custom_router(_custom_store))
 _custom_services = make_kobo_router(_custom_store, prefix='/api/custom')
 _custom_services.routes = [route for route in _custom_services.routes if '/imports/' not in route.path and route.path != '/api/custom/projects/{pid}/review']
 app.include_router(_custom_services)
+
+from .local_assistant import router as assistant_router
+app.include_router(assistant_router)
+from .assistant_templates import router as assistant_template_router
+app.include_router(assistant_template_router)
 
 if STATIC_DIR.exists():
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="dashboard")

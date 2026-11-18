@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .app_settings import read_settings, settings_lock, update_settings
+
 
 def _normalize_identifier(identifier_type: str, value: object) -> str:
     text = str(value).strip()
@@ -37,6 +39,31 @@ class DuplicateExclusionRegistry:
         local_app_data = Path(os.getenv("LOCALAPPDATA", str(Path.home())))
         self.path = path or local_app_data / "INTERSOS Legal Platform" / "duplicate-name-exclusions.json"
         self.legacy_path = None if path else local_app_data / "INTERSOS Protection Analytics" / "duplicate-name-exclusions.json"
+        self._seen_rechecks: dict[str, str] = {}
+
+    def claim_recheck_notice(self, dataset: str, pending_since: str, previously_seen: bool = False) -> bool:
+        path = self.path.with_name("duplicate-recheck-notices.json")
+        with settings_lock:
+            latest = max(
+                (str(row.get("pendingSince") or "0") for row in self.entries()
+                 if row["dataset"] == dataset and row["pendingRecheck"]),
+                default="",
+            )
+            if not latest or latest != pending_since or latest <= self._seen_rechecks.get(dataset, ""):
+                return False
+            try:
+                stored = read_settings(path).get(dataset)
+            except (OSError, ValueError):
+                stored = None
+            if isinstance(stored, str) and latest <= stored:
+                return False
+            self._seen_rechecks[dataset] = latest
+            try:
+                update_settings(path, {dataset: latest})
+            except (OSError, ValueError):
+                # Keep the in-memory claim for this app session.
+                pass
+            return not previously_seen
 
     def entries(self) -> list[dict[str, Any]]:
         try:

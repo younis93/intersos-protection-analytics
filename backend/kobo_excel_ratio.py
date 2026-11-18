@@ -7,7 +7,10 @@ def selection_base(totals,result,parts=()):
         from .kobo_excel_count_cells import count_sum
         return count_sum(result,parts=parts)
     source={**result,'_countPivot':result['_overallCountPivot']} if not parts and '_overallCountPivot' in result else result
-    counts=[pivot_value(totals,'Responses',a['id'],parts,source) for a in result.get('percentageRows',result['rows'])]
+    rows = result.get('percentageRows', result['rows'])
+    if result.get('percentageMode') == 'visible-selections':
+        rows = [row for row in rows if row['id'] != '__blank__']
+    counts=[pivot_value(totals,'Responses',a['id'],parts,source) for a in rows]
     return '('+'+'.join(counts)+')' if counts else '0'
 def group_base(totals,result,parts):
     if not parts:return selection_base(totals,result)
@@ -26,7 +29,7 @@ def ratio(totals,result,answer,parts=(),margin=False):
         numerator=count_sum(result,answer,parts)
         row_base=count_sum(result,answer)
     mode=result.get('percentageMode','legacy-respondents')
-    denominator=selection_base(totals,result) if mode=='grand-total' or margin and mode=='row-total' else selection_base(totals,result,parts) if mode=='column-total' else pivot_value(totals,'Responses',answer,(),source) if answer is not None else selection_base(totals,result)
+    denominator=selection_base(totals,result) if mode in {'grand-total', 'visible-selections'} or margin and mode=='row-total' else selection_base(totals,result,parts) if mode=='column-total' else pivot_value(totals,'Responses',answer,(),source) if answer is not None else selection_base(totals,result)
     if mode=='breakdown-group':denominator=group_base(totals,result,parts)
     elif mode=='row-total' and not margin and answer is not None and row_base is not None:denominator=row_base
     return f'IF({denominator}=0,"-",{numerator}/{denominator})'

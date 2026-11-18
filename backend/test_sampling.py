@@ -172,7 +172,42 @@ def test_partial_import_unavailable_and_empty_eligible_frame():
     assert result["available"] and result["total"] == 0 and result["columns"]
     assert "All 1 completed Legal Representation records have a blank primary contact number" in result["emptyReason"]
     assert "11 digits starting with 075, 077, or 078" in result["emptyReason"]
-    assert load_workbook(io.BytesIO(export(pd.DataFrame([record(phone="")])))).active.max_row == 1
+    with pytest.raises(ValueError, match="No eligible Sampling records"):
+        export(pd.DataFrame([record(phone="")]))
+
+
+def test_excel_splits_selected_rows_by_project():
+    source = pd.DataFrame([
+        record("old", completed="01/08/2026", Projects="UNHCR 2026 - Baghdad"),
+        record("erbil", completed="02/08/2026", Projects="  unhcr 2026  -  ERBIL "),
+        record("suli", phone="7711111111", gender="Female", Projects="UNHCR 2026 - SULI"),
+        record("mosul", phone="7711111112", Projects="UNHCR 2026 - Mosul & Kirkuk"),
+        record("baghdad", phone="7711111113", Projects="UNHCR 2026 - Baghdad"),
+        record("gov", phone="7711111114", Projects="UNHCR 2026 - Gov"),
+        record("amal", phone="7711111115", Projects="UNHCR 2026 - AMAL Camp"),
+        record("blank", phone="7711111116", Projects=None),
+        record("unknown", phone="7711111117", Projects="New project"),
+    ]).rename(columns={"Projects": "Projects - المشروع"})
+    workbook = load_workbook(io.BytesIO(export(source, removeDuplicateContacts=True)))
+    assert workbook.sheetnames == ["South", "North", "AMAL Camp", "Other"]
+    expected = {
+        "South": ["baghdad", "gov"], "North": ["mosul", "suli", "erbil"],
+        "AMAL Camp": ["amal"], "Other": ["blank", "unknown"],
+    }
+    headers = list(source.columns)
+    for name, expected_ids in expected.items():
+        sheet = workbook[name]
+        assert [cell.value for cell in sheet[1]] == headers
+        service = headers.index("Service ID")
+        assert [row[service] for row in sheet.iter_rows(min_row=2, values_only=True)] == expected_ids
+        assert sheet.freeze_panes == "A2"
+        assert sheet.auto_filter.ref == sheet.dimensions
+        assert sheet["A1"].font.bold
+
+    amal_only = load_workbook(io.BytesIO(export(source, search="amal")))
+    assert amal_only.sheetnames == ["AMAL Camp"]
+    missing_project = load_workbook(io.BytesIO(export(source.drop(columns="Projects - المشروع"))))
+    assert missing_project.sheetnames == ["Other"]
 
 
 def test_excel_duplicate_pipeline_matches_table():
@@ -202,6 +237,10 @@ def test_read_only_endpoints_and_validation(monkeypatch):
         assert download.status_code == 200
         assert "sampling.xlsx" in download.headers["content-disposition"]
         assert load_workbook(io.BytesIO(download.content)).active.max_row == 7
+        empty = client.post("/api/legal/sampling/export", json={"search": "no matching rows"})
+        assert empty.status_code == 400
+        assert empty.json()["detail"] == "No eligible Sampling records match these settings."
+        assert "content-disposition" not in empty.headers
     pd.testing.assert_frame_equal(source, original)
 
 

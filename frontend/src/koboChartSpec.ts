@@ -51,6 +51,8 @@ export function chartSpec(result:KoboChartPanel,language:string,exporting=false,
 
 function baseChartSpec(result:KoboChartPanel,language:string,exporting=false,themeOverride?:Theme,containerWidth=900,colorSettings?:KoboQuestionSettings):{data:Data[];layout:Partial<Layout>}{
  result=projectKoboChart(result);
+ const theme=themeOverride||(typeof document!=='undefined'?document.documentElement.dataset.theme||'glass-light':'glass-light') as Theme;
+ if(colorSettings)result=resultWithColors(result,colorSettings,theme);
  if(measured(result))return measureChartSpec(result,language,exporting,containerWidth);
  const appearance=resolveAppearance(result.appearance),shown=koboScreenChartRows(result);
  const dense=isDenseKoboChart(result);
@@ -58,8 +60,6 @@ function baseChartSpec(result:KoboChartPanel,language:string,exporting=false,the
  const horizontal=type==='bar',pie=type==='pie'||type==='donut',percentage=appearance.metric==='percent';
  const fullExportCaptions=exporting&&!pie;
  const value=(count:number,percent:number|null|undefined)=>percentage?percent??0:count;
- const theme=themeOverride||(typeof document!=='undefined'?document.documentElement.dataset.theme||'glass-light':'glass-light') as Theme;
- if(colorSettings)result={...result,...resultWithColors(result,colorSettings,theme)};
  const colors=shown.map(row=>markColor(result,{answer:row.id},theme));
  const ink=exporting?'#263746':chartInk(theme),grid=exporting?'#e4ebf0':chartGrid(theme),scale=exporting?2.3:1;
  const advanced=advancedChartSpec(result,language,exporting,ink,grid,theme,containerWidth);if(advanced)return advanced;

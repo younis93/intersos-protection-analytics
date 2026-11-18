@@ -318,6 +318,8 @@ def commit_edit(store,pid,request=None,undo=False):
             from .kobo_shared_dependencies import annotate as shared_connections
             from .kobo_question_conditions import annotate as local_connections
             review_context=local_connections(shared_connections(review_context))
+        from .assistant_project import remember_fields
+        remember_fields(raw, form=effective_project(raw)['form'])
         edits=raw.setdefault('dataEdits',{'revision':0,'history':[]})
         if undo:
             if request.revision!=revision(raw):raise ValueError('The data changed. Reload before undoing.')
@@ -364,6 +366,7 @@ def commit_edit(store,pid,request=None,undo=False):
         from .kobo_indicators import IndicatorDefinition,indicator_issues
         for definition in settings.get('indicators',[]):definition['reviewIssues']=indicator_issues(effective,IndicatorDefinition.model_validate({**definition,'reviewIssues':[]}))
         edits['revision']+=1
+        remember_fields(raw, form=effective['form'])
         db.execute('UPDATE projects SET payload=?,settings=?,updated=? WHERE id=?',(json.dumps(raw,ensure_ascii=False),json.dumps(settings,ensure_ascii=False),datetime.now().isoformat(),pid))
     return store.get(pid)
 

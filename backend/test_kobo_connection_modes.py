@@ -23,26 +23,186 @@ def leaf(field,value,operator='eq'):return dict(type='rule',field=field,operator
 def group(*rules,match='all'):return dict(type='group',match=match,rules=list(rules))
 
 @pytest.mark.parametrize('mode', ['grand-total', 'column-total', 'breakdown-group'])
-def test_linked_additive_percentages_respect_hidden_answer_base(mode):
+def test_linked_additive_percentages_keep_the_full_selection_base(mode):
     config = dict(percentageMode=mode, connectedPercentageMode='adjust', hiddenAnswers=['a'], breakdowns=['region'])
     adjusted, _ = result(**config)
     original, _ = result(**config, hiddenAnswerPercentageMode='keep-original')
     assert adjusted['percentageMode'] == original['percentageMode'] == mode
     assert not adjusted.get('respondentBasis') and not original.get('respondentBasis')
-    assert [(row['id'],row['percent']) for row in adjusted['rows']] == [('b',100)]
+    assert [(row['id'],row['percent']) for row in adjusted['rows']] == [('b',40)]
     assert [(row['id'],row['percent']) for row in original['rows']] == [('b',40)]
-    assert original['denominator'] == adjusted['denominator'] == 4
+    assert original['denominator'] == adjusted['denominator'] == 10
+
+
+@pytest.mark.parametrize('mode', ['grand-total', 'column-total', 'row-total', 'breakdown-group', 'visible-selections'])
+@pytest.mark.parametrize('linked', [True, False])
+def test_additive_answer_scope_preserves_visible_counts(mode, linked):
+    p = project()
+    follow = p['form']['questions'][1]
+    follow['kind'] = 'multiple'
+    if not linked:
+        follow['relevant'] = ''
+    for index, record in enumerate(p['records']):
+        record['values']['follow'] = [['a', 'b'], ['a'], ['b'], ['b'], ['b']][index] if index < 5 else None
+    options = dict(percentageMode=mode, hiddenAnswers=['a'], breakdowns=['region'], chart='line', trendDateField='date')
+    original, _ = result(p, additiveAnswerScope='all', **options)
+    visible, _ = result(p, additiveAnswerScope='visible', **options)
+    assert original['percentageMode'] == visible['percentageMode'] == mode
+    assert original['denominator'] == visible['denominator'] == 5
+    assert [(r['id'], r['count']) for r in original['rows']] == [('b', 4)]
+    assert [(r['id'], r['count']) for r in visible['rows']] == [('b', 4)]
+    expected_row_percent = 100 if mode == 'row-total' else 100 * 4 / 6
+    assert original['rows'][0]['percent'] == pytest.approx(expected_row_percent)
+    assert visible['rows'][0]['percent'] == 100
+    assert original['pivotTotal']['percent'] == pytest.approx(100 * 4 / 6)
+    assert visible['pivotTotal']['percent'] == 100
+    assert {r['id'] for r in original['percentageRows']} == {'a', 'b'}
+    assert 'percentageRows' not in visible
+    if mode != 'row-total':
+        assert original['trend']['series'][0]['points'][0]['percent'] == pytest.approx(100 * 4 / 6)
+        assert visible['trend']['series'][0]['points'][0]['percent'] == 100
 
 
 @pytest.mark.parametrize('mode,hidden,expected,total,base',[
     ('adjust',[],[60,40],100,10),('keep-original',[],[6,4],10,100),
-    ('adjust',['a'],[100],100,4),('keep-original',['a'],[4],4,100)])
+    ('adjust',['a'],[40],100,10),('keep-original',['a'],[4],10,100)])
 def test_switch_changes_the_base_even_without_hiding(mode,hidden,expected,total,base):
     q,_=result(connectedPercentageMode=mode,hiddenAnswers=hidden)
     assert [row['percent'] for row in q['rows']]==expected
     assert q['pivotTotal']['percent']==total
     assert q['respondentBasis']['denominator']==base
     assert q['respondentBasis']['parentId']=='main'
+
+
+def test_hiding_a_connected_multiple_choice_keeps_co_selections():
+    from backend.kobo_data import data_rows
+    from backend.kobo_excel import source_rows
+
+    p = project()
+    p['form']['questions'][1]['kind'] = 'multiple'
+    values = [['a', 'b'], ['a'], ['a', 'b'], ['b'], ['b']]
+    for record in p['records']:
+        index = int(record['id'])
+        record['values']['follow'] = values[index] if index < len(values) else None
+        if index == 4:
+            record['values'].update(main='yes', region='south')
+    config = dict(breakdowns=['region'], chart='line', trendDateField='date')
+
+    def answer_b(question):
+        return next(row for row in question['rows'] if row['id'] == 'b')
+
+    original, _ = result(p, **config)
+    hidden, settings = result(p, hiddenAnswers=['a'], **config)
+    assert [row['id'] for row in hidden['rows']] == ['b']
+    assert hidden['denominator'] == original['denominator'] == 4
+    assert answer_b(hidden) == answer_b(original)
+    assert (answer_b(hidden)['count'], answer_b(hidden)['percent']) == (3, 75)
+    assert hidden['trend']['series'] == [series for series in original['trend']['series'] if series['id'] == 'b']
+    rows = data_rows(p, settings, '', ['follow'], drilldown={'question': 'follow', 'answer': 'b'})
+    assert len(rows['rows']) == 3
+    assert sum(row[2] for row in source_rows(p, hidden, settings)) == 3
+
+    parent, _ = result(p, connectedPercentageMode='keep-original', hiddenAnswers=['a'], **config)
+    assert parent['respondentBasis']['denominator'] == 100
+    assert answer_b(parent)['percent'] == 3
+
+    visible, _ = result(p, percentageMode='visible-selections', hiddenAnswers=['a'], **config)
+    assert visible['denominator'] == 4
+    assert answer_b(visible)['count'] == 3
+    assert answer_b(visible)['percent'] == 100
+    assert visible['pivotTotal']['count'] == 3
+
+    filtered, _ = result(p, filterMode='additional',
+                         ownFilters=[{'field': 'follow', 'values': ['a'], 'excludeSelected': True}])
+    assert filtered['denominator'] == 1
+    assert answer_b(filtered)['count'] == 1
+    assert answer_b(filtered)['percent'] == 100
+
+
+def test_visible_selection_base_excludes_blanks_and_handles_zero_selections():
+    p = example()
+    p['records'][0]['values']['follow'] = None
+    settings = KoboSettings(hideBlanks=False, hideZero=False, questions={
+        'follow': QuestionSettings(percentageMode='visible-selections', hiddenAnswers=['a']),
+    })
+    shown = next(q for q in analyze(p, settings)['questions'] if q['id'] == 'follow')
+    rows = {row['id']: row for row in shown['rows']}
+    assert rows['b']['percent'] == 100
+    assert rows['__blank__']['count'] == 1
+    assert rows['__blank__']['percent'] is None
+    settings.questions['follow'].hiddenAnswers.append('b')
+    blank_only = next(q for q in analyze(p, settings)['questions'] if q['id'] == 'follow')
+    assert blank_only['pivotTotal']['count'] == 0
+    assert blank_only['pivotTotal']['percent'] is None
+
+
+@pytest.mark.parametrize('base_mode,scope,base,covered', [
+    ('adjust', 'all', 3, 3),
+    ('adjust', 'visible', 2, 2),
+    ('keep-original', 'all', 50, 3),
+    ('keep-original', 'visible', 49, 2),
+])
+def test_connected_answer_scope_is_independent_of_respondent_base(base_mode, scope, base, covered):
+    from backend.kobo_excel import source_rows
+    from backend.kobo_excel_direct import direct_helpers
+    from backend.kobo_excel_prepare import helper_values, materialize_multi
+    from backend.kobo_excel_source import multi_config, query_config, response_layout
+
+    p = project()
+    p['form']['questions'][1]['kind'] = 'multiple'
+    for index, record in enumerate(p['records']):
+        record['values']['follow'] = [['a', 'b'], ['a'], ['b'], None, ['a']][index] if index < 5 else None
+        if index == 4:
+            record['values']['main'] = 'yes'
+
+    settings = KoboSettings(filters=[{'field': 'region', 'values': ['north']}], questions={
+        'follow': QuestionSettings(connectedPercentageMode=base_mode, connectedAnswerScope=scope,
+                                   hiddenAnswers=['a'], breakdowns=['region'], chart='line', trendDateField='date'),
+    })
+    settings = KoboSettings.model_validate_json(settings.model_dump_json())
+    snapshot = analyze(p, settings, 'follow')
+    question = snapshot['questions'][0]
+    assert question['respondentBasis']['answerScope'] == scope
+    assert question['respondentBasis']['denominator'] == base
+    assert question['denominator'] == 3
+    assert question['pivotTotal']['count'] == covered
+    assert question['pivotTotal']['percent'] == pytest.approx(100 * covered / base)
+    row, = question['rows']
+    assert (row['id'], row['count']) == ('b', 2)
+    assert row['percent'] == pytest.approx(200 / base)
+    assert row['series'][0]['percent'] == pytest.approx(200 / base)
+    assert question['trend']['denominators'] == [base]
+    assert question['trend']['series'][0]['points'][0]['percent'] == pytest.approx(200 / base)
+    assert sum(r[3] for r in source_rows(p, question, settings)) == base
+
+    # Workbook pivots apply filters with slicers. Restrict the source fixture to
+    # the same region to check the denominator fields that feed the formulas.
+    export_project = {**p, 'records': p['records'][:50]}
+    layouts = response_layout(export_project, settings)
+    config = query_config(export_project, snapshot, settings, [], layouts)
+    own = multi_config(config, config['questions'][0])
+    expanded = [dict(zip(own['headers'], raw)) for raw in materialize_multi((own, export_project['records']))]
+    assert sum(r['Answered'] for r in expanded) == base
+    assert sum(r['Selected'] for r in expanded if r['AnswerCode'] == 'b') == 2
+    config['excelMode'] = 'binary'
+    helpers, sources = direct_helpers(config, layouts)
+    fields = sources['follow']['fields']
+    cached = [dict(zip(helpers[''], raw)) for raw in helper_values(layouts, config, sources, helpers)[0]]
+    included = [r for r in cached if r[fields['AnswerAllowed']] == 'Included']
+    assert sum(r[fields['Answered']] for r in included) == base
+    assert ('SUMPRODUCT' in helpers[''][fields['Answered']]) == (scope == 'visible')
+    if base_mode == 'keep-original':
+        assert sum(r[fields['FollowupAnswered']] for r in included) == covered
+
+    settings.questions['follow'].hiddenAnswers = ['a', 'b']
+    all_hidden = analyze(p, settings, 'follow')['questions'][0]
+    assert not all_hidden['rows']
+    if base_mode == 'adjust' and scope == 'visible':
+        assert all_hidden['respondentBasis']['denominator'] == 0
+        assert all_hidden['pivotTotal']['percent'] is None
+    settings.questions['follow'].hiddenAnswers = []
+    restored = analyze(p, settings, 'follow')['questions'][0]
+    assert restored['respondentBasis']['denominator'] == (50 if base_mode == 'keep-original' else 3)
 
 
 def test_manual_replaces_auto_condition_and_does_not_filter_original_base():
@@ -130,7 +290,7 @@ def test_numeric_and_not_selected_rules_are_safe_and_type_aware():
 
 
 @pytest.mark.parametrize('kind,excel_mode',[('category','native'),('multiple','native'),('multiple','binary')])
-@pytest.mark.parametrize('mode,base',[('adjust',4),('keep-original',100)])
+@pytest.mark.parametrize('mode,base',[('adjust',10),('keep-original',100)])
 def test_manual_rule_sources_keep_eligibility_separate_from_original_denominators(kind,excel_mode,mode,base):
     from backend.kobo_excel_source import response_layout,query_config,multi_config
     from backend.kobo_excel_direct import direct_helpers
@@ -154,8 +314,8 @@ def test_manual_rule_sources_keep_eligibility_separate_from_original_denominator
         cells=[dict(zip(helpers[''],row)) for row in rows]
         allowed=[row for row in cells if row[fields['AnswerAllowed']]=='Included']
         assert sum(row[fields['Answered']] for row in allowed)==base
-        if mode=='keep-original':assert sum(row[fields['FollowupAnswered']] for row in allowed)==4
-    assert snapshot['questions'][0]['rows'][0]['percent']==(100 if mode=='adjust' else 4)
+        if mode=='keep-original':assert sum(row[fields['FollowupAnswered']] for row in allowed)==10
+    assert snapshot['questions'][0]['rows'][0]['percent']==(40 if mode=='adjust' else 4)
 
 
 def test_original_missing_connection_remains_available_after_manual_override():

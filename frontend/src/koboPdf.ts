@@ -6,13 +6,14 @@ import {resultWithPivotOrdering} from './koboPivotSort';
 
 export function buildKoboPdf(name:string,snapshot:KoboAnalysis,signal:AbortSignal,onProgress:(progress:number,message:string)=>void,includeIntroduction=true,report?:KoboReport):Promise<Blob>{
  snapshot={...snapshot,questions:snapshot.questions.map(result=>{
+  if(result.reportAttachment)return result;
   const config=snapshot.settings.questions[result.id],language=snapshot.settings.language;
   return resultWithPivotOrdering(result,config,config?.breakdownDisplay||result.breakdownDisplay||'both',language,config?.pivotSort??result.pivotSort);
  })};
  return new Promise((resolve,reject)=>{
   if(signal.aborted){reject(new DOMException('Export cancelled','AbortError'));return}
   const worker=new Worker(new URL('./koboPdf.worker.ts',import.meta.url),{type:'module'});
-  const charts=snapshot.questions.filter(result=>result.denominator>0).flatMap(koboPdfChartPanels);
+  const charts=snapshot.questions.filter(result=>result.denominator>0&&result.reportAttachment?.view!=='pivot').flatMap(koboPdfChartPanels);
   const chartIndex=new Map(charts.map((result,index)=>[koboPdfChartKey(result),index]));
   const images=new Map<string,Promise<string>>(),rendering=new AbortController();
   const render=(id:string)=>{

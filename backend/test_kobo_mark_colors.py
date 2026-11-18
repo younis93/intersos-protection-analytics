@@ -35,6 +35,24 @@ def test_mark_colors_survive_analysis_save_and_reload(preview_client):
     assert result['denominator'] == next(q for q in analyze(store.get(pid), KoboSettings())['questions'] if q['id'] == 'group/needs')['denominator']
 
 
+def test_all_bars_color_survives_save_and_preview(preview_client):
+    client, _, pid = preview_client
+    url = f'/api/kobo/projects/{pid}'
+    settings = client.get(url).json()['settings']
+    config = settings['questions']['group/needs']
+    assert config['allBarsColor'] is None
+    config.update(allBarsColor='#EF7654', colors={'water': '#123456'})
+    assert client.put(f'{url}/settings', json=settings).status_code == 200
+    saved = client.get(url).json()['settings']
+    assert saved['questions']['group/needs']['allBarsColor'] == '#EF7654'
+    preview = client.post(f'{url}/analysis/preview', json={'settings': saved, 'question': 'group/needs'})
+    assert preview.status_code == 200
+    assert preview.json()['allBarsColor'] == '#EF7654'
+    assert preview.json()['colors']['water'] == '#123456'
+    config['allBarsColor'] = 'red'
+    assert client.put(f'{url}/settings', json=settings).status_code == 422
+
+
 def test_share_preserves_and_remaps_compatible_mark_colors(sample):
     project = copy.deepcopy(sample[0])
     color_key = key(['group/gender'], 'f', 'water')

@@ -10,6 +10,7 @@ export function indicatorScopes(form:KoboForm,scope:string){
 }
 export function indicatorDraftError(draft:KoboIndicatorDefinition){
  if(!draft.name.trim())return 'Enter an indicator name.';
+ if(draft.eligibilityField&&!draft.eligibilityCodes?.length)return 'Select at least one eligibility answer.';
  const mode=draft.mode||'score';
  if(mode==='score'&&!draft.higherMeaning.trim())return 'Explain what a higher score means.';
  if(!draft.questions.length)return 'Select at least one scoring question.';

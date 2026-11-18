@@ -1,4 +1,4 @@
-.project-transfer-dialog{box-sizing:border-box;width:min(480px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;padding:28px;border:1px solid var(--line);border-radius:20px;background:var(--panel-strong);color:var(--ink);box-shadow:0 24px 80px #0004;font-family:inherit}
+.project-transfer-dialog{box-sizing:border-box;width:min(480px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;padding:28px;border:1px solid var(--line);border-radius:20px;background:var(--popup-surface);color:var(--ink);box-shadow:0 24px 80px #0004;font-family:inherit}
 .project-transfer-dialog::backdrop{background:rgb(15 23 42 / 45%);backdrop-filter:blur(6px)}
 .project-transfer-dialog header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
 .project-transfer-emblem{display:grid;place-items:center;width:46px;height:46px;border-radius:14px;background:color-mix(in srgb,var(--blue) 12%,transparent);color:var(--blue)}

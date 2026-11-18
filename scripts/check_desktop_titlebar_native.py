@@ -8,6 +8,7 @@ import traceback
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import desktop_launcher as launcher
 import webview
+from windows_window_frame import enable_per_monitor_dpi
 
 result = {}
 controller = launcher.NativeFullscreenController("Isolated titlebar verification")
@@ -85,6 +86,99 @@ def run():
             assert native.webview.Bounds == native.ClientRectangle
         controller.on_native_ui(resize_and_finish)
         assert window.evaluate_js("window.moveResizeMarker") is True
+        def screen_layout(_native):
+            from System.Windows.Forms import Screen
+            return [(screen.DeviceName, screen.WorkingArea, screen.Bounds) for screen in Screen.AllScreens]
+
+        def move_to_screen(native, work):
+            from System.Drawing import Point
+            native.Location = Point(work.Left + 32, work.Top + 32)
+
+        def check_renderer():
+            def sizes(native):
+                return (
+                    native.webview.Bounds == native.ClientRectangle,
+                    native.webview.ClientSize.Width,
+                    native.webview.ClientSize.Height,
+                    native.DeviceDpi,
+                )
+            fills_client, width, height, dpi = controller.on_native_ui(sizes)
+            assert fills_client, geometry()
+            viewport = window.evaluate_js('[innerWidth, innerHeight, devicePixelRatio, window.moveResizeMarker]')
+            assert viewport[3] is True, viewport
+            assert abs(viewport[0] * viewport[2] - width) <= viewport[2], (viewport, width, dpi)
+            assert abs(viewport[1] * viewport[2] - height) <= viewport[2], (viewport, height, dpi)
+
+        screens = controller.on_native_ui(screen_layout)
+        display_dpi = {}
+        def rect(value):
+            return [value.X, value.Y, value.Width, value.Height]
+
+        for _name, work, display in screens:
+            controller.on_native_ui(lambda native: move_to_screen(native, work))
+            time.sleep(.15)
+            restored = geometry()
+            restored_bounds = restored["bounds"]
+            assert restored["client_bounds"] == restored["physical_bounds"], restored
+            display_dpi[_name] = controller.on_native_ui(lambda native: round(native._scale * 96))
+            check_renderer()
+            api.toggle_maximize_window()
+            time.sleep(.2)
+            expected = rect(work)
+            assert geometry()["client_bounds"] == expected, (expected, geometry())
+            check_renderer()
+            api.toggle_fullscreen()
+            time.sleep(.2)
+            assert geometry()["client_bounds"] == rect(display), geometry()
+            check_renderer()
+            api.minimize_window()
+            def restore_fullscreen(native):
+                from System.Windows.Forms import FormWindowState
+                native.WindowState = FormWindowState.Maximized
+            controller.on_native_ui(restore_fullscreen)
+            time.sleep(.35)
+            assert geometry()["client_bounds"] == rect(display), geometry()
+            check_renderer()
+            api.toggle_fullscreen()
+            time.sleep(.2)
+            assert geometry()["client_bounds"] == expected, geometry()
+            check_renderer()
+            api.toggle_maximize_window()
+            time.sleep(.2)
+            assert geometry()["bounds"] == restored_bounds, geometry()
+            check_renderer()
+
+        def move_maximized(_native, work):
+            frame = controller._frame
+            # Simulate the move-only position update from a native screen switch.
+            assert frame._user32.SetWindowPos(frame.hwnd, None, work.X, work.Y, 0, 0, 0x0015)
+
+        if len(screens) > 1:
+            api.toggle_maximize_window()
+            for _name, work, _display in screens:
+                controller.on_native_ui(lambda native: move_maximized(native, work))
+                time.sleep(.2)
+                assert geometry()["client_bounds"] == rect(work), geometry()
+                check_renderer()
+            api.toggle_maximize_window()
+        def restore_baseline(native):
+            from System.Drawing import Rectangle
+            native.Bounds = Rectangle(*baseline)
+        controller.on_native_ui(restore_baseline)
+        result["displays_checked"] = [name for name, _work, _display in screens]
+        result["display_dpi"] = display_dpi
+        def recreate_handle(native):
+            from System.Reflection import BindingFlags
+            frame = controller._frame
+            previous = frame.hwnd
+            method = native.GetType().GetMethod("RecreateHandle", BindingFlags.Instance | BindingFlags.NonPublic)
+            method.Invoke(native, None)
+            assert frame.hwnd == native.Handle.ToInt64() != previous
+            assert frame._user32.GetWindowLongW(frame.hwnd, -16) & frame.STYLE_BITS == frame.STYLE_BITS
+        controller.on_native_ui(recreate_handle)
+        time.sleep(.2)
+        check_renderer()
+        result["handle_recreation"] = "passed"
         window.evaluate_js('window.dragBridgeCalls=0;window.pywebview.api.begin_window_drag=async()=>{window.dragBridgeCalls++};document.querySelector(".desktop-titlebar-brand").dispatchEvent(new MouseEvent("mousedown",{button:0,screenX:30,screenY:15}));window.dispatchEvent(new MouseEvent("mousemove",{screenX:120,screenY:15}));window.dispatchEvent(new MouseEvent("mouseup"))')
         assert window.evaluate_js('window.dragBridgeCalls') == 0
         for _ in range(3):
@@ -149,6 +243,7 @@ def run():
         window.destroy()
 
 
+enable_per_monitor_dpi()
 webview.start(run, gui="edgechromium", private_mode=True)
 result["native_hooks_released"] = bool(controller._frame and controller._frame.disposed)
 if not result["native_hooks_released"]:

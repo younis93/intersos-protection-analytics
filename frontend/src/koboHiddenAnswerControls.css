@@ -1,5 +1,32 @@
 .kobo-percentage-base-control{display:grid;justify-items:center;gap:3px;max-width:100%;min-width:0}
 .kobo-percentage-base-label{font-size:10px;font-weight:600;line-height:1.2;color:inherit}
+.kobo-connected-base-panel{
+ container-type:inline-size;
+ margin-block:10px 6px;padding:8px 10px;
+ border:1px solid var(--line);border-radius:10px;
+ background:color-mix(in srgb,var(--panel-strong) 58%,var(--bg));
+}
+.kobo-connected-base-panel.is-scope-only{display:inline-block;container-type:normal;max-inline-size:100%;box-sizing:border-box}
+.kobo-connected-base-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;min-width:0}
+.kobo-connected-base-controls .kobo-percentage-base-control{justify-items:start;align-content:start;gap:4px}
+.kobo-connected-base-controls .kobo-percentage-base-label{font-size:11px;color:var(--muted);line-height:1.4}
+.kobo-connected-base-controls .kobo-answer-percentage-buttons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+.kobo-connected-base-status{
+ display:grid;flex:1 1 168px;align-content:center;gap:3px;min-width:0;
+ padding-inline-start:12px;border-inline-start:1px solid var(--line);
+ font-size:11px;line-height:1.35;color:var(--muted);
+}
+.kobo-connected-base-number{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 9px}
+.kobo-connected-base-number>span:first-child{display:inline-flex;align-items:baseline;gap:6px;font-weight:600}
+.kobo-connected-base-number strong{color:var(--ink);font-size:17px;line-height:1;font-variant-numeric:tabular-nums}
+.kobo-connected-base-parent{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kobo-connected-base-controls>.kobo-basis-summary{align-self:center;margin-block:0}
+@container(max-width:730px){
+ .kobo-connected-base-status{flex-basis:100%;padding:6px 0 0;border-inline-start:0;border-block-start:1px solid var(--line)}
+}
+@container(max-width:460px){
+ .kobo-connected-base-controls .kobo-percentage-base-control,.kobo-connected-base-controls .kobo-answer-percentage-buttons{width:100%}
+}
 .kobo-answer-percentage-buttons{
  display:inline-flex;align-items:stretch;gap:4px;padding:4px;max-width:100%;box-sizing:border-box;
  border:1px solid var(--line);border-radius:12px;background:var(--panel);
@@ -19,5 +46,28 @@
 }
 .kobo-answer-percentage-buttons>button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .kobo-answer-percentage-buttons>button:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+:is(.kobo-connected-base-controls,.kobo-connection-percentages) .kobo-answer-percentage-buttons{
+ gap:6px;padding:0;border:0;background:none;
+}
+:is(.kobo-connected-base-controls,.kobo-connection-percentages) .kobo-answer-percentage-buttons>button{
+ min-height:38px;padding:7px 10px;border-color:color-mix(in srgb,var(--line) 58%,var(--muted));
+ background:var(--panel-strong);color:var(--ink);font-weight:650;
+ box-shadow:0 1px 2px #00000012;
+}
+:is(.kobo-connected-base-controls,.kobo-connection-percentages) .kobo-answer-percentage-buttons>button:hover:not(:disabled):not([aria-pressed=true]){
+ border-color:var(--blue);background:color-mix(in srgb,var(--blue) 8%,var(--panel-strong));
+}
+:is(.kobo-connected-base-controls,.kobo-connection-percentages) .kobo-answer-percentage-buttons>button[aria-pressed=true]{
+ --kobo-base-button-fill:color-mix(in srgb,var(--blue) 64%,#164467);
+ border-color:var(--kobo-base-button-fill);background:var(--kobo-base-button-fill);color:#fff;
+}
+:is(.kobo-connected-base-controls,.kobo-connection-percentages) .kobo-answer-percentage-buttons>button:disabled{box-shadow:none}
+.kobo-connected-base-controls .kobo-answer-percentage-buttons>button{min-height:34px;padding-block:5px}
+@container(max-width:460px){
+ .kobo-connected-base-controls .kobo-answer-percentage-buttons>button{min-height:44px;padding-inline:7px}
+}
+@media(max-width:520px){
+ .kobo-connected-base-panel.is-scope-only .kobo-answer-percentage-buttons>button{min-height:44px}
+}
 .kobo-connection-settings>.kobo-percentage-base-control,.kobo-connection-settings>.kobo-percentage-base-control>.kobo-answer-percentage-buttons{width:100%}
 @media(prefers-reduced-motion:reduce){.kobo-answer-percentage-buttons>button{transition:none}}

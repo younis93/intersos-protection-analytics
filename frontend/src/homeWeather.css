@@ -48,12 +48,94 @@
   inset: 0;
   background-size: 600% 500%;
   background-repeat: no-repeat;
-  image-rendering: pixelated;
   pointer-events: none;
+  transform-origin: 50% 88%;
 }
 
 .home-snowman[data-facing='left'] .home-snowman-sprite {
   transform: scaleX(-1);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .home-snowman-sprite {
+    animation-duration: var(--snowman-cycle);
+    animation-timing-function: ease-in-out;
+  }
+
+  .home-snowman[data-animation='walk'] .home-snowman-sprite {
+    animation-name: snowman-stride;
+    animation-iteration-count: infinite;
+  }
+
+  .home-snowman[data-animation='pickup'] .home-snowman-sprite {
+    animation-name: snowman-wiggle;
+    animation-iteration-count: infinite;
+  }
+
+  .home-snowman[data-animation='walk']:has(:focus-visible) .home-snowman-sprite {
+    animation-play-state: paused;
+  }
+
+  .home-snowman[data-animation='walk'][data-turning] .home-snowman-sprite {
+    animation: snowman-turn 550ms ease-in-out both;
+  }
+
+  .home-snowman:is([data-animation='hat'], [data-animation='hatTip'], [data-animation='face']) .home-snowman-sprite {
+    animation-name: snowman-recoil;
+  }
+
+  .home-snowman:is([data-animation='breath'], [data-animation='blush'], [data-animation='magic']) .home-snowman-sprite {
+    animation-name: snowman-breathe;
+  }
+
+  .home-snowman[data-animation='belly'] .home-snowman-sprite { animation-name: snowman-wiggle; }
+  .home-snowman[data-animation='jump'] .home-snowman-sprite { animation-name: snowman-hop; }
+  .home-snowman[data-animation='landing'] .home-snowman-sprite { animation-name: snowman-settle; }
+}
+
+@keyframes snowman-stride {
+  0%, 50%, 100% { translate: 0 0; rotate: 0deg; }
+  25% { translate: 0 -3px; rotate: -2deg; }
+  75% { translate: 0 -3px; rotate: 2deg; }
+}
+
+@keyframes snowman-turn {
+  0%, 100% { scale: 1; }
+  40% { scale: .86 .97; }
+  72% { scale: .97 1.02; }
+}
+
+@keyframes snowman-recoil {
+  0%, 100% { rotate: 0deg; }
+  27% { rotate: -5deg; }
+  53% { rotate: 3deg; }
+  76% { rotate: -1deg; }
+}
+
+@keyframes snowman-breathe {
+  0%, 100% { scale: 1; }
+  44% { scale: 1.035 1.045; }
+  72% { scale: 1.015 1.02; }
+}
+
+@keyframes snowman-wiggle {
+  0%, 100% { rotate: 0deg; scale: 1; }
+  21%, 62% { rotate: -4deg; scale: 1.04 .97; }
+  42%, 80% { rotate: 4deg; scale: .98 1.03; }
+}
+
+@keyframes snowman-hop {
+  0%, 100% { translate: 0 0; scale: 1; }
+  20%, 77% { translate: 0 0; scale: 1.07 .91; }
+  47% { translate: 0 -6px; scale: .95 1.08; }
+}
+
+@keyframes snowman-settle {
+  0% { scale: .97 1.06; }
+  19% { scale: 1.1 .89; }
+  41% { scale: .96 1.05; }
+  64% { scale: 1.025 .975; }
+  100% { scale: 1; }
 }
 
 .home-snowman button {

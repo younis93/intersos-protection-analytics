@@ -34,7 +34,7 @@ def test_followup_and_parent_bases_and_totals():
     assert KoboSettings.model_validate_json(settings.model_dump_json()).questions['follow'].percentageParent=='main'
 
 
-@pytest.mark.parametrize('base,mode,expected', [('question','adjust',100),('parent','keep-original',2)])
+@pytest.mark.parametrize('base,mode,expected', [('question','adjust',40),('parent','keep-original',2)])
 def test_adjust_and_keep_original_and_restore(base,mode,expected):
     result,_,_=run(base,hiddenAnswers=['a'],connectedPercentageMode=mode)
     assert result['rows'][0]['percent']==expected
@@ -153,7 +153,7 @@ def test_live_excel_sources_use_the_same_parent_base(kind,mode,hidden_mode):
         assert all(len(row)==len(cfg['headers']) for row in rows)
         cells=[dict(zip(cfg['headers'],row)) for row in rows]
         assert sum(row['Answered'] for row in cells)==expected
-        assert sum(row['FollowupAnswered'] or 0 for row in cells)==2
+        assert sum(row['FollowupAnswered'] or 0 for row in cells)==5
         assert sum(row['Selected'] for row in cells if row['AnswerCode']=='b')==2
         assert 'q[percentageParent]' in query_formula(cfg)
     else:
@@ -162,7 +162,7 @@ def test_live_excel_sources_use_the_same_parent_base(kind,mode,hidden_mode):
         fields=sources['follow']['fields']
         included=[r for r in cells if r[fields['AnswerAllowed']]=='Included']
         assert sum(r[fields['Answered']] for r in included)==expected
-        assert sum(r[fields['FollowupAnswered']] for r in included)==2
+        assert sum(r[fields['FollowupAnswered']] for r in included)==5
     assert result['respondentBasis']['denominator']==expected
 
 

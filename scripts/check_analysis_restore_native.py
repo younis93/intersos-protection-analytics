@@ -7,6 +7,7 @@ import traceback
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import desktop_launcher as launcher
 import webview
+from windows_window_frame import enable_per_monitor_dpi
 
 root=Path(__file__).resolve().parents[1]
 fixture=json.loads((root/'output/analysis-features/fixture.json').read_text())
@@ -34,6 +35,18 @@ def run():
    time.sleep(1.5)
    assert js('!!document.querySelector("dialog[open]")')
    js('window.dialogEvents=[];document.addEventListener("cancel",e=>dialogEvents.push("cancel"),true);document.addEventListener("close",e=>dialogEvents.push("close"),true)')
+   def display_locations(native):
+    from System.Drawing import Point
+    from System.Windows.Forms import Screen
+    return native.Location, [
+     Point(screen.WorkingArea.X + 32, screen.WorkingArea.Y + 32)
+     for screen in Screen.AllScreens
+    ]
+   origin, locations = controller.on_native_ui(display_locations)
+   for location in [*locations, origin]:
+    controller.on_native_ui(lambda native: setattr(native, 'Location', location))
+    time.sleep(.25)
+    assert js('innerWidth > 0 && innerHeight > 0 && !!document.querySelector("dialog[open]") && !restoreErrors.length && !dialogEvents.length')
    for mode in ('normal','maximized','fullscreen'):
     if mode=='maximized':controller.toggle_maximize()
     if mode=='fullscreen':controller.toggle()
@@ -56,6 +69,7 @@ def run():
    js('document.querySelector("dialog[open]")?.dispatchEvent(new Event("cancel",{cancelable:true}))')
  except Exception:report['error']=traceback.format_exc()
  finally:window._export_close_allowed=True;window.destroy()
+enable_per_monitor_dpi()
 webview.start(run,gui='edgechromium',private_mode=True)
 target=root/'output/analysis-features'/('native-restore-'+('before' if '--before' in sys.argv else 'after')+('-large' if '--large' in sys.argv else '')+'.json')
 target.write_text(json.dumps(report,indent=2),encoding='utf-8')

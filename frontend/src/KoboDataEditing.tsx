@@ -95,9 +95,9 @@ export function KoboCellEditor({project,question,record,value,row,onClose,onSave
  return embedded?form:<EditDialog title="Edit response" onClose={onClose} busy={busy} response>{form}</EditDialog>;
 }
 
-export function KoboAnswerManager({project,question,initialAnswer,onClose,onSaved}:{project:KoboProject;question:KoboQuestion;initialAnswer?:string;onClose:()=>void;onSaved?:(p:KoboProject)=>void|Promise<void>}){
+export function KoboAnswerManager({project,question,initialAnswer,initialMode='rename',onClose,onSaved}:{project:KoboProject;question:KoboQuestion;initialAnswer?:string;initialMode?:'rename'|'merge';onClose:()=>void;onSaved?:(p:KoboProject)=>void|Promise<void>}){
  const{options,error:optionError,loading}=useOptions(project,question);
- const[mode,setMode]=useState<'rename'|'merge'>('rename'),[search,setSearch]=useState(''),[sources,setSources]=useState<string[]>([]),[renameId,setRenameId]=useState(''),[editing,setEditing]=useState(false),[label,setLabel]=useState(''),[target,setTarget]=useState(''),[destination,setDestination]=useState<'new'|'same'>('same'),[name,setName]=useState(''),[preview,setPreview]=useState<EditPreview|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[attempted,setAttempted]=useState(false);
+ const[mode,setMode]=useState(initialMode),[search,setSearch]=useState(''),[sources,setSources]=useState<string[]>([]),[renameId,setRenameId]=useState(''),[editing,setEditing]=useState(false),[label,setLabel]=useState(''),[target,setTarget]=useState(''),[destination,setDestination]=useState<'new'|'same'>(initialMode==='merge'?'new':'same'),[name,setName]=useState(''),[preview,setPreview]=useState<EditPreview|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[attempted,setAttempted]=useState(false);
  const previewKey=useRef(''),previewSection=useRef<HTMLElement>(null),renameInput=useRef<HTMLInputElement>(null),initialHandled=useRef(false),body=useRef<HTMLDivElement>(null),modeRef=useRef(mode);
  const source=options.find(option=>option.id===renameId),isRename=mode==='rename';
  const operation:Operation={kind:'answers',field:question.id,sources:isRename?renameId?[renameId]:[]:sources,label:normalizedAnswerLabel(label),target:isRename?renameId:target,destination,name:name.trim(),language:project.settings.language};

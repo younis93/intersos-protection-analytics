@@ -111,8 +111,9 @@ def iter_source_rows(project, result, settings, context=None):
     context = context or source_context(project, settings)
     q = context['questions'][result['id']]
     cfg = resolved_question_settings(q,settings)
-    from .kobo_connections import connection_plan
+    from .kobo_connections import connection_plan, has_only_hidden_answers, respondent_hidden_codes
     plan = connection_plan(q,cfg,context['questions'])
+    hidden = respondent_hidden_codes(q, cfg, plan)
     records = question_cohort(q, context['records'][q['repeat']], cfg, context['questions'], context['lookup'])
     eligible_ids = None
     if plan['enabled'] and plan['mode']=='keep-original':
@@ -140,6 +141,8 @@ def iter_source_rows(project, result, settings, context=None):
         if eligible_ids is not None:
             from .kobo_measures import record_value
             basis_answered = bool(plan['parent']) and not missing(record_value(record,plan['parent'],lookup))
+        if (eligible_ids is None or record['id'] in eligible_ids) and has_only_hidden_answers(value, hidden):
+            basis_answered = False
         if not answered: selected = set()
         elif q['kind'] == 'multiple': selected = set(value)
         elif result['bins']:
@@ -710,9 +713,11 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                 if independent and specs:
                     bottom = excel_cell(report, start + 4, 1).Top + ((len(specs)+3)//4)*156 + 24
                     while excel_cell(report, pivot_row - 2, 1).Top < bottom: pivot_row += 1
-                parent_base = (result.get('respondentBasis') or {}).get('kind') == 'parent'
+                respondent_basis = result.get('respondentBasis') or {}
+                parent_base = respondent_basis.get('kind') == 'parent'
+                visible_base = respondent_basis.get('answerScope') == 'visible'
                 keep_original = 'percentageRows' in result
-                linked_report = keep_original or parent_base
+                linked_report = keep_original or parent_base or visible_base or result.get('percentageMode') == 'visible-selections'
                 pivot_sheet = _support_sheet(book, '_Kobo original pivots') if linked_report else report
                 pivot_destination = pivot_sheet.UsedRange.Row + pivot_sheet.UsedRange.Rows.Count + 6 if linked_report else pivot_row
                 pivot = active_cache.CreatePivotTable(excel_cell(pivot_sheet, pivot_destination, 1), f'KoboPivot{position:03d}')
@@ -751,9 +756,13 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                 if totals is not None:
                     block_pivots.extend([pivot, totals])
                     if base_answer is not None:
-                        answered = pivot_value(totals, 'Follow-up answered total' if parent_base else 'Answered total', base_answer, result=result)
-                        cohort = pivot_value(totals, 'Cohort size', base_answer, result=result)
-                        excel_cell(report, start + 1, 1).Formula = '="Answered: "&' + answered + '&". Missing: "&(' + cohort + '-' + answered + ')&". ' + ('Repeat entries.' if result['repeat'] else 'Respondents.') + '"'
+                        if visible_base:
+                            base = pivot_value(totals, 'Answered total', base_answer, result=result)
+                            excel_cell(report, start + 1, 1).Formula = '="Percentage base: "&' + base + '&" · Visible answers"'
+                        else:
+                            answered = pivot_value(totals, 'Follow-up answered total' if parent_base else 'Answered total', base_answer, result=result)
+                            cohort = pivot_value(totals, 'Cohort size', base_answer, result=result)
+                            excel_cell(report, start + 1, 1).Formula = '="Answered: "&' + answered + '&". Missing: "&(' + cohort + '-' + answered + ')&". ' + ('Repeat entries.' if result['repeat'] else 'Respondents.') + '"'
                     _fixed_pivot_items(pivot, {**result, 'rows': result.get('percentageRows', result['rows'])}, project, settings)
                 _style_pivot(pivot, report, result, totals)
                 telemetry.begin('formulas', message=f'Writing question values: {completed}/{len(snapshot["questions"])}')

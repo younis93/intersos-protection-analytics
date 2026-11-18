@@ -33,11 +33,21 @@ export function KoboRendering({children,enabled=true,scope=''}:{children:ReactNo
 }
 export const useKoboTheme=()=>useContext(ThemeContext);
 
-export function useScheduledKoboChart(enabled=true){
+export function useScheduledKoboChart(enabled=true,eager=false){
  const scheduler=useContext(SchedulerContext),host=useRef<HTMLDivElement>(null);
- const[active,setActive]=useState(false),[height,setHeight]=useState(0);
+ const[active,setActive]=useState(eager&&enabled),[height,setHeight]=useState(0);
  const[attempt,setAttempt]=useState(0);
- useEffect(()=>{setActive(false);const node=host.current;if(!node||!enabled)return;if(!scheduler){const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){setActive(true);observer.disconnect()}},{rootMargin:'400px'});observer.observe(node);return()=>observer.disconnect()}return scheduler.register(node,'chart',setActive)},[scheduler,enabled,attempt]);
+ useEffect(()=>{
+  setActive(eager&&enabled);
+  const node=host.current;
+  if(!node||!enabled||eager)return;
+  if(scheduler)return scheduler.register(node,'chart',setActive);
+  const observer=new IntersectionObserver(entries=>{
+   if(entries.some(entry=>entry.isIntersecting)){setActive(true);observer.disconnect();}
+  },{rootMargin:'400px'});
+  observer.observe(node);
+  return()=>observer.disconnect();
+ },[scheduler,enabled,eager,attempt]);
  useEffect(()=>{
   const node=host.current?.querySelector('.kobo-chart-viewport');if(!node||!active)return;
   const observer=new ResizeObserver(entries=>{const next=entries[0]?.contentRect.height;if(next>0)setHeight(current=>Math.abs(current-next)>1?next:current)});

@@ -2,7 +2,10 @@ import {projectResponseError} from './projectProtection';
 import KoboGeography from './KoboGeography';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {sortPivotRows,type PivotSort} from './koboPivotSort';
-import {downloadBlob,analysisBase,analysisWorkspace} from './koboApi';
+import {downloadBlob,analysisBase,analysisWorkspace,createKoboApi} from './koboApi';
+import {analysisSourceNote,runAnalysisRecipe} from './assistantAnalysis';
+import {assistantRequest,type AssistantStatus} from './localAssistantApi';
+import {assistantChart} from './assistantChart';
 import type {KoboAnalysis,KoboProject,KoboSettings,KoboResult} from './koboTypes';
 import './koboWorkspaceTools.css';
 export type WorkspaceReport=import('./koboTypes').KoboReport;
@@ -26,6 +29,7 @@ function ResultSummary({result,language}:{result:KoboResult;language:string}){
 }
 export default function KoboWorkspaceTools({project,settings,analysis,tab,busy,choicesOpen,onChoicesOpenChange,onChange,onSave,onApplySettings}:{project:KoboProject;settings:KoboSettings;analysis:KoboAnalysis;tab:'overview'|'geography'|'report';busy:boolean;choicesOpen:boolean;onChoicesOpenChange:(open:boolean)=>void;onChange:(s:KoboSettings)=>void;onSave:()=>Promise<void>;onApplySettings:(settings:KoboSettings)=>Promise<void>}){
  const[error,setError]=useState(''),[exporting,setExporting]=useState(false),[pdfProgress,setPdfProgress]=useState('');
+ const[refreshing,setRefreshing]=useState(false),[refreshSummary,setRefreshSummary]=useState<Record<string,string>>({});
  const pdfController=useRef<AbortController|null>(null);
  useEffect(()=>()=>pdfController.current?.abort(),[]);
  const report={...emptyReport,...settings.report};
@@ -33,10 +37,65 @@ export default function KoboWorkspaceTools({project,settings,analysis,tab,busy,c
  const ids=tab==='report'?report.questions:settings.dashboardQuestions||[];
  const selected=safe.filter(q=>ids.includes(q.id));
  const toggle=(id:string)=>{const next=ids.includes(id)?ids.filter(q=>q!==id):[...ids,id];onChange(tab==='report'?{...settings,report:{...report,questions:next}}:{...settings,dashboardQuestions:next})};
+ async function refreshReportResults(signal:AbortSignal){
+  const attachments=report.assistantResults||[];
+  if(!attachments.length)return [];
+  const response=await assistantRequest('/selection',undefined,'GET',signal);
+  const {smallGroupMin=5}:AssistantStatus=await response.json();
+  const api=createKoboApi();
+  const results:KoboResult[]=[],summaries:Record<string,string>={};
+  for(const attachment of attachments){
+   const {cards,answer}=await runAnalysisRecipe(project,analysis,attachment,smallGroupMin,
+    (config,id,abort)=>api.previewQuestion(project.id,config,id,abort),signal);
+   const card=cards[0];
+   const result=card?.result&&(attachment.view==='chart'?assistantChart(card.result)?.result:card.result);
+   if(!card||!result?.rows.length)
+    throw new Error(`${attachment.name}: ${card?.message||'No visible data for this report result.'} Review or remove this attachment.`);
+   results.push({...result,id:`assistant-report:${attachment.id}`,reportAttachment:{view:attachment.view,source:analysisSourceNote(card)}});
+   summaries[attachment.id]=`${answer} ${analysisSourceNote(card)}`;
+  }
+  signal.throwIfAborted();
+  setRefreshSummary(summaries);
+  return results;
+ }
+
+ async function prepareReport(download:boolean){
+  if(pdfController.current)return;
+  const controller=new AbortController();
+  pdfController.current=controller;
+  setError('');
+  if(download){setExporting(true);setPdfProgress('Refreshing report figures…');}
+  else setRefreshing(true);
+  const snapshot=structuredClone({...analysis,questions:selected}),narrative=structuredClone(report);
+  try{
+   await onSave();
+   controller.signal.throwIfAborted();
+   snapshot.questions.push(...await refreshReportResults(controller.signal));
+   if(!download)return;
+   const {buildKoboPdf}=await import('./koboPdf');
+   const blob=await buildKoboPdf(project.name,snapshot,controller.signal,(_,text)=>setPdfProgress(text),false,narrative);
+   downloadBlob(blob,`${(narrative.title.trim()||project.name).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')}.pdf`);
+  }catch(e){
+   if(!controller.signal.aborted){setError(message(e));setRefreshSummary({});}
+  }finally{
+   if(!controller.signal.aborted){setExporting(false);setRefreshing(false);setPdfProgress('');}
+   pdfController.current=null;
+  }
+ }
  return <section className="kobo-workspace-tools" aria-label={`${tab} workspace`}>
  {tab==='overview'&&<><h2>Project overview</h2><div className="kobo-overview-metrics">{[[project.customConfig?'All records':'All submissions',analysis.total],[project.customConfig?'Filtered records':'Filtered submissions',analysis.filtered],[project.customConfig?'Visible columns':'Visible questions',analysis.questions.length],['Import issues',project.issues.length]].map(([label,value])=><article className="glass" key={label}><small>{label}</small><strong>{value.toLocaleString()}</strong></article>)}</div></>}
  {tab==='geography'?<KoboGeography project={project} settings={settings} onChange={onChange} onApplySettings={onApplySettings}/>:<>
- {tab==='report'&&<><h2>Reporting workspace</h2><div className="kobo-report-fields"><label className="kobo-field">Report title<input value={report.title} maxLength={300} placeholder={project.name} onChange={e=>onChange({...settings,report:{...report,title:e.target.value}})}/></label>{(['findings','methodology','recommendations'] as const).map(key=><label className="kobo-field" key={key}>{{findings:'Findings',methodology:'Methodology and limitations',recommendations:'Recommendations'}[key]}<textarea aria-label={{findings:'Findings',methodology:'Methodology and limitations',recommendations:'Recommendations'}[key]} rows={5} maxLength={30000} value={report[key]} onChange={e=>onChange({...settings,report:{...report,[key]:e.target.value}})}/></label>)}</div><button className="primary" disabled={exporting||busy} onClick={async()=>{setExporting(true);setError('');setPdfProgress('Preparing PDF...');const controller=new AbortController();pdfController.current=controller;const snapshot=structuredClone({...analysis,questions:selected}),narrative=structuredClone(report);try{await onSave();controller.signal.throwIfAborted();const {buildKoboPdf}=await import('./koboPdf');const blob=await buildKoboPdf(project.name,snapshot,controller.signal,(_,text)=>setPdfProgress(text),false,narrative);downloadBlob(blob,`${(narrative.title.trim()||project.name).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')}.pdf`)}catch(e){if(!controller.signal.aborted)setError(message(e))}finally{if(!controller.signal.aborted){setExporting(false);setPdfProgress('')}pdfController.current=null}}}>{exporting?'Preparing PDF...':'Download PDF report'}</button>{exporting&&<p role="status">{pdfProgress}</p>}<p>Download a PDF with your narrative, selected charts and tables, respondent bases, and current filters.</p>{error&&<p role="alert" className="error">{error}</p>}</>}
+ {tab==='report'&&<><h2>Reporting workspace</h2><div className="kobo-report-fields"><label className="kobo-field">Report title<input value={report.title} maxLength={300} placeholder={project.name} onChange={e=>onChange({...settings,report:{...report,title:e.target.value}})}/></label>{(['findings','methodology','recommendations'] as const).map(key=><label className="kobo-field" key={key}>{{findings:'Findings',methodology:'Methodology and limitations',recommendations:'Recommendations'}[key]}<textarea aria-label={{findings:'Findings',methodology:'Methodology and limitations',recommendations:'Recommendations'}[key]} rows={5} maxLength={30000} value={report[key]} onChange={e=>onChange({...settings,report:{...report,[key]:e.target.value}})}/></label>)}</div>{report.assistantResults?.length?<section className="glass kobo-workspace-card"><h3>Verified report results</h3>
+ <p>Refresh to preview the latest figures. PDF export refreshes them again using each result’s saved filters.</p>
+ <ul>{report.assistantResults.map(item=><li key={item.id}><strong>{item.name}</strong> · {item.view==='chart'?'Chart':'Pivot table'}
+  <button type="button" className="soft" disabled={busy||exporting||refreshing} aria-label={`Remove ${item.name} ${item.view}`}
+   onClick={()=>onChange({...settings,report:{...report,assistantResults:report.assistantResults?.filter(result=>result.id!==item.id)}})}>Remove</button>
+  {refreshSummary[item.id]&&<p>{refreshSummary[item.id]}</p>}
+ </li>)}</ul>
+ <button type="button" className="soft" disabled={busy||exporting||refreshing} onClick={()=>void prepareReport(false)}>Refresh report figures</button>
+ {refreshing&&<p role="status">Refreshing report figures…</p>}
+ </section>:null}
+ <button className="primary" disabled={exporting||refreshing||busy} onClick={()=>void prepareReport(true)}>Download PDF report</button>{exporting&&<p role="status">{pdfProgress}</p>}<p>Download a PDF with your narrative, selected charts and tables, respondent bases, and current filters.</p>{error&&<p role="alert" className="error">{error}</p>}</>}
  <details key={tab} className="glass kobo-workspace-card kobo-workspace-choice-panel" open={choicesOpen} onToggle={event=>{const open=event.currentTarget.open;if(open!==choicesOpen)onChoicesOpenChange(open)}}><summary>{tab==='report'?'Select report questions':'Choose dashboard charts'} ({selected.length})</summary><div className="kobo-workspace-choices">{safe.map(q=><label key={q.id}><input type="checkbox" checked={ids.includes(q.id)} onChange={()=>toggle(q.id)}/><span dir="auto">{q.label}</span></label>)}</div></details>
  {!selected.length&&<p>Select questions above to build this {tab==='report'?'report':'dashboard'}. Identifying questions are excluded.</p>}<div className="kobo-workspace-summaries">{selected.map(q=><ResultSummary key={q.id} result={q} language={settings.language}/>)}</div></>}
  </section>;

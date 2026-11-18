@@ -25,6 +25,8 @@ class DesktopTitlebarTests(unittest.TestCase):
         settings = SimpleNamespace(AreDefaultContextMenusEnabled=False)
         core = SimpleNamespace(Settings=settings, ContextMenuRequested=event)
         frame = WindowsWindowFrame.__new__(WindowsWindowFrame)
+        frame.native = MagicMock()
+        frame._handle_created_handler = frame._handle_destroyed_handler = Mock()
         frame._webview = MagicMock(CoreWebView2=None)
         frame._context_menu_handler = frame._on_context_menu_requested
         frame._context_menu_core = None

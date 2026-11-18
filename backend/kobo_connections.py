@@ -214,12 +214,34 @@ def uses_linked_respondents(cfg, plan):
     return plan['enabled'] and (cfg.percentageMode == 'legacy-respondents' or cfg.percentageBase == 'parent' or cfg.connectedPercentageMode == 'keep-original')
 
 
+def hidden_answers_filter_cohort(cfg, plan):
+    from .kobo_pivot_percentages import uses_additive_answer_scope
+    return (not plan['enabled'] and cfg.percentageMode != 'visible-selections'
+            and not (cfg.additiveAnswerScope and uses_additive_answer_scope(cfg))
+            and cfg.hiddenAnswerPercentageMode == 'adjust')
+
+
+def respondent_hidden_codes(question, cfg, plan):
+    if (cfg.connectedAnswerScope == 'visible' and uses_linked_respondents(cfg, plan)
+            and question['kind'] in {'category', 'multiple', 'text'}):
+        return set(cfg.hiddenAnswers) - {'__blank__'}
+    return set()
+
+
+def has_only_hidden_answers(value, hidden):
+    from .kobo import missing
+    if not hidden or missing(value):
+        return False
+    codes = set(value) if isinstance(value, list) else {str(value)}
+    return codes <= hidden
+
+
 def parent_field(question, cfg, questions):
     plan = connection_plan(question,cfg,questions)
     return (plan['parent'] if plan['mode']=='keep-original' else None), plan['issue']
 
 
-def apply_connection_basis(result, question, records, cfg, questions, lookup, settings):
+def apply_connection_basis(result, question, records, cfg, questions, lookup, settings, cohort):
     from .kobo import question_cohort, missing, label, breakdown_fields, breakdown_values, apply_display_percentages
     from .kobo_measures import record_value
     from .kobo_connection_rules import describe_tree
@@ -246,17 +268,20 @@ def apply_connection_basis(result, question, records, cfg, questions, lookup, se
     if cfg.percentageMode != 'legacy-respondents' and cfg.percentageBase != 'parent' and cfg.connectedPercentageMode != 'keep-original':
         return result
     parent, issue = plan['parent'], plan['issue']
-    cohort = question_cohort(question, records, cfg, questions, lookup)
     parent_base = plan['mode']=='keep-original'
+    hidden = respondent_hidden_codes(question, cfg, plan)
+    excluded = {r['id'] for r in cohort if has_only_hidden_answers(r['values'].get(question['id']), hidden)} if hidden else set()
     baseline = question_cohort(question,records,cfg.model_copy(update={'hiddenAnswers':[]}),questions,lookup,apply_connections=False) if parent_base else cohort
-    base = [r for r in baseline if not missing(record_value(r,parent,lookup) if parent_base and parent else r['values'].get(question['id']))]
+    base = [r for r in baseline if r['id'] not in excluded and not missing(
+        record_value(r, parent, lookup) if parent_base and parent else r['values'].get(question['id']))]
     denominator = None if issue else len(base)
     kind = 'parent' if parent_base else 'question'
-    result['respondentBasis'] = {'kind':kind,'mode':plan['mode'],'parentId':plan['parentId'],'label':label(parent,settings.language) if parent_base and parent else result['label'],'denominator':denominator,'active':True,'issue':issue,'hiddenMode':plan['mode'],'repeatEntries':bool(question['repeat']),'canKeepOriginal':plan['canKeepOriginal']}
+    result['respondentBasis'] = {'kind':kind,'mode':plan['mode'],'parentId':plan['parentId'],'label':label(parent,settings.language) if parent_base and parent else result['label'],'denominator':denominator,'active':True,'issue':issue,'hiddenMode':plan['mode'],'answerScope':cfg.connectedAnswerScope,'repeatEntries':bool(question['repeat']),'canKeepOriginal':plan['canKeepOriginal']}
     dimensions = breakdown_fields(cfg, questions, question)
     bases = Counter(breakdown_values(r, dimensions, lookup) for r in base) if dimensions else {}
+    excluded_by_group = Counter(breakdown_values(r, dimensions, lookup) for r in cohort if r['id'] in excluded) if dimensions and excluded else {}
     for column in result['breakdowns']:
-        column['totalCount'] = column['denominator']
+        column['totalCount'] = column['denominator'] - excluded_by_group.get(tuple(column['values']), 0)
         column['denominator'] = bases.get(tuple(column['values']), 0) if not issue else 0
         column['totalPercent'] = column['totalCount'] / column['denominator'] * 100 if column['denominator'] else None
     for row in result['rows']:
@@ -273,6 +298,7 @@ def apply_connection_basis(result, question, records, cfg, questions, lookup, se
         baseline = answer_trend(question, cfg, questions, stub, lookup, lambda _: [], [])
         old_periods = trend['periods']; periods = baseline['periods']
         trend['periods'], trend['denominators'] = periods, baseline['denominators']
+        if hidden: trend['excluded'] = baseline['excluded']
         for series in trend['series']:
             old = dict(zip(old_periods, series['points']))
             series['points'] = []
@@ -282,5 +308,8 @@ def apply_connection_basis(result, question, records, cfg, questions, lookup, se
                 series['points'].append(point)
     result['percentageMode'] = 'legacy-respondents'
     result['percentageBasis'] = ('قاعدة النسبة: ' if settings.language == 'ar' else 'Percentage base: ') + (label(parent, settings.language) if parent_base and parent else result['label'])
-    result['pivotTotal'] = {'count': result['denominator'], 'percent': result['denominator'] / denominator * 100 if denominator else None}
+    if hidden:
+        result['percentageBasis'] += ' · ' + ('الإجابات الظاهرة' if settings.language == 'ar' else 'Visible answers')
+    answered = result['denominator'] - len(excluded)
+    result['pivotTotal'] = {'count': answered, 'percent': answered / denominator * 100 if denominator else None}
     return result

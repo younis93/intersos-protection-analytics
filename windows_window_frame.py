@@ -7,6 +7,17 @@ import ctypes
 from ctypes import wintypes
 
 
+def enable_per_monitor_dpi():
+    # Set this before pywebview creates an HWND. It otherwise uses system DPI.
+    try:
+        set_awareness = ctypes.windll.user32.SetProcessDpiAwarenessContext
+    except AttributeError:
+        return
+    set_awareness.argtypes = [ctypes.c_void_p]
+    set_awareness.restype = wintypes.BOOL
+    set_awareness(ctypes.c_void_p(-4))  # PER_MONITOR_AWARE_V2
+
+
 class MinMaxInfo(ctypes.Structure):
     _fields_ = [(name, wintypes.POINT) for name in ("reserved", "max_size", "max_position", "min_track", "max_track")]
 
@@ -34,11 +45,13 @@ class WindowsWindowFrame:
     def __init__(self, native, controller):
         self.native = native
         self.controller = controller
-        self.hwnd = native.Handle.ToInt64()
+        self.hwnd = None
         self.native_drag = False
         self.disposed = False
         self._dragging_from_maximized = False
         self._handling_drag_restore = False
+        self._layout_pending = False
+        self._monitor = None
         self._webview = native.webview
         self._subclass_id = id(self)
         self._user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -56,34 +69,73 @@ class WindowsWindowFrame:
         self._user32.SetWindowLongW.argtypes = [pointer, ctypes.c_int, ctypes.c_long]
         self._user32.SetWindowPos.argtypes = [pointer, pointer, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.UINT]
         self._user32.GetWindowRect.argtypes = [pointer, ctypes.POINTER(wintypes.RECT)]
+        self._user32.RedrawWindow.argtypes = [pointer, pointer, pointer, wintypes.UINT]
         self._user32.IsZoomed.argtypes = [pointer]
         self._user32.MonitorFromWindow.argtypes = [pointer, wintypes.DWORD]
         self._user32.MonitorFromWindow.restype = pointer
         self._user32.GetMonitorInfoW.argtypes = [pointer, ctypes.POINTER(MonitorInfo)]
-        if not self._comctl.SetWindowSubclass(self.hwnd, self._callback, self._subclass_id, 0):
-            raise ctypes.WinError(ctypes.get_last_error())
+        self._handle_created_handler = self._handle_created
+        self._handle_destroyed_handler = self._handle_destroyed
+        native.HandleCreated += self._handle_created_handler
+        native.HandleDestroyed += self._handle_destroyed_handler
         self._initialized_handler = self._webview_initialized
         self._context_menu_handler = self._on_context_menu_requested
         self._context_menu_core = None
         self._webview.CoreWebView2InitializationCompleted += self._initialized_handler
         self._enable_editing_context_menu()
         self._enable_native_drag()
-        self.apply_style()
+        self._handle_created(native, None)
+
+    def _handle_created(self, _sender, _args):
+        hwnd = self.native.Handle.ToInt64()
+        if not self._comctl.SetWindowSubclass(hwnd, self._callback, self._subclass_id, 0):
+            raise ctypes.WinError(ctypes.get_last_error())
+        self.hwnd = hwnd
+        self._monitor = self._user32.MonitorFromWindow(hwnd, 2)
+        if not self.controller.fullscreen:
+            self.apply_style()
         self.refresh_work_area()
+        self._queue_layout()
+
+    def _handle_destroyed(self, _sender, _args):
+        if self.hwnd is not None:
+            self._comctl.RemoveWindowSubclass(self.hwnd, self._callback, self._subclass_id)
+            self.hwnd = None
+        self._dragging_from_maximized = False
+        self._layout_pending = False
+
+    def _queue_layout(self):
+        if self._layout_pending or self.disposed or self.hwnd is None:
+            return
+        from System import Action
+        self._layout_pending = True
+        try:
+            self.native.BeginInvoke(Action(self._settle_layout))
+        except Exception:
+            self._layout_pending = False
+            raise
+
+    def _settle_layout(self):
+        self._layout_pending = False
+        if self.disposed or self.hwnd is None or str(self.native.WindowState) == "Minimized":
+            return
+        self.refresh_work_area()
+        if self._webview.Bounds != self.native.ClientRectangle:
+            self._webview.Bounds = self.native.ClientRectangle
+        # Include WebView2's native child windows when queuing the repaint.
+        self._user32.RedrawWindow(self.hwnd, None, None, 0x0081)  # RDW_INVALIDATE | RDW_ALLCHILDREN
 
     def apply_style(self):
-        if self.disposed: return
-        # WinForms can replace its window-procedure chain while changing frame
-        # styles for fullscreen. Reattach before requesting non-client layout.
-        self._comctl.SetWindowSubclass(self.hwnd, self._callback, self._subclass_id, 0)
+        if self.disposed or self.hwnd is None: return
         self._set_maximized_bounds()
         style = self._user32.GetWindowLongW(self.hwnd, -16)
         self._user32.SetWindowLongW(self.hwnd, -16, style | self.STYLE_BITS)
         self._user32.SetWindowPos(self.hwnd, None, 0, 0, 0, 0, 0x0037)  # FRAMECHANGED, no move/size/z-order/activation.
 
-    def _set_maximized_bounds(self):
+    def _set_maximized_bounds(self, info=None):
         from System.Drawing import Rectangle
-        info = self.monitor_info()
+        if info is None:
+            info = self.monitor_info()
         work, monitor = info.work, info.monitor
         bounds = Rectangle(work.left-monitor.left, work.top-monitor.top, work.right-work.left, work.bottom-work.top)
         if self.native.MaximizedBounds != bounds:
@@ -139,9 +191,11 @@ class WindowsWindowFrame:
         return info
 
     def refresh_work_area(self):
-        if self.disposed or self.controller.fullscreen or not self._user32.IsZoomed(self.hwnd): return
-        self._set_maximized_bounds()
-        work = self.monitor_info().work
+        if self.disposed or self.hwnd is None or not self._user32.IsZoomed(self.hwnd): return
+        info = self.monitor_info()
+        if not self.controller.fullscreen:
+            self._set_maximized_bounds(info)
+        work = info.monitor if self.controller.fullscreen else info.work
         bounds = wintypes.RECT()
         self._user32.GetWindowRect(self.hwnd, ctypes.byref(bounds))
         if (bounds.left, bounds.top, bounds.right, bounds.bottom) != (work.left, work.top, work.right, work.bottom):
@@ -186,20 +240,21 @@ class WindowsWindowFrame:
                 limits.max_size.x = info.work.right - info.work.left
                 limits.max_size.y = info.work.bottom - info.work.top
                 return value
-            if message in (0x007E, 0x001A, 0x02E0):  # Display/work-area/DPI changes, never WM_MOVE.
-                value = self._comctl.DefSubclassProc(hwnd, message, wparam, lparam)
-                self.refresh_work_area()
-                return value
-            if message == 0x0232:  # WM_EXITSIZEMOVE
+            if message == 0x0047 and lparam:  # WM_WINDOWPOSCHANGED
+                position = WindowPos.from_address(lparam)
+                if not position.flags & 0x0002:  # SWP_NOMOVE
+                    monitor = self._user32.MonitorFromWindow(hwnd, 2)
+                    if monitor != self._monitor:
+                        self._monitor = monitor
+                        self._queue_layout()
+            if message in (0x0005, 0x007E, 0x001A, 0x02E0, 0x0232):
+                # Size, display, work area, DPI and end-of-drag notifications
+                # arrive before WinForms and WebView2 finish applying the bounds.
+                self._queue_layout()
+            if message == 0x0232:
                 self._dragging_from_maximized = False
-                value = self._comctl.DefSubclassProc(hwnd, message, wparam, lparam)
-                # Paint after Windows applies the final drag or Snap bounds.
-                # Leave painting queued so it cannot block the native drag loop.
-                if not self.disposed and self._webview.Visible:
-                    self._webview.Invalidate(True)
-                return value
             if message == 0x0082:  # WM_NCDESTROY
-                self.dispose()
+                self._handle_destroyed(None, None)
         except Exception:
             # Never unwind a Python exception across the Win32 callback boundary.
             pass
@@ -209,7 +264,9 @@ class WindowsWindowFrame:
         if self.disposed: return
         self.disposed = True
         try:
+            self.native.HandleCreated -= self._handle_created_handler
+            self.native.HandleDestroyed -= self._handle_destroyed_handler
             self._webview.CoreWebView2InitializationCompleted -= self._initialized_handler
             self._remove_editing_context_menu()
         finally:
-            self._comctl.RemoveWindowSubclass(self.hwnd, self._callback, self._subclass_id)
+            self._handle_destroyed(None, None)

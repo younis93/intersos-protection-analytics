@@ -1,5 +1,5 @@
 /* Manage answers owns its layout; Edit response remains independently styled. */
-.kobo-dialog.kobo-answer-manager{width:min(720px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0;overflow:hidden;outline:none;background:var(--panel-strong)}
+.kobo-dialog.kobo-answer-manager{width:min(720px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0;overflow:hidden;outline:none;background:var(--popup-surface)}
 .kobo-dialog.kobo-answer-manager[open]{display:flex;flex-direction:column}
 .kobo-dialog.kobo-answer-manager>header{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0;padding:16px 20px;border-bottom:1px solid var(--line)}
 .kobo-answer-manager>header>div{display:flex;align-items:center;gap:10px;min-width:0}

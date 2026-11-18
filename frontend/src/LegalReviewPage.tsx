@@ -21,6 +21,7 @@ X
 import { Children,Fragment,isValidElement,useEffect,useRef,useState,type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
+claimDuplicateRecheckNotice,
 createDuplicateExclusion,
 createDuplicateExclusionsBulk,
 downloadExcelUrl,
@@ -44,19 +45,13 @@ import type { DuplicateExclusion,LegalFlag,LegalReview } from "./types";
 import { ValueTable } from "./ValueTable";
 
 const DUPLICATE_RECHECK_NOTICE_MS = 20_000;
-const seenDuplicateRechecks = new Map<string, string>();
 
-function markDuplicateRecheckSeen(dataset: string, pendingSince: string) {
-  const key = `legal-review-duplicate-recheck-seen:${dataset}`;
-  if (pendingSince <= (seenDuplicateRechecks.get(dataset) ?? "")) return false;
+function wasDuplicateRecheckSeen(dataset: string, pendingSince: string) {
   try {
-    if (pendingSince <= (localStorage.getItem(key) ?? "")) return false;
-    localStorage.setItem(key, pendingSince);
+    return localStorage.getItem(`legal-review-duplicate-recheck-seen:${dataset}`) === pendingSince;
   } catch {
-    // Keep the notice one-time during this app session if storage is unavailable.
+    return false;
   }
-  seenDuplicateRechecks.set(dataset, pendingSince);
-  return true;
 }
 
 export const AMAL_HIDDEN_ASSESSMENT_RULES = new Set([
@@ -581,10 +576,22 @@ export function ReviewPageBody({
     const pendingSince = entry.pendingSince || "0";
     return pendingSince > latest ? pendingSince : latest;
   }, "");
+  const noticeRequest = useRef<{dataset:string; pendingSince:string; result:Promise<{show:boolean}>} | null>(null);
   useEffect(() => {
-    if (latestDuplicateRecheck && markDuplicateRecheckSeen(dataset, latestDuplicateRecheck)) {
-      setDuplicateRecheckNotice({dataset, pendingSince:latestDuplicateRecheck});
+    setDuplicateRecheckNotice(null);
+    if (!latestDuplicateRecheck) return;
+    let active = true;
+    if (noticeRequest.current?.dataset !== dataset || noticeRequest.current.pendingSince !== latestDuplicateRecheck) {
+      const result = claimDuplicateRecheckNotice(dataset, latestDuplicateRecheck, wasDuplicateRecheckSeen(dataset, latestDuplicateRecheck))
+        .finally(() => {
+          if (noticeRequest.current?.result === result) noticeRequest.current = null;
+        });
+      noticeRequest.current = {dataset, pendingSince:latestDuplicateRecheck, result};
     }
+    void noticeRequest.current.result.then(({show}) => {
+      if (active && show) setDuplicateRecheckNotice({dataset, pendingSince:latestDuplicateRecheck});
+    }, () => {/* Try again the next time the review page opens. */});
+    return () => { active = false; };
   }, [dataset, latestDuplicateRecheck]);
   useEffect(() => {
     if (!duplicateRecheckNotice) return;
@@ -676,11 +683,11 @@ export function ReviewPageBody({
           </button>
         </div>
       )}
-      {duplicateRecheckNotice?.dataset === dataset && pendingDuplicateRechecks.length > 0 && (
+      {duplicateRecheckNotice?.dataset === dataset && duplicateRecheckNotice.pendingSince === latestDuplicateRecheck && (
         <aside className="glass duplicate-recheck-notice" role="status">
           <AlertTriangle />
           <div><strong>{pendingDuplicateRechecks.length} excluded duplicate {pendingDuplicateRechecks.length === 1 ? "finding has" : "findings have"} changed</strong><span>New or removed matching records changed the reviewed duplicate group. These findings are back in the Review tables.</span></div>
-          <button className="primary" onClick={() => { setSelectedRules((current) => Array.from(new Set([...current,...pendingDuplicateRules]))); setFilters({}); setSearch(""); window.setTimeout(() => document.querySelector(".finding-tables")?.scrollIntoView({behavior:"smooth",block:"start"}),50); }}>Review now</button>
+          <button className="primary" onClick={() => { setDuplicateRecheckNotice(null); setSelectedRules((current) => Array.from(new Set([...current,...pendingDuplicateRules]))); setFilters({}); setSearch(""); window.setTimeout(() => document.querySelector(".finding-tables")?.scrollIntoView({behavior:"smooth",block:"start"}),50); }}>Review now</button>
         </aside>
       )}
       <div className="glass review-finding-selector">

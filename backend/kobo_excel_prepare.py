@@ -54,6 +54,7 @@ def file_formula(formula, layout):
 
 
 def helper_values(layouts, config, sources, helpers):
+    from .kobo_connections import has_only_hidden_answers
     """Seed formula caches so native caches can read them before final calculation."""
     from .kobo import missing
     from .kobo_excel_slicers import scalar_key
@@ -79,6 +80,7 @@ def helper_values(layouts, config, sources, helpers):
     for layout in layouts:
         rows = []
         own = [q for q in config['questions'] if q['scope'] == layout['scope'] and (q['kind'] != 'multiple' or config.get('excelMode') == 'binary')]
+        hidden_by_question = {q['id']: set(q.get('respondentHiddenAnswers', [])) for q in own}
         for record in layout['rows']:
             values = {'[Calc] Response': 1}
             for spec in config['filters']:
@@ -123,6 +125,10 @@ def helper_values(layouts, config, sources, helpers):
                     if question.get('percentageParent'):
                         values[fields['FollowupAnswered']] = int(answered and eligible)
                         values[fields['Answered']] = int(parent_answered)
+                    if eligible and has_only_hidden_answers(value, hidden_by_question[question['id']]):
+                        values[fields['Answered']] = 0
+                        if 'FollowupAnswered' in fields:
+                            values[fields['FollowupAnswered']] = 0
                 if record['id'] in question.get('excludedRecords', []):
                     values[fields['IncludeInPivot']] = 'Excluded'
                     if 'AnswerAllowed' in fields: values[fields['AnswerAllowed']] = 'Excluded'
@@ -163,6 +169,7 @@ def seed_formula_caches(path, layouts, cached):
 
 
 def materialize_multi(args):
+    from .kobo_connections import has_only_hidden_answers
     """Initial query results, matching the workbook-local M refresh transform."""
     config, records = args
     from .kobo import missing
@@ -187,6 +194,8 @@ def materialize_multi(args):
         return [f['captions'].get(scalar_key(raw(record, f['id']), config['fields'][f['id']]['kind']),
                     'Blank / unanswered' if missing(raw(record, f['id'])) else caption(record, f['id'])) for f in config['filters']]
     options = {answer['id']: answer['label'] for answer in question['answers']}
+    hidden = set(question.get('respondentHiddenAnswers', []))
+    display_hidden = set(question.get('hiddenDisplayAnswers', []))
     if question['blank']: options['__blank__'] = question['blankLabel']
     prefix = [question['id'], question['label'], question['group'], question['groupLabel']]
     cohort = [record for record in records if record['scope'] == question['scope']]
@@ -215,8 +224,12 @@ def materialize_multi(args):
             except (ValueError, TypeError): period = ''
             trend = [period]
         suffix = filters(record)+trend+details
-        rows.append([*prefix, record['id'], '__base__', 'Respondent base', 0, 1 if parent_base else int(answered and eligible), *dimensions, 'Denominator', *suffix, *([int(answered and eligible)] if parent_base else [])])
-        for code in (selected if answered else (['__blank__'] if question['blank'] else [])) if eligible else []:
+        hidden_only = eligible and has_only_hidden_answers(selected, hidden)
+        followup_answered = int(answered and eligible and not hidden_only)
+        base_answered = int(not hidden_only) if parent_base else followup_answered
+        rows.append([*prefix, record['id'], '__base__', 'Respondent base', 0, base_answered, *dimensions, 'Denominator', *suffix, *([followup_answered] if parent_base else [])])
+        visible = [code for code in selected if code not in display_hidden]
+        for code in (visible if answered else (['__blank__'] if question['blank'] else [])) if eligible else []:
             rows.append([*prefix, record['id'], code, options.get(code, code), 1, 0, *dimensions, 'Included', *suffix, *([0] if parent_base else [])])
     seed_filters = filters(cohort[0]) if cohort else [None]*len(config['filters'])
     for code, caption_value in options.items():

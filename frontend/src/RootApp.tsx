@@ -22,22 +22,32 @@ function WorkspaceApp(){
  // launches use this root's preparation screen instead.
  const startupEpoch=Number(new URLSearchParams(window.location.search).get('startupEpoch'));
  const desktopStartup=Number.isFinite(startupEpoch)&&startupEpoch>0;
- const [workspace,setWorkspace]=useState<Workspace>(()=>{
+ const [{workspace,openedFromHome},setWorkspace]=useState<{workspace:Workspace;openedFromHome:boolean}>(()=>{
   if(!window.location.hash){
    const preference=readStartupPage();
    if(preference!=='home'){
     const route=preference==='legal'?'#/legal/overview':`#/${preference}`;
     window.history.replaceState(null,'',`${window.location.pathname}${window.location.search}${route}`);
-    return preference;
+    return {workspace:preference,openedFromHome:false};
    }
   }
-  return workspaceFromUrl();
+  return {workspace:workspaceFromUrl(),openedFromHome:false};
  });
  const [startupReady,setStartupReady]=useState(false);
  const [startupPhase,setStartupPhase]=useState<StartupPhase>(()=>desktopStartup?'hidden':'visible');
  const startupBeganAt=useRef(performance.now());
  const [foxUnlocked,setFoxUnlocked]=useState(()=>{try{return localStorage.getItem(GUARDIAN_FOX_STORAGE_KEY)==='true'}catch{return false}});
- useEffect(()=>{const sync=(event:HashChangeEvent)=>{if(allowKoboDraftNavigation(event))setWorkspace(workspaceFromUrl())};window.addEventListener('hashchange',sync);return()=>window.removeEventListener('hashchange',sync)},[]);
+ useEffect(()=>{
+  const sync=(event:HashChangeEvent)=>{
+   if(!allowKoboDraftNavigation(event))return;
+   const next=workspaceFromUrl();
+   setWorkspace(current=>current.workspace===next?current:{
+    workspace:next,openedFromHome:current.workspace==='welcome'&&next==='legal',
+   });
+  };
+  window.addEventListener('hashchange',sync);
+  return()=>window.removeEventListener('hashchange',sync);
+ },[]);
  useEffect(()=>{if(desktopStartup||workspace!=='legal'||startupReady)return;const timer=window.setTimeout(()=>setStartupReady(true),STARTUP_MAXIMUM_MS);return()=>window.clearTimeout(timer)},[desktopStartup,workspace,startupReady]);
  useEffect(()=>{
   if(desktopStartup||!startupReady)return;
@@ -60,7 +70,7 @@ function WorkspaceApp(){
  const unlockFox=()=>{setFoxUnlocked(true);try{localStorage.setItem(GUARDIAN_FOX_STORAGE_KEY,'true')}catch{/* The fox remains available for this session. */}};
  if(workspace==='welcome')return <Welcome foxUnlocked={foxUnlocked} onFoxUnlock={unlockFox}/>;
  if(workspace==='kobo'||workspace==='custom')return <KoboAnalysis key={workspace} workspace={workspace}/>;
- return <><div className={desktopStartup?'desktop-app-content':'startup-app-content'} aria-hidden={startupPhase!=='hidden'} inert={startupPhase!=='hidden'?true:undefined}><LegalPlatform onStartupReady={markStartupReady}/></div>{startupPhase!=='hidden'&&<StartupScreen phase={startupPhase}/>}</>;
+ return <><div className={desktopStartup?'desktop-app-content':'startup-app-content'} aria-hidden={startupPhase!=='hidden'} inert={startupPhase!=='hidden'?true:undefined}><LegalPlatform onStartupReady={markStartupReady} checkSavedSource={desktopStartup&&openedFromHome}/></div>{startupPhase!=='hidden'&&<StartupScreen phase={startupPhase}/>}</>;
 }
 
 export default function RootApp(){return <><WorkspaceApp/><KoboExportTray/></>}

@@ -1,4 +1,4 @@
-.kobo-shell .kobo-customize{width:min(1200px,calc(100vw - 32px));height:min(790px,calc(100dvh - 36px));max-height:calc(100dvh - 36px);padding:0;overflow:hidden;border-radius:20px;background:var(--panel-strong)}
+.kobo-shell .kobo-customize{width:min(1200px,calc(100vw - 32px));height:min(790px,calc(100dvh - 36px));max-height:calc(100dvh - 36px);padding:0;overflow:hidden;border-radius:20px;background:var(--popup-surface)}
 .kobo-customize[open]{display:flex;flex-direction:column}
 .kobo-shell .kobo-customize>header{padding:20px 24px;margin:0;border-bottom:1px solid var(--line);flex-shrink:0;gap:18px}
 .kobo-shell .kobo-customize>header>div{min-width:0}
@@ -47,12 +47,16 @@
 .kobo-customize>footer>div{display:flex;gap:8px;flex-shrink:0}
 .kobo-shell .kobo-customize>footer>p{font-size:11px;margin:0;line-height:1.5}
 .kobo-customize>footer button{min-height:40px;padding:10px 15px;font-size:12px}
-.kobo-palette-cards{display:grid;grid-template-columns:1fr 1fr;gap:9px}
-.kobo-shell .kobo-palette-cards>button{display:grid;gap:10px;text-align:start;justify-content:stretch;border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--panel-strong);color:var(--ink);font-size:12px}
-.kobo-shell .kobo-palette-cards>button[aria-pressed=true]{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
+.kobo-palette-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.kobo-shell .kobo-palette-cards>button,.kobo-shell .kobo-palette-picker .kobo-palette-card{display:grid;gap:10px;text-align:start;justify-content:stretch;border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--panel-strong);color:var(--ink);font-size:12px}
+.kobo-shell .kobo-palette-cards>button[aria-pressed=true],.kobo-shell .kobo-palette-picker .kobo-palette-card[aria-pressed=true]{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
 .kobo-palette-swatches{display:flex;overflow:hidden;border-radius:6px;height:20px;width:100%}
 .kobo-palette-swatches>i{flex:1}
-.kobo-palette-cards>button>small{font-size:10px;line-height:1.5;color:var(--muted);font-weight:400}
+.kobo-palette-cards>button>small,.kobo-palette-card>small{font-size:10px;line-height:1.5;color:var(--muted);font-weight:400}
+.kobo-palette-picker>.kobo-color-control,.kobo-palette-picker .kobo-palette-card{width:100%;height:100%}
+.kobo-palette-picker-label{display:flex;align-items:center;justify-content:space-between;gap:6px;line-height:1.35}
+.kobo-shell .kobo-palette-picker-label>svg{width:12px;height:12px;flex-shrink:0}
+.kobo-shell .kobo-palette-picker.has-error .kobo-palette-card{border-color:#b44732;box-shadow:0 0 0 1px #b44732}
 .kobo-color-section-heading{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .kobo-color-section-heading h4{font-size:12px;margin:0}
 .kobo-shell .kobo-color-section-heading>button{font-size:10px;padding:7px;min-height:32px}
@@ -63,19 +67,8 @@
 .kobo-shell .kobo-color-control>.app-select-trigger{display:flex;align-items:center;gap:6px;padding:7px;border:1px solid var(--line);border-radius:9px;background:var(--panel-strong);color:var(--ink);font-size:10px;white-space:nowrap}
 .kobo-color-control>.app-select-trigger>i{width:21px;height:21px;border-radius:6px;border:1px solid #0002;flex-shrink:0}
 .kobo-shell .kobo-color-control>.app-select-trigger>svg{position:static;transform:none;width:12px;height:12px}
-.kobo-color-popup{width:300px!important;box-sizing:border-box;padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--panel-strong);color:var(--ink);box-shadow:0 16px 45px #0003;backdrop-filter:blur(24px);overflow:auto;font-family:inherit}
-.kobo-color-popup>strong{display:block;font-size:12px;overflow-wrap:anywhere;margin-bottom:14px}
-.kobo-color-popup .kobo-field{font-size:11px;gap:6px}
-.kobo-custom-label{display:block;margin:16px 0 10px;font-size:10px;color:var(--muted)}
 .kobo-appearance-control>label{display:flex;flex-direction:column;gap:7px;margin:12px 0 6px;font-size:12px;color:var(--ink)}
 .kobo-appearance-control>label>input{width:100%;box-sizing:border-box;min-height:38px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit}
-.kobo-suggested-colors{display:grid;grid-template-columns:repeat(6,1fr);gap:7px}
-.kobo-shell .kobo-suggested-colors>button{width:100%;aspect-ratio:1;padding:3px;border:1px solid #0002;border-radius:7px;display:grid;place-items:center;box-shadow:none}
-.kobo-suggested-colors>button>svg{color:white;filter:drop-shadow(0 1px 2px #0009);width:18px!important;height:18px!important}
-.kobo-native-color{display:flex;align-items:center;justify-content:space-between;margin-top:16px;font-size:12px}
-.kobo-native-color>input{width:48px;height:34px;border:1px solid var(--line);border-radius:7px;background:transparent;cursor:pointer}
-.kobo-color-error{font-size:11px!important;color:#b44732!important;line-height:1.5!important;margin:8px 0!important}
-.kobo-color-row.has-error .app-select-trigger{border-color:#b44732}
 .kobo-customize-mobile-tabs{display:none}
 .kobo-customize button:disabled{opacity:.5;cursor:not-allowed}
 .kobo-shell .kobo-customize>header>.soft,.kobo-shell .kobo-customize>footer .soft,.kobo-shell .kobo-color-section-heading>.soft,.kobo-shell .kobo-customize-breakdowns .soft{background:var(--panel);color:var(--ink);border:1px solid var(--line);box-shadow:none}

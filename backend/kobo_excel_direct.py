@@ -22,7 +22,7 @@ def add_metric(pivot, result, metric, percentage_field=None):
     else:source = pivot.PivotFields(field_name(result, 'Selected' if metric == 'count' else 'Answered')) if direct else (
         pivot.PivotFields('Selected') if metric == 'count' else percentage_field(pivot))
     field = pivot.AddDataField(source, '#' if metric == 'count' else '%', -4157)
-    if modern and metric=='percent':field.Calculation={'row-total':6,'column-total':7,'grand-total':8,'breakdown-group':7}[result['percentageMode']]
+    if modern and metric=='percent':field.Calculation={'row-total':6,'column-total':7,'grand-total':8,'visible-selections':8,'breakdown-group':7}[result['percentageMode']]
     elif direct and metric == 'percent': field.Calculation = 7  # xlPercentOfColumn
     field.NumberFormat = '#,##0' if metric == 'count' else percent_format(result.get('percentageDecimals', 0))
 
@@ -43,6 +43,17 @@ def hidden_answer_formula(question, value):
             conditions.append(f'ISNUMBER(FIND({excel_literal(" "+code+" ")}," "&{normalized}&" "))')
         else: conditions.append(f'EXACT({value}&"",{excel_literal(code)})')
     return 'OR('+','.join(conditions)+')' if conditions else 'FALSE'
+
+
+def hidden_only_formula(question, value):
+    hidden = question.get('respondentHiddenAnswers', [])
+    if question['kind'] != 'multiple':
+        return hidden_answer_formula({**question, 'hiddenAnswers': hidden}, value)
+    normalized = f'TRIM(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE({value},CHAR(9)," "),CHAR(10)," "),CHAR(13)," "))'
+    padded = f'(" "&SUBSTITUTE({normalized}," ","  ")&" ")'
+    tokens = '{' + ','.join(excel_literal(f' {code} ') for code in hidden) + '}'
+    # Double spaces make exact token matches disjoint, including repeated selections.
+    return f'(SUMPRODUCT(LEN({padded})-LEN(SUBSTITUTE({padded},{tokens},"")))=LEN({padded}))'
 
 
 def direct_helpers(config, layouts):
@@ -145,6 +156,13 @@ def direct_helpers(config, layouts):
                 fields['FollowupAnswered'] = prefix+'followup answered'
                 helpers[scope][fields['FollowupAnswered']] = f'=IF(AND({eligible},{value}<>""),1,0)'
                 helpers[scope][fields['Answered']] = f'=IF({parent}="",0,1)'
+            if q.get('respondentHiddenAnswers'):
+                hidden_only = f'AND({eligible},{hidden_only_formula(q, value)})'
+                for metric in ['Answered', 'FollowupAnswered']:
+                    if metric in fields:
+                        header = fields[metric]
+                        original = helpers[scope][header][1:]
+                        helpers[scope][header] = f'=IF({hidden_only},0,{original})'
         if q.get('excludedRecords'):
             # A fixed project decision follows Response ID when workbook rows are sorted.
             excluded = f'IFERROR(VLOOKUP({excel_literal("exclude:"+q["id"]+"|")}&[@[Response ID]],KoboChoices,2,FALSE),"")="Excluded"'

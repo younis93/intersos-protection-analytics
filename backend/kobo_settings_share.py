@@ -234,6 +234,12 @@ def preview_settings(project, current, package):
         if definition['scope']:
             if definition['scope'] not in group_map: review.append('Scoring repeat table could not be matched.')
             else: definition['scope'] = group_map[definition['scope']]
+        for key, purpose in (('eligibilityField', 'Eligibility field'), ('breakdownField', 'Breakdown field')):
+            original = definition.get(key)
+            if original in mapping:
+                definition[key] = mapping[original]
+            elif original:
+                review.append(f'{purpose} could not be matched: {original}.')
         for rule in definition['questions']:
             original = rule['question']
             if original in mapping: rule['question'] = mapping[original]

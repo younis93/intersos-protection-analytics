@@ -1,4 +1,4 @@
-.kobo-shell .kobo-report-prompt{width:min(1120px,calc(100vw - 40px));height:min(820px,calc(100dvh - 40px));max-height:calc(100dvh - 40px);padding:0;overflow:hidden;border-radius:22px;background:var(--panel-strong);color:var(--ink)}
+.kobo-shell .kobo-report-prompt{width:min(1120px,calc(100vw - 40px));height:min(820px,calc(100dvh - 40px));max-height:calc(100dvh - 40px);padding:0;overflow:hidden;border-radius:22px;background:var(--popup-surface);color:var(--ink)}
 .kobo-report-prompt[open]{display:flex;flex-direction:column}
 .kobo-shell .kobo-report-prompt .kobo-report-header{display:flex;align-items:center;gap:15px;padding:22px 26px;margin:0;border-bottom:1px solid var(--line);flex-shrink:0}
 .kobo-report-header>div{flex:1;min-width:0}

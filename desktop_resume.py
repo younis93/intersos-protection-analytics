@@ -59,13 +59,7 @@ class DesktopResume:
             def recover(native):
                 if self.closed or not self.minimized or str(native.WindowState)=='Minimized' or native.ClientSize.Width<=0 or native.ClientSize.Height<=0:return None
                 self.minimized=False
-                if self.controller.fullscreen:
-                    # WinForms restores maximized fullscreen windows to the work area.
-                    # Reapply monitor bounds without altering normal restore placement.
-                    from System.Windows.Forms import Screen
-                    bounds=Screen.FromHandle(native.Handle).Bounds
-                    self.controller._frame._user32.SetWindowPos(native.Handle.ToInt64(),None,bounds.X,bounds.Y,bounds.Width,bounds.Height,0x0014)
-                else:self.controller.refresh_work_area()
+                self.controller._frame.refresh_work_area()
                 native.PerformLayout()
                 view=native.webview
                 view.Visible=True

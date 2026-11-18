@@ -326,6 +326,11 @@ export const legalReviewExportUrl = (
   `${API}/legal/review-export/${dataset}?comparison_month=${encodeURIComponent(comparisonMonth)}&name_compare_chars=${nameCompareChars}&allow_name_variations=${allowNameVariations}&exact_matches_only=${exactMatchesOnly}&rules=${encodeURIComponent(rules.join(","))}&severity=${encodeURIComponent(filters.severity || "")}&lawyer=${encodeURIComponent(filters.lawyer || "")}&project=${encodeURIComponent(filters.project || "")}&location=${encodeURIComponent(filters.location || "")}&date=${encodeURIComponent(filters.date || "")}&search=${encodeURIComponent(search)}&ignore_court_verdict_rules=${encodeURIComponent(ignoreCourtVerdictRules.join(","))}&filters=${encodeURIComponent(JSON.stringify(fieldFilters))}`;
 export const getDuplicateExclusions = () =>
   fetch(`${API}/legal/duplicate-exclusions`, { cache: "no-store" }).then(parse<{rows: DuplicateExclusion[]; count: number}>);
+export const claimDuplicateRecheckNotice = (dataset: string, pendingSince: string, previouslySeen: boolean) =>
+  fetch(`${API}/legal/duplicate-exclusions/recheck-notice`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dataset, pendingSince, previouslySeen }),
+  }).then(parse<{show: boolean}>);
 export const createDuplicateExclusion = (record: Pick<DuplicateExclusion, "caseId" | "rule" | "name" | "project" | "source"> & Partial<Pick<DuplicateExclusion,"dataset"|"identifierType"|"identifierValue"|"duplicateContext">>) =>
   fetch(`${API}/legal/duplicate-exclusions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(record) }).then(parse<{rows: DuplicateExclusion[]; count: number}>);
 export const createDuplicateExclusionsBulk = (records: Array<Pick<DuplicateExclusion, "caseId" | "rule" | "name" | "project" | "source"> & Partial<Pick<DuplicateExclusion,"dataset"|"identifierType"|"identifierValue"|"duplicateContext">>>) =>

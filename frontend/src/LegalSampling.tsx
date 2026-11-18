@@ -47,7 +47,7 @@ export default function LegalSampling({state,update}:{state:SamplingState;update
           <button className="primary" onClick={()=>setDrawer(true)}><AnimatedActionIcon type="filters"/>All filters {active>0&&<b>{active}</b>}</button>
           <button className="soft detention-filter-clear" disabled={!changed&&state.page===1} onClick={reset}><AnimatedActionIcon type="reset"/>Reset</button>
           <TableResetButton iconOnly disabled={!recordFilters.control.filters.length} onReset={recordFilters.clear}/>
-          <ExcelDownloadButton className="primary studio-excel" onClick={download} disabled={busy||search!==state.search||Boolean(error)||!data?.available}>Excel</ExcelDownloadButton>
+          <ExcelDownloadButton className="primary studio-excel" onClick={download} disabled={busy||search!==state.search||Boolean(error)||!data?.available||data.total===0}>Excel</ExcelDownloadButton>
         </div>
       </div>
     </LegalScrollControls>

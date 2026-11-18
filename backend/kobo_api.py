@@ -1,5 +1,6 @@
 """Local Kobo project API. Imports remain staged until mapping is confirmed."""
 from __future__ import annotations
+from .assistant_checks import CrossQuestionCheck, check_questions
 from .kobo_shared_dependencies import DependencyRequest
 from .kobo_question_conditions import QuestionConditionsRequest
 from .kobo_connection_setup import ConnectionSetupRequest, confirm_connection
@@ -257,6 +258,7 @@ class QuestionResult(BaseModel):
     chart: Literal['bar', 'column', 'pie', 'donut', 'line', 'histogram', 'heatmap']
     colors: dict[str, str]
     pointColors: dict[str, str] = Field(default_factory=dict)
+    allBarsColor: str | None = None
 
 
 class AnalysisResponse(BaseModel):
@@ -523,6 +525,9 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
     def get(pid):
         try: return store.get(pid)
         except KeyError as exc: raise HTTPException(404, str(exc)) from exc
+
+    from .assistant_project import mount_project_assistant
+    mount_project_assistant(router, store)
 
     def project_revision(pid):
         try: return store.project_revision(pid)
@@ -1012,6 +1017,14 @@ def make_router(store: ProjectStore | None = None, prefix='/api/kobo'):
         get(pid)
         try: commit_review(store, pid, body); return project(pid)
         except ValueError as exc: raise HTTPException(409, str(exc)) from exc
+
+    @router.post('/projects/{pid}/assistant/cross-check')
+    def assistant_cross_check(pid: str, body: CrossQuestionCheck):
+        from .local_assistant import preferences
+        try:
+            return check_questions(get(pid), body, preferences().get('smallGroupMin', 5))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @router.post('/projects/{pid}/data-review')
     def grouped_data_review(pid: str, body: DataReviewRequest):

@@ -4,6 +4,7 @@ type Particle = {x: number; y: number; depth: number; phase: number; gust: numbe
 type Spray = {x: number; vx: number; vy: number; age: number};
 type Surface = {ledge: Float32Array; shape: Float32Array; spray: Spray[]; runoff: [number, number]};
 type Palette = {rain: string; ice: string; shade: string; water: string};
+type SnowShuffle = {x: number; y: number; strength: number};
 
 const lightPalette: Palette = {rain: '#28648e', ice: '#9dbed5', shade: '#426f94', water: '#347ca9'};
 const darkPalette: Palette = {rain: '#a6daf9', ice: '#d5edff', shade: '#507b9b', water: '#91c9ed'};
@@ -23,6 +24,7 @@ export function mountHomeWeather(home: HTMLElement, mode: HomeWeatherMode) {
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const surfaces = new WeakMap<HTMLCanvasElement, Surface>();
   const particles: Particle[] = [];
+  const snowShuffles: SnowShuffle[] = [];
   const mouse = {x: 0, y: 0, vx: 0, speed: 0, time: 0};
   let frame = 0;
   let lastFrame = 0;
@@ -218,7 +220,8 @@ export function mountHomeWeather(home: HTMLElement, mode: HomeWeatherMode) {
       const life = rain ? 0.35 : 0.62;
       if (drop.age >= life) return false;
       const x = drop.x * width + drop.vx * drop.age;
-      const y = rain ? 3 - drop.vy * drop.age + 285 * drop.age ** 2 : 3 + drop.vy * drop.age;
+      const gravity = rain ? 285 : drop.vy < 0 ? 195 : 0;
+      const y = 3 + (rain ? -drop.vy : drop.vy) * drop.age + gravity * drop.age ** 2;
       const above = y < 0;
       const layer = above ? skyLayer.ctx : ctx;
       const drawX = above ? left + x : x;
@@ -235,6 +238,23 @@ export function mountHomeWeather(home: HTMLElement, mode: HomeWeatherMode) {
     });
   }
 
+  function shuffleLedge(surface: Surface, left: number, top: number, width: number, shuffles: SnowShuffle[]) {
+    for (const {x, y, strength} of shuffles) {
+      if (Math.abs(y - top) > 26 || x < left - 12 || x > left + width + 12) continue;
+      const center = clamp((x - left) / width, 0, 1) * (ledgeBins - 1);
+      const radius = Math.max(1, (9 + strength * 15) * (ledgeBins - 1) / width);
+      for (let bin = Math.max(0, Math.floor(center - radius)); bin <= Math.min(ledgeBins - 1, center + radius); bin++) {
+        const force = strength * Math.max(0, 1 - Math.abs(bin - center) / radius);
+        if (force < .08 || surface.ledge[bin] < .07) continue;
+        surface.ledge[bin] *= 1 - .72 * force;
+        if (surface.spray.length >= 28) continue;
+        const direction = bin < center ? -1 : 1;
+        surface.spray.push({x: bin / (ledgeBins - 1), vx: direction * (20 + random() * 55),
+          vy: -(35 + random() * 68) * (.6 + force), age: 0});
+      }
+    }
+  }
+
   function tick(now: number) {
     const step = lastFrame ? Math.min((now - lastFrame) / 1000, 0.04) : 1 / 60;
     lastFrame = now;
@@ -243,7 +263,7 @@ export function mountHomeWeather(home: HTMLElement, mode: HomeWeatherMode) {
       frame = requestAnimationFrame(tick);
       return;
     }
-    const dark = /^(glass-dark|forest|vice-city)$/.test(document.documentElement.dataset.theme || '');
+    const dark = home.classList.contains('is-vice-city') || /^(glass-dark|forest)$/.test(document.documentElement.dataset.theme || '');
     const palette = dark ? darkPalette : lightPalette;
     const activeSurfaces = Array.from(home.querySelectorAll<HTMLCanvasElement>('.home-weather-surface')).flatMap(canvas => {
       const parent = canvas.parentElement!;
@@ -270,12 +290,18 @@ export function mountHomeWeather(home: HTMLElement, mode: HomeWeatherMode) {
     if (particles.length > count) particles.length = count;
     while (particles.length < count) particles.push(resetParticle({x: 0, y: 0, depth: 0, phase: 0, gust: 0}, width, height, true));
     const gust = Math.max(0, 1 - (now - mouse.time) / 220);
+    const shuffles = snowShuffles.splice(0);
     prepare(skyLayer.canvas, skyLayer.ctx, width, height);
     for (const particle of particles) {
       const previousY = particle.y;
       const distance = Math.hypot(particle.x - mouse.x, particle.y - mouse.y);
       const push = mouse.vx * 0.75 + mouse.speed * 0.42 * Math.sign(particle.x - mouse.x);
       particle.gust += gust * push * Math.max(0, 1 - distance / gustRadius) * step * 7;
+      for (const {x, y, strength} of shuffles) {
+        const dx = particle.x - x;
+        const influence = Math.max(0, 1 - Math.hypot(dx, particle.y - y) / gustRadius);
+        particle.gust += Math.sign(dx) * influence * strength * 135;
+      }
       particle.gust *= Math.exp(-step * 5);
       const wind = rain ? 78 : 9 + Math.sin(now / 1950) * 12 + Math.sin(now / 840 + particle.phase) * 26;
       particle.x += (wind + particle.gust) * step;
@@ -308,6 +334,7 @@ export function mountHomeWeather(home: HTMLElement, mode: HomeWeatherMode) {
           surface.spray.push({x, vx: gust * mouse.vx * 0.25 + random() * 18 - 9, vy: 20 + random() * 32, age: 0});
         }
       }
+      if (shuffles.length) shuffleLedge(surface, rect.left, top, rect.width, shuffles);
       drawLedge(ctx, surface, rect.width, rect.height, step, palette, logoBorder);
       drawSpray(ctx, surface, rect.width, rect.left, top, step, palette);
     }
@@ -317,6 +344,7 @@ export function mountHomeWeather(home: HTMLElement, mode: HomeWeatherMode) {
   function updateAnimation() {
     cancelAnimationFrame(frame);
     lastFrame = 0;
+    snowShuffles.length = 0;
     if (!document.hidden && !reducedMotion.matches) frame = requestAnimationFrame(tick);
   }
 
@@ -324,10 +352,17 @@ export function mountHomeWeather(home: HTMLElement, mode: HomeWeatherMode) {
   document.addEventListener('visibilitychange', updateAnimation);
   reducedMotion.addEventListener('change', updateAnimation);
   updateAnimation();
-  return () => {
-    cancelAnimationFrame(frame);
-    home.removeEventListener('pointermove', aim);
-    document.removeEventListener('visibilitychange', updateAnimation);
-    reducedMotion.removeEventListener('change', updateAnimation);
+  return {
+    shuffleSnow(x: number, y: number, strength: number) {
+      if (!rain && !document.hidden && !reducedMotion.matches && snowShuffles.length < 6) {
+        snowShuffles.push({x, y, strength});
+      }
+    },
+    dispose() {
+      cancelAnimationFrame(frame);
+      home.removeEventListener('pointermove', aim);
+      document.removeEventListener('visibilitychange', updateAnimation);
+      reducedMotion.removeEventListener('change', updateAnimation);
+    },
   };
 }

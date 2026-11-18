@@ -2,7 +2,11 @@
 import math
 from decimal import Decimal,ROUND_HALF_UP
 
-MODES={'grand-total':'% of Grand Total','column-total':'% of Column Total','row-total':'% of Row Total','breakdown-group':'% within breakdown group','legacy-respondents':'% of Respondents'}
+MODES={'grand-total':'% of Grand Total','column-total':'% of Column Total','row-total':'% of Row Total','breakdown-group':'% within breakdown group','legacy-respondents':'% of Respondents','visible-selections':'% of visible selections'}
+
+def uses_additive_answer_scope(cfg):
+    return cfg.percentageMode != 'legacy-respondents' and (
+        not cfg.calculation or cfg.calculation.operation in {'count', 'sum'})
 
 def percentage(numerator, denominator):
     return numerator / denominator * 100 if numerator is not None and denominator else None
@@ -20,6 +24,8 @@ def value_totals(result, use_value, level):
         return math.fsum(valid) if valid else None if use_value else 0
 
     rows, columns = result['rows'], result['breakdowns']
+    if result.get('percentageMode') == 'visible-selections':
+        rows = [row for row in rows if row['id'] != '__blank__']
     row_totals = {row['id']: total(cell.get(value_key) for cell in row.get('series', [])) if columns else row.get(value_key) for row in rows}
     by_column = {}
     for row in rows:
@@ -61,6 +67,10 @@ def apply_pivot_percentages(result, cfg, original=None):
     basis = value_totals(original, bool(measured), cfg.percentageGroupLevel) if original is not None else visible
     row_totals, column_totals, _, grand = visible
     for row in result['rows']:
+        if mode == 'visible-selections' and row['id'] == '__blank__':
+            for cell in [row, *row.get('series', [])]:
+                put_percent(cell, None, None, decimals)
+            continue
         row_base = basis[0].get(row['id']) if mode == 'row-total' else basis[3]
         for cell in row.get('series', []):
             base = row_base if mode == 'row-total' else column_base(mode, cell['id'], basis)
@@ -80,5 +90,7 @@ def apply_pivot_percentages(result, cfg, original=None):
         for series, row in zip(trend['series'], nested['rows']):
             for point, cell in zip(series['points'], row['series']):
                 point.update(percent=cell['percent'], displayPercent=cell['displayPercent'])
-    result['percentageBasis'] = MODES[mode]+(f' · level {cfg.percentageGroupLevel}' if mode=='breakdown-group' else '')+' · '+('sum of values across answer selections' if measured else 'answer selections')
+    result['percentageBasis'] = MODES[mode] if mode == 'visible-selections' else MODES[mode]+(f' · level {cfg.percentageGroupLevel}' if mode=='breakdown-group' else '')+' · '+('sum of values across answer selections' if measured else 'answer selections')
+    if mode == 'visible-selections' and cfg.additiveAnswerScope == 'all':
+        result['percentageBasis'] = '% of all selections'
     return result

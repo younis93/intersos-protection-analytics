@@ -21,7 +21,6 @@ import {AnimatedSectionIcon} from './AnimatedNavigationIcon';
 import {HomeRiveAvatar} from './HomeRiveAvatar';
 import ProcessingBackground from './ProcessingBackground';
 import ViceCityBackdrop from './ViceCityBackdrop';
-import {useViceCityDay} from './viceCityDay';
 import './viceCityTheme.css';
 import {mountHomeCardRefraction} from './homeCardRefraction';
 import './homeCardGlass.css';
@@ -35,6 +34,17 @@ import {readStartupPage,saveStartupPage,STARTUP_PAGE_LABELS,type StartupPage} fr
 
 const UPDATE_CHECK_INTERVAL_MS=6*60*60*1000;
 const HalloweenGame=lazy(()=>import('./HalloweenGame'));
+const HOME_THEME_KEY='home-theme';
+type HomeTheme=Theme|'vice-city';
+const HOME_THEME_OPTIONS:[HomeTheme,string][]=[
+  ['glass-light','Liquid Glass Light'],
+  ['glass-dark','Liquid Glass Dark'],
+  ['unhcr','INTERSOS'],
+  ['multicolor','Chromatic Executive'],
+  ['executive','Executive Minimal'],
+  ['forest','Forest Professional'],
+  ['vice-city','Vice City'],
+];
 
 export interface WorkspaceDefinition {id:string;label:string;description:string;route:string;icon:any;accent:string;badge?:string;enabled:boolean}
 export const workspaces:WorkspaceDefinition[]=[
@@ -50,7 +60,17 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
   });
   const [fullscreen,setFullscreen]=useState(false);
   const [halloween,setHalloween]=useState(false);
-  const viceCity=useViceCityDay()&&!halloween;
+  const [viceCitySelected,setViceCitySelected]=useState(()=>localStorage.getItem(HOME_THEME_KEY)==='vice-city');
+  const selectHomeTheme=(value:HomeTheme)=>{
+    setViceCitySelected(value==='vice-city');
+    if(value==='vice-city'){
+      localStorage.setItem(HOME_THEME_KEY,value);
+    }else{
+      localStorage.removeItem(HOME_THEME_KEY);
+      setTheme(value);
+    }
+  };
+  const viceCity=viceCitySelected&&!halloween;
   const glassCards=useRef<HTMLDivElement>(null);
   const showCardGlass=!viceCity&&!halloween&&(theme==='glass-light'||theme==='glass-dark');
   useEffect(()=>{
@@ -90,6 +110,8 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
   const weatherAudio=useRef<ReturnType<typeof createHomeWeatherAudio>>(null);
   const playSnowmanCue=useCallback((cue:SnowmanCue)=>weatherAudio.current?.playSnowmanCue(cue),[]);
   const home=useRef<HTMLElement>(null);
+  const weatherScene=useRef<ReturnType<typeof mountHomeWeather>>(undefined);
+  const shuffleSnow=useCallback((x:number,y:number,strength:number)=>weatherScene.current?.shuffleSnow(x,y,strength),[]);
   const activeWeather=halloween||homeLocked||updateOpen?null:weather;
   const weatherSurface=activeWeather?<canvas key={activeWeather} className="home-weather-surface" aria-hidden="true"/>:null;
   const disposeWeatherAudio=useCallback(()=>{
@@ -97,7 +119,10 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
     weatherAudio.current=null;
   },[]);
   useEffect(()=>{
-    if(activeWeather&&home.current)return mountHomeWeather(home.current,activeWeather);
+    if(!activeWeather||!home.current)return;
+    const scene=mountHomeWeather(home.current,activeWeather);
+    weatherScene.current=scene;
+    return ()=>{scene?.dispose();weatherScene.current=undefined};
   },[activeWeather]);
   useEffect(()=>{
     if(!weather){disposeWeatherAudio();return}
@@ -166,7 +191,7 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
     {activeWeather&&<canvas key={activeWeather} className="home-weather-sky" aria-hidden="true"/>}
     {halloweenTransition!==null&&<HalloweenTransition onStart={()=>burnAudio.current?.play()} onReveal={()=>burnAudio.current?.reveal()} onCovered={()=>{setHalloween(halloweenTransition);setManualPlay(false)}} onComplete={finishHalloweenTransition}/>}
     {halloween&&<Suspense fallback={<span className="halloween-loading" role="status">Waking the pumpkin mage...</span>}><HalloweenGame paused={updateOpen||halloweenTransition!==null} onManualChange={setManualPlay}/></Suspense>}
-    <div className="welcome-home-actions"><button type="button" className="halloween-pumpkin-toggle" aria-label={halloween?'Turn off Halloween mode':'Turn on Halloween mode'} aria-pressed={halloween} title={halloween?'Return to the original home screen':'A little Halloween magic'} onClick={toggleHalloween} disabled={halloweenTransition!==null} aria-busy={halloweenTransition!==null}><PumpkinIcon active={halloween}/>{pumpkinPulse>0&&<span key={pumpkinPulse} className="pumpkin-toggle-burst" data-on={halloween} aria-hidden="true">{Array.from({length:12},(_,i)=><i key={i} style={{'--spark-x':`${Math.cos(i*Math.PI/6)*38}px`,'--spark-y':`${Math.sin(i*Math.PI/6)*38}px`,'--spark-delay':`${i*.01}s`} as React.CSSProperties}/>)}</span>}</button><div className="welcome-home-controls" inert={homeLocked}><button className={`soft fullscreen-button update-button ${updateInfo?.available?'update-available':''}`} onClick={checkUpdates} title={updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:'Check for updates'} aria-label="Check for updates"><RefreshCw/>{updateInfo?.available&&<b aria-label="New update available">New</b>}{weatherSurface}</button><div className="startup-launch-select" aria-busy={startupSaving}><AppSelect decoration={weatherSurface} label="Open on launch" ariaLabel="Open on launch" icon={Power} value={startupPage} disabled={startupSaving} onChange={value=>void saveStartup(value as StartupPage)} options={Object.entries(STARTUP_PAGE_LABELS) as [string,string][]}/>{startupSaving&&<span role="status" className="sr-only">Saving startup page...</span>}{startupNotice&&<p className="startup-launch-feedback" role="status">{startupNotice}</p>}{startupError&&<p className="startup-launch-feedback is-error" role="alert">{startupError}</p>}</div><AppSelect decoration={weatherSurface} label="Theme" value={theme} onChange={value=>setTheme(value as Theme)} variant="theme" icon={Palette} ariaLabel="Application theme" options={[["glass-light","Liquid Glass Light"],["glass-dark","Liquid Glass Dark"],["unhcr","INTERSOS"],["multicolor","Chromatic Executive"],["executive","Executive Minimal"],["forest","Forest Professional"]]}/><button className="soft fullscreen-button" onClick={toggleFullscreen} title={fullscreen?'Exit full screen':'Enter full screen'} aria-label={fullscreen?'Exit full screen':'Enter full screen'}>{fullscreen?<Minimize2/>:<Maximize2/>}{weatherSurface}</button>
+    <div className="welcome-home-actions"><button type="button" className="halloween-pumpkin-toggle" aria-label={halloween?'Turn off Halloween mode':'Turn on Halloween mode'} aria-pressed={halloween} title={halloween?'Return to the original home screen':'A little Halloween magic'} onClick={toggleHalloween} disabled={halloweenTransition!==null} aria-busy={halloweenTransition!==null}><PumpkinIcon active={halloween}/>{pumpkinPulse>0&&<span key={pumpkinPulse} className="pumpkin-toggle-burst" data-on={halloween} aria-hidden="true">{Array.from({length:12},(_,i)=><i key={i} style={{'--spark-x':`${Math.cos(i*Math.PI/6)*38}px`,'--spark-y':`${Math.sin(i*Math.PI/6)*38}px`,'--spark-delay':`${i*.01}s`} as React.CSSProperties}/>)}</span>}</button><div className="welcome-home-controls" inert={homeLocked}><button className={`soft fullscreen-button update-button ${updateInfo?.available?'update-available':''}`} onClick={checkUpdates} title={updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:'Check for updates'} aria-label="Check for updates"><RefreshCw/>{updateInfo?.available&&<b aria-label="New update available">New</b>}{weatherSurface}</button><div className="startup-launch-select" aria-busy={startupSaving}><AppSelect decoration={weatherSurface} label="Open on launch" ariaLabel="Open on launch" icon={Power} value={startupPage} disabled={startupSaving} onChange={value=>void saveStartup(value as StartupPage)} options={Object.entries(STARTUP_PAGE_LABELS) as [string,string][]}/>{startupSaving&&<span role="status" className="sr-only">Saving startup page...</span>}{startupNotice&&<p className="startup-launch-feedback" role="status">{startupNotice}</p>}{startupError&&<p className="startup-launch-feedback is-error" role="alert">{startupError}</p>}</div><AppSelect decoration={weatherSurface} label="Theme" value={viceCitySelected?'vice-city':theme} onChange={value=>selectHomeTheme(value as HomeTheme)} variant="theme" icon={Palette} ariaLabel="Application theme" options={HOME_THEME_OPTIONS}/><button className="soft fullscreen-button" onClick={toggleFullscreen} title={fullscreen?'Exit full screen':'Enter full screen'} aria-label={fullscreen?'Exit full screen':'Enter full screen'}>{fullscreen?<Minimize2/>:<Maximize2/>}{weatherSurface}</button>
       {weatherTest&&<div className="home-weather-test-buttons" role="group" aria-label="Local weather test">
         <button type="button" className="soft home-weather-test-button" aria-pressed={testWeather==='rain'} disabled={halloween||homeLocked||updateOpen} onClick={()=>toggleTestWeather('rain')}><CloudRain aria-hidden="true"/>Rain{weatherSurface}</button>
         <button type="button" className="soft home-weather-test-button" aria-pressed={testWeather==='snow'} disabled={halloween||homeLocked||updateOpen} onClick={()=>toggleTestWeather('snow')}><Snowflake aria-hidden="true"/>Snow{weatherSurface}</button>
@@ -175,13 +200,13 @@ export default function Welcome({foxUnlocked}:{foxUnlocked:boolean;onFoxUnlock:(
     <section className="welcome-content" inert={homeLocked}>
       <header className="welcome-header welcome-header-compact">
         <div className="welcome-brand-stage">
-          <HomeLogo halloween={halloween} frameDecoration={weatherSurface}>{!halloween&&AVATAR_ENABLED&&foxUnlocked&&<GuardianFox mode="home"/>}</HomeLogo>
+          <HomeLogo halloween={halloween} viceCity={viceCity} frameDecoration={weatherSurface}>{!halloween&&AVATAR_ENABLED&&foxUnlocked&&<GuardianFox mode="home"/>}</HomeLogo>
         </div>
         <span>Iraq Data Analysis</span>
       </header>
       <div ref={glassCards} className={`workspace-cards${showCardGlass?' home-card-glass':''}`}>{workspaces.filter(x=>x.enabled).map((workspace,index)=>{const Icon=workspace.icon;return <a key={workspace.id} href={`#${workspace.route}`} className={`workspace-card workspace-${workspace.accent}`} onPointerEnter={()=>prepareWorkspace(workspace.id)} onFocus={()=>prepareWorkspace(workspace.id)} style={{'--card-index':index} as React.CSSProperties}><span className="workspace-card-glow"/>{weatherSurface}<span className="workspace-icon">{workspace.id==='kobo'?<AnimatedSectionIcon key={koboIconMotion} Icon={ChartColumnIncreasing} iconStyle="chart-column-increasing" size={28}/>:<Icon/>}</span><span className="workspace-badge">{workspace.badge}</span><strong>{workspace.label}</strong><p>{workspace.description}</p><span className="workspace-enter">Enter workspace <ArrowRight/></span></a>})}</div>
 
-      {activeWeather==='snow'&&<HomeSnowman playCue={playSnowmanCue}/>}
+      {activeWeather==='snow'&&<HomeSnowman playCue={playSnowmanCue} shuffleSnow={shuffleSnow}/>}
     </section>
     <footer className="welcome-footer" inert={homeLocked}><span>Designed for clear, local and decision-ready legal data review.</span><button type="button" className="designer-unlock" onClick={toggleAvatar} aria-pressed={avatarRevealed} aria-label={`${avatarRevealed?'Hide':'Reveal'} the cartoon boy`}>Designed by <strong>Younis Jamal</strong></button></footer>
     {!halloween&&RIVE_HOME_AVATAR_ENABLED&&avatarRevealed&&<HomeRiveAvatar disabled={false} phase="normal"/>}

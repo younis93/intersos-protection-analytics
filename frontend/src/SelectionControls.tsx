@@ -20,10 +20,10 @@ export function ExcelDownloadButton({onClick,children="Excel",className="primary
 }
 
 export // The top layer escapes clipping without losing each page's inherited menu styles.
-function useDropdownPosition(open: boolean, close: () => void) {
+function useDropdownPosition(open: boolean, close: () => void, triggerSelector = ".app-select-trigger") {
   const root = useRef<HTMLDivElement>(null), menu = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    const node = menu.current, trigger = root.current?.querySelector<HTMLElement>(".app-select-trigger");
+    const node = menu.current, trigger = root.current?.querySelector<HTMLElement>(triggerSelector);
     if (!open || !node || !trigger) return;
     node.showPopover();
     const position = () => {
@@ -75,7 +75,7 @@ function useDropdownPosition(open: boolean, close: () => void) {
       observer.disconnect();
       if (node.matches(":popover-open")) node.hidePopover();
     };
-  }, [open]);
+  }, [open, triggerSelector]);
   return {root, menu};
 }
 

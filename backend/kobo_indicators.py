@@ -41,6 +41,9 @@ class IndicatorDefinition(BaseModel):
     reviewIssues: list[str] = Field(default_factory=list)
     mode: Literal['score', 'percentage', 'numeric_sum', 'numeric_average'] = 'score'
     conditionMatch: Literal['all', 'any'] = 'all'
+    eligibilityField: str = ''
+    eligibilityCodes: list[str] = Field(default_factory=list, max_length=100)
+    breakdownField: str = ''
 
 
 class IndicatorPivotRow(BaseModel):
@@ -112,6 +115,15 @@ class IndicatorResult(BaseModel):
     numerator: float | None = None
     denominator: int = 0
     questionPivots: list[IndicatorQuestionPivot] = Field(default_factory=list)
+    breakdowns: list['IndicatorGroup'] = Field(default_factory=list)
+
+
+class IndicatorGroup(BaseModel):
+    id: str
+    label: str
+    complete: int
+    incomplete: int
+    value: float | None
 
 
 def scope_ancestors(form, scope):
@@ -143,6 +155,14 @@ def indicator_issues(project, definition):
     scopes = scope_ancestors(project['form'], definition.scope)
     if scopes is None: issues.append('The selected repeat table no longer exists.')
     questions = {q['id']: q for q in project['form']['questions']}
+    for field, purpose in ((definition.eligibilityField, 'eligibility'), (definition.breakdownField, 'breakdown')):
+        if not field:
+            continue
+        question = questions.get(field)
+        if not question or question['kind'] != 'category' or question.get('repeat') or question.get('identifying') or question.get('metadata'):
+            issues.append(f'Choose a single-choice main-form field for {purpose}.')
+        elif purpose == 'eligibility' and (not definition.eligibilityCodes or not set(definition.eligibilityCodes) <= {choice['name'] for choice in question['choices']}):
+            issues.append('Select at least one current eligibility answer.')
     for rule in definition.questions:
         question = questions.get(rule.question)
         if question is None:
@@ -261,6 +281,7 @@ def calculate_indicator(project, settings, definition, *, status='all', page=1, 
     selected, complete, incomplete, scores, total = [], 0, 0, [], 0
     start = (page-1)*page_size
     matched = 0
+    grouped = {}
     pivots, accumulators = [], []
     for rule in definition.questions:
         question = questions[rule.question]
@@ -270,10 +291,21 @@ def calculate_indicator(project, settings, definition, *, status='all', page=1, 
         accumulators.append({'points': [], 'normalized': [], 'contribution': [], 'numeric': []})
     for record in records:
         if record['scope'] != definition.scope: continue
+        if definition.eligibilityField:
+            owner = answer_owner(record, questions[definition.eligibilityField], lookup)
+            if not owner or owner['values'].get(definition.eligibilityField) not in definition.eligibilityCodes:
+                continue
         total += 1
         scored = score_record(record, definition, questions, lookup, settings.language)
         if scored.status == 'complete': complete += 1; scores.append(scored.score)
         else: incomplete += 1
+        if definition.breakdownField:
+            owner = answer_owner(record, questions[definition.breakdownField], lookup)
+            group = str(owner['values'].get(definition.breakdownField) or '__blank__') if owner else '__blank__'
+            group_scores, group_missing = grouped.get(group, ([], 0))
+            if scored.status == 'complete': group_scores.append(scored.score)
+            else: group_missing += 1
+            grouped[group] = (group_scores, group_missing)
         for rule, part, pivot, acc in zip(definition.questions, scored.contributions, pivots, accumulators):
             question = questions[rule.question]
             owner = answer_owner(record, question, lookup)
@@ -320,6 +352,12 @@ def calculate_indicator(project, settings, definition, *, status='all', page=1, 
             scoring = '; '.join(f'{captions.get(code, code)}: {value:g}' for code, value in item.points.items())
         rules.append(f'{question["name"]}: {scoring}.' + (f' Method: {item.multipleMethod or "assigned points"}. Maximum: {maximum_points(item):g}. Weight: {item.weight:g} ({item.weight/total_weight*100:.1f}%).' if definition.mode == 'score' else ''))
     formulas = {'score': 'Score = 100 x weighted average of (question points / maximum question points).', 'percentage': f'Percentage = 100 x complete responses meeting {definition.conditionMatch.upper()} question conditions / complete responses. Each response is counted once.', 'numeric_sum': 'Total = sum of original numeric answers across all selected questions and complete responses.', 'numeric_average': 'Average = sum of original numeric answers / number of answered numeric values across complete responses. Each question has equal weight; use compatible units.'}
+    eligibility = questions.get(definition.eligibilityField)
+    if eligibility:
+        options = ', '.join(label(choice, settings.language) for choice in eligibility['choices'] if choice['name'] in definition.eligibilityCodes)
+        rules.insert(0, f'Eligibility: {label(eligibility, settings.language)} = {options}.')
+    breakdown = questions.get(definition.breakdownField)
+    if breakdown: rules.insert(0, f'Breakdown: {label(breakdown, settings.language)}.')
     methodology = '\n'.join([definition.name, definition.description, *((('Higher score means: ' if definition.mode == 'score' else 'Higher result means: ')+definition.higherMeaning,) if definition.higherMeaning else ()),
         'Unit: '+(definition.scope or 'Main submission'), formulas[definition.mode],
         'Only complete responses enter the final result. Missing, unrecognized or invalid answers make a response incomplete.' + (' Weights are not redistributed.' if definition.mode == 'score' else ''),
@@ -337,8 +375,13 @@ def calculate_indicator(project, settings, definition, *, status='all', page=1, 
     numerator = sum(s == 100 for s in scores) if definition.mode == 'percentage' else numeric_total if definition.mode.startswith('numeric_') else math.fsum(scores)
     denominator = complete*len(definition.questions) if definition.mode == 'numeric_average' else complete
     value = numeric_total if definition.mode == 'numeric_sum' and complete else numeric_total/denominator if definition.mode == 'numeric_average' and denominator else average
+    captions = {choice['name']: label(choice, settings.language) for choice in breakdown['choices']} if breakdown else {}
+    breakdowns = [IndicatorGroup(id=key, label=captions.get(key, 'Blank / unanswered' if key == '__blank__' else key),
+         complete=len(values), incomplete=absent,
+         value=(math.fsum(values) if definition.mode == 'numeric_sum' else math.fsum(values)/len(values)) if values else None)
+         for key, (values, absent) in grouped.items()]
     return IndicatorResult(id=definition.id, name=definition.name, total=total, complete=complete, incomplete=incomplete, completeness=complete/total*100 if total else None,
-        average=average, value=value, mode=definition.mode, conditionMatch=definition.conditionMatch, numerator=numerator if complete else None, denominator=denominator, questionPivots=pivots, filterSummary=filter_descriptions(project, settings), methodology=methodology, rows=selected, matched=matched, page=page, pageSize=page_size)
+        average=average, value=value, mode=definition.mode, conditionMatch=definition.conditionMatch, numerator=numerator if complete else None, denominator=denominator, questionPivots=pivots, filterSummary=filter_descriptions(project, settings), methodology=methodology, rows=selected, matched=matched, page=page, pageSize=page_size, breakdowns=breakdowns)
 
 
 def range_label(r):

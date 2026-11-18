@@ -153,6 +153,15 @@ def add_transfer_routes(router, store, prefix):
                     # One transaction commits data, sources and settings against the reviewed version.
                     with store.connect() as db:
                         db.execute('BEGIN IMMEDIATE')
+                        from .assistant_project import remember_fields
+                        from .kobo_edits import effective_project
+                        stored = db.execute('SELECT payload FROM projects WHERE id=?',
+                                            (body.projectId,)).fetchone()
+                        if stored is not None:
+                            existing = json.loads(stored[0])
+                            if 'assistant' in existing:
+                                payload['assistant'] = existing['assistant']
+                            remember_fields(payload, existing, effective_project(payload)['form'])
                         result = db.execute('UPDATE projects SET payload=?,settings=?,form=?,data=?,updated=? WHERE id=? AND updated=?',
                             (json.dumps(payload,ensure_ascii=False), settings.model_dump_json(), form_raw, data_raw,
                              datetime.now().isoformat(),body.projectId,body.expectedUpdated))

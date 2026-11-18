@@ -12,8 +12,11 @@ it('keeps connection information compact and does not render a permanent panel',
  expect(html).toContain('Connected · 1 question · Edit');expect(html).toContain('aria-haspopup="dialog"');expect(html).not.toContain('<dialog');
 });
 it('explains the selected base and hidden-answer behavior in both languages',()=>{
- const html=renderToStaticMarkup(<KoboBasisSummary result={result} language="en"/>);
- expect(html).toContain('100');expect(html).toContain('Main');expect(html).toContain('Adjusted follow-up base');
+ const html=renderToStaticMarkup(<KoboBasisSummary result={result} language="en" hiddenCount={1}/>);
+ expect(html).toContain('1 answer hidden');
+ expect(html).toContain('100');expect(html).toContain('Main');expect(html).toContain('Parent respondents');
+ const followUp={...result,respondentBasis:{...result.respondentBasis!,kind:'question' as const,denominator:5}};
+ expect(renderToStaticMarkup(<KoboBasisSummary result={followUp} language="en"/>)).toContain('Follow-up respondents');
  expect(renderToStaticMarkup(<KoboBasisSummary result={result} language="ar"/>)).toContain('dir="rtl"');
  const invalid={...result,respondentBasis:{...result.respondentBasis!,issue:'missing-parent',denominator:null}};
  expect(renderToStaticMarkup(<KoboBasisSummary result={invalid} language="en"/>)).toContain('Percentage base unavailable');
@@ -98,6 +101,14 @@ it('reserves parent percentage controls for legacy basis while keeping connectio
  expect(html).toContain('Question connection');
 });
 
+it('shows the selected answer scope alongside the parent respondent base',()=>{
+ const value={percentageMode:'legacy-respondents',connectedPercentageMode:'keep-original',connectedAnswerScope:'visible'} as const;
+ const html=renderToStaticMarkup(<KoboConnectionControls result={result} project={project} value={value as KoboQuestionSettings} language="en" onChange={()=>{}}/>);
+ expect(html).toContain('Answer scope');
+ expect(html).toMatch(/aria-pressed="true"[^>]*>Visible answers</);
+ expect(html).toContain('Parent respondents without an eligible follow-up answer remain in the base.');
+});
+
 
 it('shows respondent switches only for active connections or hidden answers',()=>{
  const plain={...result,connections:null,respondentBasis:null};
@@ -107,9 +118,9 @@ it('shows respondent switches only for active connections or hidden answers',()=
  expect(showRespondentPercentageControls(plain,{...settings,hiddenAnswers:['a']})).toBe(true);
  const ignored={...result,connections:{...result.connections!,effectiveTree:null,conditions:result.connections!.conditions.map(c=>({...c,status:'ignored'}))}};
  expect(showRespondentPercentageControls(ignored,settings)).toBe(false);
- for(const percentageMode of ['grand-total','row-total','column-total','breakdown-group'] as const){
+ for(const percentageMode of ['grand-total','row-total','column-total','breakdown-group','visible-selections'] as const){
   expect(showRespondentPercentageControls({...result,percentageMode},settings)).toBe(false);
-  expect(showRespondentPercentageControls({...result,percentageMode},{...settings,hiddenAnswers:['a']})).toBe(true);
+  expect(showRespondentPercentageControls({...result,percentageMode},{...settings,hiddenAnswers:['a']})).toBe(false);
   const html=renderToStaticMarkup(<KoboConnectionControls result={result} project={project} value={{...settings,percentageMode}} language="en" onChange={()=>{}}/>);
   expect(html).not.toContain('kobo-answer-percentage-buttons');
  }
@@ -118,8 +129,9 @@ it('shows respondent switches only for active connections or hidden answers',()=
   expect(html).not.toContain('kobo-answer-percentage-buttons');
  }
  const hidden=renderToStaticMarkup(<KoboConnectionControls result={plain} project={project} value={{...settings,hiddenAnswers:['a']}} language="en" onChange={()=>{}}/>);
- expect(hidden).toContain('Visible respondents');
- expect(hidden).toContain('All respondents');
+ expect(hidden).toContain('Answer scope');
+ expect(hidden).toMatch(/aria-pressed="true"[^>]*>Visible answers</);
+ expect(hidden).toContain('All answers');
  expect(hidden).not.toContain('Original base question');
 });
 

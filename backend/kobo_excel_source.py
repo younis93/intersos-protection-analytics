@@ -99,16 +99,18 @@ def query_config(project, snapshot, settings, specs, layouts):
     results = []
     for result in snapshot['questions']:
         q = by_id[result['id']]; cfg = resolved_question_settings(q,settings)
-        from .kobo_connections import connection_plan, uses_linked_respondents
+        from .kobo_connections import connection_plan, hidden_answers_filter_cohort, respondent_hidden_codes
         plan = connection_plan(q,cfg,by_id) if cfg else {'enabled':False}
         dimensions = breakdown_fields(cfg, by_id, q) if cfg else []
-        exclude_hidden = cfg and (uses_linked_respondents(cfg, plan) or cfg.hiddenAnswerPercentageMode == 'adjust')
+        exclude_hidden = cfg and hidden_answers_filter_cohort(cfg, plan)
         counts = Counter(row['label'] for row in result.get('percentageRows', result['rows']))
         results.append({'id': q['id'], 'label': result['label'], 'group': q['group'], 'groupLabel': next((g['label'] for g in snapshot['groups'] if g['id'] == q['group']), ''),
             'excludedRecords': [r['id'] for r in project['records'] if q['id'] in r.get('_conditionalExcluded', [])],
             'scope': q['repeat'], 'kind': q['kind'], 'dateUnit': cfg.dateUnit if cfg else 'month', 'trendDateField': cfg.trendDateField if cfg and result.get('trend') else '', 'trendUnit': cfg.trendUnit if cfg else 'month', 'dimensions': [f['id'] for f in dimensions],
-            'bins': result.get('bins', []), 'blank': not settings.hideBlanks and not (exclude_hidden and '__blank__' in cfg.hiddenAnswers), 'hiddenAnswers': cfg.hiddenAnswers if exclude_hidden and q['kind'] in {'category','multiple','text'} else [],
+            'bins': result.get('bins', []), 'blank': not settings.hideBlanks and (not cfg or '__blank__' not in cfg.hiddenAnswers or any(row['id'] == '__blank__' for row in result.get('percentageRows', []))), 'hiddenAnswers': cfg.hiddenAnswers if exclude_hidden and q['kind'] in {'category','multiple','text'} else [],
             'hiddenAnswerPercentageMode': cfg.hiddenAnswerPercentageMode if cfg else 'adjust',
+            'hiddenDisplayAnswers': cfg.hiddenAnswers if not exclude_hidden and 'percentageRows' not in result else [],
+            'respondentHiddenAnswers': sorted(respondent_hidden_codes(q, cfg, plan)),
             'percentageParent': plan['parentId'] if plan['enabled'] and plan['mode']=='keep-original' else '',
             'connected':plan['enabled'], 'connectionTree':plan.get('tree') if not plan.get('reviewIssues') else None,
             'answers': [{'id': a['id'], 'label': f"{a['label']} [{a['id']}]" if counts[a['label']] > 1 else a['label']} for a in result.get('percentageRows', result['rows']) if a['id'] != '__blank__'],
@@ -194,14 +196,15 @@ QUERY_BODY = r'''
      value = FieldValue(r, q[id]), selected = List.Distinct(List.Select(Text.Split(value, " "), each _ <> "")), answered = if List.IsEmpty(selected) then 0 else 1,
      parentBase = Record.FieldOrDefault(q, "percentageParent", "") <> "", parentAnswered = if parentBase then FieldValue(r,q[percentageParent]) <> "" else false,
      eligible = MatchNode(Record.FieldOrDefault(q, "connectionTree", null), r) and List.IsEmpty(List.Intersect({if value = "" then {"__blank__"} else selected, Record.FieldOrDefault(q, "hiddenAnswers", {})})) and (not parentBase or parentAnswered),
+     hiddenOnly = eligible and answered = 1 and List.IsEmpty(List.Difference(selected, Record.FieldOrDefault(q, "respondentHiddenAnswers", {}))),
      dimensions = List.Transform(q[dimensions], (id) => Caption(id, FieldValue(r, id))),
      filters = FilterValues(r),
      trend = if Record.FieldOrDefault(q, "trendDateField", "") = "" then {} else {try Date.ToText(Date.From(FieldValue(r, q[trendDateField])), if q[trendUnit] = "year" then "yyyy" else if q[trendUnit] = "month" then "yyyy-MM" else "yyyy-MM-dd") otherwise ""},
      details = {TextValue(Record.Field(r, "Response ID")), TextValue(Record.FieldOrDefault(r, "Parent ID")), Record.FieldOrDefault(r, "Source row")} & List.Transform(Config[details], (f) => let field = Record.Field(Config[fields], f[id]), owner = Resolve(r, field[scope]) in if owner = null then null else Record.Field(owner, field[column])),
-     row = (code as text, caption as text, count as number, base as number, role as text) => {q[id], q[label], q[group], q[groupLabel], TextValue(Record.Field(r, "Response ID")), code, caption, count, base} & List.FirstN(dimensions & {"", "", ""}, 3) & {role} & filters & trend & details & (if Record.FieldOrDefault(q, "percentageParent", "") = "" then {} else {if role = "Denominator" then (if eligible then answered else 0) else 0}),
-     chosen = if not eligible then {} else if answered = 0 then (if q[blank] then {"__blank__"} else {}) else selected,
+     row = (code as text, caption as text, count as number, base as number, role as text) => {q[id], q[label], q[group], q[groupLabel], TextValue(Record.Field(r, "Response ID")), code, caption, count, base} & List.FirstN(dimensions & {"", "", ""}, 3) & {role} & filters & trend & details & (if Record.FieldOrDefault(q, "percentageParent", "") = "" then {} else {if role = "Denominator" and eligible and not hiddenOnly then answered else 0}),
+     chosen = if not eligible then {} else if answered = 0 then (if q[blank] then {"__blank__"} else {}) else List.Difference(selected, Record.FieldOrDefault(q, "hiddenDisplayAnswers", {})),
      selections = List.Transform(chosen, (code) => let known = List.Select(Options, each [id] = code) in row(code, if List.IsEmpty(known) then code else known{0}[label], 1, 0, "Included"))
-     in if not parentBase and not eligible then {} else {row("__base__", "Respondent base", 0, if parentBase then (if parentAnswered then 1 else 0) else if eligible then answered else 0, "Denominator")} & selections)),
+     in if not parentBase and not eligible then {} else {row("__base__", "Respondent base", 0, if hiddenOnly then 0 else if parentBase then (if parentAnswered then 1 else 0) else if eligible then answered else 0, "Denominator")} & selections)),
    Seeds = List.Transform(Options, (a) => {q[id], q[label], q[group], q[groupLabel], null, a[id], a[label], 0, 0, "", "", "", "Category seed"} & (if List.IsEmpty(Cohort) then List.Repeat({null}, List.Count(Config[filters])) else FilterValues(Cohort{0})) & (if Record.FieldOrDefault(q, "trendDateField", "") = "" then {} else {null}) & List.Repeat({null}, 3 + List.Count(Config[details])) & (if Record.FieldOrDefault(q, "percentageParent", "") = "" then {} else {0}))
  in Expanded & Seeds,
  Rows = List.Combine(List.Transform(Config[questions], each QuestionRows(_))),

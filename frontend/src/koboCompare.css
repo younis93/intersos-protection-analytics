@@ -1,4 +1,4 @@
-.kobo-shell .kobo-compare{width:min(1480px,calc(100vw - 32px));height:min(880px,calc(100dvh - 40px));max-height:calc(100dvh - 40px);padding:0;overflow:hidden;border-radius:22px;background:var(--panel-strong)}
+.kobo-shell .kobo-compare{width:min(1480px,calc(100vw - 32px));height:min(880px,calc(100dvh - 40px));max-height:calc(100dvh - 40px);padding:0;overflow:hidden;border-radius:22px;background:var(--popup-surface)}
 .kobo-compare[open]{display:flex;flex-direction:column}
 .kobo-shell .kobo-compare>header{display:flex;align-items:center;gap:14px;margin:0;padding:20px 24px;border-bottom:1px solid var(--line);flex:none}
 .kobo-compare-icon{display:grid;place-items:center;width:44px;height:44px;flex:none;border-radius:14px;background:color-mix(in srgb,var(--blue) 10%,transparent);color:var(--blue)}

@@ -3,7 +3,8 @@ import {resolveAppearance} from './koboAppearance';
 
 export const projectKoboChart=(result:KoboResult):KoboResult=>result.chartProjection?{...result,...result.chartProjection,chartProjection:null}:result;
 
-export type KoboChartPanel=KoboResult&{chartMaximum?:number};
+// A pie or donut can render as bars in a paged chart or a PDF panel.
+export type KoboChartPanel=KoboResult&{chartMaximum?:number;sourceChart?:KoboResult['chart']};
 
 export function koboChartRows(result:KoboResult){
  result=projectKoboChart(result);
@@ -42,7 +43,8 @@ export function koboScreenChartPage(result:KoboResult,rows:KoboResult['rows'],re
  const pages=paged?Math.ceil(rows.length/pageSize):1;
  const page=Math.max(0,Math.min(pages-1,requestedPage));
  const start=paged?page*pageSize:0,end=paged?Math.min(rows.length,start+pageSize):rows.length;
- return{result:paged?{...result,chart:isDenseKoboChart(result)?'bar':readableKoboChartType(result),rows:rows.slice(start,end)}:result,paged,page,pages,start,end,total:rows.length};
+ const panel:KoboChartPanel=paged?{...result,sourceChart:result.chart,chart:isDenseKoboChart(result)?'bar':readableKoboChartType(result),rows:rows.slice(start,end)}:result;
+ return{result:panel,paged,page,pages,start,end,total:rows.length};
 }
 
 /** Bound printed panels so labels stay legible after proportional page placement. */
@@ -57,7 +59,7 @@ export function koboPdfChartPanels(result:KoboResult){
  const panels:KoboChartPanel[]=[];
  const count=Math.ceil(rows.length/limit),base=Math.floor(rows.length/Math.max(1,count)),extra=rows.length%Math.max(1,count);
  let start=0;
- for(let index=0;index<count;index++){const size=base+(index<extra?1:0);panels.push({...result,chart,chartMaximum,rows:rows.slice(start,start+size)});start+=size}
+ for(let index=0;index<count;index++){const size=base+(index<extra?1:0);panels.push({...result,sourceChart:result.chart,chart,chartMaximum,rows:rows.slice(start,start+size)});start+=size}
  if(chart==='heatmap'){const matrix:KoboChartPanel[]=[];for(const panel of panels)for(let column=0;column<result.breakdowns.length;column+=5)matrix.push({...panel,breakdowns:result.breakdowns.slice(column,column+5)});return matrix.length?matrix:panels}
  return panels;
 }

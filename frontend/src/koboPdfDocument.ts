@@ -113,10 +113,20 @@ export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,lo
    pdf.setDrawColor(line);pdf.setLineWidth(.5);pdf.line(margin,y+2,width-margin,y+2);y+=11;
   }
   questionPage();
+  if(sourceResult.reportAttachment)paragraph(sourceResult.reportAttachment.source,9,false,muted);
   const stats=Object.entries(result.statistics).filter(([key,value])=>key!=='count'&&Number.isFinite(value)).map(([key,value])=>`${statisticLabels[key]?.[rtl?1:0]||key.replace(/([A-Z])/g,' $1')}: ${number(value)}`);
   if(stats.length)paragraph(stats.join('   |   '),9,false,muted);
   if(!result.rows.length){paragraph(rtl?'لا توجد إجابات ضمن عوامل التصفية الحالية.':'No answered responses under the current filters.',10,false,muted);continue}
-  const chartPanels=sourceResult.denominator?koboPdfChartPanels(sourceResult):[];
+  const chartPanels=sourceResult.denominator&&sourceResult.reportAttachment?.view!=='pivot'?koboPdfChartPanels(sourceResult):[];
+  if(sourceResult.reportAttachment?.view==='chart'){
+   for(const [index,chart] of chartPanels.entries()){
+    if(index||bottom-y<180)questionPage(true);
+    const image=await imageFor(chart),properties=pdf.getImageProperties(image);
+    const placement=fitKoboPdfImage(properties.width,properties.height,available,bottom-y);
+    pdf.addImage(image,'PNG',margin+placement.x,y,placement.width,placement.height,undefined,'FAST');
+   }
+   continue;
+  }
   if(chartPanels.length>1){
    let offset=0;
    for(let index=0;index<chartPanels.length;index++){
@@ -131,13 +141,15 @@ export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,lo
    questionPage(true);
   }
   const breakdownDisplay=isMeasure&&!additiveMeasure(sourceResult)?'count':snapshot.settings.questions[result.id]?.breakdownDisplay||'both';
-  if(questionFilterNote(sourceResult.filterMode)){paragraph(questionFilterNote(sourceResult.filterMode),10,true);for(const note of sourceResult.filterSummary||[])paragraph(note,9,false,muted)}
-  paragraph(sourceResult.percentageBasis,9,false,muted);
+  if(!sourceResult.reportAttachment){
+   if(questionFilterNote(sourceResult.filterMode)){paragraph(questionFilterNote(sourceResult.filterMode),10,true);for(const note of sourceResult.filterSummary||[])paragraph(note,9,false,muted)}
+   paragraph(sourceResult.percentageBasis,9,false,muted);
+  }
   if(isMeasure)paragraph(`${sourceResult.measure!.label} · ${sourceResult.measure!.unit}${sourceResult.measure!.parentValuesRepeated?' · Parent values are repeated once per matching repeat entry.':''}`,10,true);
   const metrics=breakdownDisplay==='both'?['count','percent']:[breakdownDisplay];
   const breakdownMetric=isMeasure?sourceResult.measure!.label+(additiveMeasure(sourceResult)&&breakdownDisplay!=='count'?' / %':''):breakdownDisplay==='count'?'#':breakdownDisplay==='percent'?'%':'# / %';
   const totalsPolicy=koboPivotTotals(result);
-  const hasBreakdown=result.breakdowns.length>0,tableWidth=hasBreakdown||chartPanels.length>1?available:(available-24)*.5;
+  const hasBreakdown=result.breakdowns.length>0,tableWidth=hasBreakdown||chartPanels.length>1||sourceResult.reportAttachment?.view==='pivot'?available:(available-24)*.5;
   const panels=hasBreakdown?Array.from({length:Math.ceil(result.breakdowns.length/5)},(_,i)=>result.breakdowns.slice(i*5,i*5+5)):[[]];
   for(let panelIndex=0;panelIndex<panels.length;panelIndex++){
    const panel=panels[panelIndex];if(panelIndex)questionPage(true);

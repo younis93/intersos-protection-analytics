@@ -37,7 +37,7 @@ def write_trend_series(book,chart,result,matrix,metrics,support_sheet,legacy_bas
             column=2+ai*len(metrics)+mi
             for pi,row in enumerate(matrix):
                 numerator=remaining_sum(matrix_range([row]),[row[index] for index in excluded]) if other else row[own_index]
-                denominator=legacy_bases[pi] if mode=='legacy-respondents' and legacy_bases else grand if mode=='grand-total' else f'SUM({matrix_range([row])})' if mode in {'column-total','breakdown-group'} else row_total
+                denominator=legacy_bases[pi] if mode=='legacy-respondents' and legacy_bases else grand if mode in {'grand-total', 'visible-selections'} else f'SUM({matrix_range([row])})' if mode in {'column-total','breakdown-group'} else row_total
                 formula=numerator if metric=='count' else f'IFERROR(IF({denominator}=0,"-",{numerator}/{denominator}),"-")'
                 excel_cell(helper,first+pi,column).Formula2='='+formula
             native=chart.SeriesCollection().NewSeries();native.Name=safe_spreadsheet_value(series['label']+(' %' if metric=='percent' else ' #'))

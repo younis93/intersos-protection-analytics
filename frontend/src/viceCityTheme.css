@@ -95,6 +95,8 @@
   height: 100%;
   object-fit: cover;
   object-position: center bottom;
+  filter: blur(6px);
+  transform: scale(1.06);
 }
 
 .vice-city-backdrop picture::after {

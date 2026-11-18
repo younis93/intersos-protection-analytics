@@ -203,9 +203,9 @@ dialog.custom-setup .app-select-menu-search>input:is(:focus,:focus-visible){
 /* The same feedback applies to secondary actions throughout all six steps. */
 .custom-setup button:is(.soft,.primary){display:inline-flex;align-items:center;justify-content:center;gap:8px}
 .custom-setup button:is(.soft,.primary)>svg{width:17px;height:17px;flex:none}
-.custom-setup button:not(.app-select-trigger):not([role=option]):is(:hover,:focus-visible):not(:disabled) svg:not(.custom-action-loading):not(.custom-next-arrow):not(.custom-refresh-icon){animation:custom-icon-nudge .55s ease}
+.custom-setup button:not(.app-select-trigger):not([role=option]):is(:hover,:focus-visible):not(:disabled) svg:not(.custom-action-loading):not(.custom-next-arrow):not(.custom-refresh-icon,.lucide-x){animation:custom-icon-nudge .55s ease}
 .custom-setup button:is(:hover,:focus-visible):not(:disabled) .custom-refresh-icon:not(.custom-action-loading){animation:custom-icon-spin .65s ease}
-.custom-setup button:not(:disabled):active>svg:not(.custom-action-loading){transform:scale(.9)}
+.custom-setup button:not(:disabled):active>svg:not(.custom-action-loading,.lucide-x){transform:scale(.9)}
 .custom-setup .app-select-trigger>svg{transition:transform .2s ease}
 .custom-setup .app-select-trigger[aria-expanded=true]>svg{transform:rotate(180deg)}
 .custom-setup button:focus-visible{outline:2px solid var(--blue);outline-offset:3px}

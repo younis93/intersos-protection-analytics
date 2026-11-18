@@ -73,7 +73,7 @@ def trend_chart(book, report, cache, result, position, footer, left, top, metric
             mode=result.get('percentageMode','legacy-respondents')
             denominator=base
             if mode!='legacy-respondents':
-                matrix=refs if mode=='grand-total' else [refs[index]] if mode in {'column-total','breakdown-group'} else [[row[ai]] for row in refs]
+                matrix=refs if mode in {'grand-total', 'visible-selections'} else [refs[index]] if mode in {'column-total','breakdown-group'} else [[row[ai]] for row in refs]
                 denominator='SUM('+matrix_range(matrix)+')'
             if series['id'] not in visible_ids: continue
             values.extend(['=' + refs[index][ai], f'=IF({denominator}=0,"-",{count}/{denominator})'])

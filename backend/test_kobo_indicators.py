@@ -28,6 +28,17 @@ def test_worked_example_normalizes_unequal_scales_and_excludes_incomplete(sample
     assert project == before
 
 
+def test_eligibility_and_breakdown_share_the_complete_response_base(sample):
+    item = IndicatorDefinition(id='coverage', name='Coverage', mode='percentage',
+        eligibilityField='group/gender', eligibilityCodes=['f'], breakdownField='group/gender',
+        questions=[IndicatorQuestion(question='group/needs', kind='multiple', selectedCodes=['food'])])
+    result = calculate_indicator(sample[0], KoboSettings(language='en'), item)
+    assert (result.total, result.numerator, result.denominator, result.value) == (2, 1, 1, 100)
+    assert [(group.id, group.complete, group.incomplete, group.value) for group in result.breakdowns] == [('f', 1, 1, 100)]
+    assert 'Eligibility: Gender = Female' in result.methodology
+    assert 'Select at least one current eligibility answer.' in indicator_issues(sample[0], item.model_copy(update={'eligibilityCodes': ['obsolete']}))
+
+
 def test_custom_weights_have_fixed_shares_on_incomplete_records(sample):
     item = definition(); item.questions[1].weight = 3
     result = calculate_indicator(sample[0], KoboSettings(), item)

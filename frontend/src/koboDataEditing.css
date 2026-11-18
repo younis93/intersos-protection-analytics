@@ -3,7 +3,7 @@
 .kobo-answer-edit-shortcut{font:inherit;color:inherit;text-align:start;justify-content:flex-start!important;background:transparent;border:0;padding:0;white-space:normal;overflow-wrap:anywhere}.kobo-answer-edit-shortcut:hover{text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
 
 /* The single-response editor owns its layout without changing Manage answers. */
-.kobo-dialog.kobo-response-dialog{width:min(600px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0!important;overflow:hidden;background:var(--panel-strong)}
+.kobo-dialog.kobo-response-dialog{width:min(600px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:0!important;overflow:hidden;background:var(--popup-surface)}
 .kobo-dialog.kobo-response-dialog[open]{display:flex;flex-direction:column}
 .kobo-dialog.kobo-response-dialog>header{flex-shrink:0;margin:0;padding:20px 24px 16px;border-bottom:1px solid var(--line);gap:12px}
 .kobo-dialog.kobo-response-dialog>header>div{display:grid;grid-template-columns:36px minmax(0,1fr);column-gap:12px;align-items:center}

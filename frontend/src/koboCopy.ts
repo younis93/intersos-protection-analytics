@@ -1,7 +1,14 @@
 import type {createKoboApi} from './koboApi';
 import {resultWithPivotOrdering} from './koboPivotSort';
 import {koboTableHtml,koboTableText} from './koboTableData';
-import type {KoboSettings} from './koboTypes';
+import type {KoboResult,KoboSettings} from './koboTypes';
+
+export async function copyKoboChartImage(result:KoboResult,language:string){
+ if(!navigator.clipboard?.write||typeof ClipboardItem==='undefined')
+  throw new Error('Image copying is unavailable. Use Chart PNG to download the image.');
+ const image=import('./KoboChart').then(module=>module.koboChartImage(result,language)).then(async url=>(await fetch(url)).blob());
+ await navigator.clipboard.write([new ClipboardItem({'image/png':image})]);
+}
 
 /** Copy includes zero rows without changing the saved or displayed settings. */
 export function loadKoboCopyAnalysis(api:Pick<ReturnType<typeof createKoboApi>,'analyze'>,id:string,settings:KoboSettings,signal:AbortSignal,question=''){

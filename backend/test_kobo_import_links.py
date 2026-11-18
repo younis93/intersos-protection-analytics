@@ -5,7 +5,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.kobo import ProjectStore, normalize, parse_data, parse_form, propose_mapping
+from backend.kobo import KoboSettings, ProjectStore, normalize, parse_data, parse_form, propose_mapping
 from backend.kobo_api import make_router
 from backend.kobo_import_links import form_changes, question_matches, reuse_links, review_details
 from backend.test_kobo import workbook
@@ -24,6 +24,50 @@ def fixture_data():
         if name in {'gender', 'age', 'needs'}: m.update(question=name, status='matched', mergeMode='coalesce')
         else: m.update(question='', status='excluded')
     return form, sheets, mappings
+
+
+def test_replacement_upload_remembers_form_changes_and_increased_missingness(tmp_path):
+    form, sheets, mappings = fixture_data()
+    records, issues = normalize(form, sheets, mappings)
+    project = {'form': form, 'records': records, 'issues': issues, 'mappings': mappings}
+    store = ProjectStore(tmp_path/'assistant-briefing.db')
+    saved = store.create('Briefing', project, b'form', b'data', KoboSettings())
+    changed = deepcopy(project)
+    changed['records'][0]['values']['gender'] = None
+    changed['form']['questions'][0]['labels']['en'] = 'Respondent sex'
+    store.repair(saved['id'], changed, b'updated form', b'updated data')
+    app = FastAPI()
+    app.include_router(make_router(store))
+    client = TestClient(app)
+    upload = client.get(f'/api/kobo/projects/{saved["id"]}/assistant').json()['upload']
+    assert {'question': 'gender', 'change': 'Question label changed'} in upload['changes']
+    assert {'field': 'gender', 'before': 1, 'after': 2} in upload['missingIncreases']
+
+
+def test_assistant_cross_check_withholds_small_rule_counts_and_checks_visible_patterns(tmp_path):
+    from backend.assistant_checks import CrossQuestionCheck, check_questions
+    from backend.test_kobo import sample
+    payload, _, _ = sample.__wrapped__()
+    first = payload['form']['questions'][0]
+    second = {**first, 'id': 'second', 'name': 'second'}
+    payload['form']['questions'].append(second)
+    records = []
+    for index, (a, b) in enumerate([('f', 'f')]*6 + [('m', 'm')]*6):
+        records.append({'id': str(index), 'scope': '', 'values': {first['id']: a, 'second': b}})
+    payload['records'] = records
+    check = CrossQuestionCheck(settings=KoboSettings(), first=first['id'], second='second')
+    assert len(check_questions(payload, check, 5)['patterns']) == 2
+    rule = check.model_copy(update={'expectation': 'answer', 'when': 'f', 'expected': 'f'})
+    assert check_questions(payload, rule, 5) == {'checked': 6, 'violations': 0}
+    records[0]['values']['second'] = 'm'
+    assert check_questions(payload, rule, 5) == {'withheld': True}
+    assert check_questions(payload, check, 5) == {'withheld': True}
+    store = ProjectStore(tmp_path/'cross-check.db')
+    saved = store.create('Cross check', payload, b'form', b'data', KoboSettings())
+    app = FastAPI()
+    app.include_router(make_router(store))
+    route = f'/api/kobo/projects/{saved["id"]}/assistant/cross-check'
+    assert TestClient(app).post(route, json=rule.model_dump()).json() == {'withheld': True}
 
 
 def test_typed_coalesce_reports_only_actual_conflicts_and_exact_examples():

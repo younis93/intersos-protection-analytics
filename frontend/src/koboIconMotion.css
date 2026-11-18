@@ -1,7 +1,7 @@
 /* Shared interaction feedback for Kobo controls, including dialogs in portals.
    Existing layered action icons, report sparkles, loaders and state chevrons
    keep their own motion. No icon runs continuously while the page is idle. */
-:where(.kobo-shell,.kobo-dialog,.kobo-export-tray) :is(button:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]),a[href]:not([aria-disabled="true"])):is(:hover,:focus-visible)>svg.lucide:not(.lucide-loader-circle,.lucide-loader,.lucide-chevron-down,.lucide-chevron-up,.lucide-chevron-left,.lucide-chevron-right,.lucide-chevrons-up-down,.lucide-chevrons-down-up,[style*="transform"]),
+:where(.kobo-shell,.kobo-dialog,.kobo-export-tray) :is(button:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]),a[href]:not([aria-disabled="true"])):is(:hover,:focus-visible)>svg.lucide:not(.lucide-x,.lucide-loader-circle,.lucide-loader,.lucide-chevron-down,.lucide-chevron-up,.lucide-chevron-left,.lucide-chevron-right,.lucide-chevrons-up-down,.lucide-chevrons-down-up,[style*="transform"]),
 :where(.kobo-shell,.kobo-dialog,.kobo-export-tray) button:not(:disabled):not([aria-busy="true"]):is(:hover,:focus-visible)>:is(.excel-download-button-content,.kobo-section-icon)>svg.lucide,
 :where(.kobo-shell,.kobo-dialog) .app-select:has(>.app-select-trigger:not(:disabled)):is(:hover,:focus-within)>svg.app-select-icon.lucide,
 .kobo-shell .sidebar nav button:not(:disabled):is(:hover,:focus-visible)>.animated-section-icon:not(.animated-action-icon){animation:var(--kobo-icon-motion,kobo-icon-pulse) var(--kobo-icon-duration,.55s) cubic-bezier(.22,1,.36,1);transform-origin:center}
@@ -10,7 +10,7 @@
 :where(.kobo-shell,.kobo-dialog,.kobo-export-tray) svg:is(.lucide-arrow-right,.lucide-columns-2,.lucide-columns2,.lucide-columns-3,.lucide-columns3){--kobo-icon-motion:kobo-icon-right}
 :where(.kobo-shell,.kobo-dialog,.kobo-export-tray) svg.lucide-arrow-left{--kobo-icon-motion:kobo-icon-left}
 :where(.kobo-shell,.kobo-dialog,.kobo-export-tray) svg:is(.lucide-pencil,.lucide-file-text,.lucide-file-json,.lucide-file-spreadsheet,.lucide-palette){--kobo-icon-motion:kobo-icon-tilt}
-:where(.kobo-shell,.kobo-dialog,.kobo-export-tray) svg:is(.lucide-plus,.lucide-x){--kobo-icon-motion:kobo-icon-turn}
+:where(.kobo-shell,.kobo-dialog,.kobo-export-tray) svg.lucide-plus{--kobo-icon-motion:kobo-icon-turn}
 :where(.kobo-shell,.kobo-dialog,.kobo-export-tray) svg.lucide-rotate-ccw{--kobo-icon-motion:kobo-icon-reset}
 :where(.kobo-shell,.kobo-dialog,.kobo-export-tray) svg.lucide-copy{--kobo-icon-motion:kobo-icon-copy}
 :where(.kobo-shell,.kobo-dialog,.kobo-export-tray) svg:is(.lucide-eye,.lucide-eye-off){--kobo-icon-motion:kobo-icon-eye}

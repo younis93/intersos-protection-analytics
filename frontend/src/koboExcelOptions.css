@@ -1,4 +1,4 @@
-.kobo-shell .kobo-excel-options{width:min(1180px,calc(100vw - 32px));height:min(860px,calc(100dvh - 40px));max-height:calc(100dvh - 40px);padding:0;overflow:hidden;border-radius:20px;background:var(--panel-strong)}
+.kobo-shell .kobo-excel-options{width:min(1180px,calc(100vw - 32px));height:min(860px,calc(100dvh - 40px));max-height:calc(100dvh - 40px);padding:0;overflow:hidden;border-radius:20px;background:var(--popup-surface)}
 .kobo-excel-options[open]{display:flex;flex-direction:column}
 .kobo-shell .kobo-excel-options>header{display:flex;align-items:center;gap:14px;padding:22px 24px;margin:0;border-bottom:1px solid var(--line);flex-shrink:0}
 .kobo-excel-options-icon{display:grid;place-items:center;width:46px;height:46px;flex-shrink:0;border-radius:14px;background:color-mix(in srgb,var(--blue) 9%,var(--panel));color:var(--blue)}

@@ -4,6 +4,108 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright');
 const url = process.env.APP_URL || 'http://127.0.0.1:5189/';
 const executablePath = process.env.EDGE_PATH || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 
+async function checkSnowmanCadence(page, snowman) {
+  await page.waitForFunction(() => document.querySelector('.home-snowman-sprite')?.style.backgroundSize.startsWith('1600%'));
+  const sample = await snowman.locator('.home-snowman-sprite').evaluate(element => new Promise(resolve => {
+    const frames = new Set();
+    let start;
+    let first;
+    function read(now) {
+      start ??= now;
+      const [x, y] = element.style.backgroundPosition.split(' ').map(parseFloat);
+      const frame = Math.round(x * 15 / 100) + 16 * Math.round(y * 29 / 100);
+      first ??= frame;
+      frames.add(frame);
+      if (now - start < 500) requestAnimationFrame(read);
+      else resolve({elapsed: now - start, advance: (frame - first + 48) % 48, distinct: frames.size});
+    }
+    requestAnimationFrame(read);
+  }));
+  assert(Math.abs(sample.advance - sample.elapsed / 25) <= 3, JSON.stringify(sample));
+  assert(sample.distinct >= 12, JSON.stringify(sample));
+}
+
+async function checkSnowmanPinch(page, snowman) {
+  const touch = await page.context().newCDPSession(page);
+  const dispatch = (type, touchPoints = []) => touch.send('Input.dispatchTouchEvent', {type, touchPoints});
+  try {
+    const {x, y, width, height} = await snowman.locator('[data-part="belly"]').boundingBox();
+    const first = {id: 1, x: x + width * .2, y: y + height / 2};
+    const second = {id: 2, x: x + width * .8, y: first.y};
+    await dispatch('touchStart', [first, second]);
+    await page.waitForFunction(() => document.querySelector('.home-snowman')?.dataset.animation === 'pinch');
+    await dispatch('touchMove', [first, {...second, x: first.x + 12}]);
+    await page.waitForFunction(() => parseFloat(document.querySelector('.home-snowman-sprite').style.scale) > 1.1);
+    await dispatch('touchMove', [first, {...second, x: second.x + 30}]);
+    await page.waitForFunction(() => parseFloat(document.querySelector('.home-snowman-sprite').style.scale) < .9);
+    await dispatch('touchEnd');
+    await page.waitForFunction(() => document.querySelector('.home-snowman')?.dataset.animation === 'walk');
+    assert.equal(await snowman.locator('.home-snowman-sprite').evaluate(element => element.style.scale), '');
+  } finally {
+    await touch.detach();
+  }
+}
+
+async function checkSnowmanCardLanding(browser, width) {
+  const page = await browser.newPage({viewport: {width, height: 900}, hasTouch: width === 390});
+  let allowDragAssets;
+  const dragAssets = new Promise(resolve => { allowDragAssets = resolve; });
+  try {
+    await page.route('**/api/**', route => route.fulfill({json: route.request().url().endsWith('/home/weather') ? {mode: 'snow'} : []}));
+    await page.route('**/assets/home-snowman-drag-*', async route => {
+      await dragAssets;
+      await route.continue();
+    });
+    await page.addInitScript(() => {
+      window.snowSpray = [];
+      const ellipse = CanvasRenderingContext2D.prototype.ellipse;
+      CanvasRenderingContext2D.prototype.ellipse = function(x, y, rx, ry, ...rest) {
+        if (rx === 1.85 && ry === 1.55 && this.canvas.classList.contains('home-weather-sky')) {
+          window.snowSpray.push({x, y});
+        }
+        return ellipse.call(this, x, y, rx, ry, ...rest);
+      };
+    });
+    await page.goto(`${url}?startupEpoch=123#/`);
+    const snowman = page.getByRole('group', {name: 'Snowman', exact: true});
+    const sprite = snowman.locator('.home-snowman-sprite');
+    await checkSnowmanCadence(page, snowman);
+    const card = page.locator('.workspace-card').first();
+    const hat = await snowman.locator('[data-part="hat"]').boundingBox();
+    const before = await sprite.evaluate(element => element.style.backgroundImage);
+    await page.mouse.move(hat.x + hat.width / 2, hat.y + hat.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(width - 5, 10, {steps: 6});
+    await page.waitForFunction(() => document.querySelector('.home-snowman')?.dataset.animation === 'pickup');
+    assert.equal(await sprite.evaluate(element => element.style.backgroundImage), before);
+    if (width > 390) {
+      await page.setViewportSize({width: 390, height: 600});
+      await page.waitForFunction(() => document.querySelector('.home-snowman')?.getBoundingClientRect().right <= innerWidth + 1);
+      await page.setViewportSize({width, height: 900});
+    }
+    const target = await card.boundingBox();
+    const impactX = target.x + target.width / 2;
+    await page.mouse.move(impactX, Math.max(0, target.y - 140), {steps: 8});
+    await page.mouse.up();
+    await page.waitForFunction(() => {
+      const actor = document.querySelector('.home-snowman');
+      return actor?.dataset.animation === 'landing' && actor.dataset.surface === 'card';
+    });
+    const landed = await snowman.boundingBox();
+    const cardTop = (await card.boundingBox()).y;
+    assert(Math.abs(landed.y + landed.height * .88 - cardTop) < 4);
+    await page.waitForFunction(({x, y}) => window.snowSpray.some(flake => Math.abs(flake.x - x) < 45
+      && flake.y < y && flake.y > y - 45), {x: impactX, y: cardTop});
+    allowDragAssets();
+    await page.waitForFunction(() => document.querySelector('.home-snowman')?.dataset.animation === 'walk');
+    assert.equal(await snowman.getAttribute('data-surface'), 'card');
+    if (width === 390) await checkSnowmanPinch(page, snowman);
+  } finally {
+    allowDragAssets();
+    await page.close();
+  }
+}
+
 async function checkWeather(browser, width, theme) {
   const page = await browser.newPage({viewport: {width, height: 900}});
   try {
@@ -135,6 +237,7 @@ async function checkWeather(browser, width, theme) {
     await refreshMode('snow');
     assert.equal(await page.locator('main.welcome-page').getAttribute('data-home-weather'), 'snow');
     await snowman.waitFor();
+    if (width === 390) await checkSnowmanCadence(page, snowman);
     assert.deepEqual(await layoutPositions(), homePositions);
     const snowmanBounds = await snowman.boundingBox();
     assert.equal(snowmanBounds.y + snowmanBounds.height, 900);
@@ -165,9 +268,13 @@ async function checkWeather(browser, width, theme) {
     assert.equal(await snowman.getAttribute('data-animation'), 'falling');
     await page.waitForFunction(() => document.querySelector('.home-snowman')?.dataset.animation === 'landing', null, {timeout: 2000});
     const landed = await snowman.boundingBox();
-    assert.equal(landed.y, snowmanBounds.y);
+    if (await snowman.getAttribute('data-surface') === 'card') {
+      const cardTops = await page.locator('.workspace-card').evaluateAll(cards => cards.map(card => card.getBoundingClientRect().top));
+      assert(cardTops.some(top => Math.abs(landed.y + landed.height * .88 - top) < 4));
+    } else assert.equal(landed.y, snowmanBounds.y);
     assert(landed.x < grabX - 60);
     await page.waitForFunction(() => document.querySelector('.home-snowman')?.dataset.animation === 'walk', null, {timeout: 3000});
+    if (width === 390) await checkSnowmanPinch(page, snowman);
     await logo.scrollIntoViewIfNeeded();
     await page.waitForFunction(() => {
       const canvas = document.querySelector('.home-logo-weather-border > canvas');
@@ -258,6 +365,11 @@ async function checkWeather(browser, width, theme) {
 (async () => {
   const browser = await chromium.launch({executablePath});
   try {
+    for (const width of [1440, 390]) {
+      await checkSnowmanCardLanding(browser, width);
+      console.log(`Snowman card landing and snow shuffle passed at ${width}px`);
+    }
+    if (process.argv.includes('--snowman-only')) return;
     for (const width of [1440, 390]) {
       for (const theme of ['glass-light', 'glass-dark']) {
         await checkWeather(browser, width, theme);
