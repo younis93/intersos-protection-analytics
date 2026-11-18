@@ -3,6 +3,7 @@ name: Release Windows installer
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -25,7 +26,13 @@ jobs:
       - name: Resolve release version
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}".TrimStart('v')
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $versionLine = Select-String -Path backend/version.py -Pattern '^APP_VERSION = "(\d+\.\d+\.\d+)"$'
+            if (-not $versionLine) { throw "Could not read the application version." }
+            $version = $versionLine.Matches[0].Groups[1].Value
+          } else {
+            $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          }
           "APP_VERSION=$version" >> $env:GITHUB_ENV
           (Get-Content backend/version.py) -replace 'APP_VERSION = ".*"', "APP_VERSION = `"$version`"" -replace 'YOUR_GITHUB_OWNER/intersos-protection-analytics', '${{ github.repository }}' | Set-Content backend/version.py
       - name: Install dependencies
@@ -42,7 +49,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Frontend tests failed." }
           npm run build --prefix frontend
           if ($LASTEXITCODE -ne 0) { throw "Frontend build failed." }
-          python -m PyInstaller --noconfirm --clean --windowed --onedir --name "Iraq Data Analysis" --icon "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico" --distpath packaging-temp/dist --workpath packaging-temp/work --specpath packaging-temp/spec --add-data "$env:GITHUB_WORKSPACE\frontend\dist;frontend\dist" --add-data "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico;." --add-data "$env:GITHUB_WORKSPACE\backend\custom_preparation_policy.json;backend" --collect-all polars --collect-all cryptography "$env:GITHUB_WORKSPACE\desktop_launcher.py"
+          # Polars is used by legacy analytics tests. The desktop app uses pandas without Arrow.
+          python -m PyInstaller --noconfirm --clean --windowed --onedir --name "Iraq Data Analysis" --icon "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico" --distpath packaging-temp/dist --workpath packaging-temp/work --specpath packaging-temp/spec --add-data "$env:GITHUB_WORKSPACE\frontend\dist;frontend\dist" --add-data "$env:GITHUB_WORKSPACE\intersos-protection-analytics.ico;." --add-data "$env:GITHUB_WORKSPACE\backend\custom_preparation_policy.json;backend" --exclude-module polars --exclude-module pyarrow --collect-all cryptography "$env:GITHUB_WORKSPACE\desktop_launcher.py"
+          if ($LASTEXITCODE -ne 0) { throw "Desktop packaging failed." }
       - name: Sign application and build signed installer
         shell: pwsh
         env:
@@ -73,11 +82,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Installer signing failed." }
           Remove-Item certificate.pfx -Force
       - name: Generate update manifest
+        if: github.event_name == 'push'
         run: python scripts/generate_update_manifest.py "$env:APP_VERSION" "${{ github.repository }}" "release/Iraq-Data-Analysis-Setup-$env:APP_VERSION.exe" "release/update.json"
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        if: github.event_name == 'push'
         with:
           generate_release_notes: false
           body_path: RELEASE_NOTES.md
           files: |
             release/Iraq-Data-Analysis-Setup-${{ env.APP_VERSION }}.exe
             release/update.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: signed-installer-${{ env.APP_VERSION }}
+          path: release/Iraq-Data-Analysis-Setup-${{ env.APP_VERSION }}.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3

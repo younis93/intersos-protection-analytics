@@ -18,10 +18,9 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid release version: $Ver
 
 $Tag = "v$Version"
 $BaseUrl = "https://github.com/younis93/intersos-protection-analytics/releases/download/$Tag"
-$InstallerName = "Iraq-Data-Analysis-Setup-$Version.exe"
+$AllowedInstallerNames = @("Iraq-Data-Analysis-Setup-$Version.exe", "Iraq-Data-Analysis-Setup-$Version-Compact.exe")
 $TempRoot = Join-Path ([IO.Path]::GetTempPath()) "intersos-release-sync-$Version"
 $ManifestPath = Join-Path $TempRoot 'update.json'
-$InstallerPath = Join-Path $TempRoot $InstallerName
 [IO.Directory]::CreateDirectory($TempRoot) | Out-Null
 
 $Downloaded = $false
@@ -40,7 +39,9 @@ if (-not $Downloaded) { throw "Release $Tag was not published before the wait li
 
 $Manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
 if ($Manifest.version -ne $Version) { throw 'The update manifest version does not match the requested release.' }
-if ($Manifest.installerUrl -ne "$BaseUrl/$InstallerName") { throw 'The update manifest contains an unexpected installer URL.' }
+$InstallerName = $AllowedInstallerNames | Where-Object { $Manifest.installerUrl -ceq "$BaseUrl/$_" }
+if (-not $InstallerName) { throw 'The update manifest contains an unexpected installer URL.' }
+$InstallerPath = Join-Path $TempRoot $InstallerName
 
 & curl.exe -L --fail --silent --show-error $Manifest.installerUrl -o $InstallerPath
 if ($LASTEXITCODE -ne 0) { throw "Unable to download $InstallerName." }

@@ -222,6 +222,8 @@ if ($PythonSslPolicy -and (Test-Path -LiteralPath $PythonSslPolicy)) {
     $PyInstallerArgs += @('--add-data', "$PythonSslPolicy;.")
 }
 $PyInstallerArgs += @('--hidden-import', 'win32timezone', '--hidden-import', 'pythoncom', '--hidden-import', 'win32com.client', '--hidden-import', 'win32process', '--hidden-import', 'win32api')
+# Match the release build. Legacy analytics tests still use Polars and Arrow in the source environment.
+$PyInstallerArgs += @('--exclude-module', 'polars', '--exclude-module', 'pyarrow')
 $PyInstallerArgs += @('--collect-all', 'cryptography')
 if ($Clean) { $PyInstallerArgs += '--clean' }
 $PyInstallerArgs += (Join-Path $ProjectRoot 'desktop_launcher.py')
