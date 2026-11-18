@@ -1,4 +1,4 @@
-import {formatPercent,displayPercent} from './koboPercentages';
+import {formatPercent,chartPercent,percentageDecimals,type PercentageValue} from './koboPercentages';
 import {chartInk} from './ChartPrimitives';
 import {markColor} from './koboMarkColors';
 import {currentKoboTheme} from './koboThemeColors';
@@ -13,10 +13,12 @@ export function measureChartSpec(result:KoboResult,language:string,exporting=fal
  const rows=result.rows.filter(row=>row.id!=='__blank__'),horizontal=result.chart==='bar',heatmap=result.chart==='heatmap';
  const percentMode=result.measure?.operation==='sum'&&(result.percentageMode??'legacy-respondents')!=='legacy-respondents'&&result.appearance?.metric==='percent';
  const showBoth=result.measure?.operation==='sum'&&result.appearance?.labels==='both'&&(result.percentageMode??'legacy-respondents')!=='legacy-respondents';
- const text=(cell:KoboMeasureCell,chartLabel=false)=>{
+ const decimals=percentageDecimals(result);
+ const plottedPercent=(cell:(KoboMeasureCell&PercentageValue)|undefined)=>chartPercent(cell,decimals);
+ const text=(cell:KoboMeasureCell&PercentageValue,chartLabel=false)=>{
   const amount=measureNumber(result,cell.value,language);
   if(!showBoth&&!percentMode)return amount;
-  const percent=displayPercent(cell as KoboMeasureCell&{percent:number|null}),decimals=result.percentageDecimals??0;
+  const percent=plottedPercent(cell);
   if(chartLabel&&hideZeroPercentLabel(percent,decimals,result.appearance?.zeroPercentLabels))return showBoth?amount:'';
   const formatted=formatPercent(percent,decimals,language);
   return showBoth?`${amount} (${formatted})`:formatted;
@@ -51,10 +53,10 @@ export function measureChartSpec(result:KoboResult,language:string,exporting=fal
   if(exporting)layout.width=Math.max(1300,(heatmap?columns.length:horizontal?0:rows.length)*font*9+(layout.margin!.l??0)+100);
   layout.height=Math.max(Number(layout.height),layout.margin!.b+60+(horizontal||heatmap?rows.length*rowBand:320));
  }
- if(heatmap)return {layout,data:[{type:'heatmap',x:columns.map(column=>exporting||explicitCategories?column.id:column.label),y:rows.map(row=>exporting||explicitCategories?row.id:row.label),z:rows.map(row=>result.breakdowns.map(column=>row.series?.find(cell=>cell.id===column.id)?.[percentMode?'percent':'value']??null)),text:rows.map(row=>result.breakdowns.map(column=>text(row.series?.find(cell=>cell.id===column.id)||{}))),customdata:rows.map(row=>columns.map(column=>[row.label,column.label])),hovertemplate:'%{customdata[0]}<br>%{customdata[1]}<br>%{text}<extra></extra>',colorbar:percentMode?{ticksuffix:'%'}:undefined,colorscale:'Blues'} as unknown as Data]};
+ if(heatmap)return {layout,data:[{type:'heatmap',x:columns.map(column=>exporting||explicitCategories?column.id:column.label),y:rows.map(row=>exporting||explicitCategories?row.id:row.label),z:rows.map(row=>result.breakdowns.map(column=>percentMode?plottedPercent(row.series?.find(cell=>cell.id===column.id)):row.series?.find(cell=>cell.id===column.id)?.value??null)),text:rows.map(row=>result.breakdowns.map(column=>text(row.series?.find(cell=>cell.id===column.id)||{}))),customdata:rows.map(row=>columns.map(column=>[row.label,column.label])),hovertemplate:'%{customdata[0]}<br>%{customdata[1]}<br>%{text}<extra></extra>',colorbar:percentMode?{ticksuffix:'%'}:undefined,colorscale:'Blues'} as unknown as Data]};
  if(result.chart==='line'&&result.trend){
   layout.xaxis={type:'category',automargin:true};layout.showlegend=true;
-  return {layout,data:result.trend.series.map(series=>({type:'scatter',mode:result.appearance?.labels==='hidden'?'lines+markers':'lines+markers+text',textposition:'top center',name:series.label,x:result.trend!.periods,y:series.points.map(point=>percentMode?point.percent:point.value??null),text:series.points.map(point=>text(point,true)),hovertext:series.points.map(point=>text(point)),hovertemplate:'%{x}<br>%{hovertext}<extra>%{fullData.name}</extra>',connectgaps:false} as Data))};
+  return {layout,data:result.trend.series.map(series=>({type:'scatter',mode:result.appearance?.labels==='hidden'?'lines+markers':'lines+markers+text',textposition:'top center',name:series.label,x:result.trend!.periods,y:series.points.map(point=>percentMode?plottedPercent(point):point.value??null),text:series.points.map(point=>text(point,true)),hovertext:series.points.map(point=>text(point)),hovertemplate:'%{x}<br>%{hovertext}<extra>%{fullData.name}</extra>',connectgaps:false} as Data))};
  }
  const series=columns.length?columns:[{id:'',label:result.measure!.label}];
  const labelsVisible=result.appearance?.labels!=='hidden';
@@ -67,8 +69,8 @@ export function measureChartSpec(result:KoboResult,language:string,exporting=fal
  const thickness=(horizontal?plotHeight:plotWidth)/Math.max(1,rows.length)/series.length*.8;
  let minimum=0,maximum=0,padding=0;
  const prepared=series.map(column=>{
-  const cells:KoboMeasureCell[]=rows.map(row=>column.id?row.series?.find(cell=>cell.id===column.id)||{}:row);
-  const values=cells.map(cell=>percentMode?(cell as KoboMeasureCell&{percent?:number|null}).percent??null:cell.value??null);
+  const cells:(KoboMeasureCell&PercentageValue)[]=rows.map(row=>column.id?row.series?.find(cell=>cell.id===column.id)||{}:row);
+  const values=cells.map(cell=>percentMode?plottedPercent(cell):cell.value??null);
   const captions=labelsVisible?cells.map(cell=>text(cell,true)):undefined;
   if(inside||outside)for(const [index,value] of values.entries()){
    if(value===null)continue;

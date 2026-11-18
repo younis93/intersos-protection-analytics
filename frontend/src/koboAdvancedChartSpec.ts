@@ -4,7 +4,7 @@ import {resolveAppearance,chartLabel} from './koboAppearance';
 import {categoryCaption,chartCaption,rotatedCategoryDepth} from './koboChartLabels';
 import type {Theme} from './types';
 import {koboThemeColor,koboThemePalette,koboHeatmapScale} from './koboThemeColors';
-import {percentageDecimals,formatPercent} from './koboPercentages';
+import {chartPercent,percentageDecimals,formatPercent} from './koboPercentages';
 
 export function singlePeriodTrendNotice(result:KoboResult,language:string){
  const trend=result.chart==='line'?result.trend:null;
@@ -51,10 +51,10 @@ export function advancedChartSpec(result:KoboResult&{chartMaximum?:number},langu
   layout.annotations=[{text:note,x:0,y:1,xref:'paper',yref:'paper',showarrow:false,xanchor:'left',yanchor:'bottom',yshift:8,font:{size:noteFont,color:ink}}];
   if(!trend.periods.length)layout.annotations.push({text:language==='ar'?'لا توجد تواريخ صالحة':'No valid dates under the current filters',x:.5,y:.5,xref:'paper',yref:'paper',showarrow:false});
   return {layout,data:trend.series.map(series=>({type:'scatter',mode:appearance.labels==='hidden'?'lines+markers':'lines+markers+text',name:series.label,
-   x:trend.periods,y:series.points.map(point=>percentage?point.percent:point.count),connectgaps:false,
+   x:trend.periods,y:series.points.map(point=>percentage?chartPercent(point,decimals):point.count),connectgaps:false,
    line:{color:result.colors[series.id]||koboThemeColor(series.id,theme)},marker:{color:result.colors[series.id]||koboThemeColor(series.id,theme)},
-   text:series.points.map(point=>point.percent===null&&percentage||appearance.labels==='auto'&&!point.count?'':chartLabel(point.count,point.percent,appearance.labels==='auto'?percentage?'percent':'count':appearance.labels,language,decimals,appearance.zeroPercentLabels)),textposition:'top center',cliponaxis:false,
-   hovertext:series.points.map((point,index)=>`${chartCaption(series.label,42,4)}<br>${trend.periods[index]}<br># ${point.count}<br>${formatPercent(point.percent,decimals,language)}`),hovertemplate:'%{hovertext}<extra></extra>'} as Data))};
+   text:series.points.map(point=>point.percent===null&&percentage||appearance.labels==='auto'&&!point.count?'':chartLabel(point.count,chartPercent(point,decimals),appearance.labels==='auto'?percentage?'percent':'count':appearance.labels,language,decimals,appearance.zeroPercentLabels)),textposition:'top center',cliponaxis:false,
+   hovertext:series.points.map((point,index)=>`${chartCaption(series.label,42,4)}<br>${trend.periods[index]}<br># ${point.count}<br>${formatPercent(chartPercent(point,decimals),decimals,language)}`),hovertemplate:'%{hovertext}<extra></extra>'} as Data))};
  }
  const columns=result.breakdowns;
  const columnCaptions=columns.map(column=>categoryCaption(column.label,22,exporting?Infinity:5,appearance.categoryLabels));
@@ -74,10 +74,10 @@ export function advancedChartSpec(result:KoboResult&{chartMaximum?:number},langu
  layout.xaxis={...axis,type:'category',tickmode:'array',tickvals:columns.map(column=>column.id),ticktext:columnCaptions,tickangle:rotate?-45:0};
  layout.yaxis={...axis,type:'category',autorange:'reversed',tickmode:'array',tickvals:rows.map(row=>row.id),ticktext:rowCaptions};
  return {layout,data:[{type:'heatmap',x:columns.map(column=>column.id),y:rows.map(row=>row.id),
-  z:rows.map(row=>columns.map(column=>{const entry=row.series?.find(entry=>entry.id===column.id);return percentage?entry?.percent??null:entry?.count??0})),
+  z:rows.map(row=>columns.map(column=>{const entry=row.series?.find(entry=>entry.id===column.id);return percentage?chartPercent(entry,decimals):entry?.count??0})),
   colorscale:koboHeatmapScale(theme,result.colors.series===koboThemePalette(theme)[0]?undefined:result.colors.series),zmin:0,...(result.chartMaximum?{zmax:result.chartMaximum}:{}),hoverongaps:false,
-  text:rows.map(row=>columns.map(column=>{const entry=row.series?.find(entry=>entry.id===column.id);return chartLabel(entry?.count??0,entry?.percent??null,appearance.labels==='auto'?percentage?'percent':'count':appearance.labels,language,decimals,appearance.zeroPercentLabels)})),
+  text:rows.map(row=>columns.map(column=>{const entry=row.series?.find(entry=>entry.id===column.id);return chartLabel(entry?.count??0,chartPercent(entry,decimals),appearance.labels==='auto'?percentage?'percent':'count':appearance.labels,language,decimals,appearance.zeroPercentLabels)})),
   texttemplate:appearance.labels==='hidden'?'':'%{text}',textfont:{size:font},
-  hovertext:rows.map(row=>columns.map(column=>{const entry=row.series?.find(entry=>entry.id===column.id);return `${chartCaption(row.label,42,4)}<br>${chartCaption(column.label,42,4)}<br># ${entry?.count??0}<br>${formatPercent(entry?.percent??null,decimals,language)}`})),hovertemplate:'%{hovertext}<extra></extra>',
+  hovertext:rows.map(row=>columns.map(column=>{const entry=row.series?.find(entry=>entry.id===column.id);return `${chartCaption(row.label,42,4)}<br>${chartCaption(column.label,42,4)}<br># ${entry?.count??0}<br>${formatPercent(chartPercent(entry,decimals),decimals,language)}`})),hovertemplate:'%{hovertext}<extra></extra>',
   colorbar:{title:{text:percentage?'%':'#'},ticksuffix:percentage?'%':''}} as unknown as Data]};
 }

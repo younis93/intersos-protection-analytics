@@ -16,8 +16,8 @@ it('can hide rounded zero percentages in charts and exports while keeping counts
  for(const exporting of [false,true]){
   const shown=chartSpec({...source,appearance:{metric:'percent',labels:'percent'}},'en',exporting).data[0];
   const hidden=chartSpec({...source,appearance:{metric:'percent',labels:'percent',zeroPercentLabels:'hide'}},'en',exporting).data[0];
-  expect(shown).toMatchObject({y:[0,0.4,0.5],text:['0%','0%','1%']});
-  expect(hidden).toMatchObject({y:[0,0.4,0.5],text:['','','1%']});
+  expect(shown).toMatchObject({y:[0,0,1],text:['0%','0%','1%']});
+  expect(hidden).toMatchObject({y:[0,0,1],text:['','','1%']});
   expect(hidden).toMatchObject({hovertext:(shown as {hovertext?:string[]}).hovertext});
  }
  expect(chartLabel(7,0.004,'both','en',2,'hide')).toBe('7');

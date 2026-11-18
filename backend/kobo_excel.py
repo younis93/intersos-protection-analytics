@@ -638,7 +638,7 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
             result['_excelBreakdowns'] = native_breakdown_columns(project, result, source_settings)
             if result['_source'].get('binary'): result['breakdowns'] = result['_excelBreakdowns']
             result['appearance'] = {**result.get('appearance', {}), 'metric': 'percent' if chart_metric == 'percent' else 'count', 'labels': 'hidden' if result.get('appearance', {}).get('labels') == 'hidden' else chart_metric, 'grid': 'hide'}
-        used_names = response_sheet_names | {'_kobo chart pivots', '_kobo chart labels', '_kobo slicer totals', '_kobo chart values', '_kobo trend pivots', '_kobo overall totals', '_kobo overall pivots'}; first_report = None; completed = 0
+        used_names = response_sheet_names | {'_kobo chart pivots', '_kobo chart labels', '_kobo slicer totals', '_kobo chart values', '_kobo chart percentages', '_kobo trend pivots', '_kobo overall totals', '_kobo overall pivots'}; first_report = None; completed = 0
         final_label_styles = []; final_heatmaps = []
         caches = {}
         telemetry.begin('layout', 20, 'Preparing analysis worksheets')
@@ -678,8 +678,10 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                     if result.get('filterMode') in {'own','additional'}:
                         add_sheet_slicers(book,report,[pivot],own_specs.get(result['id'],[]),f'own{position}',top_row=start+4)
                     else:sheet_pivots[result['repeat']].append(pivot)
-                    from .kobo_excel_chart_projection import project_excel_chart
+                    from .kobo_excel_chart_projection import project_excel_chart, round_excel_chart_percentages
                     project_excel_chart(book,chart,result,_support_sheet)
+                    if result["measure"]["operation"] == "sum":
+                        round_excel_chart_percentages(book, chart, result, [result["appearance"]["metric"]], _support_sheet)
                     required=max(footer.Top+footer.Height,chart.Top+chart.Height if chart is not None else 0)+BLOCK_GAP
                     next_row=max(footer.Row+5,start+int(required/15))
                     while excel_cell(report,next_row,1).Top<required:next_row+=1
@@ -785,8 +787,9 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                 else:
                     chart = _chart(report, chart_pivot, result, area.Left+area.Width+CHART_GAP, area.Top, chart_metrics or metrics, project, settings, totals, final_label_styles) if result['denominator'] else None
                     if chart is None: excel_cell(report, start + 3, 1).Value = 'No answered responses available for a chart.'
-                from .kobo_excel_chart_projection import project_excel_chart
+                from .kobo_excel_chart_projection import project_excel_chart, round_excel_chart_percentages
                 project_excel_chart(book,chart,result,_support_sheet)
+                round_excel_chart_percentages(book, chart, result, trend_metrics if result.get("trend") else chart_metrics, _support_sheet)
                 if parent_base:
                     excel_cell(report, start+2, 1).Value = safe_spreadsheet_value(result['percentageBasis'])
                 if keep_original:

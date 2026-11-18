@@ -1,5 +1,11 @@
 """Project live chart ranges without changing pivot rows or slicer membership."""
 from .kobo_excel_ranges import excel_cell,excel_range
+from .kobo_excel_percentages import percent_format
+
+
+def round_chart_percent(expression, decimals, unavailable='"-"'):
+    # Excel stores percentages as fractions, so 1% needs two decimal places.
+    return f'IFERROR(ROUND({expression},{decimals + 2}),{unavailable})'
 
 
 def numeric_sum(expressions):
@@ -25,16 +31,20 @@ def projected_cell(result,answer,column,metric):
 def measured_heatmap(report,result,area,footer):
     """A separate projected matrix keeps the complete measured pivot untouched."""
     from .kobo_excel_layout import excel_literal
-    from .kobo_excel_percentages import percent_format
     columns=result.get('_excelBreakdowns',result['breakdowns'])
-    answers=result['chartProjection']['rows']
+    projection = result.get('chartProjection')
+    answers = projection['rows'] if projection else result['rows']
     first=area.Column+area.Columns.Count+2;top=area.Row
     metric=result.get('appearance',{}).get('metric','count') if result['measure']['operation']=='sum' else 'count'
-    excel_cell(report,top,first).Value=f"Heatmap - Top {result['chartProjection']['topNShown']} of {result['chartProjection']['topNTotal']}"
+    excel_cell(report,top,first).Value=f"Heatmap - Top {projection['topNShown']} of {projection['topNTotal']}" if projection else 'Heatmap - %'
     for index,column in enumerate(columns,first+1):excel_cell(report,top+2,index).Value=column['label']
     for offset,answer in enumerate(answers,top+3):
         excel_cell(report,offset,first).Formula='='+excel_literal(answer['label'])
-        for index,column in enumerate(columns,first+1):excel_cell(report,offset,index).Formula2='='+projected_cell(result,answer['id'],column['id'],metric)
+        for index,column in enumerate(columns,first+1):
+            expression = projected_cell(result, answer['id'], column['id'], metric)
+            if metric == 'percent':
+                expression = round_chart_percent(expression, result.get('percentageDecimals', 0))
+            excel_cell(report,offset,index).Formula2='='+expression
     if answers and columns:
         matrix=excel_range(report,top+3,first+1,top+2+len(answers),first+len(columns))
         matrix.FormatConditions.AddColorScale(3)
@@ -59,6 +69,30 @@ def series_arguments(formula):
         index+=1
     parts.append(text[start:])
     return parts
+
+
+def round_excel_chart_percentages(book, chart_object, result, metrics, support_sheet):
+    if chart_object is None or 'percent' not in metrics or not (result.get('_displayCells') or result.get('trend')):
+        return
+    chart = chart_object.Chart
+    helper = support_sheet(book, '_Kobo chart percentages')
+    first = helper.UsedRange.Row + helper.UsedRange.Rows.Count + 2
+    decimals = result.get('percentageDecimals', 0)
+    for index in range(1, chart.SeriesCollection().Count + 1):
+        if metrics[(index - 1) % len(metrics)] != 'percent':
+            continue
+        series = chart.SeriesCollection(index)
+        count = series.Points().Count
+        if not count:
+            continue
+        source = series_arguments(str(series.Formula))[2]
+        target = excel_range(helper, first, index, first + count - 1, index)
+        target.Formula2 = tuple(('=' + round_chart_percent(f'INDEX({source},{point})', decimals, 'NA()'),)
+                                for point in range(1, count + 1))
+        series.Values = target
+        if series.HasDataLabels:
+            series.DataLabels().NumberFormat = percent_format(decimals)
+    chart.PlotVisibleOnly = False
 
 
 def project_excel_chart(book,chart_object,result,support_sheet):

@@ -6,6 +6,26 @@ import type {KoboResult} from './koboTypes';
 
 const base:KoboResult={id:'q',name:'q',label:'Household size',group:'',repeat:'',kind:'number',chart:'histogram',denominator:2,missing:0,total:2,statistics:{},percentageBasis:'Answered',breakdowns:[],colors:{},rows:[{id:'bin:0',label:'0 - 5',count:1,percent:50},{id:'bin:1',label:'5 - 10',count:0,percent:0},{id:'bin:2',label:'10 - 15',count:1,percent:50}]};
 describe('household assessment charts',()=>{
+ it.each([['column','y'],['bar','x'],['histogram','y'],['line','y'],['pie','values'],['donut','values']] as const)('plots the percentage displayed in %s charts', (chart, axis)=>{
+  const rows=[3.18,2.55,1.27,0.64].map((percent,index)=>({id:String(index),label:String(index),count:index+1,percent}));
+  const result={...base,chart,rows,appearance:{metric:'percent' as const, labels:'percent' as const}};
+  for(const exporting of [false,true]){
+   const spec=chartSpec(result,'en',exporting);
+   expect(Reflect.get(spec.data[0],axis)).toEqual([3,3,1,1]);
+   expect(spec.data[0]).toMatchObject({text:['3%','3%','1%','1%']});
+   const precise=chartSpec({...result,percentageDecimals:2},'en',exporting);
+   expect(Reflect.get(precise.data[0],axis)).toEqual([3.18,2.55,1.27,0.64]);
+  }
+ });
+ it('uses the same display values for trend points and heatmap colors',()=>{
+  const points=[{count:5,percent:3.18,displayPercent:3},{count:4,percent:2.55,displayPercent:3},{count:0,percent:null}];
+  const appearance={metric:'percent' as const};
+  const trend:KoboResult={...base,chart:'line',appearance,trend:{dateField:'day',unit:'month',excluded:0,periods:['2026-01','2026-02','2026-03'],denominators:[157,157,0],series:[{id:'a',label:'A',points}]}};
+  expect(chartSpec(trend,'en').data[0]).toMatchObject({y:[3,3,null],text:['3%','3%','']});
+  const breakdowns=points.map((_,index)=>({id:String(index),label:String(index),denominator:index===2?0:157}));
+  const heatmap:KoboResult={...base,chart:'heatmap',appearance,breakdowns,rows:[{...base.rows[0],series:points.map((point,index)=>({...point,id:String(index)}))}]};
+  expect(chartSpec(heatmap,'en').data[0]).toMatchObject({z:[[3,3,null]]});
+ });
  it('keeps histogram bins adjacent and preserves type in screen and export',()=>{
   const histogram={...base,rows:Array.from({length:20},(_,i)=>({...base.rows[i%3],id:String(i)}))};
   expect(isDenseKoboChart(histogram)).toBe(false);

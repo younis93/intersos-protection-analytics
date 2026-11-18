@@ -1,5 +1,6 @@
 import type {KoboResult} from './koboTypes';
 import {resolveAppearance} from './koboAppearance';
+import {chartPercent,percentageDecimals,type PercentageValue} from './koboPercentages';
 
 export const projectKoboChart=(result:KoboResult):KoboResult=>result.chartProjection?{...result,...result.chartProjection,chartProjection:null}:result;
 
@@ -54,7 +55,7 @@ export function koboPdfChartPanels(result:KoboResult){
  if(result.chart==='line'&&result.trend)return [result as KoboChartPanel];
  const rows=koboScreenChartRows(result),chart=isDenseKoboChart(result)?'bar':readableKoboChartType(result);
  const limit=chart==='heatmap'?8:['bar','column','line'].includes(chart)?Math.max(1,Math.min(8,Math.floor(20/Math.max(1,result.breakdowns.length)))):Math.max(1,rows.length);
- const appearance=resolveAppearance(result.appearance),metric=(entry:{count:number;percent:number|null})=>appearance.metric==='percent'?entry.percent??0:entry.count;
+ const appearance=resolveAppearance(result.appearance),metric=(entry:PercentageValue&{count:number})=>appearance.metric==='percent'?chartPercent(entry,percentageDecimals(result))??0:entry.count;
  const chartMaximum=Math.max(0,...rows.map(row=>result.breakdowns.length?(appearance.bars==='stack'&&chart!=='heatmap'?(row.series||[]).reduce((sum,entry)=>sum+metric(entry),0):Math.max(0,...(row.series||[]).map(metric))):metric(row)));
  const panels:KoboChartPanel[]=[];
  const count=Math.ceil(rows.length/limit),base=Math.floor(rows.length/Math.max(1,count)),extra=rows.length%Math.max(1,count);

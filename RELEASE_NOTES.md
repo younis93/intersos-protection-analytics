@@ -1,1 +1,1 @@
-Improve the percentage calculation In Kobo
+Chart improvements

@@ -114,12 +114,14 @@ def native_heatmap(report, result, area, footer):
     headers = ['Answer', *(column['label'] for column in columns)]
     excel_range(report, heading, first, heading, first + len(columns)).Value = (tuple(safe_spreadsheet_value(h) for h in headers),)
     excel_range(report, heading, first, heading, first + len(columns)).Font.Bold = True
+    from .kobo_excel_chart_projection import projected_cell, round_chart_percent
     formulas = []
     for answer in answers:
         values = ['=' + excel_literal(answer['label'])]
         for column in columns:
-            from .kobo_excel_chart_projection import projected_cell
             cell = projected_cell(result,answer['id'],column['id'],metric)
+            if metric == 'percent':
+                cell = round_chart_percent(cell, result.get('percentageDecimals', 0))
             values.append('=' + cell)
         formulas.append(tuple(values))
     ranges = []

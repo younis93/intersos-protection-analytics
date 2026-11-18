@@ -2,7 +2,7 @@ import {projectKoboChart} from './koboChartDensity';
 import {measured} from './koboMeasures';
 import {measureChartSpec} from './koboMeasureChartSpec';
 import {advancedChartSpec} from './koboAdvancedChartSpec';
-import {displayPercent,formatPercent,percentageDecimals,type PercentageValue} from './koboPercentages';
+import {chartPercent,formatPercent,percentageDecimals,type PercentageValue} from './koboPercentages';
 import {resultWithColors,markColor} from './koboMarkColors';
 import type {Data,Layout} from 'plotly.js';
 import type {Theme} from './types';
@@ -59,7 +59,8 @@ function baseChartSpec(result:KoboChartPanel,language:string,exporting=false,the
  const type=dense?'bar':readableKoboChartType(result);
  const horizontal=type==='bar',pie=type==='pie'||type==='donut',percentage=appearance.metric==='percent';
  const fullExportCaptions=exporting&&!pie;
- const value=(count:number,percent:number|null|undefined)=>percentage?percent??0:count;
+ const decimals=percentageDecimals(result);
+ const value=(entry:PercentageValue&{count:number})=>percentage?chartPercent(entry,decimals)??0:entry.count;
  const colors=shown.map(row=>markColor(result,{answer:row.id},theme));
  const ink=exporting?'#263746':chartInk(theme),grid=exporting?'#e4ebf0':chartGrid(theme),scale=exporting?2.3:1;
  const advanced=advancedChartSpec(result,language,exporting,ink,grid,theme,containerWidth);if(advanced)return advanced;
@@ -102,27 +103,26 @@ function baseChartSpec(result:KoboChartPanel,language:string,exporting=false,the
  const labelMode=appearance.labels==='auto'?(percentage?'percent':'count'):appearance.labels,visibleLabels=appearance.labels!=='hidden';
  const labelPosition=visibleLabels&&supportsBarLabelPosition(result.chart)?appearance.labelPosition:'auto';
  const insideLabels=labelPosition==='inside',outsideLabels=labelPosition==='outside'&&!stacked;
- const maximum=Math.max(result.chartMaximum||0,...shown.map(row=>result.breakdowns.length?(stacked?row.series?.reduce((sum,entry)=>sum+value(entry.count,entry.percent),0)||0:Math.max(0,...(row.series||[]).map(entry=>value(entry.count,entry.percent)))):value(row.count,row.percent)));
+ const maximum=Math.max(result.chartMaximum||0,...shown.map(row=>result.breakdowns.length?(stacked?row.series?.reduce((sum,entry)=>sum+value(entry),0)||0:Math.max(0,...(row.series||[]).map(entry=>value(entry)))):value(row)));
  const plotHeight=Math.max(80,height-bottom-top);
  const valueExtent=horizontal?usable:plotHeight;
  const thickness=(horizontal?plotHeight:usable)/Math.max(1,shown.length)/(stacked?1:seriesCount)*.8;
  let outsidePadding=0;
- const pieTotal=shown.reduce((sum,row)=>sum+value(row.count,row.percent),0);
- const decimals=percentageDecimals(result);
+ const pieTotal=shown.reduce((sum,row)=>sum+value(row),0);
  const hoverNumber=new Intl.NumberFormat(language,{maximumFractionDigits:2});
  const hoverText=(label:string,count:number|undefined,percent:number|null|undefined,breakdown?:string)=>
   `<b>${chartCaption(label,42,4)}</b>${breakdown?`<br>${chartCaption(breakdown,48,4)}`:''}<br>${language==='ar'?'# العدد':'# Count'}: <b>${count===undefined?'-':hoverNumber.format(count)}</b><br>${language==='ar'?'% النسبة':'% Share'}: <b>${formatPercent(percent,decimals,language)}</b>`;
  const data:Data[]=[];
- const dataLabel=(entry:PercentageValue&{count:number})=>chartLabel(entry.count,displayPercent(entry),labelMode,language,decimals,appearance.zeroPercentLabels);
+ const dataLabel=(entry:PercentageValue&{count:number})=>chartLabel(entry.count,chartPercent(entry,decimals),labelMode,language,decimals,appearance.zeroPercentLabels);
  if(pie){
-  data.push({type:'pie',labels:shown.map(row=>row.label),values:shown.map(row=>value(row.count,row.percent)),hole:type==='donut'?.55:0,marker:{colors},sort:false,
-   textinfo:appearance.labels==='hidden'?'none':'text',text:shown.map(row=>appearance.labels==='auto'?(pieTotal&&value(row.count,row.percent)/pieTotal>=.035?[chartCaption(row.label,24,2),dataLabel(row)].filter(Boolean).join('<br>'):''):dataLabel(row)),textposition:'auto',automargin:true,textfont:{size:labelFont,weight:700},insidetextfont:{color:colors.map(labelInk),size:labelFont,weight:700},outsidetextfont:{color:ink,size:labelFont,weight:700},
-   customdata:shown.map(row=>[row.count,row.percent==null?'-':`${row.percent}%`,row.label,row.id,null]),hovertext:shown.map(row=>hoverText(row.label,row.count,displayPercent(row))),hovertemplate:'%{hovertext}<extra></extra>'} as unknown as Data);
+  data.push({type:'pie',labels:shown.map(row=>row.label),values:shown.map(row=>value(row)),hole:type==='donut'?.55:0,marker:{colors},sort:false,
+   textinfo:appearance.labels==='hidden'?'none':'text',text:shown.map(row=>appearance.labels==='auto'?(pieTotal&&value(row)/pieTotal>=.035?[chartCaption(row.label,24,2),dataLabel(row)].filter(Boolean).join('<br>'):''):dataLabel(row)),textposition:'auto',automargin:true,textfont:{size:labelFont,weight:700},insidetextfont:{color:colors.map(labelInk),size:labelFont,weight:700},outsidetextfont:{color:ink,size:labelFont,weight:700},
+   customdata:shown.map(row=>[row.count,row.percent==null?'-':`${row.percent}%`,row.label,row.id,null]),hovertext:shown.map(row=>hoverText(row.label,row.count,chartPercent(row,decimals))),hovertemplate:'%{hovertext}<extra></extra>'} as unknown as Data);
  }else{
   const series=result.breakdowns.length?result.breakdowns:[{id:'',label:''}],indexed=shown.map(row=>new Map(row.series?.map(entry=>[entry.id,entry])));
   series.forEach(column=>{
-   const entries=shown.map((row,index)=>column.id?indexed[index].get(column.id):row),values=entries.map(entry=>entry?value(entry.count,entry.percent):0);
-   const labels=entries.map((entry,index)=>entry&&(appearance.labels!=='auto'||values[index]>0)?dataLabel(entry):'');
+   const entries=shown.map((row,index)=>column.id?indexed[index].get(column.id):row),values=entries.map(entry=>entry?value(entry):0);
+   const labels=entries.map(entry=>entry&&(appearance.labels!=='auto'||(percentage?entry.percent??0:entry.count)>0)?dataLabel(entry):'');
    const inside=insideLabels?labels.map((text,index)=>insideBarValueLabel(text,values[index],maximum,valueExtent*.88,thickness,labelFont,8*scale,horizontal,stacked)):[];
    const placed=labels.map((text,index)=>{
     const label=insideLabels?inside[index]:outsideLabels?{text,position:'outside'}:barValueLabel(text,values[index],maximum,valueExtent*.88,thickness,labelFont,horizontal,stacked);
@@ -139,7 +139,7 @@ function baseChartSpec(result:KoboChartPanel,language:string,exporting=false,the
     x:horizontal?values:shown.map(position),y:horizontal?shown.map(position):values,text:visibleLabels?(type==='line'?labels.map((text,index)=>appearance.labels==='auto'&&index%Math.max(stride,Math.ceil(shown.length*labelFont*4/usable))!==0?'':text):placed.map(label=>label.text)):undefined,textposition:type==='line'?'top center':visibleLabels?placed.map(label=>label.position):'none',cliponaxis:false,
     ...(type!=='line'?{insidetextanchor:'end' as const,insidetextfont:{color:contrast,size:insideLabels?inside.map(label=>label.size):labelFont,weight:700},outsidetextfont:{color:ink,size:labelFont,weight:700},textangle:0,constraintext:insideLabels?'inside':'none'}:{textfont:{color:ink,size:labelFont,weight:700}}),
     marker:{color:fill},line:{color:result.colors[column.id||'series']||(koboThemeColor(column.id||'series',theme))},
-    customdata:entries.map((entry,index)=>[entry?.count??0,entry?.percent==null?'-':`${entry.percent}%`,shown[index].label,shown[index].id,column.id||null]),hovertext:entries.map((entry,index)=>hoverText(shown[index].label,entry?.count,displayPercent(entry),column.id?column.label:undefined)),hovertemplate:'%{hovertext}<extra></extra>'} as unknown as Data); // Plotly supports per-point positions and font colors beyond the bundled TS declarations.
+    customdata:entries.map((entry,index)=>[entry?.count??0,entry?.percent==null?'-':`${entry.percent}%`,shown[index].label,shown[index].id,column.id||null]),hovertext:entries.map((entry,index)=>hoverText(shown[index].label,entry?.count,chartPercent(entry,decimals),column.id?column.label:undefined)),hovertemplate:'%{hovertext}<extra></extra>'} as unknown as Data); // Plotly supports per-point positions and font colors beyond the bundled TS declarations.
   });
  }
  const outsideRange=outsidePadding?outsideBarValueRange(0,maximum,valueExtent,outsidePadding):undefined;

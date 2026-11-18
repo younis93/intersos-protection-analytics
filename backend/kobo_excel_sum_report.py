@@ -71,7 +71,7 @@ def additive_sum_report(book,report,result,position,start,support_sheet,values,v
     excel_cell(report,start+3,1).Value=result['percentageBasis']
     result['_displayCells']={(answer['id'],column['id'] if column else ''):{'count':formula(ri,ci)[0],'percent':formula(ri,ci)[1]} for ri,answer in enumerate(rows) for ci,column in enumerate(base_columns)}
     if result['chart']=='heatmap':
-        if result.get('chartProjection'):
+        if result.get('chartProjection') or result.get('appearance', {}).get('metric') == 'percent':
             from .kobo_excel_chart_projection import measured_heatmap
             area,footer=measured_heatmap(report,result,area,footer)
             return area,footer,None
