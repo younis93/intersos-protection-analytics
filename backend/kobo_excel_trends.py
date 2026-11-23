@@ -99,6 +99,53 @@ def trend_chart(book, report, cache, result, position, footer, left, top, metric
     return chart_object, footer
 
 
+def snapshot_trend_chart(report, result, left, top, metric):
+    trend = (result.get('chartProjection') or {}).get('trend') or result['trend']
+    if not trend['periods'] or not trend['series']:
+        return None
+    from .kobo_excel import _support_sheet, _rgb, answer_color
+    sheet = _support_sheet(report.Parent, '_Kobo trend snapshots')
+    first = sheet.UsedRange.Row + sheet.UsedRange.Rows.Count + 3
+    last = first + len(trend['periods']) - 1
+    periods = excel_range(sheet, first, 1, last, 1)
+    periods.NumberFormat = '@'
+    periods.Value = tuple((period,) for period in trend['periods'])
+    appearance = result.get('appearance', {})
+    obj = report.ChartObjects().Add(left, top, 650, appearance.get('height', 0)*.75 or 360)
+    chart = obj.Chart
+    chart.ChartType = 4
+    chart.HasTitle = True
+    chart.ChartTitle.Text = (appearance.get('title') or result['label'])[:255]
+    chart.HasLegend = appearance.get('legend') != 'hidden'
+    chart.PlotVisibleOnly = False
+    decimals = result.get('percentageDecimals', 0)
+    for index, entry in enumerate(trend['series'], 2):
+        values = excel_range(sheet, first, index, last, index)
+        values.Value = tuple((point['count'] if metric == 'count' else
+                              None if point.get('displayPercent') is None else point['displayPercent']/100,)
+                             for point in entry['points'])
+        series = chart.SeriesCollection().NewSeries()
+        series.Name = safe_spreadsheet_value(entry['label'])
+        series.XValues = periods
+        series.Values = values
+        series.Format.Line.ForeColor.RGB = _rgb(answer_color(result, entry['id']))
+        labels = appearance.get('labels', 'auto')
+        if labels != 'hidden':
+            series.ApplyDataLabels()
+            if labels in {'auto', metric}:
+                series.DataLabels().NumberFormat = percent_format(decimals) if metric == 'percent' else '#,##0'
+            else:
+                for point_index, point in enumerate(entry['points'], 1):
+                    count, percent = point['count'], point.get('displayPercent')
+                    formatted = '-' if percent is None else f'{percent:.{decimals}f}%'
+                    series.Points(point_index).DataLabel.Text = (f'{count:,} ({formatted})' if labels == 'both'
+                                                                 else f'{count:,}' if labels == 'count' else formatted)
+    if metric == 'percent':
+        chart.Axes(2).TickLabels.NumberFormat = percent_format(decimals)
+    obj.Placement = 3
+    return obj
+
+
 def native_heatmap(report, result, area, footer):
     """A formula matrix of pivot values keeps color rules stable on Refresh All."""
     columns = result.get('_excelBreakdowns', result['breakdowns'])
@@ -109,7 +156,8 @@ def native_heatmap(report, result, area, footer):
     metric = result.get('appearance', {}).get('metric', 'count')
     excel_cell(report, top, first).Value = 'Heatmap - ' + ('%' if metric == 'percent' else '#')
     excel_cell(report, top, first).Font.Bold = True
-    excel_cell(report, top + 1, first).Value = 'Values follow the pivot and response slicers. Double-click counts in the pivot to view responses.'
+    excel_cell(report, top + 1, first).Value = ('Values reflect the filters applied at export.' if result.get('answerFilterSummary') else
+                                              'Values follow the pivot and response slicers. Double-click counts in the pivot to view responses.')
     heading = top + 3
     headers = ['Answer', *(column['label'] for column in columns)]
     excel_range(report, heading, first, heading, first + len(columns)).Value = (tuple(safe_spreadsheet_value(h) for h in headers),)

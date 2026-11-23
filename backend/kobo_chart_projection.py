@@ -18,7 +18,8 @@ def project_chart(result, cfg, question=None, *, original=None):
     omitted = [r for r in rows if r['id'] not in chosen]
     additive = not measure or measure['operation'] == 'sum'
     other = bool(cfg.chartOther and additive and omitted)
-    mode = cfg.percentageMode
+    mode = result.get('percentageMode', cfg.percentageMode)
+    answer_base = (result.get('answerFilterSummary') or {}).get('denominator')
 
     basis = original if original is not None else result
     respondent_mode = mode == 'legacy-respondents'
@@ -33,7 +34,10 @@ def project_chart(result, cfg, question=None, *, original=None):
         return merged
 
     if other:
-        if respondent_mode:
+        if answer_base is not None:
+            denominator = answer_base
+            column_denominators = {column['id']: answer_base for column in result['breakdowns']}
+        elif respondent_mode:
             denominator = (basis.get('respondentBasis') or {}).get('denominator', basis['denominator'])
             column_denominators = {column['id']: column['denominator'] for column in basis['breakdowns']}
         else:
@@ -55,7 +59,9 @@ def project_chart(result, cfg, question=None, *, original=None):
         trend['series'] = [series for series in trend['series'] if series['id'] in chosen]
         if other and removed:
             base_trend = basis['trend']
-            if respondent_mode:
+            if answer_base is not None:
+                period_bases = dict.fromkeys(base_trend['periods'], answer_base)
+            elif respondent_mode:
                 period_bases = dict(zip(base_trend['periods'], base_trend['denominators']))
             else:
                 totals = value_totals(trend_pivot(base_trend, basis), bool(measure), cfg.percentageGroupLevel)

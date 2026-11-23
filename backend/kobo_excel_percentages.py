@@ -24,7 +24,12 @@ def report_table(book, report, totals, result, row, metrics, support_sheet, lang
     decimals = result.get('percentageDecimals', 0)
     units = 100 * 10 ** decimals
     helper = support_sheet(book, '_Kobo rounding')
-    columns = result.get('_excelBreakdowns', result['breakdowns']) or [{'id': '', 'labels': []}]
+    columns = result.get('_excelBreakdowns', result['breakdowns'])
+    answer_filter = result.get('answerFilterSummary')
+    depth = len(result.get('breakdownFields', []))
+    if answer_filter and depth:
+        columns = [*columns, {'id': '', 'labels': ['الإجمالي' if language == 'ar' else 'Total'] * depth}]
+    columns = columns or [{'id': '', 'labels': []}]
     answers = result['rows']
     valid = [answer for answer in result.get('percentageRows',answers) if answer['id'] != '__blank__']
     canonical = {key: index for index, key in enumerate(sorted(answer['id'] for answer in valid))}
@@ -38,16 +43,21 @@ def report_table(book, report, totals, result, row, metrics, support_sheet, lang
         if max(first, last) > 1048576: raise ValueError('Percentage display helpers exceed the Excel row limit. Export fewer questions or breakdowns.')
         quoted = "'" + helper.Name.replace("'", "''") + "'!"
         parts = column['labels']
-        denominator = selection_base(totals,result,parts) if modern(result) else pivot_value(totals, 'Answered total', base, parts, result)
+        denominator = str(answer_filter['denominator']) if answer_filter else selection_base(totals,result,parts) if modern(result) else pivot_value(totals, 'Answered total', base, parts, result)
         for index, answer in enumerate(valid):
             r = first + index
             helper.Cells(r, 1).Value = safe_spreadsheet_value(answer['id'])
-            helper.Cells(r, 2).Formula = '=' + pivot_value(totals, 'Responses', answer['id'], parts, result)
             helper.Cells(r, 3).Formula = '=' + denominator
-            formulas = rounding_formulas(r, first, last, units, decimals, result['kind'] != 'multiple')
-            helper.Range(helper.Cells(r, 4), helper.Cells(r, 7)).Formula = (tuple(formulas),)
-            helper.Cells(r, 8).Value = canonical[answer['id']]
-            if modern(result): helper.Cells(r, 7).Formula = '=' + ratio(totals,result,answer['id'],parts)
+            if answer_filter:
+                entry = next((cell for cell in answer.get('series', []) if cell['id'] == column['id']), {}) if column['id'] else answer
+                helper.Cells(r, 2).Value = entry.get('count', 0)
+                helper.Cells(r, 7).Formula = f'=IF(C{r}=0,"-",B{r}/C{r})'
+            else:
+                helper.Cells(r, 2).Formula = '=' + pivot_value(totals, 'Responses', answer['id'], parts, result)
+                formulas = rounding_formulas(r, first, last, units, decimals, result['kind'] != 'multiple')
+                helper.Range(helper.Cells(r, 4), helper.Cells(r, 7)).Formula = (tuple(formulas),)
+                helper.Cells(r, 8).Value = canonical[answer['id']]
+                if modern(result): helper.Cells(r, 7).Formula = '=' + ratio(totals,result,answer['id'],parts)
             helper.Cells(r, 7).NumberFormat = percent_format(decimals)
             cells[(answer['id'], column['id'])] = {'count': f'{quoted}$B${r}', 'percent': f'{quoted}$G${r}', 'denominator': f'{quoted}$C${r}'}
         if not valid:
@@ -55,9 +65,13 @@ def report_table(book, report, totals, result, row, metrics, support_sheet, lang
         column['_denominator'] = f'{quoted}$C${first}'
         blank = next((answer for answer in answers if answer['id'] == '__blank__'), None)
         if blank:
-            cells[(blank['id'], column['id'])] = {'count': pivot_value(totals, 'Responses', blank['id'], parts, result), 'percent': '"-"', 'denominator': column['_denominator']}
+            if answer_filter:
+                entry = next((cell for cell in blank.get('series', []) if cell['id'] == column['id']), {}) if column['id'] else blank
+                count = entry.get('count', 0)
+                cells[(blank['id'], column['id'])] = {'count': str(count), 'percent': f'IF({denominator}=0,"-",{count}/{denominator})'}
+            else:
+                cells[(blank['id'], column['id'])] = {'count': pivot_value(totals, 'Responses', blank['id'], parts, result), 'percent': '"-"', 'denominator': column['_denominator']}
     result['_displayCells'] = cells
-    depth = len(result.get('breakdownFields', []))
     metric_count = len(metrics)
     width = 1 + len(columns) * metric_count
     header_bottom = row + depth
@@ -94,9 +108,10 @@ def report_table(book, report, totals, result, row, metrics, support_sheet, lang
         if report.Rows(r).RowHeight < 22: report.Rows(r).RowHeight = 22
     footer_row = header_bottom + 1 + len(answers)
     from .kobo_excel_totals import append_overall_totals, totals_policy
-    width = append_overall_totals(book, report, totals, result, metrics, support_sheet,
-                                 header_bottom + 1, 1, width, footer_row, language)
-    if not totals_policy(result)[0]:
+    if not answer_filter:
+        width = append_overall_totals(book, report, totals, result, metrics, support_sheet,
+                                     header_bottom + 1, 1, width, footer_row, language)
+    if not answer_filter and not totals_policy(result)[0]:
         bottom = max(header_bottom, footer_row - 1)
         area = report.Range(report.Cells(row, 1), report.Cells(bottom, width))
         area.Font.Name = 'Arial'; area.Font.Size = 10; area.Borders.Color = 0xEADACF
@@ -105,10 +120,10 @@ def report_table(book, report, totals, result, row, metrics, support_sheet, lang
     for c, column in enumerate(columns):
         denominator = column['_denominator']
         linked = (result.get('respondentBasis') or {}).get('kind') == 'parent'
-        count_total = pivot_value(totals, 'Follow-up answered total', base, column['labels'], result) if linked else denominator
+        count_total = str(column.get('totalCount', 0) if column['id'] else answer_filter['count']) if answer_filter else pivot_value(totals, 'Follow-up answered total', base, column['labels'], result) if linked else denominator
         for offset, metric in enumerate(metrics):
             target = report.Cells(footer_row, 2 + c * metric_count + offset)
-            target.Formula = '=' + (count_total if metric == 'count' else f'IF({denominator}=0,"-",{count_total}/{denominator})' if linked else ratio(totals,result,None,column['labels'],margin=True) if modern(result) else f'IF({denominator}=0,"-",1)')
+            target.Formula = '=' + (count_total if metric == 'count' else f'IF({denominator}=0,"-",{count_total}/{denominator})' if linked or answer_filter else ratio(totals,result,None,column['labels'],margin=True) if modern(result) else f'IF({denominator}=0,"-",1)')
             target.NumberFormat = '#,##0' if metric == 'count' else percent_format(decimals)
     footer = report.Range(report.Cells(footer_row, 1), report.Cells(footer_row, width))
     footer.Interior.Color = 0xEBDFD2; footer.Font.Bold = True; footer.RowHeight = 26

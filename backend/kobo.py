@@ -79,17 +79,51 @@ class ChartAppearance(BaseModel):
     titleSpacing: Literal['compact', 'standard', 'roomy'] | Annotated[float, Field(strict=True, ge=0, le=36)] = 9.0
     titleColor: str = Field('', pattern=r'^$|^#[0-9a-fA-F]{6}$')
     valueAxis: Literal['show', 'hide'] = 'show'
+    horizontalAxisLine: Literal['show', 'hide'] = 'show'
+    verticalAxisLine: Literal['show', 'hide'] = 'show'
     categoryLabels: Literal['wrap', 'truncate', 'rotate'] = 'wrap'
+    categoryLabelSize: Literal[0, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 26, 28] = 0
+    categoryLabelLines: Literal[0, 1, 2, 3, 4, 5] = 0
     metric: Literal['auto', 'count', 'percent'] = 'auto'
     labels: Literal['auto', 'hidden', 'count', 'percent', 'both'] = 'auto'
     labelPosition: Literal['inside', 'outside'] = 'outside'
     zeroPercentLabels: Literal['show', 'hide'] = 'show'
     legend: Literal['auto', 'hidden', 'top', 'bottom', 'left', 'right'] = 'auto'
+    legendAlign: Literal['left', 'center', 'right'] = 'left'
+    legendVerticalAlign: Literal['top', 'middle', 'bottom'] = 'top'
+    barWidth: Literal['narrow', 'medium', 'standard', 'custom'] = 'standard'
+    customBarWidth: int = Field(80, ge=10, le=100)
+    chartWidthMode: Literal['auto', 'compact', 'narrow', 'medium', 'wide', 'extra-wide', 'custom'] = 'auto'
+    chartWidth: int = Field(640, ge=360, le=1600)
+    answerSpacing: Literal['compact', 'standard', 'spacious'] = 'standard'
     fontFamily: ChartFont = 'Helvetica Neue'
-    fontSize: Literal[0, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 26, 28] = 0
+    fontSize: int = Field(0, ge=0, le=36)
     height: Literal[0, 320, 420, 560, 720] = 0
+    customHeight: int = Field(0, ge=0, le=1600)
     grid: Literal['auto', 'show', 'hide'] = 'auto'
     bars: Literal['group', 'stack'] = 'group'
+
+    @model_validator(mode='before')
+    @classmethod
+    def migrate_axis_lines(cls, value):
+        if not isinstance(value, dict):
+            return value
+        previous = value.get('valueAxisLine', value.get('valueAxis', 'show'))
+        return {'horizontalAxisLine': previous, 'verticalAxisLine': previous, **value}
+
+    @field_validator('fontSize')
+    @classmethod
+    def valid_answer_size(cls, value):
+        if 0 < value < 8:
+            raise ValueError('Answer size must be at least 8 pixels.')
+        return value
+
+    @field_validator('customHeight')
+    @classmethod
+    def valid_custom_height(cls, value):
+        if 0 < value < 240:
+            raise ValueError('Custom chart height must be at least 240 pixels.')
+        return value
 
     @field_validator('labelPosition', mode='before')
     @classmethod
@@ -131,6 +165,7 @@ class QuestionSettings(BaseModel):
     hiddenPivotColumns: list[str] = Field(default_factory=list)
     filterMode: Literal['page', 'own', 'additional'] = 'page'
     ownFilters: list[KoboFilter] = Field(default_factory=list)
+    answerFilters: list[KoboFilter] = Field(default_factory=list, max_length=100)
     hiddenAnswers: list[str] = Field(default_factory=list)
     hiddenAnswerPercentageMode: Literal['adjust', 'keep-original'] = 'adjust'
     chartTopN: int | None = Field(None, ge=1, le=1000000)
@@ -138,8 +173,11 @@ class QuestionSettings(BaseModel):
     percentageMode: Literal['legacy-respondents', 'grand-total', 'column-total', 'row-total', 'breakdown-group', 'visible-selections'] = 'legacy-respondents'
     percentageGroupLevel: int = Field(1, ge=1, le=3)
     calculation: Calculation | None = None
+    answerShareQuestion: str = ''
+    answerShareAnswer: str = ''
+    answerStackMode: Literal['count', 'percent'] | None = None
     appearance: ChartAppearance = Field(default_factory=ChartAppearance)
-    palette: Literal['Balanced', 'Blue', 'Teal', 'Warm', 'Solid blue', 'Ocean', 'Botanical', 'Jewel', 'Contrast'] | None = None
+    palette: Literal['Balanced', 'Blue', 'Teal', 'Warm', 'Solid blue', 'Ocean', 'Botanical', 'Jewel', 'Contrast', 'Navy', 'Cobalt', 'Steel Blue', 'Glacier Blue', 'Coastal', 'Earth Tones', 'Orchard'] | None = None
     chart: Literal['bar', 'column', 'pie', 'donut', 'line', 'histogram', 'heatmap'] | None = None
     colors: dict[str, str] = Field(default_factory=dict)
     pointColors: dict[str, str] = Field(default_factory=dict)
@@ -878,6 +916,13 @@ def breakdown_values(record, dimensions, lookup):
 
 
 CHART_PALETTES = {
+    'Navy': ['#102E50', '#194979', '#2C659C', '#4B83B6', '#78A6CA', '#AACBE2'],
+    'Cobalt': ['#203589', '#304CB0', '#4567CA', '#6285DF', '#8CA8EC', '#B5C7F5'],
+    'Steel Blue': ['#263D58', '#3B5771', '#53728D', '#6D8EA7', '#91ADBF', '#B9CDD8'],
+    'Glacier Blue': ['#07516D', '#0D6E8F', '#158BAB', '#35A6C1', '#66BED2', '#A2D7E3'],
+    'Coastal': ['#176691', '#248675', '#C6674A', '#A77728', '#745589', '#536D80'],
+    'Earth Tones': ['#AC573C', '#647640', '#A77B32', '#556E82', '#8B5163', '#38796F'],
+    'Orchard': ['#694786', '#AE4565', '#398253', '#BD742E', '#3F70A5', '#866C38'],
     'Solid blue': ['#1683D8'],
     'Ocean': ['#1E3A5F', '#247BA0', '#329D9C', '#5E60CE', '#427AA1', '#6B8E9B'],
     'Botanical': ['#245C4A', '#4E7C59', '#849B55', '#B18A45', '#8F5D5D', '#5D7285'],
@@ -889,6 +934,9 @@ CHART_PALETTES = {
     'Teal': ['#145A58','#207D78','#339D94','#62B6A8','#95CFC0','#C4E5D8'],
     'Warm': ['#8C3B2A','#B45232','#D57641','#E6A15B','#EEC486','#F3DEB7'],
 }
+
+
+VALUE_RANKED_BLUE_PALETTES = frozenset({'Navy', 'Cobalt', 'Steel Blue', 'Glacier Blue'})
 
 
 def palette_color(palette, option):
@@ -945,7 +993,24 @@ def active_question_filters(cfg):
     return [rule for rule in cfg.ownFilters if (bool(rule.values) if rule.kind == 'category' else rule.minimum is not None or rule.maximum is not None or bool(rule.months))]
 
 
-def question_cohort(question, records, cfg, questions, lookup, *, apply_connections=True):
+def answer_filter_rules(cfg):
+    return [rule for rule in cfg.answerFilters if rule.values] if not cfg.calculation or cfg.calculation.operation == 'count' else []
+
+
+def answer_filter_cohorts(records, rules, questions, lookup):
+    from .kobo_measures import record_value
+    eligible, matched = [], []
+    for record in records:
+        values = [record_value(record, questions[rule.field], lookup) for rule in rules]
+        if any((missing(value) or value == []) and '__blank__' not in rule.values for value, rule in zip(values, rules)):
+            continue
+        eligible.append(record)
+        if all(matches(value, rule) for value, rule in zip(values, rules)):
+            matched.append(record)
+    return eligible, matched
+
+
+def question_cohort(question, records, cfg, questions, lookup, *, apply_connections=True, apply_answer_filters=True):
     """Resolve a question cohort once, using ancestor values for repeat filters."""
     from .kobo_connections import connection_plan, hidden_answers_filter_cohort
     from .kobo_connection_rules import matches_tree
@@ -963,8 +1028,9 @@ def question_cohort(question, records, cfg, questions, lookup, *, apply_connecti
         if not plan['enabled']: return True
         if tree and not matches_tree(tree,lambda key:record_value(record,questions[key],lookup),kinds): return False
         return plan['mode']!='keep-original' or not plan['parent'] or not missing(record_value(record,plan['parent'],lookup))
-    if cfg.filterMode not in {'own', 'additional'}: return [r for r in records if r['scope'] == question['repeat'] and visible(r)]
-    for rule in cfg.ownFilters:
+    answer_rules = answer_filter_rules(cfg)
+    local = active_question_filters(cfg) if cfg.filterMode in {'own', 'additional'} else []
+    for rule in [*(cfg.ownFilters if cfg.filterMode in {'own', 'additional'} else []), *answer_rules]:
         field = questions.get(rule.field)
         if not field: raise ValueError('Question filter references an unavailable field.')
         expected = field['kind'] if field['kind'] in {'number','date'} else 'category'
@@ -974,14 +1040,17 @@ def question_cohort(question, records, cfg, questions, lookup, *, apply_connecti
         scope = field['repeat']
         if scope and scope != question['repeat'] and not question['repeat'].startswith(scope + '/'):
             raise ValueError('Question filters must use this response table or an ancestor table.')
-    candidates = records if cfg.filterMode == 'additional' else lookup.values()
-    active_rules = active_question_filters(cfg)
-    return [r for r in candidates if r['scope'] == question['repeat'] and visible(r) and all(matches(record_value(r, questions[f.field], lookup), f) for f in active_rules)]
+    for rule in answer_rules:
+        if questions[rule.field]['kind'] not in {'category', 'multiple'} or rule.kind != 'category':
+            raise ValueError('Answer percentage filters require a choice question.')
+    candidates = lookup.values() if cfg.filterMode == 'own' and not answer_rules else records
+    cohort = [r for r in candidates if r['scope'] == question['repeat'] and visible(r) and all(matches(record_value(r, questions[f.field], lookup), f) for f in local)]
+    return answer_filter_cohorts(cohort, answer_rules, questions, lookup)[1] if answer_rules and apply_answer_filters else cohort
 
 
 def question_filter_summary(question, cfg, settings, questions):
     local = active_question_filters(cfg)
-    rules = local if cfg.filterMode == 'own' else [*settings.filters, *local] if cfg.filterMode == 'additional' else settings.filters
+    rules = local if cfg.filterMode == 'own' and not answer_filter_rules(cfg) else [*settings.filters, *local] if cfg.filterMode in {'own', 'additional'} else settings.filters
     return [f"{label(questions[f.field], settings.language)}: {filter_rule_summary(f, {c['name']: label(c, settings.language) for c in questions[f.field]['choices']})}" for f in rules if f.field in questions]
 
 
@@ -1001,12 +1070,13 @@ def answer_visibility_summary(q, records, cfg, questions, lookup, cohort, answer
 
 def question_result(q: dict, records: list[dict], settings: KoboSettings, questions: dict, lookup: dict):
     cfg = resolved_question_settings(q, settings)
+    answer_rules = answer_filter_rules(cfg)
     from .kobo_connections import connection_plan, uses_linked_respondents, respondent_hidden_codes
     from .kobo_pivot_percentages import apply_pivot_percentages, uses_additive_answer_scope
     plan = connection_plan(q,cfg,questions)
     if plan['enabled'] and (cfg.percentageBase == 'parent' or cfg.connectedPercentageMode == 'keep-original'): cfg = cfg.model_copy(update={'percentageMode':'legacy-respondents'})
     additive_scope = cfg.additiveAnswerScope if uses_additive_answer_scope(cfg) else None
-    if not plan['enabled'] and not additive_scope and cfg.percentageMode != 'visible-selections' and cfg.hiddenAnswerPercentageMode == 'keep-original' and cfg.hiddenAnswers and q['kind'] in {'category','multiple','text'}:
+    if not answer_rules and not plan['enabled'] and not additive_scope and cfg.percentageMode != 'visible-selections' and cfg.hiddenAnswerPercentageMode == 'keep-original' and cfg.hiddenAnswers and q['kind'] in {'category','multiple','text'}:
         def calculate(**updates):
             scoped = settings.model_copy(update={'questions': {
                 **settings.questions, q['id']: cfg.model_copy(update={'chartTopN': None, **updates})}})
@@ -1030,7 +1100,9 @@ def question_result(q: dict, records: list[dict], settings: KoboSettings, questi
         if not (result.get('chartProjection') or {}).get('axisOrder'):
             result['chartProjection'] = project_chart(result, cfg, q, original=original)
         return result
-    cohort = question_cohort(q, records, cfg, questions, lookup)
+    cohort = question_cohort(q, records, cfg, questions, lookup, apply_answer_filters=False)
+    if answer_rules:
+        eligible, cohort = answer_filter_cohorts(cohort, answer_rules, questions, lookup)
     answered = [r for r in cohort if not missing(r['values'].get(q['id']))]
     denominator = len(answered)
     stats, bins, categories = question_categories(q, answered, cfg)
@@ -1061,14 +1133,21 @@ def question_result(q: dict, records: list[dict], settings: KoboSettings, questi
                 row['series'].append({'id': b['id'], 'count': n, 'percent': n / b['denominator'] * 100 if b['denominator'] else None})
     apply_display_percentages(rows, breakdowns, denominator, q['kind'], settings.percentageDecimals)
     if settings.hideZero and cfg.chart != 'histogram': rows = [r for r in rows if r['count']]
-    if cfg.answerSort != 'form' and cfg.chart != 'histogram' and not bins and not (cfg.calculation and cfg.calculation.operation!='count'):
-        by_count = cfg.answerSort.startswith('count')
-        rows.sort(key=lambda r: r['count'] if by_count else r['label'].casefold(), reverse=cfg.answerSort.endswith('desc'))
+    if cfg.chart != 'histogram' and not bins:
+        if cfg.answerSort.startswith('label'):
+            from .kobo_pivot_sort import natural
+            sort_label = (lambda row: float(row['id'])) if q['kind'] == 'number' else (lambda row: natural(row['label']))
+            rows.sort(key=sort_label, reverse=cfg.answerSort == 'label-desc')
+        elif cfg.answerSort.startswith('count') and not (cfg.calculation and cfg.calculation.operation != 'count'):
+            rows.sort(key=lambda row: row['count'], reverse=cfg.answerSort == 'count-desc')
     if not settings.hideBlanks and '__blank__' not in cfg.hiddenAnswers and len(cohort) > denominator: rows.append({'id': '__blank__', 'label': 'Blank / unanswered' if settings.language == 'en' else 'فارغ / دون إجابة', 'count': len(cohort) - denominator, 'percent': None, 'displayPercent': None})
     colors = {key: palette_color(cfg.palette, key) for key in [*[row['id'] for row in rows], *[column['id'] for column in breakdowns], 'series']} if cfg.palette else {}
     colors.update(cfg.colors)
     from .kobo_trends import answer_trend
     trend = answer_trend(q, cfg, questions, answered, lookup, categories, rows)
+    if cfg.palette and cfg.palette != 'Blue' and trend:
+        for series in trend['series']:
+            colors.setdefault(series['id'], palette_color(cfg.palette, series['id']))
     result = {'answerSort': cfg.answerSort, 'addedFromData': bool(q.get('addedFromData')), 'trend': trend, 'id': q['id'], 'name': q['name'], 'label': label(q, settings.language), 'group': q['group'], 'kind': q['kind'], 'repeat': q['repeat'], 'denominator': denominator, 'missing': len(cohort) - denominator, 'total': len(cohort), 'rows': rows, 'statistics': stats, 'bins': bins, 'breakdowns': breakdowns, 'breakdownDisplay': cfg.breakdownDisplay, 'breakdownFields': [{'id': dim['id'], 'label': label(dim, settings.language)} for dim in dimensions], 'percentageBasis': ('Records with a value within each breakdown category' if breakdowns else 'Records with a value in this column') if q.get('customColumn') else ('Answered respondents within each breakdown category' if breakdowns else 'Respondents who answered this question'), 'percentageDecimals': settings.percentageDecimals, 'chart': cfg.chart or ('line' if q['kind'] == 'date' else 'column'), 'colors': colors, 'pointColors': cfg.pointColors, 'allBarsColor': cfg.allBarsColor, 'appearance': cfg.appearance.model_dump()}
 
     from .kobo_measures import apply_measure
@@ -1081,13 +1160,21 @@ def question_result(q: dict, records: list[dict], settings: KoboSettings, questi
         not additive_scope and plan['enabled'] and cfg.percentageMode != 'visible-selections'
         and not respondent_hidden_codes(q, cfg, plan)
         and (not uses_linked_respondents(cfg, plan) or q['kind'] != 'multiple'))
-    if preserve_totals and cfg.hiddenAnswers and q['kind'] in {'category', 'multiple', 'text'}:
+    if not answer_rules and preserve_totals and cfg.hiddenAnswers and q['kind'] in {'category', 'multiple', 'text'}:
         original_cfg = cfg.model_copy(update={'hiddenAnswers': [], 'chartTopN': None})
         original_settings = settings.model_copy(update={'questions': {**settings.questions, q['id']: original_cfg}})
         original = question_result(q, records, original_settings, questions, lookup)
     result = apply_pivot_percentages(result, cfg, original)
     from .kobo_connections import apply_connection_basis
     result = apply_connection_basis(result, q, records, cfg, questions, lookup, settings, cohort)
+    if answer_rules:
+        from .kobo_pivot_percentages import apply_answer_filter_percentages
+        matched_columns = Counter(breakdown_values(record, dimensions, lookup) for record in cohort) if dimensions else {}
+        selections = [{'question': label(questions[rule.field], settings.language),
+                       'answers': [label(choice, settings.language) for choice in questions[rule.field]['choices'] if choice['name'] in rule.values]
+                                  + (['Blank / unanswered' if settings.language == 'en' else 'فارغ / دون إجابة'] if '__blank__' in rule.values else []),
+                       'exclude': rule.excludeSelected} for rule in answer_rules]
+        apply_answer_filter_percentages(result, len(cohort), len(eligible), matched_columns, selections)
     if original is not None:
         result['percentageRows'] = original['rows']
         if result.get('trend') and original.get('trend'):
@@ -1106,6 +1193,9 @@ def question_result(q: dict, records: list[dict], settings: KoboSettings, questi
     result = apply_pivot_sort(result, cfg)
     if not (result.get('chartProjection') or {}).get('axisOrder'):
         result['chartProjection'] = project_chart(result, cfg, q, original=original)
+    if not answer_rules and (cfg.answerShareQuestion or cfg.answerStackMode):
+        from .kobo_answer_shares import answer_views
+        result.update(answer_views(q, cfg, questions, cohort, dimensions, lookup, settings.language))
     visibility = answer_visibility_summary(q, records, cfg, questions, lookup, cohort, denominator,
                                            plan['enabled'] or bool(additive_scope) or cfg.percentageMode == 'visible-selections')
     if visibility is not None: result['answerVisibility'] = visibility
@@ -1131,7 +1221,8 @@ def analyze(project: dict, settings: KoboSettings, question: str = ''):
         result['connectionSetup'] = q.get('connectionSetup')
         result['conditionChecks'] = {key: value for key, value in review_summary.get('conditionQuestions', {}).get(q['id'], {}).items() if key != 'label'}
         result['conditionalWarnings'] = {key: value for key, value in warnings.get(q['id'], {}).items() if key != 'label'}
-        if result.get('connectionSetup') or result['missingAnswers'].get('open') or result['conditionChecks'].get('open') or result['conditionalWarnings'].get('open') or not settings.hideEmpty or result['denominator'] or (result.get('respondentBasis') or {}).get('kind') == 'parent' or bool(result.get('respondentBasis') and (settings.questions[q['id']].connectionSource == 'manual' or settings.questions[q['id']].connectedPercentageMode is not None or result['respondentBasis'].get('issue'))) or result.get('filterMode') in {'own', 'additional'} or settings.questions[q['id']].hiddenAnswers or settings.questions[q['id']].ownFilters: results.append(result)
+        has_answer_view = result.get('answerFilterSummary') or result.get('answerShare') or (result.get('answerStack') or {}).get('groups')
+        if has_answer_view or result.get('connectionSetup') or result['missingAnswers'].get('open') or result['conditionChecks'].get('open') or result['conditionalWarnings'].get('open') or not settings.hideEmpty or result['denominator'] or (result.get('respondentBasis') or {}).get('kind') == 'parent' or bool(result.get('respondentBasis') and (settings.questions[q['id']].connectionSource == 'manual' or settings.questions[q['id']].connectedPercentageMode is not None or result['respondentBasis'].get('issue'))) or result.get('filterMode') in {'own', 'additional'} or settings.questions[q['id']].hiddenAnswers or settings.questions[q['id']].ownFilters: results.append(result)
     if settings.questionSort != 'form':
         by_count = settings.questionSort.startswith('answered')
         # Sorting only within groups preserves the original group hierarchy.

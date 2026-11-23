@@ -67,7 +67,7 @@ def apply_measure(result, question, cfg, questions, answered, lookup, categories
     for column in result['breakdowns']:
         column.update(aggregate(column_members[column['id']],field,operation,lookup))
     result['measureTotal'] = aggregate(pool if cfg.percentageMode!='legacy-respondents' else answered,field,operation,lookup)
-    if cfg.answerSort.startswith('count'):
+    if cfg.answerSort.startswith('count') and not result.get('bins'):
         valid = [row for row in result['rows'] if row['id'] != '__blank__']
         valid.sort(key=lambda row: row['value'] or 0, reverse=cfg.answerSort == 'count-desc')
         result['rows'] = [r for r in valid if r['value'] is not None]+[r for r in valid if r['value'] is None]+[r for r in result['rows'] if r['id']=='__blank__']

@@ -17,6 +17,28 @@ def put_percent(cell, numerator, denominator, decimals):
     cell['displayPercent'] = float(Decimal(str(cell['percent'])).quantize(Decimal(1).scaleb(-decimals), rounding=ROUND_HALF_UP)) if cell['percent'] is not None else None
 
 
+def apply_answer_filter_percentages(result, matched, eligible, matched_columns, selections):
+    decimals = result.get('percentageDecimals', 0)
+    for row in result['rows']:
+        for cell in [row, *row.get('series', [])]:
+            put_percent(cell, cell['count'], eligible, decimals)
+    for column in result['breakdowns']:
+        count = matched_columns.get(tuple(column['values']), 0)
+        column.update(totalCount=count, totalPercent=percentage(count, eligible))
+    for series in (result.get('trend') or {}).get('series', []):
+        for point in series['points']:
+            put_percent(point, point.get('count'), eligible, decimals)
+    result.update(
+        percentageMode='answer-filter',
+        percentageBasis='% of eligible responses matching selected answers',
+        pivotTotal={'count': matched, 'percent': percentage(matched, eligible), 'contributingCount': matched},
+        answerFilterSummary={'count': matched, 'denominator': eligible,
+                             'percent': percentage(matched, eligible), 'selections': selections},
+    )
+    if result['chart'] in {'pie', 'donut'}:
+        result['chart'] = 'bar'
+
+
 def value_totals(result, use_value, level):
     value_key = 'value' if use_value else 'count'
     def total(values):

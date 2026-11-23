@@ -1,6 +1,48 @@
 """Project live chart ranges without changing pivot rows or slicer membership."""
+from decimal import Decimal, ROUND_HALF_UP
+
 from .kobo_excel_ranges import excel_cell,excel_range
 from .kobo_excel_percentages import percent_format
+
+
+def ranked_chart_colors(result, rows, palette, metric, overrides):
+    from .kobo import CHART_PALETTES
+
+    ramp = CHART_PALETTES[palette]
+    decimals = Decimal(1).scaleb(-result.get('percentageDecimals', 0))
+    if metric == 'percent':
+        values = [Decimal(str(row.get('displayPercent', row.get('percent')) or 0)).quantize(decimals, rounding=ROUND_HALF_UP)
+                  for row in rows]
+    else:
+        field = 'value' if result.get('measure') else 'count'
+        values = [row.get(field) or 0 for row in rows]
+    ranks = sorted(set(values), reverse=True)
+    last_rank = max(1, len(ranks) - 1)
+    shades = {value: ramp[(2 * rank * (len(ramp) - 1) + last_rank) // (2 * last_rank)]
+              for rank, value in enumerate(ranks)}
+    return [overrides.get(row['id'], shades[value]) for row, value in zip(rows, values)]
+
+
+def apply_ranked_chart_colors(chart_object, result, visible, settings, metrics):
+    from .kobo import VALUE_RANKED_BLUE_PALETTES
+    from .kobo_excel import _rgb
+
+    kind = result['chart']
+    if (chart_object is None or settings.palette not in VALUE_RANKED_BLUE_PALETTES
+            or result['breakdowns'] or kind in {'line', 'heatmap'}):
+        return
+    projection = result.get('chartProjection')
+    rows = [row for row in (projection or result)['rows'] if row['id'] != '__blank__']
+    visible_by_id = {row['id']: row for row in (projection or visible or result)['rows']}
+    rank_rows = [visible_by_id.get(row['id'], {'id': row['id']}) for row in rows]
+    all_bars = settings.allBarsColor if kind in {'bar', 'column', 'histogram'} else None
+    chart = chart_object.Chart
+    for index in range(1, chart.SeriesCollection().Count + 1):
+        colors = ranked_chart_colors(result, rank_rows, settings.palette, metrics[(index - 1) % len(metrics)], settings.colors)
+        series = chart.SeriesCollection(index)
+        points = series.Points()
+        for point, color in enumerate(colors[:points.Count], 1):
+            series.Points(point).Format.Fill.ForeColor.RGB = _rgb(all_bars or color)
 
 
 def round_chart_percent(expression, decimals, unavailable='"-"'):

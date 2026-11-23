@@ -16,6 +16,11 @@ def apply_pivot_sort(result, cfg):
             or selected.id.endswith(':percent') and cfg.breakdownDisplay == 'count'):
         selected = None
     result['pivotSort'] = selected.model_dump() if selected else None
+    temporal = result['kind'] == 'date' or result.get('bins') or result['chart'] == 'histogram'
+    original = result['rows']
+    if temporal and (selected or result['kind'] == 'date' and cfg.answerSort != 'form'):
+        axis_rows = sorted(original, key=lambda row: (row['id'] == '__blank__', row['id'])) if result['kind'] == 'date' else original
+        result['chartProjection'] = {'rows': axis_rows, 'axisOrder': True, 'topNTotal': len(axis_rows), 'topNShown': len(axis_rows), 'topNOther': False}
     if not selected: return result
     ids = set(selected.series or [])
     base = sum(columns[key]['denominator'] for key in ids)
@@ -34,11 +39,7 @@ def apply_pivot_sort(result, cfg):
         left, right = value(a), value(b)
         if left is None or right is None: return (left is None) - (right is None)
         return ((left > right) - (left < right)) * (1 if selected.direction == 'asc' else -1)
-    temporal = result['kind'] == 'date' or result.get('bins') or result['chart'] == 'histogram'
-    original = result['rows']
     result['rows'] = sorted(original, key=cmp_to_key(compare))
     order = {row['id']: i for i, row in enumerate(result['rows'])}
     if result.get('trend'): result['trend']['series'].sort(key=lambda series: order.get(series['id'], len(order)))
-    if temporal:
-        result['chartProjection'] = {'rows': original, 'axisOrder': True, 'topNTotal': len(original), 'topNShown': len(original), 'topNOther': False}
     return result

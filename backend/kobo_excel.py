@@ -450,7 +450,7 @@ def _chart(report, pivot, result, left, top, metrics, project, settings, totals=
     chart_object = report.ChartObjects().Add(left, top, 650, appearance.get('height', 0)*.75 or 360)
     # Add() and the Left property use different origins on RTL worksheets.
     chart_object.Left = left; chart_object.Top = top
-    chart_object.Name = f'Chart_{pivot.Name}'
+    chart_object.Name = f'Chart_{pivot.Name}' if pivot is not None else f'AnswerFilterChart_{result["id"].encode().hex()[:120]}_{int(top)}'
     chart = chart_object.Chart
     display_cells = result.get('_displayCells')
     if display_cells:
@@ -567,7 +567,7 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
         source_questions = {}
         for q in project['form']['questions']:
             cfg = resolved_question_settings(q, settings)
-            source_questions[q['id']] = cfg.model_copy(update={**({'answerSort':'form'} if cfg.answerSort.startswith('count') else {}),'filterMode':'page'})
+            source_questions[q['id']] = cfg.model_copy(update={**({'answerSort':'form'} if cfg.answerSort.startswith('count') else {}),'filterMode':'page','answerFilters':[]})
         source_settings = settings.model_copy(update={'filters': [], 'hideZero': False, 'hideEmpty': False, 'questions': source_questions})
         telemetry.begin('analysis', 0, 'Calculating export results')
         snapshot = analyze(project, source_settings, question)
@@ -669,6 +669,42 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                 result = item['result']; position = item['position']; start = next_row; completed += 1
                 telemetry.completed = completed-1
                 telemetry.begin('pivots', 20+round(completed / len(snapshot['questions']) * 75), f'Building question {completed}/{len(snapshot["questions"])}')
+                shown = visible.get(result['id'])
+                if shown and shown.get('answerFilterSummary'):
+                    from .kobo_excel_percentages import report_table
+                    from .kobo_excel_chart_projection import apply_ranked_chart_colors, project_excel_chart, round_excel_chart_percentages
+                    from .kobo_excel_trends import native_heatmap, snapshot_trend_chart
+                    shown['_excelBreakdowns'] = shown['breakdowns']
+                    shown['appearance'] = result['appearance']
+                    summary = shown['answerFilterSummary']
+                    mode = shown.get('breakdownDisplay', 'both')
+                    metrics = ['count', 'percent'] if mode == 'both' else [mode]
+                    excel_cell(report, start, 1).Value = safe_spreadsheet_value(shown['label'])
+                    excel_cell(report, start, 1).Font.Bold = True
+                    excel_cell(report, start+1, 1).Value = f'{summary["count"]} of {summary["denominator"]} eligible responses matched the selected answers.'
+                    excel_cell(report, start+2, 1).Value = safe_spreadsheet_value('; '.join(
+                        f'{selection["question"]}: {"excluding " if selection["exclude"] else ""}{", ".join(selection["answers"])}'
+                        for selection in summary['selections']))
+                    excel_cell(report, start+3, 1).Value = 'Percentages reflect the filters applied at export.'
+                    area, footer = report_table(book, report, None, shown, start+5, metrics, _support_sheet, settings.language)
+                    chart = None
+                    chart_metrics = [shown['appearance']['metric']]
+                    left, top = area.Left+area.Width+CHART_GAP, area.Top
+                    if shown['chart'] == 'heatmap' and shown['breakdowns']:
+                        area, footer, formats = native_heatmap(report, shown, area, footer)
+                        final_heatmaps.extend(formats)
+                    elif shown.get('trend'):
+                        chart = snapshot_trend_chart(report, shown, left, top, chart_metrics[0])
+                    elif any(row['count'] and row['id'] != '__blank__' for row in shown['rows']):
+                        chart = _chart(report, None, shown, left, top, chart_metrics, project, settings, final_styles=final_label_styles)
+                        project_excel_chart(book, chart, shown, _support_sheet)
+                        round_excel_chart_percentages(book, chart, shown, chart_metrics, _support_sheet)
+                        apply_ranked_chart_colors(chart, shown, shown, resolved_question_settings(questions[shown['id']], settings), chart_metrics)
+                    required = max(footer.Top+footer.Height, chart.Top+chart.Height if chart is not None else 0) + BLOCK_GAP
+                    next_row = footer.Row+5
+                    while excel_cell(report, next_row, 1).Top < required: next_row += 1
+                    previous_nested = None
+                    continue
                 if result.get('measure'):
                     from .kobo_excel_measures import measured_report
                     layout = next(value for value in layouts if value['scope']==result['repeat'])
@@ -678,10 +714,13 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                     if result.get('filterMode') in {'own','additional'}:
                         add_sheet_slicers(book,report,[pivot],own_specs.get(result['id'],[]),f'own{position}',top_row=start+4)
                     else:sheet_pivots[result['repeat']].append(pivot)
-                    from .kobo_excel_chart_projection import project_excel_chart, round_excel_chart_percentages
+                    from .kobo_excel_chart_projection import apply_ranked_chart_colors, project_excel_chart, round_excel_chart_percentages
                     project_excel_chart(book,chart,result,_support_sheet)
-                    if result["measure"]["operation"] == "sum":
-                        round_excel_chart_percentages(book, chart, result, [result["appearance"]["metric"]], _support_sheet)
+                    measure_metric = 'count'
+                    if result['measure']['operation'] == 'sum':
+                        measure_metric = result['appearance']['metric']
+                        round_excel_chart_percentages(book, chart, result, [measure_metric], _support_sheet)
+                    apply_ranked_chart_colors(chart, result, visible.get(result['id']), resolved_question_settings(questions[result['id']], settings), [measure_metric])
                     required=max(footer.Top+footer.Height,chart.Top+chart.Height if chart is not None else 0)+BLOCK_GAP
                     next_row=max(footer.Row+5,start+int(required/15))
                     while excel_cell(report,next_row,1).Top<required:next_row+=1
@@ -787,9 +826,11 @@ def excel_worker(project, snapshot, settings_dict, target, messages, question=''
                 else:
                     chart = _chart(report, chart_pivot, result, area.Left+area.Width+CHART_GAP, area.Top, chart_metrics or metrics, project, settings, totals, final_label_styles) if result['denominator'] else None
                     if chart is None: excel_cell(report, start + 3, 1).Value = 'No answered responses available for a chart.'
-                from .kobo_excel_chart_projection import project_excel_chart, round_excel_chart_percentages
+                from .kobo_excel_chart_projection import apply_ranked_chart_colors, project_excel_chart, round_excel_chart_percentages
                 project_excel_chart(book,chart,result,_support_sheet)
-                round_excel_chart_percentages(book, chart, result, trend_metrics if result.get("trend") else chart_metrics, _support_sheet)
+                active_metrics = trend_metrics if result.get('trend') else chart_metrics
+                round_excel_chart_percentages(book, chart, result, active_metrics, _support_sheet)
+                apply_ranked_chart_colors(chart, result, visible.get(result['id']), resolved_question_settings(questions[result['id']], settings), active_metrics)
                 if parent_base:
                     excel_cell(report, start+2, 1).Value = safe_spreadsheet_value(result['percentageBasis'])
                 if keep_original:
