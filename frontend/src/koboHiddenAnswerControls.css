@@ -7,13 +7,12 @@
  border:1px solid var(--line);border-radius:10px;
  background:color-mix(in srgb,var(--panel-strong) 58%,var(--bg));
 }
-.kobo-connected-base-panel.is-scope-only{display:inline-block;container-type:normal;max-inline-size:100%;box-sizing:border-box}
-.kobo-connected-base-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;min-width:0}
+.kobo-connected-base-controls{display:flex;flex-wrap:wrap;align-items:start;gap:8px 12px;min-width:0}
 .kobo-connected-base-controls .kobo-percentage-base-control{justify-items:start;align-content:start;gap:4px}
 .kobo-connected-base-controls .kobo-percentage-base-label{font-size:11px;color:var(--muted);line-height:1.4}
 .kobo-connected-base-controls .kobo-answer-percentage-buttons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
-.kobo-connected-base-panel:not(.is-scope-only) .kobo-percentage-base-control{flex:1 1 320px}
-.kobo-connected-base-panel:not(.is-scope-only) .kobo-answer-percentage-buttons{inline-size:100%}
+.kobo-connected-base-panel .kobo-percentage-base-control{flex:1 1 310px}
+.kobo-connected-base-panel .kobo-answer-percentage-buttons{inline-size:100%}
 .kobo-connected-base-status{display:grid;gap:5px;min-width:0;font-size:12px;line-height:1.4;color:var(--muted)}
 .kobo-connected-base-heading{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
 .kobo-connected-base-number{font-weight:600}
@@ -21,13 +20,7 @@
 .kobo-connected-base-parent{overflow-wrap:anywhere}
 .kobo-connected-base-parent bdi{color:var(--ink);font-weight:550}
 .kobo-connected-base-selection{margin:0}
-.kobo-connected-base-panel:not(.is-scope-only)>.kobo-connected-base-controls{align-items:start;margin-block-start:10px}
-.kobo-percentage-example{
- display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 10px;margin:8px 0 0;padding-block-start:8px;
- border-block-start:1px solid var(--line);color:var(--muted);font-size:12px;line-height:1.4;
-}
-.kobo-percentage-example-answer{overflow-wrap:anywhere}
-.kobo-percentage-example strong{color:var(--ink);font-variant-numeric:tabular-nums}
+.kobo-connected-base-panel>.kobo-connected-base-controls{align-items:start;margin-block-start:10px}
 @container(max-width:460px){
  .kobo-connected-base-controls .kobo-percentage-base-control,.kobo-connected-base-controls .kobo-answer-percentage-buttons{width:100%}
  .kobo-connected-base-heading{flex-direction:column;align-items:flex-start}
@@ -71,8 +64,34 @@
 @container(max-width:460px){
  .kobo-connected-base-controls .kobo-answer-percentage-buttons>button{min-height:44px;padding-inline:7px}
 }
-@media(max-width:520px){
- .kobo-connected-base-panel.is-scope-only .kobo-answer-percentage-buttons>button{min-height:44px}
-}
 .kobo-connection-settings>.kobo-percentage-base-control,.kobo-connection-settings>.kobo-percentage-base-control>.kobo-answer-percentage-buttons{width:100%}
 @media(prefers-reduced-motion:reduce){.kobo-answer-percentage-buttons>button{transition:none}}
+
+
+.kobo-pivot-percentage-summary{display:grid;gap:22px;padding:20px;background:var(--panel-strong)}
+.kobo-pivot-percentage-header{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,32%);align-items:start;gap:20px}
+.kobo-pivot-percentage-detail,.kobo-pivot-percentage-metric{display:grid;gap:6px;min-width:0;overflow-wrap:anywhere}
+.kobo-pivot-percentage-detail h4,.kobo-pivot-percentage-axis h5,.kobo-pivot-percentage-summary p{margin:0}
+.kobo-pivot-percentage-label,.kobo-pivot-percentage-basis{font-size:12px;color:var(--muted);line-height:1.4}
+.kobo-pivot-percentage-label{font-weight:650}
+.kobo-pivot-percentage-detail h4{font-size:17px;line-height:1.45;font-weight:700;color:var(--ink)}
+.kobo-pivot-percentage-metric{text-align:end;justify-items:end}
+.kobo-pivot-percentage-metric strong{font-size:clamp(25px,4cqi,40px);line-height:1.1;color:var(--blue);font-variant-numeric:tabular-nums}
+.kobo-pivot-percentage-metric p{font-size:13px;line-height:1.45;color:var(--ink)}
+.kobo-pivot-percentage-conditions{display:grid;gap:4px;margin-block-start:7px;overflow-wrap:anywhere}
+.kobo-pivot-percentage-conditions strong{font-size:12px;color:var(--ink)}
+.kobo-pivot-percentage-conditions ul{display:grid;gap:3px;margin:0;padding-inline-start:17px;font-size:12px;line-height:1.5}
+.kobo-pivot-percentage-controls{padding-block-start:12px;border-block-start:1px solid var(--line)}
+.kobo-pivot-percentage-visibility{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));align-items:start;gap:18px 24px;padding:14px 16px;border-block-start:1px solid var(--line);border-radius:8px;background:color-mix(in srgb,var(--blue) 4%,var(--panel-strong))}
+.kobo-pivot-percentage-axis{display:grid;gap:4px;min-width:0}
+.kobo-pivot-percentage-axis h5{font-size:13px;line-height:1.4;color:var(--ink)}
+.kobo-pivot-percentage-axis p{font-size:12px;line-height:1.5;color:var(--muted)}
+.kobo-pivot-percentage-metric .kobo-pivot-hidden-selections{font-size:12px;color:var(--muted)}
+.kobo-pivot-percentage-axis .kobo-percentage-base-control{margin-block-start:6px}
+.kobo-pivot-percentage-summary .kobo-connected-base-controls{margin-block-start:0}
+@container(max-width:520px){
+ .kobo-pivot-percentage-header{grid-template-columns:minmax(0,1fr);gap:14px}
+ .kobo-pivot-percentage-metric{text-align:start;justify-items:start}
+ .kobo-pivot-percentage-visibility{padding:12px}
+}
+@media(max-width:420px){.kobo-pivot-percentage-summary{padding:14px}}

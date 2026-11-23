@@ -39,6 +39,7 @@ def apply_original_respondent_percentages(result, original):
         for cell in row.get('series', []):
             put_percent(cell, cell['count'], column_bases.get(cell['id']) if row['id'] != '__blank__' else None, decimals)
     visible = result['denominator']
+    result['percentageSummary'] = {'numerator': visible, 'denominator': denominator}
     result['pivotTotal'] = {'count': visible, 'percent': percentage(visible, denominator)}
     for column in result['breakdowns']:
         column['totalCount'] = column['denominator']

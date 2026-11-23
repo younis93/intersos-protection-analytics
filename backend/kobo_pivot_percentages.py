@@ -2,6 +2,8 @@
 import math
 from decimal import Decimal,ROUND_HALF_UP
 
+from .kobo_percentages import display_percentages
+
 MODES={'grand-total':'% of Grand Total','column-total':'% of Column Total','row-total':'% of Row Total','breakdown-group':'% within breakdown group','legacy-respondents':'% of Respondents','visible-selections':'% of visible selections'}
 
 def uses_additive_answer_scope(cfg):
@@ -30,6 +32,7 @@ def apply_answer_filter_percentages(result, matched, eligible, matched_columns, 
             put_percent(point, point.get('count'), eligible, decimals)
     result.update(
         percentageMode='answer-filter',
+        percentageSummary={'numerator': matched, 'denominator': eligible},
         percentageBasis='% of eligible responses matching selected answers',
         pivotTotal={'count': matched, 'percent': percentage(matched, eligible), 'contributingCount': matched},
         answerFilterSummary={'count': matched, 'denominator': eligible,
@@ -98,10 +101,18 @@ def apply_pivot_percentages(result, cfg, original=None):
             base = row_base if mode == 'row-total' else column_base(mode, cell['id'], basis)
             put_percent(cell, cell.get(value_key), base, decimals)
         put_percent(row, row_totals[row['id']], row_base, decimals)
+    # Balance the displayed answer shares only when they cover the entire count base.
+    if not measured and mode in {'grand-total', 'visible-selections'} and grand and grand == basis[3]:
+        entries = [(row_id, int(count)) for row_id, count in row_totals.items()]
+        rounded = display_percentages(entries, int(grand), decimals)
+        for row in result['rows']:
+            if row['id'] in rounded:
+                row['displayPercent'] = rounded[row['id']]
     for column in result['breakdowns']:
         amount = column_totals[column['id']]
         column[total_key] = amount
         column['totalPercent'] = percentage(amount, column_base(mode, column['id'], basis))
+    result['percentageSummary'] = {'numerator': grand, 'denominator': basis[3]}
     result['pivotTotal'] = {value_key: grand, 'percent': percentage(grand, basis[3]),
         'contributingCount': (result.get('measureTotal') or {}).get('contributingCount', result['denominator'])}
     trend = result.get('trend')

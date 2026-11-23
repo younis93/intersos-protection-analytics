@@ -14,6 +14,7 @@ import {bulkQuestionSettings,enabledKoboQuestions,sharedBreakdownFields,sharedBu
 import {calculationKey,colorEntries,defaultKoboColor,koboPalettes,resolveKoboColors} from './koboCustomizeOptions';
 import {KoboRendering} from './KoboRendering';
 import KoboPivotTable from './KoboPivotTable';
+import {resultWithPivotColumns} from './koboPivotSort';
 import './koboCustomize.css';
 import './koboBulkCustomize.css';
 const Chart=lazy(()=>import('./KoboChart'));
@@ -88,7 +89,7 @@ export default function KoboBulkCustomize({project,settings,analysis,onApply,onC
   const timer=setTimeout(()=>void koboApi.previewQuestion(project.id,{...base.current,questions:{...base.current.questions,[target.id]:cfg}},target.id,controller.signal).then(result=>{if(!controller.signal.aborted)setPreview({key,result})}).catch(issue=>{if(!controller.signal.aborted)setError(issue instanceof Error?issue.message:String(issue))}).finally(()=>{if(!controller.signal.aborted)setBusy(false)}),250);
   return()=>{clearTimeout(timer);controller.abort()};
  },[key,retry]);
- const shown=useMemo(()=>preview&&cfg?{...preview.result,chart:cfg.chart||(['date'].includes(preview.result.kind)?'line':preview.result.kind==='number'?'column':'bar') as KoboResult['chart'],colors:resolveKoboColors({...preview.result,chart:cfg.chart||preview.result.chart,appearance:cfg.appearance},cfg.palette,cfg.colors),pointColors:cfg.pointColors||{},breakdownDisplay:cfg.breakdownDisplay,appearance:cfg.appearance}:null,[preview,cfg]);
+ const shown=useMemo(()=>preview&&cfg?resultWithPivotColumns({...preview.result,chart:cfg.chart||(['date'].includes(preview.result.kind)?'line':preview.result.kind==='number'?'column':'bar') as KoboResult['chart'],colors:resolveKoboColors({...preview.result,chart:cfg.chart||preview.result.chart,appearance:cfg.appearance},cfg.palette,cfg.colors),pointColors:cfg.pointColors||{},breakdownDisplay:cfg.breakdownDisplay,appearance:cfg.appearance},cfg,settings.language):null,[preview,cfg,settings.language]);
  const entries=shown?colorEntries(shown):[],entryKey=JSON.stringify(entries.map(entry=>entry.id));
  useEffect(()=>setColorLimit(20),[entryKey]);
  const changeLevel=(index:number,value:string)=>{const next=[...levels];if(value)next[index]=value;else next.splice(index,1);patch({breakdowns:next.filter(Boolean)})};

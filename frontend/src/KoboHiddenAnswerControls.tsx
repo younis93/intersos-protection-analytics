@@ -28,24 +28,32 @@ export function KoboHiddenAnswerControls({mode,onChange,language='en',keepOrigin
  </div>;
 }
 
-export function KoboAnswerScopeControl({value,onChange,language,basis='follow-up',multipleChoice=false}:{
- value?:KoboConnectedAnswerScope;onChange:(scope:KoboConnectedAnswerScope)=>void;language:'en'|'ar';basis?:'follow-up'|'respondents'|'totals';
- multipleChoice?:boolean;
+const hiddenAxisLabels={answers:'الإجابات المخفية',rows:'الصفوف المخفية',columns:'الأعمدة المخفية'} as const;
+export function koboHiddenScopeLabel(language:'en'|'ar',axis:keyof typeof hiddenAxisLabels){
+ return language==='ar'?`كيف تؤثر ${hiddenAxisLabels[axis]} في النسب المئوية`:`How hidden ${axis} affect percentages`;
+}
+
+export function KoboAnswerScopeControl({value,onChange,language,basis='follow-up',multipleChoice=false,axis='answers',showLabel=true}:{
+ value?:KoboConnectedAnswerScope;onChange:(scope:KoboConnectedAnswerScope)=>void;language:'en'|'ar';basis?:'follow-up'|'respondents'|'totals'|'answer-filter';
+ multipleChoice?:boolean;axis?:keyof typeof hiddenAxisLabels;showLabel?:boolean;
 }){
- const ar=language==='ar',label=ar?'كيف تؤثر الإجابات المخفية في النسب المئوية':'How hidden answers affect percentages';
+ const ar=language==='ar';
+ const item=hiddenAxisLabels[axis],label=koboHiddenScopeLabel(language,axis);
  const hintId=useId();
- const showMixedAnswerHint=basis==='follow-up'&&multipleChoice;
+ const showMixedAnswerHint=(basis==='follow-up'||basis==='answer-filter')&&multipleChoice;
  const hints={
+  'answer-filter':ar?['تُحتسب الاستجابات حتى إذا كانت جميع إجاباتها مخفية.','استبعد الاستجابات ذات الإجابات المخفية فقط من قاعدة النسبة.']:['Include responses whose answers are all hidden.','Exclude responses with only hidden answers from the percentage base.'],
+  columns:ar?['تشمل قاعدة النسبة جميع الأعمدة.','تشمل قاعدة النسبة الأعمدة الظاهرة فقط.']:['Use all breakdown columns in the percentage base.','Use only visible breakdown columns in the percentage base.'],
   'follow-up':ar?['تُحسب الاستجابات حتى إذا كانت جميع إجاباتها مخفية.','استبعد مستجيبي المتابعة المؤهلين الذين جميع اختياراتهم مخفية.']:['Include respondents whose selections are all hidden.','Exclude eligible follow-up respondents whose selections are all hidden.'],
   respondents:ar?['استخدم قاعدة المستجيبين الأصلية.','استبعد المستجيبين ذوي الإجابات المخفية من قاعدة النسبة.']:['Use the original respondent base.','Exclude respondents with hidden answers from the percentage base.'],
   totals:ar?['تدخل الإجابات المخفية في إجماليات النسب.','تُحسب الإجماليات من الإجابات الظاهرة فقط.']:['Include hidden answers in the percentage totals.','Calculate percentage totals from visible answers.'],
- }[basis];
+ }[axis==='columns'?'columns':basis];
  const options=[
-  ['all',ar?'تضمين الإجابات المخفية في الحساب':'Include hidden answers in the calculation',hints[0]],
-  ['visible',ar?'استبعاد الإجابات المخفية من الحساب':'Exclude hidden answers from the calculation',hints[1]],
+  ['all',ar?`تضمين ${item} في الحساب`:`Include hidden ${axis} in the calculation`,hints[0]],
+  ['visible',ar?`استبعاد ${item} من الحساب`:`Exclude hidden ${axis} from the calculation`,hints[1]],
  ] as const;
  return <div className="kobo-percentage-base-control" role="group" aria-label={label}>
-  <span className="kobo-percentage-base-label">{label}</span>
+  {showLabel&&<span className="kobo-percentage-base-label">{label}</span>}
   <div className="kobo-answer-percentage-buttons">
    {options.map(([scope,caption,hint])=><button type="button" key={scope} aria-pressed={(value??'all')===scope} aria-describedby={scope==='visible'&&showMixedAnswerHint?hintId:undefined} title={hint} onClick={()=>onChange(scope)}>{caption}</button>)}
   </div>
@@ -53,10 +61,10 @@ export function KoboAnswerScopeControl({value,onChange,language,basis='follow-up
  </div>;
 }
 
-export function KoboRespondentAnswerScopeControl({mode,onChange,language}:{
- mode?:'adjust'|'keep-original';onChange:(mode:'adjust'|'keep-original')=>void;language:'en'|'ar';
+export function KoboRespondentAnswerScopeControl({mode,onChange,language,axis,showLabel}:{
+ mode?:'adjust'|'keep-original';onChange:(mode:'adjust'|'keep-original')=>void;language:'en'|'ar';axis?:'answers'|'rows';showLabel?:boolean;
 }){
- return <KoboAnswerScopeControl basis="respondents" language={language} value={mode==='keep-original'?'all':'visible'}
+ return <KoboAnswerScopeControl axis={axis} showLabel={showLabel} basis="respondents" language={language} value={mode==='keep-original'?'all':'visible'}
   onChange={scope=>onChange(scope==='all'?'keep-original':'adjust')}/>;
 }
 

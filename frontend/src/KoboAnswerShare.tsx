@@ -16,8 +16,9 @@ export default function KoboAnswerShare({result,language}:{result:KoboResult;lan
      arabic?'لا توجد استجابات مؤهلة.':'No eligible responses.'}</div>
     <ul>{selections.map((selection,index)=><li key={index}><bdi>{selection.question}</bdi>{' · '}
      {selection.exclude&&(arabic?'باستثناء ':'excluding ')}<bdi>{selection.answers.join(arabic?'، ':', ')}</bdi></li>)}</ul>
-    <small>{arabic?'يُحسب الأساس بعد عوامل تصفية الصفحة والسؤال وقبل تطبيق الإجابات المحددة.':
-     'The base includes page and Question filters, before the selected answers are applied.'}</small>
+    <small>{summary.visibleColumnsOnly
+     ?(arabic?'تقتصر قاعدة النسبة على الأعمدة الظاهرة بعد تطبيق فلاتر الصفحة والسؤال.':'The base uses visible columns after page and question filters.')
+     :(arabic?'يُحسب الأساس بعد عوامل تصفية الصفحة والسؤال وقبل تطبيق الإجابات المحددة.':'The base includes page and question filters, before the selected answers are applied.')}</small>
    </div>
   </section>;
  }

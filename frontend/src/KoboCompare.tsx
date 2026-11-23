@@ -3,18 +3,21 @@ import {Columns2,Table2,X} from 'lucide-react';
 import {AppSelect} from './SelectionControls';
 import KoboPivotTable,{type KoboPivotSelection} from './KoboPivotTable';
 import type {KoboAnalysis,KoboResult} from './koboTypes';
+import {resultWithPivotColumns} from './koboPivotSort';
 import './koboCompare.css';
 
 type Display='count'|'percent'|'both';
 function ComparisonTable({result,analysis,group,onDrilldown}:{onDrilldown:(result:KoboResult,selection:KoboPivotSelection)=>void;result:KoboResult;analysis:KoboAnalysis;group:string}){
  const[count,setCount]=useState(100),[display,setDisplay]=useState<Display>(()=>analysis.settings.questions[result.id]?.breakdownDisplay||result.breakdownDisplay||'both');
+ const config=analysis.settings.questions[result.id],language=analysis.settings.language;
+ const pivot=useMemo(()=>resultWithPivotColumns(result,config,language),[result,config,language]);
  return <>
   <div className="kobo-compare-question"><span className="eyebrow" dir="auto">{result.name}{result.id!==result.name?` · ${result.id}`:''}</span><h3 dir="auto">{result.label}</h3><p className="kobo-compare-group" dir="auto">{group}</p>
    <div className="kobo-compare-counts"><span>{'Answered'} <strong>{result.denominator.toLocaleString(analysis.settings.language)}</strong></span><span>{'Missing'} <strong>{result.missing.toLocaleString(analysis.settings.language)}</strong></span><span>{'Total'} <strong>{result.total.toLocaleString(analysis.settings.language)}</strong></span></div>
   </div>
   {result.filterMode&&result.filterMode!=='page'&&<p className="kobo-notice">Filters: {result.filterSummary?.join('; ')||'All eligible records'}</p>}
   {!result.denominator&&<p className="kobo-compare-message" role="status">{'No answered responses under the current filters.'}</p>}
-  <KoboPivotTable onDrilldown={selection=>onDrilldown(result,selection)} result={result} language={analysis.settings.language} limit={count} display={display} onDisplayChange={setDisplay} showDisplaySelector/>
+  <KoboPivotTable onDrilldown={selection=>onDrilldown(pivot,selection)} result={pivot} language={analysis.settings.language} limit={count} display={display} onDisplayChange={setDisplay} showDisplaySelector/>
   {result.rows.length>count&&<button type="button" className="soft kobo-compare-more" onClick={()=>setCount(value=>value+100)}>{'Show more answers'} ({result.rows.length-count})</button>}
   {result.kind==='multiple'&&<p className="kobo-basis">Percentages can total more than 100%; each respondent is counted once per selected option.</p>}
  </>;

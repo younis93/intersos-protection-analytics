@@ -1,15 +1,34 @@
 import {useEffect,useId,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
-import {Eye,EyeOff,MoreHorizontal,Pencil,Settings2} from 'lucide-react';
+import {Check,Eye,EyeOff,MoreHorizontal,Pencil,Settings2,X} from 'lucide-react';
+import {normalizedAnswerLabel} from './koboAnswerDraft';
 import './koboAnswerActions.css';
 
 const answerMenuOpened='kobo-answer-menu-opened';
 
 type MenuPosition={x:number;y:number;align:'start'|'end';last?:boolean;anchor?:{left:number;top:number}};
-type Props={label:string;children:ReactNode;language?:string;hiddenCount:number;target?:'Answer'|'Column';actions?:{label:string;run:()=>void}[];onRename?:()=>void;onManage?:()=>void;onHide?:()=>void;onRestore?:()=>void};
+type Props={label:string;children:ReactNode;language?:string;hiddenCount:number;target?:'Answer'|'Column';actions?:{label:string;run:()=>void}[];onRename?:(label:string)=>Promise<void>;onManage?:()=>void;onHide?:()=>void;onRestore?:()=>void};
 export default function KoboAnswerActions({label,children,language='en',hiddenCount,target='Answer',actions,onRename,onManage,onHide,onRestore}:Props){
  const[position,setPosition]=useState<MenuPosition|null>(null),menu=useRef<HTMLDivElement>(null),trigger=useRef<HTMLButtonElement>(null),id=useId();
+ const [draft,setDraft]=useState<string|null>(null),[busy,setBusy]=useState(false),[renameError,setRenameError]=useState('');
+ const input=useRef<HTMLInputElement>(null),restoreFocus=useRef(false);
+ const editing=draft!==null;
  const direction=language==='ar'?'rtl':'ltr';
+ useLayoutEffect(()=>{
+  if(editing){input.current?.focus({preventScroll:true});input.current?.select()}
+  else if(restoreFocus.current){restoreFocus.current=false;trigger.current?.focus({preventScroll:true})}
+ },[editing]);
+ const finishRename=()=>{restoreFocus.current=true;setDraft(null);setRenameError('')};
+ const saveRename=async()=>{
+  if(!onRename||draft===null||busy)return;
+  const next=normalizedAnswerLabel(draft);
+  if(!next){setRenameError('Enter an answer label.');return}
+  if(next===normalizedAnswerLabel(label)){finishRename();return}
+  setBusy(true);setRenameError('');
+  try{await onRename(next);finishRename()}
+  catch(error){setRenameError(error instanceof Error?error.message:String(error))}
+  finally{setBusy(false);input.current?.focus({preventScroll:true})}
+ };
  const close=(restore=true)=>{setPosition(null);if(restore)trigger.current?.focus({preventScroll:true})};
  const announceOpen=()=>window.dispatchEvent(new CustomEvent(answerMenuOpened,{detail:id}));
  const open=(last=false)=>{announceOpen();const b=trigger.current?.getBoundingClientRect();if(b)setPosition({x:direction==='rtl'?b.left:b.right,y:b.bottom+4,align:direction==='rtl'?'start':'end',last,anchor:{left:b.left,top:b.top}})};
@@ -37,6 +56,17 @@ export default function KoboAnswerActions({label,children,language='en',hiddenCo
  },[position]);
  const run=(action:()=>void)=>{close();action()};
  const menuLabel=`${target} options: ${label}`;
+ if(editing)return <form className="kobo-pivot-rename" dir={direction} aria-busy={busy}
+  onPointerDown={event=>event.stopPropagation()} onMouseDown={event=>event.stopPropagation()}
+  onClick={event=>event.stopPropagation()} onContextMenu={event=>event.stopPropagation()}
+  onSubmit={event=>{event.preventDefault();event.stopPropagation();void saveRename()}}
+  onKeyDown={event=>{event.stopPropagation();if(event.key==='Escape'){event.preventDefault();if(!busy)finishRename()}}}>
+  <input ref={input} aria-label="New answer label" aria-describedby={renameError?`${id}-error`:undefined} dir="auto" value={draft} maxLength={1000} readOnly={busy}
+   onChange={event=>{setDraft(event.target.value);setRenameError('')}}/>
+  <button type="submit" className="soft" aria-label={busy?'Saving rename':'Save rename'} title="Save rename" disabled={busy}><Check aria-hidden="true"/></button>
+  <button type="button" className="soft" aria-label="Cancel rename" title="Cancel rename" disabled={busy} onClick={finishRename}><X aria-hidden="true"/></button>
+  {renameError&&<small id={`${id}-error`} className="error" role="alert">{renameError}</small>}
+ </form>;
  return <span className="kobo-answer-actions" dir={direction} onContextMenu={event=>{event.preventDefault();event.stopPropagation();announceOpen();const b=trigger.current?.getBoundingClientRect();setPosition({x:event.clientX,y:event.clientY,align:'start',anchor:b?{left:b.left,top:b.top}:undefined})}}>
   <span className="kobo-answer-label" dir="auto">{children}</span>
   <button ref={trigger} type="button" className="soft kobo-answer-menu-trigger" title={`${target} actions`} aria-label={menuLabel} aria-haspopup="menu" aria-controls={position?id:undefined} aria-expanded={!!position} onPointerDown={event=>event.stopPropagation()} onMouseDown={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();if(position)close();else open()}} onKeyDown={event=>{if(event.key!=='Tab')event.stopPropagation();if(event.key==='ContextMenu'||event.key==='F10'&&event.shiftKey||event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();open(event.key==='ArrowUp')}}}><MoreHorizontal aria-hidden="true"/></button>
@@ -46,7 +76,7 @@ export default function KoboAnswerActions({label,children,language='en',hiddenCo
    const buttons=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')),index=buttons.indexOf(document.activeElement as HTMLButtonElement);
    buttons[event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();
   }}>
-   {onRename&&<button type="button" role="menuitem" onClick={()=>run(onRename)}><Pencil aria-hidden="true"/>Rename answer</button>}
+   {onRename&&<button type="button" role="menuitem" onClick={()=>{close(false);setDraft(label)}}><Pencil aria-hidden="true"/>Rename answer</button>}
    {onManage&&<button type="button" role="menuitem" onClick={()=>run(onManage)}><Settings2 aria-hidden="true"/>Manage answers</button>}
    {(onRename||onManage)&&(onHide||onRestore)&&<div className="kobo-answer-menu-divider" role="separator"/>}
    {actions?.map(action=><button key={action.label} type="button" role="menuitem" onClick={()=>run(action.run)}>{action.label}</button>)}

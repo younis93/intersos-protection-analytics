@@ -6,6 +6,9 @@ export function hiddenAnswerOptions(ids:string[],question:KoboQuestion|undefined
  for(const choice of question?.choices||[])labels.set(choice.name,koboLabel(choice,language));
  for(const option of fetched)labels.set(option.id,option.label);
  const options=[...new Set(ids)].map(id=>({id,label:id==='__blank__'?(language==='ar'?'فارغ / دون إجابة':'Blank / unanswered'):labels.get(id)||id}));
+ return withDuplicateCodes(options);
+}
+export function withDuplicateCodes(options:HiddenAnswerOption[]){
  const counts=new Map<string,number>();for(const option of options){const key=option.label.normalize('NFKC').toLocaleLowerCase().trim();counts.set(key,(counts.get(key)||0)+1)}
  return options.map(option=>({...option,showCode:(counts.get(option.label.normalize('NFKC').toLocaleLowerCase().trim())||0)>1}));
 }

@@ -177,6 +177,7 @@ class PivotRow(BaseModel):
     id: str
     label: str
     count: int
+    percentageCount: int | None = None
     percent: float | None
     displayPercent: float | None = None
     series: list[BreakdownCount] = Field(default_factory=list)
@@ -213,7 +214,21 @@ class AnswerVisibility(BaseModel):
     hiddenCount: int
 
 
+class PivotPercentageSummary(BaseModel):
+    numerator: float | None
+    denominator: float | None
+    visibleColumnsOnly: bool = False
+    rowScope: Literal['included', 'excluded', 'cohort-excluded', 'linked-excluded', 'answer-filter-excluded', 'display-only'] | None = None
+    columnScope: Literal['included', 'excluded', 'outside-results'] | None = None
+
+
+class HiddenAnswerSelections(BaseModel):
+    hidden: int
+    total: int
+
+
 class QuestionResult(BaseModel):
+    hiddenAnswerSelections: HiddenAnswerSelections | None = None
     answerFilterSummary: dict[str, Any] | None = None
     answerShare: dict[str, Any] | None = None
     answerStack: dict[str, Any] | None = None
@@ -234,6 +249,7 @@ class QuestionResult(BaseModel):
     chartProjection: dict[str, Any] | None = None
     percentageGroupLevel: int = 1
     percentageMode: str = 'legacy-respondents'
+    percentageSummary: PivotPercentageSummary | None = None
     pivotTotal: dict[str, Any] | None = None
     answerSort: Literal['form', 'count-desc', 'count-asc', 'label-asc', 'label-desc'] = 'count-desc'
     measure: dict[str, Any] | None = None

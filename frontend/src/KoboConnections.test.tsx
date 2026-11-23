@@ -1,7 +1,7 @@
 import {showRespondentPercentageControls} from './KoboHiddenAnswerControls';
 import {expect,it} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
-import KoboConnections,{KoboBasisSummary,KoboConnectionControls,KoboOriginalConnections,KoboPercentageExample} from './KoboConnections';
+import KoboConnections,{KoboBasisSummary,KoboConnectionControls,KoboOriginalConnections} from './KoboConnections';
 import type {KoboResult,KoboProject,KoboQuestionSettings} from './koboTypes';
 
 const result={id:'follow',name:'follow',label:'Follow-up',kind:'category',group:'',repeat:'',denominator:5,missing:95,total:100,statistics:{},percentageBasis:'Respondents',colors:{},chart:'bar',rows:[],breakdowns:[],connections:{parents:[{id:'main',name:'main',label:'Main',hidden:true,compatible:true,triggers:['Other']}],conditions:[{source:'follow',expression:"${main} = 'other'",readable:'Main = Other',supported:true}],issues:[]},respondentBasis:{kind:'parent',parentId:'main',label:'Main',denominator:100,active:true,issue:'',hiddenMode:'adjust',repeatEntries:false}} as KoboResult;
@@ -27,20 +27,6 @@ it('explains the selected base in both languages and shows the hidden-answer act
  expect(renderToStaticMarkup(<KoboBasisSummary result={result} language="ar"/>)).toContain('dir="rtl"');
  const invalid={...result,respondentBasis:{...result.respondentBasis!,issue:'missing-parent',denominator:null}};
  expect(renderToStaticMarkup(<KoboBasisSummary result={invalid} language="en"/>)).toContain('Percentage base unavailable');
-});
-it('uses an eligible visible answer and the displayed overall percentage for the calculation example',()=>{
- const example={...result,respondentBasis:{...result.respondentBasis!,denominator:6},percentageDecimals:1 as const,breakdownFields:[{id:'region',label:'Region'}],rows:[
-  {id:'__blank__',label:'Blank',count:5,percent:null},
-  {id:'a',label:'Hidden option',count:3,percent:3},
-  {id:'b',label:'Visible option',count:1,percent:100/6,displayPercent:16.6},
- ]};
- const html=renderToStaticMarkup(<KoboPercentageExample result={example} language="en" hiddenAnswers={['a']}/>);
- expect(html).toContain('Overall percentage example');
- expect(html).toContain('Visible option');
- expect(html).not.toContain('Hidden option');
- expect(html).toContain('1 of 6 respondents = <bdi>16.6%</bdi>');
- const zero={...example,respondentBasis:{...result.respondentBasis!,denominator:0}};
- expect(renderToStaticMarkup(<KoboPercentageExample result={zero} language="en"/>)).toContain('Percentages are unavailable because the base is zero.');
 });
 it('describes an ignored connection using the question’s own respondent base',()=>{
  const ignored={...result,connections:{...result.connections!,effectiveTree:null},

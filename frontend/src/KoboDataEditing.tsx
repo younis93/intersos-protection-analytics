@@ -16,6 +16,15 @@ const editGuards=new Map<string,()=>Promise<unknown>>();
 export function registerDataEditGuard(id:string,guard:()=>Promise<unknown>){editGuards.set(id,guard);return()=>{if(editGuards.get(id)===guard)editGuards.delete(id)}}
 export const prepareDataEdit=(id:string)=>editGuards.get(id)?.()||Promise.resolve();
 export function notifyDataEdit(project:KoboProject){window.dispatchEvent(new CustomEvent('kobo-data-changed',{detail:project}))}
+export async function renamePivotAnswer(project:KoboProject,field:string,id:string,label:string,language:'en'|'ar'){
+ const path=`/projects/${project.id}/edits`;
+ const operation:Operation={kind:'answers',field,destination:'same',language,renames:[{id,label}]};
+ const request={revision:project.dataRevision||0,operation};
+ await prepareDataEdit(project.id);
+ const {signature}=await koboRequest<EditPreview>(`${path}/preview`,request);
+ const saved=await koboRequest<KoboProject>(`${path}/apply`,{...request,signature});
+ notifyDataEdit(saved);
+}
 export async function undoDataEdit(project:KoboProject){await prepareDataEdit(project.id);const saved=await koboRequest<KoboProject>(`/projects/${project.id}/edits/undo`,{revision:project.dataRevision||0,operation:{kind:'cells'}});notifyDataEdit(saved);return saved}
 function EditDialog({title,children,onClose,busy=false,response=false,manager=false}:{title:string;children:ReactNode;onClose:()=>void;busy?:boolean;response?:boolean;manager?:boolean}){
  const ref=useRef<HTMLDialogElement>(null),opener=useRef(document.activeElement);

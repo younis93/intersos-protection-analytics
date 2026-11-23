@@ -17,6 +17,7 @@ import {calculationKey,colorEntries,customizeDraft,defaultKoboColor,koboPalettes
 import {supportsAllBarsColor} from './koboMarkColors';
 import {KoboRendering} from './KoboRendering';
 import KoboPivotTable from './KoboPivotTable';
+import {resultWithPivotColumns} from './koboPivotSort';
 import KoboQuestionExport from './KoboQuestionExport';
 import KoboAnswerShare from './KoboAnswerShare';
 import {AnswerFilterPicker} from './KoboFilterByAnswer';
@@ -63,8 +64,8 @@ export default function KoboCustomize({result,project,settings,onApply,onClose,o
   const chart=preview.result.answerFilterSummary?preview.result.chart:draft.chart||preview.result.chart;
   const appearance=draft.appearance;
   const colors=resolveKoboColors({...preview.result,chart,appearance},draft.palette,draft.colors);
-  return {...preview.result,chart,appearance,colors,pointColors:draft.pointColors||{},breakdownDisplay:draft.breakdownDisplay};
- },[preview.result,draft.chart,draft.palette,draft.colors,draft.pointColors,draft.breakdownDisplay,draft.appearance]);
+  return resultWithPivotColumns({...preview.result,chart,appearance,colors,pointColors:draft.pointColors||{},breakdownDisplay:draft.breakdownDisplay},draft,settings.language);
+ },[preview.result,draft,settings.language]);
  const breakdowns=draft.breakdowns||[];
  const answerSources=project.form.questions.filter(question=>question.repeat===result.repeat&&['category','multiple'].includes(question.kind)&&question.choices.length);
  const shareQuestion=answerSources.find(question=>question.id===draft.answerShareQuestion);

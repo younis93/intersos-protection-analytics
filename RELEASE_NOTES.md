@@ -1,1 +1,1 @@
-improvement to the Kobo calcultion
+improvement to the chart

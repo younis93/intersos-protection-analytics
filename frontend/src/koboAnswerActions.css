@@ -1,5 +1,11 @@
 .kobo-answer-actions{display:grid;grid-template-columns:minmax(0,1fr) 30px;align-items:center;gap:8px;width:100%;min-width:0;box-sizing:border-box;text-align:inherit}
 .kobo-answer-label{min-width:0;overflow-wrap:anywhere;white-space:normal;text-align:inherit}
+.kobo-pivot-rename{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:4px;min-width:0}
+.kobo-pivot-rename input{box-sizing:border-box;width:100%;min-width:0;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--panel-strong);color:var(--ink);font:inherit}
+.kobo-pivot-rename input:focus-visible{outline:2px solid var(--blue);outline-offset:-1px}
+.kobo-pivot-rename button.soft{display:inline-grid;place-items:center;width:30px;height:30px;padding:4px}
+.kobo-pivot-rename svg{width:16px;height:16px}
+.kobo-pivot-rename .error{grid-column:1/-1;margin:0;white-space:normal;overflow-wrap:anywhere;text-align:start}
 .kobo-answer-actions>button.kobo-answer-menu-trigger,.kobo-shell .kobo-answer-actions>button.kobo-answer-menu-trigger{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;min-width:30px;min-height:30px;padding:5px!important;margin:0;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--muted);opacity:1;box-shadow:none;transform:none;flex:none}
 .kobo-answer-menu-trigger svg{width:16px;height:16px;flex:none}
 .kobo-answer-actions>button.kobo-answer-menu-trigger:hover,.kobo-answer-actions>button.kobo-answer-menu-trigger[aria-expanded=true]{background:color-mix(in srgb,var(--blue) 9%,var(--panel));color:var(--blue);border-color:color-mix(in srgb,var(--blue) 20%,var(--line))}

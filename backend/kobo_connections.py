@@ -241,7 +241,7 @@ def parent_field(question, cfg, questions):
     return (plan['parent'] if plan['mode']=='keep-original' else None), plan['issue']
 
 
-def apply_connection_basis(result, question, records, cfg, questions, lookup, settings, cohort):
+def apply_connection_basis(result, question, records, cfg, questions, lookup, settings, cohort, *, record_in_scope=None):
     from .kobo import question_cohort, missing, label, breakdown_fields, breakdown_values, apply_display_percentages
     from .kobo_measures import record_value
     from .kobo_connection_rules import describe_tree
@@ -272,6 +272,8 @@ def apply_connection_basis(result, question, records, cfg, questions, lookup, se
     hidden = respondent_hidden_codes(question, cfg, plan)
     excluded = {r['id'] for r in cohort if has_only_hidden_answers(r['values'].get(question['id']), hidden)} if hidden else set()
     baseline = question_cohort(question,records,cfg.model_copy(update={'hiddenAnswers':[]}),questions,lookup,apply_connections=False) if parent_base else cohort
+    if parent_base and record_in_scope is not None:
+        baseline = [r for r in baseline if record_in_scope(r)]
     base = [r for r in baseline if r['id'] not in excluded and not missing(
         record_value(r, parent, lookup) if parent_base and parent else r['values'].get(question['id']))]
     denominator = None if issue else len(base)

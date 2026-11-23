@@ -4,7 +4,7 @@ import math
 from .kobo_pivot_percentages import column_base, put_percent, trend_pivot, value_totals
 
 
-def project_chart(result, cfg, question=None, *, original=None):
+def project_chart(result, cfg, question=None, *, original=None, selected_answers=None):
     rows = [r for r in result['rows'] if r['id'] != '__blank__']
     limit = cfg.chartTopN
     if not limit or result['kind'] == 'date' or result.get('bins') or result['chart'] == 'histogram': return None
@@ -13,7 +13,7 @@ def project_chart(result, cfg, question=None, *, original=None):
     fallback={r['id']:i for i,r in enumerate(sorted(rows,key=lambda r:float(r['id']) if result['kind']=='number' else r['id']))}
     form_order={c['name']:i for i,c in enumerate((question or {}).get('choices',[]))}
     ranked = sorted(enumerate(rows), key=lambda pair: (value(pair[1]) is None, -(value(pair[1]) or 0), form_order.get(pair[1]['id'],fallback[pair[1]['id']])))
-    chosen = {r['id'] for _, r in ranked[:limit]}
+    chosen = selected_answers if selected_answers is not None else {r['id'] for _, r in ranked[:limit]}
     kept = [deepcopy(r) for r in rows if r['id'] in chosen]
     omitted = [r for r in rows if r['id'] not in chosen]
     additive = not measure or measure['operation'] == 'sum'

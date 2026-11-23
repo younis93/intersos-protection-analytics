@@ -10,7 +10,8 @@ describe('pivot totals rendering',()=>{
    const pivot={...result,rows:result.rows.slice(0,rows),breakdowns:Array.from({length:columns},(_,i)=>({id:`b${i}`,label:`B${i}`,denominator:10}))};
    const html=renderToStaticMarkup(<KoboPivotTable result={pivot} language="en" display={display} limit={1} onDrilldown={()=>{}}/>);
    expect(html.includes('<tfoot>')).toBe(rows>1);
-   expect(html.includes('>Total</th>')).toBe(rows>1||columns>1);
+   expect(html.includes('>Total</th>')).toBe(rows>1);
+   expect(html.includes('aria-label="Sort by Total"')).toBe(columns>1);
    if(rows&&columns>1){
     expect(html).toContain(`data-answer="${rows-1}"`);
     if(rows>1)expect(html).toContain('All answered responses');

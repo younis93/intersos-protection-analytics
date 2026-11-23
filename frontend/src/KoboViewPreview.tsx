@@ -3,6 +3,7 @@ import {ChartColumn,Filter,Languages,Layers,Search,Table2} from 'lucide-react';
 import {koboApi} from './koboApi';
 import {KoboRendering} from './KoboRendering';
 import KoboPivotTable from './KoboPivotTable';
+import {resultWithPivotColumns} from './koboPivotSort';
 import {viewSignature} from './koboSavedViewState';
 import {matchingViewAnalysis,previewFilters,sampleViewResults,settingsForViewPreview,viewOrderLabels,viewQuestionSetup} from './koboViewPreviewModel';
 import type {KoboAnalysis,KoboProject,KoboResult,KoboSettings} from './koboTypes';
@@ -10,7 +11,9 @@ import type {KoboViewSnapshot} from './koboSavedViewTypes';
 import './koboViewPreview.css';
 
 const Chart=lazy(()=>import('./KoboChart'));
-function SampleCard({result,snapshot}:{result:KoboResult;snapshot:KoboViewSnapshot}){
+function SampleCard({result:source,snapshot}:{result:KoboResult;snapshot:KoboViewSnapshot}){
+ const config=snapshot.questions[source.id];
+ const result=useMemo(()=>resultWithPivotColumns(source,config,snapshot.language),[source,config,snapshot.language]);
  const[tab,setTab]=useState<'chart'|'pivot'>(snapshot.viewMode==='table'?'pivot':'chart');
  return <article className="kobo-view-sample-card"><header><div><h5 dir="auto">{result.label}</h5><p>{result.denominator} answered · {result.missing} missing · {result.total} eligible records</p></div>{snapshot.viewMode!=='table'&&<div role="group" aria-label={`Preview display for ${result.name}`}><button type="button" className="soft" aria-pressed={tab==='chart'} onClick={()=>setTab('chart')}>Chart</button><button type="button" className="soft" aria-pressed={tab==='pivot'} onClick={()=>setTab('pivot')}>Pivot</button></div>}</header>{tab==='chart'&&snapshot.viewMode!=='table'?<Suspense fallback={<p role="status">Loading chart...</p>}><Chart result={result} language={snapshot.language}/></Suspense>:<><KoboPivotTable result={result} language={snapshot.language} limit={10} display={snapshot.questions[result.id]?.breakdownDisplay||'both'} showCopyButton={false}/>{result.rows.length>10&&<p className="kobo-view-sample-limit">Showing 10 of {result.rows.length} answer rows. Totals include all answers.</p>}</>}</article>;
 }

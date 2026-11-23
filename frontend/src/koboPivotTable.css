@@ -47,6 +47,8 @@
 .kobo-shell .kobo-pivot-wrap .kobo-pivot-table thead .kobo-pivot-band-3{background:#504078}
 .kobo-shell .kobo-pivot-wrap .kobo-pivot-table th[aria-sort=ascending] .kobo-pivot-sort,.kobo-shell .kobo-pivot-wrap .kobo-pivot-table th[aria-sort=descending] .kobo-pivot-sort{color:#fff;gap:6px;text-decoration:underline;text-underline-offset:3px}
 .kobo-shell .kobo-pivot-wrap .kobo-pivot-table .kobo-pivot-sort:focus-visible{outline:2px solid currentColor;outline-offset:3px}
+.kobo-pivot-table thead th:has(.kobo-pivot-sort){cursor:pointer}
+.kobo-pivot-table thead th:hover .kobo-pivot-sort{text-decoration:underline;text-underline-offset:3px}
 .kobo-shell .kobo-pivot-wrap .kobo-pivot-table tfoot th,.kobo-shell .kobo-pivot-wrap .kobo-pivot-table tfoot td{background:#dbe8f4;color:#173651;border-top:3px solid #476e91;font-weight:750}
 :root[data-theme=glass-dark] .kobo-shell .kobo-pivot-wrap .kobo-pivot-table tfoot th,:root[data-theme=glass-dark] .kobo-shell .kobo-pivot-wrap .kobo-pivot-table tfoot td{background:#27445d;color:#f3f8ff;border-top-color:#8fb9df}
 
