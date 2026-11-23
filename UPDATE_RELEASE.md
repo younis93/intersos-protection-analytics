@@ -1,5 +1,15 @@
 # Publishing application updates
 
+## Before the next client release
+
+Complete these checks before publishing either an in-app update or a client installer:
+
+- [ ] Remove the AI setting and the AI button from the client interface.
+- [ ] Remove the Vice City theme from the client.
+- [ ] Verify these changes on both a fresh install and an upgrade from an existing client, including one with Vice City selected.
+
+## Publishing steps
+
 1. Create the public repository `younis93/intersos-protection-analytics` and push this local `main` branch.
 2. Add repository secrets `SIGNING_CERTIFICATE_BASE64` and `SIGNING_CERTIFICATE_PASSWORD`.
 3. Commit changes, then publish with a semantic version tag:

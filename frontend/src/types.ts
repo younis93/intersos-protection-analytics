@@ -21,7 +21,7 @@ export type StudioValueMode = 'count'|'percent-total'|'percent-series'|'percent-
 export type StudioLabelMode = 'auto'|'show'|'hide';
 export type StudioOrientation = 'horizontal'|'vertical';
 export interface StudioChartOptions {sort:StudioSort;topN:StudioTopN;valueMode:StudioValueMode;labelMode:StudioLabelMode;orientation:StudioOrientation}
-export interface UpdateCheck {enabled:boolean;currentVersion:string;available:boolean;latestVersion?:string;notes?:string;publishedAt?:string;sizeBytes?:number;message?:string}
+export interface UpdateCheck {enabled:boolean;currentVersion:string;available:boolean;latestVersion?:string;notes?:string;publishedAt?:string;sizeBytes?:number;message?:string;checkFailed?:boolean}
 export interface UpdateStatus {phase:'idle'|'downloading'|'verifying'|'installing'|'restarting'|'error';progress:number;error?:string|null;downloadedBytes?:number;totalBytes?:number;currentVersion:string}
 export interface LegalSheet {id:string;name:string;rows:number;columns:string[]}
 export interface LegalOverviewChart {label:string;count:number}

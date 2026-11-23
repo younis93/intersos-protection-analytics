@@ -2,10 +2,22 @@ import {singlePeriodTrendNotice} from './koboAdvancedChartSpec';
 import {describe,it,expect} from 'vitest';
 import {chartSpec} from './koboChartSpec';
 import {isDenseKoboChart,koboPdfChartPanels,koboPdfChartKey,readableKoboChartType} from './koboChartDensity';
-import type {KoboResult} from './koboTypes';
+import {questionDefaults,type KoboResult} from './koboTypes';
 
 const base:KoboResult={id:'q',name:'q',label:'Household size',group:'',repeat:'',kind:'number',chart:'histogram',denominator:2,missing:0,total:2,statistics:{},percentageBasis:'Answered',breakdowns:[],colors:{},rows:[{id:'bin:0',label:'0 - 5',count:1,percent:50},{id:'bin:1',label:'5 - 10',count:0,percent:0},{id:'bin:2',label:'10 - 15',count:1,percent:50}]};
 describe('household assessment charts',()=>{
+ it.each(['count','percent'] as const)('stacks answers for each breakdown using %s geometry',mode=>{
+  const result:KoboResult={...base,chart:'bar',answerStack:{
+   mode,questionId:'safety',questionLabel:'Safety',highlightedAnswer:'unsafe',multiple:false,
+   answers:[{id:'safe',label:'Safe'},{id:'unsafe',label:'Unsafe'}],
+   groups:[{id:'n',label:'North',counts:{safe:2,unsafe:1}},{id:'s',label:'South',counts:{unsafe:4}}],
+  }};
+  const spec=chartSpec(result,'en',false,undefined,900,{...questionDefaults,colors:{'["stack answer","safety","unsafe"]':'#D65040'}});
+  expect(spec.layout.barmode).toBe('stack');
+  expect(spec.data[0]).toMatchObject({name:'Safe',x:mode==='count'?[2,0]:[200/3,0],y:['n','s']});
+  expect(spec.data[1]).toMatchObject({name:'Unsafe',x:mode==='count'?[1,4]:[100/3,100],y:['n','s'],opacity:1,marker:{color:'#D65040'}});
+  if(mode==='percent')expect(spec.layout.xaxis?.range).toEqual([0,100]);
+ });
  it.each([['column','y'],['bar','x'],['histogram','y'],['line','y'],['pie','values'],['donut','values']] as const)('plots the percentage displayed in %s charts', (chart, axis)=>{
   const rows=[3.18,2.55,1.27,0.64].map((percent,index)=>({id:String(index),label:String(index),count:index+1,percent}));
   const result={...base,chart,rows,appearance:{metric:'percent' as const, labels:'percent' as const}};
@@ -31,6 +43,24 @@ describe('household assessment charts',()=>{
   expect(isDenseKoboChart(histogram)).toBe(false);
   expect(readableKoboChartType(histogram)).toBe('histogram');
   for(const exporting of [true,false]){const spec=chartSpec(histogram,'en',exporting);expect(spec.layout.bargap).toBe(0);expect(spec.data[0].type).toBe('bar')}
+ });
+ it('keeps numeric-looking and repeated line labels in the selected answer order',()=>{
+  const rows=['10','2','10'].map((label,index)=>({...base.rows[index],id:String(index+10),label}));
+  for(const exporting of [false,true]){
+   const spec=chartSpec({...base,chart:'line',rows},'en',exporting);
+   const ids=rows.map(row=>row.id);
+   expect(spec.layout.xaxis).toMatchObject({type:'category',categoryorder:'array',categoryarray:ids,ticktext:['10','2','10']});
+   expect(spec.data[0]).toMatchObject({x:ids});
+  }
+ });
+ it.each(['pie','donut'] as const)('keeps distinct answers with repeated captions in a requested %s chart',chart=>{
+  const rows=base.rows.map((row,index)=>({...row,label:index===2?'Same caption [bin:0]':'Same caption',count:index+1}));
+  const result={...base,kind:'category' as const,chart,rows};
+  for(const exporting of [false,true]){
+   expect(chartSpec(result,'en',exporting).data[0]).toMatchObject({
+    type:'pie',sort:false,labels:['Same caption [bin:0] (2)','Same caption [bin:1]','Same caption [bin:0]'],values:[1,2,3],
+   });
+  }
  });
  it('renders heatmap cells from breakdown values with correct percentages',()=>{
   const heatmap:KoboResult={...base,chart:'heatmap',appearance:{metric:'percent'},breakdowns:[{id:'n',label:'North',denominator:2},{id:'s',label:'South',denominator:1}],rows:[{...base.rows[0],series:[{id:'n',count:1,percent:50},{id:'s',count:1,percent:100}]}]};

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
+import logging
 import os
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -18,6 +21,7 @@ from urllib.parse import urlparse
 from .version import APP_VERSION, DEFAULT_GITHUB_REPOSITORY
 from .process_launch import launch_independent_process
 
+logger = logging.getLogger(__name__)
 REPOSITORY = os.getenv("INTERSOS_GITHUB_REPOSITORY", DEFAULT_GITHUB_REPOSITORY).strip()
 SIGNING_CERTIFICATE_THUMBPRINT = "C4F1B12A3BCCC73BEF903FA3796304CF0E67670D"
 ENABLED = "/" in REPOSITORY and not REPOSITORY.startswith("YOUR_")
@@ -133,7 +137,7 @@ def _version(value: str) -> tuple[int, ...]:
     return tuple(int(part) for part in clean.split("."))
 
 
-def _json(url: str) -> dict[str, Any]:
+def _json(url: str) -> Any:
     request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "INTERSOS-Legal-Platform"})
     with urllib.request.urlopen(request, timeout=12) as response:
         return json.load(response)
@@ -147,14 +151,36 @@ def check() -> dict[str, Any]:
     try:
         manifest = _json(f"https://github.com/{REPOSITORY}/releases/latest/download/update.json")
         required = {"version", "installerUrl", "sha256", "publishedAt", "sizeBytes"}
-        size_bytes = manifest.get("sizeBytes")
-        if not required.issubset(manifest) or len(str(manifest["sha256"])) != 64 or isinstance(size_bytes, bool) or not isinstance(size_bytes, int) or size_bytes <= 0:
+        if not isinstance(manifest, dict) or not required.issubset(manifest):
             raise ValueError("Invalid update manifest")
-        available = _version(str(manifest["version"])) > _version(APP_VERSION)
-        _available = manifest if available else None
-        return {**base, "available": available, "latestVersion": manifest["version"], "notes": manifest.get("notes", ""), "publishedAt": manifest["publishedAt"], "sizeBytes": size_bytes}
-    except (OSError, ValueError, KeyError, urllib.error.URLError) as exc:
-        return {**base, "message": f"Unable to check for updates: {exc}"}
+        size_bytes = manifest["sizeBytes"]
+        if (
+            not isinstance(manifest["version"], str)
+            or not isinstance(manifest.get("notes", ""), str)
+            or len(str(manifest["sha256"])) != 64
+            or type(size_bytes) is not int
+            or size_bytes <= 0
+        ):
+            raise ValueError("Invalid update manifest")
+        available = _version(manifest["version"]) > _version(APP_VERSION)
+    except urllib.error.HTTPError as exc:
+        logger.warning("Update manifest request failed: HTTP %s", exc.code)
+        return {**base, "checkFailed": True, "message": "GitHub could not provide release information. Try again in a few minutes."}
+    except (OSError, http.client.HTTPException) as exc:
+        logger.warning("Update manifest connection failed: %s", exc)
+        reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+        if isinstance(reason, TimeoutError):
+            message = "GitHub took too long to respond. Check your internet connection and try again."
+        elif isinstance(reason, ssl.SSLError):
+            message = "A secure connection to GitHub could not be established. Contact IT if this continues."
+        else:
+            message = "The app couldn’t reach GitHub. Check your internet connection and try again."
+        return {**base, "checkFailed": True, "message": message}
+    except ValueError as exc:
+        logger.warning("Invalid update manifest: %s", exc)
+        return {**base, "checkFailed": True, "message": "GitHub returned invalid release information. Try again later."}
+    _available = manifest if available else None
+    return {**base, "available": available, "latestVersion": manifest["version"], "notes": manifest.get("notes", ""), "publishedAt": manifest["publishedAt"], "sizeBytes": size_bytes}
 
 
 def status() -> dict[str, Any]:

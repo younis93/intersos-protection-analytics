@@ -19,7 +19,7 @@ def test_appearance_roundtrip_preserves_results_and_settings_version(sample, lab
     project = copy.deepcopy(sample[0])
     settings = KoboSettings(questions={'group/needs': QuestionSettings(breakdowns=['group/gender'])})
     before = analyze(project, settings)
-    settings.questions['group/needs'].appearance = ChartAppearance(metric='percent', labels=labels, labelPosition='outside', zeroPercentLabels='hide', legend='right', fontSize=14, height=560, grid='hide', bars='stack', categoryLabels='rotate')
+    settings.questions['group/needs'].appearance = ChartAppearance(metric='percent', labels=labels, labelPosition='outside', zeroPercentLabels='hide', legend='right', fontSize=14, height=560, grid='hide', bars='stack', categoryLabels='rotate', categoryLabelSize=16, categoryLabelLines=2)
     after = analyze(project, settings)
     original = next(q for q in before['questions'] if q['id'] == 'group/needs')
     changed = next(q for q in after['questions'] if q['id'] == 'group/needs')
@@ -30,6 +30,8 @@ def test_appearance_roundtrip_preserves_results_and_settings_version(sample, lab
     assert QuestionResult.model_validate(changed).appearance.zeroPercentLabels == 'hide'
     assert QuestionResult.model_validate(changed).appearance.labelPosition == 'outside'
     assert QuestionResult.model_validate(changed).appearance.categoryLabels == 'rotate'
+    assert QuestionResult.model_validate(changed).appearance.categoryLabelSize == 16
+    assert KoboSettings.model_validate_json(settings.model_dump_json()).questions['group/needs'].appearance.categoryLabelLines == 2
     assert KoboSettings.model_validate(settings.model_dump()).questions['group/needs'].appearance.height == 560
     assert KoboSettings.model_validate_json(settings.model_dump_json()).questions['group/needs'].appearance.labels == labels
     assert settings.version == 1
@@ -40,6 +42,62 @@ def test_legacy_settings_and_result_default_to_automatic():
     assert ChartAppearance().fontFamily == 'Helvetica Neue'
     assert 'valueAxisMaximum' not in ChartAppearance.model_validate({'valueAxisMaximum': 100}).model_dump()
     assert ChartAppearance(labelPosition='auto').labelPosition == 'outside'
+    assert ChartAppearance().legendAlign == 'left'
+    assert ChartAppearance().barWidth == 'standard'
+
+
+def test_axis_lines_are_independent_and_preserve_legacy_visibility(sample):
+    hidden = ChartAppearance(valueAxis='hide')
+    assert (hidden.horizontalAxisLine, hidden.verticalAxisLine) == ('hide', 'hide')
+    legacy = ChartAppearance(valueAxisLine='hide', horizontalAxisLine='show')
+    assert (legacy.horizontalAxisLine, legacy.verticalAxisLine) == ('show', 'hide')
+    settings = KoboSettings(questions={'group/needs': QuestionSettings(appearance={
+        'valueAxis': 'hide', 'horizontalAxisLine': 'show', 'verticalAxisLine': 'hide',
+        'barWidth': 'custom', 'customBarWidth': 35,
+    })})
+    restored = KoboSettings.model_validate_json(settings.model_dump_json())
+    result = next(q for q in analyze(sample[0], restored)['questions'] if q['id'] == 'group/needs')
+    appearance = QuestionResult.model_validate(result).appearance
+    assert (appearance.valueAxis, appearance.horizontalAxisLine, appearance.verticalAxisLine) == ('hide', 'show', 'hide')
+    assert (appearance.barWidth, appearance.customBarWidth) == ('custom', 35)
+
+
+def test_layout_prefs_survive_settings_and_analysis(sample):
+    settings = KoboSettings(questions={'group/needs': QuestionSettings(appearance={
+        'legendAlign': 'center', 'barWidth': 'narrow', 'chartWidthMode': 'custom', 'chartWidth': 480, 'answerSpacing': 'compact',
+    })})
+    restored = KoboSettings.model_validate_json(settings.model_dump_json())
+    result = next(q for q in analyze(sample[0], restored)['questions'] if q['id'] == 'group/needs')
+    saved = QuestionResult.model_validate(result).appearance
+    assert (saved.legendAlign, saved.barWidth) == ('center', 'narrow')
+    assert (saved.chartWidthMode, saved.chartWidth, saved.answerSpacing) == ('custom', 480, 'compact')
+
+
+@pytest.mark.parametrize('width', [359, 1601, 420.5])
+def test_invalid_manual_chart_width(width):
+    with pytest.raises(ValidationError):
+        ChartAppearance(chartWidthMode='custom', chartWidth=width)
+
+
+def test_custom_height_and_side_legend_alignment_roundtrip():
+    appearance = ChartAppearance(customHeight=517, legend='right', legendVerticalAlign='middle')
+    assert ChartAppearance.model_validate_json(appearance.model_dump_json()) == appearance
+    with pytest.raises(ValidationError):
+        ChartAppearance(customHeight=239)
+
+
+def test_manual_answer_size_roundtrip():
+    appearance = ChartAppearance(fontSize=27)
+    assert ChartAppearance.model_validate_json(appearance.model_dump_json()).fontSize == 27
+    with pytest.raises(ValidationError):
+        ChartAppearance(fontSize=37)
+
+
+@pytest.mark.parametrize('mode', ['compact', 'medium', 'wide', 'extra-wide'])
+def test_chart_width_presets_preserve_saved_custom_width(mode):
+    settings = QuestionSettings(appearance={'chartWidthMode': mode, 'chartWidth': 517})
+    reopened = QuestionSettings.model_validate_json(settings.model_dump_json())
+    assert (reopened.appearance.chartWidthMode, reopened.appearance.chartWidth) == (mode, 517)
 
 
 @pytest.mark.parametrize('spacing', ['roomy', 4.5, 0, 36])

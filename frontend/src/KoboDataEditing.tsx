@@ -9,7 +9,7 @@ import type {ColumnFilter} from './columnFilters';
 import './koboDataEditing.css';
 export type AnswerOption={id:string;label:string;count:number};
 export type ReviewBlankScope={settings:KoboSettings;group:string;category:string;status:string;search:string;groupSearch:string;columnFilters:ColumnFilter[]};
-type Operation={reviewBlanks?:ReviewBlankScope&{question:string};kind:'cells'|'answers';allMatches?:boolean;originalValue?:unknown;cells?:{record:string;field:string;value:unknown}[];field?:string;sources?:string[];label?:string;target?:string;destination?:'same'|'new';name?:string;language:'en'|'ar'};
+type Operation={reviewBlanks?:ReviewBlankScope&{question:string};kind:'cells'|'answers';allMatches?:boolean;originalValue?:unknown;cells?:{record:string;field:string;value:unknown}[];field?:string;sources?:string[];label?:string;target?:string;renames?:{id:string;label:string}[];destination?:'same'|'new';name?:string;language:'en'|'ar'};
 type EditPreview={impacts?:string[];revision:number;signature:string;affectedRecords:number;matchingRecords?:number;field:string;options:AnswerOption[];beforeOptions:AnswerOption[]};
 export const editableField=(q:KoboQuestion)=>!q.connectionSetup?.pending&&q.editable!==false&&!q.metadata&&!q.localDerived&&!q.derivedFrom&&!q.id.startsWith('calc_')&&!['_id','_uuid','uuid','_index','_parent_index','_submission_time'].includes(q.name.toLowerCase());
 const editGuards=new Map<string,()=>Promise<unknown>>();
@@ -97,51 +97,109 @@ export function KoboCellEditor({project,question,record,value,row,onClose,onSave
 
 export function KoboAnswerManager({project,question,initialAnswer,initialMode='rename',onClose,onSaved}:{project:KoboProject;question:KoboQuestion;initialAnswer?:string;initialMode?:'rename'|'merge';onClose:()=>void;onSaved?:(p:KoboProject)=>void|Promise<void>}){
  const{options,error:optionError,loading}=useOptions(project,question);
- const[mode,setMode]=useState(initialMode),[search,setSearch]=useState(''),[sources,setSources]=useState<string[]>([]),[renameId,setRenameId]=useState(''),[editing,setEditing]=useState(false),[label,setLabel]=useState(''),[target,setTarget]=useState(''),[destination,setDestination]=useState<'new'|'same'>(initialMode==='merge'?'new':'same'),[name,setName]=useState(''),[preview,setPreview]=useState<EditPreview|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[attempted,setAttempted]=useState(false);
+ const[mode,setMode]=useState(initialMode),[search,setSearch]=useState(''),[sources,setSources]=useState<string[]>([]),[renameId,setRenameId]=useState(''),[renames,setRenames]=useState<Map<string,string>>(()=>new Map()),[label,setLabel]=useState(''),[target,setTarget]=useState(''),[destination,setDestination]=useState<'new'|'same'>(initialMode==='merge'?'new':'same'),[name,setName]=useState(''),[preview,setPreview]=useState<EditPreview|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[attempted,setAttempted]=useState(false);
  const previewKey=useRef(''),previewSection=useRef<HTMLElement>(null),renameInput=useRef<HTMLInputElement>(null),initialHandled=useRef(false),body=useRef<HTMLDivElement>(null),modeRef=useRef(mode);
- const source=options.find(option=>option.id===renameId),isRename=mode==='rename';
- const operation:Operation={kind:'answers',field:question.id,sources:isRename?renameId?[renameId]:[]:sources,label:normalizedAnswerLabel(label),target:isRename?renameId:target,destination,name:name.trim(),language:project.settings.language};
+ const isRename=mode==='rename';
+ const optionsById=useMemo(()=>new Map(options.map(option=>[option.id,option])),[options]);
+ const pendingRenames=useMemo(()=>Array.from(renames,([id,label])=>({id,label})),[renames]);
+ const missingRenames=useMemo(()=>pendingRenames.filter(({id})=>!optionsById.has(id))
+  .map(({id})=>({id,label:id,count:0})),[pendingRenames,optionsById]);
+ const originalAnswer=optionsById.get(renameId);
+ const operation:Operation={kind:'answers',field:question.id,destination,name:name.trim(),language:project.settings.language,
+  ...(isRename?{renames:pendingRenames}:{sources,label:normalizedAnswerLabel(label),target})};
  const key=JSON.stringify([project.dataRevision||0,operation]),readyPreview=preview&&previewKey.current===key?preview:null;
  const matches=options.filter(option=>normalizedAnswerLabel(option.label)===normalizedAnswerLabel(label)),collision=matches.filter(option=>!sources.includes(option.id));
- const validation=isRename?renameAnswerError(options,renameId,label):sources.length<2?'Select at least two answers to merge.':!label.trim()?'Enter a combined answer label.':label.trim().length>1000?'Use 1,000 characters or fewer.':matches.length>1&&!target?'Choose the existing answer by its code.':'';
- const blocked=busy||loading||!!optionError||!!validation||editing||destination==='new'&&!name.trim();
- const visible=useMemo(()=>options.filter(option=>(!isRename||option.id!==renameId)&&`${option.label} ${option.id}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())),[options,search,isRename,renameId]);
- const beginRename=(option:AnswerOption)=>{if(busy)return;setRenameId(option.id);setLabel(option.label);setEditing(true);setAttempted(false);setError('');setPreview(null)};
- useEffect(()=>{if(!initialHandled.current&&!loading){initialHandled.current=true;const option=options.find(option=>option.id===initialAnswer);if(option)beginRename(option)}},[loading,options,initialAnswer]);
- useEffect(()=>{if(editing){renameInput.current?.focus();renameInput.current?.select()}},[editing,renameId]);
+ const renameLabel=normalizedAnswerLabel(label);
+ const restoresOriginal=!!originalAnswer&&renameLabel===normalizedAnswerLabel(originalAnswer.label);
+ const inlineError=renameId&&!restoresOriginal?renameAnswerError(options,renameId,renameLabel,renames):'';
+ const draftError=useMemo(()=>isRename&&!loading
+  ?pendingRenames.map(({id,label})=>renameAnswerError(options,id,label,renames)).find(Boolean)||''
+  :'',[isRename,loading,options,pendingRenames,renames]);
+ const validation=isRename?draftError:sources.length<2?'Select at least two answers to merge.':!label.trim()?'Enter a combined answer label.':label.trim().length>1000?'Use 1,000 characters or fewer.':matches.length>1&&!target?'Choose the existing answer by its code.':'';
+ const blocked=busy||loading||!!optionError||!!validation||(isRename&&(!renames.size||!!renameId))||destination==='new'&&!name.trim();
+ const visible=useMemo(()=>{
+  const candidates=isRename?[...options,...missingRenames]:options;
+  if(isRename&&renameId&&!candidates.some(option=>option.id===renameId))candidates.push({id:renameId,label:renameId,count:0});
+  const query=search.toLocaleLowerCase();
+  return candidates.filter(option=>option.id===renameId||
+   `${option.label} ${option.id} ${isRename?renames.get(option.id)||'':''}`.toLocaleLowerCase().includes(query));
+ },[options,missingRenames,search,isRename,renameId,renames]);
+ const clearPreview=()=>{setPreview(null);setError('')};
+ const removeRename=(id:string)=>setRenames(current=>{const next=new Map(current);next.delete(id);return next});
+ const stageRename=()=>{
+  if(inlineError){setAttempted(true);renameInput.current?.focus();return false}
+  if(restoresOriginal){
+   if(renames.has(renameId))removeRename(renameId);
+  }else if(renames.get(renameId)!==renameLabel){
+   setRenames(current=>new Map(current).set(renameId,renameLabel));
+  }
+  return true;
+ };
+ const beginRename=(option:AnswerOption)=>{
+  if(busy||(renameId&&!stageRename()))return;
+  setRenameId(option.id);setLabel(renames.get(option.id)??option.label);setAttempted(false);clearPreview();
+ };
+ useEffect(()=>{if(!initialHandled.current&&!loading){initialHandled.current=true;const option=options.find(option=>option.id===initialAnswer);if(option&&isRename)beginRename(option)}},[loading,options,initialAnswer]);
+ useEffect(()=>{if(renameId){renameInput.current?.focus();renameInput.current?.select()}},[renameId]);
  useEffect(()=>{setPreview(null);setError('')},[key]);
  useEffect(()=>{if(readyPreview)previewSection.current?.scrollIntoView({block:'nearest',behavior:'instant'})},[readyPreview]);
- const changeMode=(next:'rename'|'merge')=>{if(busy||mode===next)return;modeRef.current=next;setMode(next);setSearch('');setRenameId('');setSources([]);setLabel('');setTarget('');setName('');setDestination(next==='rename'?'same':'new');setEditing(false);setAttempted(false);setPreview(null);setError('')};
- const cancelRename=()=>{setRenameId('');setLabel('');setEditing(false);setAttempted(false);setPreview(null);setError('');requestAnimationFrame(()=>body.current?.querySelector<HTMLInputElement>('.kobo-edit-search input')?.focus())};
- const finishRename=()=>{setAttempted(true);if(validation)return;setEditing(false);requestAnimationFrame(()=>body.current?.querySelector<HTMLButtonElement>('[data-edit-rename]')?.focus())};
+ const changeMode=(next:'rename'|'merge')=>{
+  if(busy||mode===next)return;
+  modeRef.current=next;setMode(next);setSearch('');setRenameId('');setRenames(new Map());setSources([]);setLabel('');setTarget('');setName('');setDestination(next==='rename'?'same':'new');setAttempted(false);clearPreview();
+ };
+ const focusRenameRow=(id:string)=>requestAnimationFrame(()=>{
+  if(renameInput.current)return;
+  const row=body.current?.querySelector(`[data-answer-id="${CSS.escape(id)}"]`);
+  const control=row?.querySelector<HTMLButtonElement>('[data-edit-rename]')||body.current?.querySelector<HTMLInputElement>('.kobo-edit-search input');
+  control?.focus({preventScroll:true});
+ });
+ const cancelRename=()=>{
+  setRenameId('');setLabel('');setAttempted(false);clearPreview();focusRenameRow(renameId);
+ };
+ const discardRename=(id:string)=>{
+  removeRename(id);
+  clearPreview();focusRenameRow(id);
+ };
+ const finishRename=()=>{
+  if(busy||!renameId||!stageRename())return;
+  setRenameId('');setLabel('');setAttempted(false);clearPreview();focusRenameRow(renameId);
+ };
+ const renameAction=renames.size>1?'renames':'rename';
  const act=async(apply=false)=>{
   if(blocked)return;const snapshotKey=key,snapshotMode=mode;setBusy(true);setError('');
   try{await prepareDataEdit(project.id);if(apply){if(!readyPreview)return;const p=await koboRequest<KoboProject>(`/projects/${project.id}/edits/apply`,{revision:project.dataRevision||0,operation,signature:readyPreview.signature});notifyDataEdit(p);if(onSaved)await onSaved(p);else onClose()}else{const next=await koboRequest<EditPreview>(`/projects/${project.id}/edits/preview`,{revision:project.dataRevision||0,operation});if(modeRef.current!==snapshotMode)return;previewKey.current=snapshotKey;setPreview(next)}}catch(issue){setError(issue instanceof Error?issue.message:String(issue))}finally{setBusy(false)}
  };
  const showCode=(option:AnswerOption)=>options.some(other=>other.id!==option.id&&normalizedAnswerLabel(other.label)===normalizedAnswerLabel(option.label));
- const renderRow=(option:AnswerOption,pinned=false)=><div key={option.id} className={`kobo-managed-answer${pinned?' is-active':''}`} data-answer-id={option.id}>
-  {!isRename&&<input type="checkbox" aria-label={`Select ${option.label} (${option.id})`} checked={sources.includes(option.id)} disabled={busy} onChange={event=>{setSources(current=>event.target.checked?[...current,option.id]:current.filter(id=>id!==option.id));setPreview(null)}}/>}
-  <div className="kobo-managed-label">{pinned&&editing?<><label className="sr-only" htmlFor="kobo-inline-answer-label">New answer label</label><input ref={renameInput} id="kobo-inline-answer-label" aria-label="New answer label" aria-invalid={attempted&&!!validation} aria-describedby={attempted&&validation?'kobo-rename-validation':undefined} disabled={busy} value={label} maxLength={1000} onChange={event=>{setLabel(event.target.value);setPreview(null)}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();event.stopPropagation();finishRename()}if(event.key==='Escape'){event.preventDefault();event.stopPropagation();cancelRename()}}}/></>:<><strong dir="auto">{pinned?label:option.label}</strong>{pinned&&<small className="kobo-rename-pending">Pending rename <span dir="auto">from {option.label}</span></small>}{showCode(option)&&<small>Code: {option.id}</small>}</>}</div>
-  <span className="kobo-managed-count" title="Responses across all filters">{option.count.toLocaleString()}</span>
-  {isRename&&<div className="kobo-managed-actions">{pinned&&editing?<><button type="button" className="soft" disabled={busy} onClick={finishRename}>Done</button><button type="button" className="soft" disabled={busy} aria-label="Cancel rename" onClick={cancelRename}><X aria-hidden="true"/></button></>:<><button data-edit-rename={pinned?'true':undefined} type="button" className="soft" aria-label={`Rename ${option.label}`} disabled={busy||!!renameId&&!pinned} onClick={()=>{if(pinned){setEditing(true);setPreview(null)}else beginRename(option)}}><Pencil aria-hidden="true"/>{pinned?'Edit':'Rename'}</button>{pinned&&<button type="button" className="soft" aria-label="Discard rename" disabled={busy} onClick={cancelRename}><X aria-hidden="true"/></button>}</>}</div>}
- </div>;
+ const renderRow=(option:AnswerOption)=>{
+  const active=option.id===renameId;
+  const pending=isRename?renames.get(option.id):undefined;
+  const available=optionsById.has(option.id);
+  return <div key={option.id} className={`kobo-managed-answer${active?' is-active':''}`} data-answer-id={option.id}>
+   {!isRename&&<input type="checkbox" aria-label={`Select ${option.label} (${option.id})`} checked={sources.includes(option.id)} disabled={busy} onChange={event=>{setSources(current=>event.target.checked?[...current,option.id]:current.filter(id=>id!==option.id));setPreview(null)}}/>}
+   <div className="kobo-managed-label">{active?<><label className="sr-only" htmlFor="kobo-inline-answer-label">New answer label</label><input ref={renameInput} id="kobo-inline-answer-label" aria-label="New answer label" aria-invalid={attempted&&!!inlineError} aria-describedby={attempted&&inlineError?'kobo-rename-validation':undefined} disabled={busy} value={label} maxLength={1000} onChange={event=>{setLabel(event.target.value);setPreview(null)}} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();event.stopPropagation();finishRename()}if(['ArrowUp','ArrowDown','Home','End'].includes(event.key))event.stopPropagation();if(event.key==='Escape'){event.preventDefault();event.stopPropagation();cancelRename()}}}/>{attempted&&inlineError&&<small id="kobo-rename-validation" className="kobo-inline-rename-error" role="alert">{inlineError}</small>}</>:<><strong dir="auto">{pending??option.label}</strong>{pending&&<small className="kobo-rename-pending">Pending rename <span dir="auto">{available?`from ${option.label}`:`for unavailable answer ${option.id}`}</span></small>}{showCode(option)&&<small>Code: {option.id}</small>}</>}</div>
+   <span className="kobo-managed-count" title="Responses across all filters">{option.count.toLocaleString()}</span>
+   {isRename&&<div className="kobo-managed-actions">{active?<><button type="button" className="soft" disabled={busy} onClick={finishRename}>Done</button><button type="button" className="soft" disabled={busy} aria-label="Cancel rename" onClick={cancelRename}><X aria-hidden="true"/></button></>:<><button data-edit-rename type="button" className="soft" aria-label={pending?`Edit rename for ${option.label}`:`Rename ${option.label}`} disabled={busy||!available} onClick={()=>beginRename(option)}><Pencil aria-hidden="true"/>{pending?'Edit':'Rename'}</button>{pending&&<button type="button" className="soft" aria-label={`Discard rename for ${option.label}`} disabled={busy||!!renameId} onClick={()=>discardRename(option.id)}><X aria-hidden="true"/></button>}</>}</div>}
+  </div>;
+ };
  return <EditDialog title="Manage answers" onClose={onClose} busy={busy} manager>
   <div ref={body} className="kobo-answer-manager-body">
    <div className="kobo-edit-field"><strong dir="auto">{koboLabel(question,project.settings.language)}</strong><small>Changes apply to this project across all filters. Original files stay unchanged.</small></div>
    <div className="kobo-answer-mode" role="group" aria-label="Answer action"><button type="button" aria-pressed={isRename} disabled={busy} onClick={()=>changeMode('rename')}><Pencil aria-hidden="true"/>Rename</button><button type="button" aria-pressed={!isRename} disabled={busy} onClick={()=>changeMode('merge')}><GitMerge aria-hidden="true"/>Merge</button></div>
-   <p className="kobo-answer-manager-hint">{isRename?'Rename an answer directly in its row.':'Select two or more answers to combine into one.'}</p>
+   <p className="kobo-answer-manager-hint">{isRename?'Click Done or choose another answer, then preview your changes.':'Select two or more answers to combine into one.'}</p>
    <label className="kobo-edit-search"><Search aria-hidden="true"/><input data-initial-focus aria-label="Search answer options" placeholder="Find answers" value={search} disabled={busy} onChange={event=>setSearch(event.target.value)}/></label>
    {loading?<p role="status" className="kobo-answer-manager-empty">Loading answers...</p>:<>
-    {isRename&&source&&<div className="kobo-pinned-answer">{renderRow(source,true)}{attempted&&validation&&<p id="kobo-rename-validation" className="error" role="alert">{validation}</p>}</div>}
-    <VirtualRows navigateTable className="kobo-managed-answer-list" items={visible} enabled={visible.length>100} estimate={50} resetKey={search+mode} render={option=>renderRow(option)}/>
-    {!visible.length&&!source&&<p role="status" className="kobo-answer-manager-empty">{search?'No answers match your search.':'No answers available.'}</p>}
+    <VirtualRows navigateTable className="kobo-managed-answer-list" items={visible} enabled={visible.length>100} estimate={50} resetKey={search+mode} retainIndex={renameId?visible.findIndex(option=>option.id===renameId):-1} render={renderRow}/>
+    {!visible.length&&<p role="status" className="kobo-answer-manager-empty">{search?'No answers match your search.':'No answers available.'}</p>}
    </>}
    {!isRename&&<section className="kobo-merge-answer-settings" aria-label="Merge settings"><p role="status">{sources.length} {sources.length===1?'answer':'answers'} selected</p>{sources.length>=2&&<><label className="kobo-field">Combined answer label<input aria-label="Combined answer label" value={label} disabled={busy} maxLength={1000} onChange={event=>{setLabel(event.target.value);setTarget('')}} placeholder="Enter the combined answer label"/></label>{collision.length>0&&<p className="kobo-edit-warning">This label already exists. The selected answers will merge into it.</p>}{matches.length>1&&<label className="kobo-field">Existing answer code<select aria-label="Existing answer code" disabled={busy} value={target} onChange={event=>setTarget(event.target.value)}><option value="">Choose the existing answer</option>{matches.map(option=><option key={option.id} value={option.id}>{option.label} ({option.id})</option>)}</select></label>}</>}</section>}
-   {(renameId||!isRename&&sources.length>=2)&&<section className="kobo-answer-save-section" aria-label="Save destination"><fieldset disabled={busy}><legend>Where to save</legend><div className="kobo-answer-destinations"><label className={destination==='same'?'is-selected':''}><input type="radio" name="answer-save-destination" checked={destination==='same'} onChange={()=>setDestination('same')}/><span>Update this field</span></label><label className={destination==='new'?'is-selected':''}><input type="radio" name="answer-save-destination" checked={destination==='new'} onChange={()=>setDestination('new')}/><span>Create a new field</span></label></div><p>{destination==='same'?'Update answers in the current analysis field.':'Save directly after the original question in form order, with its current filters, hidden answers, and analysis settings.'}</p></fieldset>{destination==='new'&&<label className="kobo-field">New field name<input aria-label="New field name" value={name} disabled={busy} maxLength={1000} onChange={event=>setName(event.target.value)} placeholder="Name for the new field"/></label>}</section>}
-   {readyPreview&&<section ref={previewSection} className="kobo-answer-change-preview" aria-label="Answer change preview" tabIndex={-1}><h3>{isRename?'Review rename':'Review merge'}</h3><p>{isRename?`Rename “${source?.label}” to “${label.trim()}”`:`Merge ${sources.length} answers into “${label.trim()}”`}</p><div className="kobo-answer-preview-meta"><span>{isRename?'Responses using this answer':'Records changed'} <b>{(isRename?source?.count||0:readyPreview.affectedRecords).toLocaleString()}</b></span><span>Save to <b dir="auto">{destination==='new'?name.trim():'Current field'}</b></span></div>{readyPreview.impacts?.map(impact=><p key={impact}>{impact}</p>)}<details><summary>Before and after answers</summary><div className="kobo-answer-preview-columns">{[{title:'Before',options:readyPreview.beforeOptions},{title:'After',options:readyPreview.options}].map(group=><div key={group.title}><h4>{group.title}</h4>{group.options.map(option=><p key={option.id}><span dir="auto">{option.label}</span><b>{option.count.toLocaleString()}</b></p>)}</div>)}</div></details></section>}
-   {(error||optionError)&&<p className="error" role="alert">{error||optionError}</p>}
+   {(isRename?(!!renameId||renames.size>0):sources.length>=2)&&<section className="kobo-answer-save-section" aria-label="Save destination"><fieldset disabled={busy}><legend>Where to save</legend><div className="kobo-answer-destinations"><label className={destination==='same'?'is-selected':''}><input type="radio" name="answer-save-destination" checked={destination==='same'} onChange={()=>setDestination('same')}/><span>Update this field</span></label><label className={destination==='new'?'is-selected':''}><input type="radio" name="answer-save-destination" checked={destination==='new'} onChange={()=>setDestination('new')}/><span>Create a new field</span></label></div><p>{destination==='same'?'Update answers in the current analysis field.':'Save directly after the original question in form order, with its current filters, hidden answers, and analysis settings.'}</p></fieldset>{destination==='new'&&<label className="kobo-field">New field name<input aria-label="New field name" value={name} disabled={busy} maxLength={1000} onChange={event=>setName(event.target.value)} placeholder="Name for the new field"/></label>}</section>}
+   {readyPreview&&<section ref={previewSection} className="kobo-answer-change-preview" aria-label="Answer change preview" tabIndex={-1}><h3>{isRename?`Review ${renameAction}`:'Review merge'}</h3>{isRename?pendingRenames.map(draft=>{
+    const before=readyPreview.beforeOptions.find(option=>option.id===draft.id);
+    return <p key={draft.id}>Rename <bdi>“{before?.label??draft.id}”</bdi> to <bdi>“{draft.label}”</bdi> · {(before?.count??0).toLocaleString()} responses</p>;
+   }):<p>{`Merge ${sources.length} answers into “${label.trim()}”`}</p>}<div className="kobo-answer-preview-meta">{!isRename&&<span>Records changed <b>{readyPreview.affectedRecords.toLocaleString()}</b></span>}<span>Save to <b dir="auto">{destination==='new'?name.trim():'Current field'}</b></span></div>{readyPreview.impacts?.map(impact=><p key={impact}>{impact}</p>)}<details><summary>Before and after answers</summary><div className="kobo-answer-preview-columns">{[{title:'Before',options:readyPreview.beforeOptions},{title:'After',options:readyPreview.options}].map(group=><div key={group.title}><h4>{group.title}</h4>{group.options.map(option=><p key={option.id}><span dir="auto">{option.label}</span><b>{option.count.toLocaleString()}</b></p>)}</div>)}</div></details></section>}
+   {(error||optionError||draftError)&&<p className="error" role="alert">{error||optionError||draftError}</p>}
   </div>
-  <footer className="kobo-answer-manager-footer"><span role="status">{busy?'Working...':readyPreview?'Review the result, then apply.':isRename?renameId?editing?'Finish the inline edit, then preview.':'Rename ready to preview.':'Choose an answer to rename.':sources.length>=2?'Set the combined label and save destination.':'Select at least two answers.'}</span><div><button type="button" className="soft" disabled={busy} onClick={onClose}>Cancel</button>{!readyPreview?<button type="button" className="primary" disabled={blocked} onClick={()=>void act()}>{busy?<LoaderCircle className="kobo-edit-spinner"/>:isRename?<Pencil aria-hidden="true"/>:<GitMerge aria-hidden="true"/>}{isRename?'Preview rename':'Preview merge'}</button>:<button type="button" className="primary" disabled={blocked} onClick={()=>void act(true)}><Check aria-hidden="true"/>{isRename?'Apply rename':'Apply merge'}</button>}</div></footer>
+  <footer className="kobo-answer-manager-footer"><span role="status">{busy?'Working...':readyPreview?'Review the result, then apply.':isRename?renameId?'Click Done to stage this rename.':renames.size?`${renames.size} ${renameAction} ready to preview.`:'Choose an answer to rename.':sources.length>=2?'Set the combined label and save destination.':'Select at least two answers.'}</span><div><button type="button" className="soft" disabled={busy} onClick={onClose}>Cancel</button>{!readyPreview?<button type="button" className="primary" disabled={blocked} onClick={()=>void act()}>{busy?<LoaderCircle className="kobo-edit-spinner"/>:isRename?<Pencil aria-hidden="true"/>:<GitMerge aria-hidden="true"/>}{isRename?`Preview ${renameAction}`:'Preview merge'}</button>:<button type="button" className="primary" disabled={blocked} onClick={()=>void act(true)}><Check aria-hidden="true"/>{isRename?`Apply ${renameAction}`:'Apply merge'}</button>}</div></footer>
  </EditDialog>;
 }
 export function KoboEditNotice({project,onUndo}:{project:KoboProject;onUndo:()=>void}){return <div className="kobo-edit-notice" role="status"><Check aria-hidden="true"/><span>Analysis data updated.</span><button type="button" className="soft" disabled={!project.canUndoEdit} onClick={onUndo}><RotateCcw/>Undo</button></div>}

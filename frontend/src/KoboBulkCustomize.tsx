@@ -2,6 +2,7 @@ import {useKoboUnsavedChanges} from './useKoboUnsavedChanges';
 import KoboBulkSettingHeading from './KoboBulkSettingHeading';
 import {appearanceDefaults,resolveAppearance,type KoboAppearance} from './koboAppearance';
 import KoboAppearanceControls,{appearanceSettingApplies,gridlineChoice} from './KoboAppearanceControls';
+import {readableKoboChartType} from './koboChartDensity';
 import KoboSettingsSelect from './KoboSettingsSelect';
 import {lazy,Suspense,useEffect,useMemo,useRef,useState} from 'react';
 import {BarChart3,ChartColumn,ChartLine,ChevronDown,Palette,PieChart,RotateCcw,SlidersHorizontal,X} from 'lucide-react';
@@ -36,8 +37,11 @@ export default function KoboBulkCustomize({project,settings,analysis,onApply,onC
    const chart=next.chart||(draft.chart===undefined&&result?.chart)||(question.kind==='date'?'line':'column');
    const calculated=!!next.calculation&&next.calculation.operation!=='count';
    const usesDateField=chart==='line'&&!!next.trendDateField&&['category','multiple','number'].includes(question.kind);
+   const hasBreakdowns=!!(next.breakdowns?.length||next.breakdown);
+   const legendChart=result?readableKoboChartType({...result,chart,breakdowns:hasBreakdowns?result.breakdowns:[]}):chart;
    return {question,config:next,usesDateField,context:{
-    chart,breakdowns:!!(next.breakdowns?.length||next.breakdown),appearance:next.appearance,
+    chart,breakdowns:hasBreakdowns,appearance:next.appearance,
+    automaticLegend:hasBreakdowns||usesDateField||chart==='line'&&!!result?.trend||['pie','donut'].includes(legendChart),
     calculated,measured:calculated&&next.calculation?.operation!=='sum',
     legacyMeasure:calculated&&next.percentageMode==='legacy-respondents',
     trend:chart==='line'&&(usesDateField||question.kind==='date'||!!result?.trend&&draft.chart===undefined&&draft.trendDateField===undefined),
@@ -84,7 +88,7 @@ export default function KoboBulkCustomize({project,settings,analysis,onApply,onC
   const timer=setTimeout(()=>void koboApi.previewQuestion(project.id,{...base.current,questions:{...base.current.questions,[target.id]:cfg}},target.id,controller.signal).then(result=>{if(!controller.signal.aborted)setPreview({key,result})}).catch(issue=>{if(!controller.signal.aborted)setError(issue instanceof Error?issue.message:String(issue))}).finally(()=>{if(!controller.signal.aborted)setBusy(false)}),250);
   return()=>{clearTimeout(timer);controller.abort()};
  },[key,retry]);
- const shown=useMemo(()=>preview&&cfg?{...preview.result,chart:cfg.chart||(['date'].includes(preview.result.kind)?'line':preview.result.kind==='number'?'column':'bar') as KoboResult['chart'],colors:resolveKoboColors(preview.result,cfg.palette,cfg.colors),pointColors:cfg.pointColors||{},breakdownDisplay:cfg.breakdownDisplay,appearance:cfg.appearance}:null,[preview,cfg]);
+ const shown=useMemo(()=>preview&&cfg?{...preview.result,chart:cfg.chart||(['date'].includes(preview.result.kind)?'line':preview.result.kind==='number'?'column':'bar') as KoboResult['chart'],colors:resolveKoboColors({...preview.result,chart:cfg.chart||preview.result.chart,appearance:cfg.appearance},cfg.palette,cfg.colors),pointColors:cfg.pointColors||{},breakdownDisplay:cfg.breakdownDisplay,appearance:cfg.appearance}:null,[preview,cfg]);
  const entries=shown?colorEntries(shown):[],entryKey=JSON.stringify(entries.map(entry=>entry.id));
  useEffect(()=>setColorLimit(20),[entryKey]);
  const changeLevel=(index:number,value:string)=>{const next=[...levels];if(value)next[index]=value;else next.splice(index,1);patch({breakdowns:next.filter(Boolean)})};
@@ -155,7 +159,7 @@ export default function KoboBulkCustomize({project,settings,analysis,onApply,onC
     </div>
     <div hidden={section!=='colors'} className="kobo-customize-section"><h3>Shared chart colors</h3><p>Choose a palette or edit a color. Only your changes will apply.</p>
      {heading('Chart colors','palette',['palette','colors'])}
-     <div className="kobo-palette-cards">{koboPalettes.map(palette=><button key={palette.name} type="button" aria-label={`${palette.label||palette.name} shared palette`} aria-pressed={selected('palette')===palette.name} onClick={()=>{patch({palette:palette.name as KoboQuestionSettings['palette'],colors:{}})}}><span>{palette.label||palette.name}</span><small>{palette.description}</small><span className="kobo-palette-swatches">{palette.colors.slice(0,6).map(color=><i key={color} style={{background:color}}/>)}</span></button>)}</div>
+     <div className="kobo-palette-cards">{koboPalettes.map(palette=><button key={palette.name} type="button" aria-label={`${palette.label||palette.name} shared palette`} aria-pressed={selected('palette')===palette.name} onClick={()=>{patch({palette:palette.name,colors:{}})}}><span>{palette.label||palette.name}</span><small>{palette.description}</small><span className="kobo-palette-swatches">{palette.colors.slice(0,6).map(color=><i key={color} style={{background:color}}/>)}</span></button>)}</div>
      <button className="soft" type="button" aria-pressed={selected('palette')==='auto'} onClick={()=>{patch({palette:null,colors:{}})}}><RotateCcw/>Automatic colors</button>
      <div className="kobo-color-section-heading"><h4>Preview question colors</h4></div><p>Custom colors apply wherever the same option ID is used. Other colors keep their current values.</p>
      {shown&&<div className="kobo-customize-colors">{entries.slice(0,colorLimit).map(entry=><ColorControl key={`${questionId}:${entry.id}`} entry={entry} value={shown.colors[entry.id]||defaultKoboColor(shown,entry.id)} palette={cfg?.palette} disabled={pending} onChange={value=>setDraft(current=>({...current,colors:{...current.colors,[entry.id]:value}}))}/>)}</div>}{entries.length>colorLimit&&<button className="soft" type="button" onClick={()=>setColorLimit(value=>value+20)}>Show more colors</button>}

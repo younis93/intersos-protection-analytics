@@ -1,13 +1,17 @@
 import {cloneElement, type ReactElement, type KeyboardEvent, useLayoutEffect, useMemo, useRef, useState} from "react";
 import {rowOffsets, windowIndexes} from "./virtualWindow";
 
-export function VirtualRows<T>({items,render,table=false,columns=1,enabled=items.length>200,estimate=42,resetKey,initialFocusIndex=null,className,buttonRows=false,revealIndex=null,navigateTable=false}:{navigateTable?:boolean;items:T[];render:(item:T,index:number)=>ReactElement;table?:boolean;columns?:number;enabled?:boolean;estimate?:number;resetKey?:string;initialFocusIndex?:number|null;className?:string;buttonRows?:boolean;revealIndex?:number|null}) {
+export function VirtualRows<T>({items,render,table=false,columns=1,enabled=items.length>200,estimate=42,resetKey,initialFocusIndex=null,className,buttonRows=false,revealIndex=null,retainIndex=-1,navigateTable=false}:{navigateTable?:boolean;items:T[];render:(item:T,index:number)=>ReactElement;table?:boolean;columns?:number;enabled?:boolean;estimate?:number;resetKey?:string;initialFocusIndex?:number|null;className?:string;buttonRows?:boolean;revealIndex?:number|null;retainIndex?:number}) {
   const element=useRef<HTMLElement|null>(null),heights=useRef(new Map<number,number>());
   const [version,setVersion]=useState(0),[viewport,setViewport]=useState({top:0,height:360}),[focus,setFocus]=useState<number|null>(initialFocusIndex);
   const previousItems=useRef(items);
   const pendingFocus=useRef<number|null>(null),pendingLastControl=useRef(false),pendingColumn=useRef<string|null>(null);
   const offsets=useMemo(()=>rowOffsets(items.length,heights.current,estimate),[items.length,version,estimate]);
   const indexes=enabled?windowIndexes(offsets,viewport.top,viewport.height,focus):items.map((_,index)=>index);
+  if(retainIndex>=0&&retainIndex<items.length&&!indexes.includes(retainIndex)){
+    indexes.push(retainIndex);
+    indexes.sort((a,b)=>a-b);
+  }
   useLayoutEffect(()=>{const previous=previousItems.current;previousItems.current=items;if(previous.length<=items.length&&previous.every((item,index)=>item===items[index]))return;heights.current.clear();setVersion(value=>value+1);setFocus(null);const root=table?element.current?.closest<HTMLElement>(".legal-table-wrap"):element.current;if(root&&table)root.scrollTop=0},[items,table]);
   useLayoutEffect(()=>{if(!table&&element.current)element.current.scrollTop=0},[resetKey,table]);
   useLayoutEffect(()=>{

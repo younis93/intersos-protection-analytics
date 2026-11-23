@@ -1,15 +1,14 @@
-const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const assert=require('node:assert/strict');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE_PATH||'playwright');
-const root=path.resolve(__dirname,'..'),fixture=path.join(root,'frontend/src/updateLatencyCheck.tsx'),html=path.join(root,'frontend/update-latency-check.html');
+const base=process.env.APP_TEST_URL||'http://127.0.0.1:5188';
 (async()=>{let browser;try{
-  fs.writeFileSync(fixture,`import React from 'react';import {createRoot} from 'react-dom/client';import Welcome from './Welcome';import './styles.css';createRoot(document.getElementById('root')!).render(<Welcome foxUnlocked={false} onFoxUnlock={()=>{}}/>);`);
-  fs.writeFileSync(html,'<meta name="viewport" content="width=device-width, initial-scale=1"><div id="root"></div><script type="module" src="/src/updateLatencyCheck.tsx"></script>');
   browser=await chromium.launch({executablePath:process.env.EDGE_PATH||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
   const page=await browser.newPage(),errors=[],requests=[];page.on('pageerror',error=>errors.push(String(error)));
+  const alert=page.getByRole('dialog',{name:'Application update'}).getByRole('alert');
   await page.route('**/api/update/check',async route=>{await new Promise(resolve=>requests.push({route,resolve}));});
-  const finish=async(index,json,status=200)=>{const request=requests[index];await request.route.fulfill({status,json});request.resolve();};
+  const finish=async(index,json,status=200)=>{const request=requests[index];await request.route.fulfill({status,json,headers:{'access-control-allow-origin':'*'}});request.resolve();};
   const available={enabled:true,available:true,currentVersion:'1.0.49',latestVersion:'1.0.50',notes:'1. Performance: Faster navigation.\n2. Email: Preview and edit emails.',sizeBytes:84183192};
-  await page.goto((process.env.APP_TEST_URL||'http://127.0.0.1:5188')+'/update-latency-check.html');
+  await page.goto(base+'/?homeWeatherTest=1',{waitUntil:'commit'});
   await page.getByRole('button',{name:'Check for updates',exact:true}).waitFor();
   const elapsed=await page.evaluate(async()=>{const start=performance.now();document.querySelector('[aria-label="Check for updates"]').click();while(!document.querySelector('[aria-label="Application update"]'))await new Promise(requestAnimationFrame);return performance.now()-start;});
   assert(elapsed<250,`Dialog took ${elapsed}ms to open`);
@@ -24,7 +23,8 @@ const root=path.resolve(__dirname,'..'),fixture=path.join(root,'frontend/src/upd
   assert.equal(await page.locator('.update-release-notes li').count(),2,'Cached release notes should appear during refresh');
   await page.waitForFunction(()=>document.querySelector('.update-check-status'));
   assert.equal(requests.length,2);await finish(1,{detail:'Synthetic connection failure'},500);
-  await page.getByRole('alert').waitFor();assert.equal(await page.locator('.update-release-notes li').count(),2);
+  await alert.waitFor();assert.equal(await page.locator('.update-release-notes li').count(),2);
+  assert.match(await alert.textContent(),/Try again in a moment/);
   await page.getByRole('button',{name:'Check again',exact:true}).click();
   await page.waitForFunction(()=>!document.querySelector('.update-check-error'));
   assert.equal(requests.length,3);await finish(2,{enabled:true,available:false,currentVersion:'1.0.50',latestVersion:'1.0.50'});
@@ -33,5 +33,20 @@ const root=path.resolve(__dirname,'..'),fixture=path.join(root,'frontend/src/upd
   await page.waitForFunction(()=>document.querySelector('.update-check-status'));
   await finish(3,{enabled:true,available:false,currentVersion:'1.0.50',message:'Unable to check for updates: network unavailable'});
   await page.getByRole('button',{name:'Check again',exact:true}).waitFor();
+  assert.match(await alert.textContent(),/Check your internet connection/);
+
+  await page.reload({waitUntil:'commit'});
+  await page.getByRole('button',{name:'Check for updates',exact:true}).click();
+  await page.getByRole('heading',{name:'Checking for updates…',exact:true}).waitFor();
+  await finish(4,{enabled:true,available:false,currentVersion:'1.0.50',checkFailed:true,message:'The app couldn’t reach GitHub. Check your internet connection and try again.'});
+  await page.getByRole('heading',{name:'Unable to check for updates',exact:true}).waitFor();
+  assert.match(await alert.textContent(),/Check your internet connection/);
+  assert.equal(await page.locator('.update-check-status').count(),0);
+  assert.equal(await page.locator('.update-icon').getAttribute('data-updating'),'false');
+  await page.getByRole('button',{name:'Check again',exact:true}).click();
+  await page.getByRole('heading',{name:'Checking for updates…',exact:true}).waitFor();
+  assert.equal(await alert.count(),0);
+  await finish(5,{enabled:true,available:false,currentVersion:'1.0.50',latestVersion:'1.0.50'});
+  await page.getByRole('heading',{name:'You’re up to date',exact:true}).waitFor();
   assert.deepEqual(errors,[]);console.log(JSON.stringify({openMs:Math.round(elapsed),pendingRequestsShared:true,cachedNotesImmediate:true,closeRemainsClosed:true,errorRetry:true,pageErrors:errors}));
-}finally{await browser?.close();for(const file of [fixture,html])fs.rmSync(file,{force:true});}})().catch(error=>{console.error(error);process.exit(1)});
+}finally{await browser?.close();}})().catch(error=>{console.error(error);process.exit(1)});

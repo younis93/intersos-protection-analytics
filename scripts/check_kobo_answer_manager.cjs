@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs');
 const {chromium}=require('C:/Users/youni/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const clone=value=>JSON.parse(JSON.stringify(value));
-const out='output/kobo-answer-manager';fs.mkdirSync(out,{recursive:true});
+const out=process.env.KOBO_TEST_OUTPUT||'output/kobo-answer-manager';fs.mkdirSync(out,{recursive:true});
 (async()=>{
  const browser=await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
  try{for(const theme of ['glass-light','glass-dark'])for(const width of [1440,390,320]){
@@ -14,6 +14,11 @@ const out='output/kobo-answer-manager';fs.mkdirSync(out,{recursive:true});
   const question=()=>({id:'answer',name:'answer',labels:{en:caption},kind:'category',type:'select_one answers',repeat:'',group:'',metadata:false,identifying:false,choices:options.map(option=>({name:option.id,labels:{en:option.label}}))});
   const project=()=>({id:'answer-project',name:'Answer manager',form:{questions:[question()],groups:[],language:'en',warnings:[]},settings,warnings:[],issues:[],importNotes:[],dataRevision:revision,canUndoEdit:history.length>0});
   const preview=operation=>{
+   if(operation.renames){
+    const labels=new Map(operation.renames.map(({id,label})=>[id,label]));
+    return {revision,signature:JSON.stringify(operation),affectedRecords:operation.destination==='new'?344:0,field:'answer',
+     options:options.map(option=>({...option,label:labels.get(option.id)??option.label})),beforeOptions:options,impacts:[]};
+   }
    const existing=options.find(option=>option.id===operation.target)||options.find(option=>option.label===operation.label),target=existing?.id||operation.sources[0];
    let after=options.filter(option=>!operation.sources.includes(option.id)||option.id===target).map(option=>option.id===target?{...option,label:operation.label,count:options.filter(o=>operation.sources.includes(o.id)||o.id===target).reduce((n,o)=>n+o.count,0)}:option);
    if(!after.some(o=>o.id===target))after.push({id:target,label:operation.label,count:options.filter(o=>operation.sources.includes(o.id)).reduce((n,o)=>n+o.count,0)});
@@ -33,9 +38,20 @@ const out='output/kobo-answer-manager';fs.mkdirSync(out,{recursive:true});
    else if(path.endsWith('/settings'))body=settings;
    await route.fulfill({json:body});
   });
-  await page.goto('http://127.0.0.1:5298/#/kobo/answer-project');
+  const base=process.env.KOBO_TEST_URL||'http://127.0.0.1:5298';
+  await page.goto(`${base}/#/kobo/answer-project`);
   const manager=page.getByRole('dialog',{name:'Manage answers',exact:true});
-  const open=async()=>{await page.getByRole('button',{name:'Manage answers answer',exact:true}).click().catch(async e=>{console.error(errors,(await page.locator('body').innerText()).slice(0,1200));throw e});await manager.locator('[data-answer-id="yes"]').waitFor();};
+  const openAnswerAction=async action=>{
+   const trigger=page.getByRole('button',{name:'Answer options: Yes',exact:true});
+   await trigger.evaluate(el=>el.scrollIntoView({block:'center',behavior:'instant'}));
+   await trigger.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+   await trigger.press('ArrowDown');
+   await page.getByRole('menuitem',{name:action,exact:true}).press('Enter');
+  };
+  const open=async()=>{
+   await openAnswerAction('Manage answers');
+   await manager.locator('[data-answer-id="yes"]').waitFor();
+  };
   const input=()=>manager.getByRole('textbox',{name:'New answer label',exact:true});
   const finish=async value=>{await input().fill(value);await input().press('Enter');};
   const row=id=>manager.locator(`[data-answer-id="${id}"]`);
@@ -47,14 +63,13 @@ const out='output/kobo-answer-manager';fs.mkdirSync(out,{recursive:true});
   await manager.screenshot({path:`${out}/list-${theme}-${width}.png`});
   await row('yes').getByRole('button',{name:'Rename Yes',exact:true}).click();await finish('');await manager.getByRole('alert').filter({hasText:'Enter an answer label.'}).waitFor();
   await finish('No');await manager.getByRole('alert').filter({hasText:'Use Merge'}).waitFor();
-  await finish('Yes');await manager.getByRole('alert').filter({hasText:'Enter a different label.'}).waitFor();
   await finish('نعم - Yes');assert(await manager.getByRole('radio',{name:'Update this field',exact:true}).isChecked());
   assert(await manager.getByRole('button',{name:'Preview rename',exact:true}).isEnabled());
   failPreview=width===1440;
   await manager.getByRole('button',{name:'Preview rename',exact:true}).click();
   if(width===1440){await manager.getByRole('alert').filter({hasText:'Preview failed.'}).waitFor();assert(await row('yes').getByText('نعم - Yes',{exact:true}).isVisible());await manager.getByRole('button',{name:'Preview rename',exact:true}).click();}
   await manager.getByRole('region',{name:'Answer change preview',exact:true}).waitFor();
-  assert.equal(lastPreview.operation.target,'yes');assert.deepEqual(lastPreview.operation.sources,['yes']);assert.equal(lastPreview.operation.destination,'same');
+  assert.deepEqual(lastPreview.operation.renames,[{id:'yes',label:'نعم - Yes'}]);assert.equal(lastPreview.operation.destination,'same');
   assert((await manager.getByRole('region',{name:'Answer change preview'}).innerText()).includes('67'));
   await manager.getByText('Before and after answers',{exact:true}).click();
   await manager.screenshot({path:`${out}/rename-${theme}-${width}.png`});
@@ -71,9 +86,31 @@ const out='output/kobo-answer-manager';fs.mkdirSync(out,{recursive:true});
   await page.locator('.kobo-edit-notice').getByRole('button',{name:'Undo',exact:true}).click();
   await page.getByRole('button',{name:'Answer options: Yes',exact:true}).waitFor();
   // Opening from an answer goes straight into its inline rename, including zero counts.
-  await page.getByRole('button',{name:'Answer options: Yes',exact:true}).click();await page.getByRole('menuitem',{name:'Rename answer',exact:true}).click();await input().waitFor();assert.equal(await input().inputValue(),'Yes');await input().press('Escape');assert(await manager.isVisible());assert.equal(await input().count(),0);
-  await row('refuse').getByRole('button',{name:'Rename Prefer not to answer',exact:true}).click();await finish('أفضل عدم الإجابة');
-  await manager.getByRole('button',{name:'Preview rename',exact:true}).click();await manager.getByRole('region',{name:'Answer change preview'}).waitFor();assert((await manager.getByRole('region',{name:'Answer change preview'}).innerText()).includes('0'));
+  await openAnswerAction('Rename answer');await input().waitFor();assert.equal(await input().inputValue(),'Yes');await input().press('Escape');assert(await manager.isVisible());assert.equal(await input().count(),0);
+  const done=manager.getByRole('button',{name:'Done',exact:true});
+  const refuseIndex=await row('refuse').getAttribute('data-window-index');
+  await row('refuse').getByRole('button',{name:'Rename Prefer not to answer',exact:true}).click();
+  assert.equal(await row('refuse').getAttribute('data-window-index'),refuseIndex);
+  assert(await row('refuse').getByRole('textbox',{name:'New answer label',exact:true}).isVisible());
+  assert(await row('refuse').evaluate(node=>{
+   const inputRect=node.querySelector('input').getBoundingClientRect(),doneRect=node.querySelector('.kobo-managed-actions button').getBoundingClientRect();
+   return inputRect.left<doneRect.left&&Math.abs(inputRect.y+inputRect.height/2-doneRect.y-doneRect.height/2)<2;
+  }));
+  await input().fill('أفضل عدم الإجابة');await done.click();
+  await row('yes').getByRole('button',{name:'Rename Yes',exact:true}).click();await done.click();
+  assert.equal(await input().count(),0);
+  await row('no').getByRole('button',{name:'Rename No',exact:true}).click();await input().fill('Yes');
+  await row('yes').getByRole('button',{name:'Rename Yes',exact:true}).click();
+  await manager.getByRole('alert').filter({hasText:'Use Merge'}).waitFor();
+  assert.equal(await input().inputValue(),'Yes');assert(await input().evaluate(node=>node===document.activeElement));
+  await input().fill('No response');
+  await row('yes').getByRole('button',{name:'Rename Yes',exact:true}).click();await input().fill('Confirmed');
+  await done.click();
+  await row('yes').getByRole('button',{name:'Edit rename for Yes',exact:true}).click();await input().fill('Yes');await done.click();
+  assert(await row('yes').getByRole('button',{name:'Rename Yes',exact:true}).isVisible());
+  await row('yes').getByRole('button',{name:'Rename Yes',exact:true}).click();await input().fill('Confirmed');await done.click();
+  await manager.getByRole('button',{name:'Preview renames',exact:true}).click();await manager.getByRole('region',{name:'Answer change preview'}).waitFor();assert((await manager.getByRole('region',{name:'Answer change preview'}).innerText()).includes('0'));
+  assert.deepEqual(lastPreview.operation.renames,[{id:'refuse',label:'أفضل عدم الإجابة'},{id:'no',label:'No response'},{id:'yes',label:'Confirmed'}]);
   await manager.getByRole('button',{name:'Merge',exact:true}).click();assert.equal(await manager.getByRole('region',{name:'Answer change preview'}).count(),0);assert.equal(await manager.getByRole('textbox',{name:'New field name',exact:true}).count(),0);
   await manager.getByRole('checkbox',{name:'Select Yes (yes)',exact:true}).check();assert.equal(await manager.getByRole('textbox',{name:'Combined answer label',exact:true}).count(),0);
   await manager.getByRole('checkbox',{name:'Select No (no)',exact:true}).check();assert(await manager.getByRole('radio',{name:'Create a new field',exact:true}).isChecked());
@@ -84,12 +121,13 @@ const out='output/kobo-answer-manager';fs.mkdirSync(out,{recursive:true});
   await manager.screenshot({path:`${out}/merge-${theme}-${width}.png`});
   await manager.getByRole('radio',{name:'Update this field',exact:true}).check();assert.equal(await manager.getByRole('button',{name:'Apply merge',exact:true}).count(),0);
   await manager.getByRole('button',{name:'Cancel',exact:true}).click();
-  // Virtualized lists keep an edited answer pinned and its draft stable through search/scroll.
+  // Virtualized lists retain the inline editor and its draft through search and scrolling.
   large=true;await open();assert(await manager.locator('.kobo-managed-answer-list>.kobo-managed-answer').count()<100);
   await search.fill('Option 220');await row('option220').getByRole('button',{name:'Rename Option 220',exact:true}).click();await input().fill('Renamed option 220');await search.fill('Nothing matches');assert.equal(await input().inputValue(),'Renamed option 220');
   await search.fill('');await manager.locator('.kobo-managed-answer-list').evaluate(e=>e.scrollTop=e.scrollHeight);assert.equal(await input().inputValue(),'Renamed option 220');
-  await manager.getByRole('button',{name:'Done',exact:true}).click();assert(await row('option220').isVisible());
-  await manager.getByRole('button',{name:'Discard rename',exact:true}).click();await search.fill('Nothing matches');await manager.getByText('No answers match your search.',{exact:true}).waitFor();
+  await manager.getByRole('button',{name:'Done',exact:true}).click();await search.fill('Renamed option 220');
+  assert(await row('option220').isVisible());
+  await manager.getByRole('button',{name:'Discard rename for Option 220',exact:true}).click();await search.fill('Nothing matches');await manager.getByText('No answers match your search.',{exact:true}).waitFor();
   assert(await manager.evaluate(e=>e.scrollWidth<=e.clientWidth+1));
   await manager.getByRole('button',{name:'Cancel',exact:true}).click();assert.deepEqual(errors,[]);
   assert(previewCount>=4);assert(applyCount>=1);

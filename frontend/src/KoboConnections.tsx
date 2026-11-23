@@ -4,13 +4,13 @@ import KoboQuestionConditions,{type QuestionConditionControls} from './KoboQuest
 import KoboInlineConnectionEditor,{type InlineConnectionControls} from './KoboInlineConnectionEditor';
 import {connectionMessage,conditionSummary,ruleIssue} from './koboConnectionHealth';
 import KoboConnectionRuleEditor,{emptyConnectionRule} from './KoboConnectionRuleEditor';
-import {additiveAnswerScopeFor,KoboAnswerScopeControl,KoboHiddenAnswerControls,KoboRespondentAnswerScopeControl,hasPercentageConnection,supportsAdditiveAnswerScope,supportsConnectedAnswerScope} from './KoboHiddenAnswerControls';
+import {additiveAnswerScopeFor,KoboAnswerScopeControl,KoboHiddenAnswerControls,KoboRespondentAnswerScopeControl,hasPercentageConnection,koboCompactRespondentLabel,koboRespondentGroupLabel,supportsAdditiveAnswerScope,supportsConnectedAnswerScope} from './KoboHiddenAnswerControls';
 import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import {Link2,Link2Off,AlertTriangle,CheckCircle2,Pencil,X,Eye,CircleMinus,ArrowLeft,ArrowRight} from 'lucide-react';
 import {AppSelect} from './SelectionControls';
 import {koboLabel,type KoboProject,type KoboQuestionSettings,type KoboResult} from './koboTypes';
-import {formatPercent} from './koboPercentages';
+import {displayPercent,formatPercent,percentageDecimals} from './koboPercentages';
 import './koboConnections.css';
 
 export function connectionHealth(result:KoboResult,language:'en'|'ar'){
@@ -71,29 +71,39 @@ export function KoboConnectionControls({result,project,value,language,onChange,s
  {section!=='connection'&&!!value.hiddenAnswers?.length&&supportsAdditiveAnswerScope(result,value.percentageMode,value.calculation?.operation||'count')&&
   <section className="kobo-values-card kobo-connection-percentages"><KoboAnswerScopeControl basis="totals" language={language} value={additiveAnswerScopeFor(result,value,value.percentageMode)} onChange={additiveAnswerScope=>onChange({additiveAnswerScope})}/></section>}
  {section!=='connection'&&!measured&&!!value.hiddenAnswers?.length&&!linked&&(!value.percentageMode||value.percentageMode==='legacy-respondents')&&<section className="kobo-values-card kobo-connection-percentages"><KoboRespondentAnswerScopeControl language={language} mode={value.hiddenAnswerPercentageMode} onChange={hiddenAnswerPercentageMode=>onChange({hiddenAnswerPercentageMode})}/></section>}
- {section!=='connection'&&linked&&!measured&&(!value.percentageMode||value.percentageMode==='legacy-respondents')&&<section className="kobo-values-card kobo-connection-percentages" dir={ar?'rtl':'ltr'} aria-label={text('Respondent group','مجموعة المستجيبين')}><header><h4>{text('Respondent group','مجموعة المستجيبين')}</h4></header>
-  {linked&&!measured&&<><AppSelect label={text('Original base question','سؤال القاعدة الأصلية')} searchable value={selected} options={[["",text('Choose a connected question','اختر سؤالاً مرتبطاً')],...(!parents.some(q=>q.id===selected)&&selected?[[selected,text('Review this question - not in conditions','راجع السؤال - غير موجود في الشروط')] as [string,string]]:[]),...parents.map(q=>[q.id,koboLabel(q,language)] as [string,string])]} onChange={percentageParent=>onChange({percentageParent})}/>
+ {section!=='connection'&&linked&&!measured&&(!value.percentageMode||value.percentageMode==='legacy-respondents')&&<section className="kobo-values-card kobo-connection-percentages" dir={ar?'rtl':'ltr'} aria-label={koboRespondentGroupLabel(language)}><header><h4>{koboRespondentGroupLabel(language)}</h4></header>
+  {linked&&!measured&&<><AppSelect label={text('Linked question to use','السؤال المرتبط المراد استخدامه')} searchable value={selected} options={[["",text('Choose a linked question','اختر سؤالاً مرتبطاً')],...(!parents.some(q=>q.id===selected)&&selected?[[selected,text('Review this question - not in conditions','راجع السؤال - غير موجود في الشروط')] as [string,string]]:[]),...parents.map(q=>[q.id,koboLabel(q,language)] as [string,string])]} onChange={percentageParent=>onChange({percentageParent})}/>
    <KoboHiddenAnswerControls language={language} mode={mode} keepOriginalDisabled={!result.respondentBasis?.canKeepOriginal||source==='manual'&&!!ruleIssue(manualTree,fields)} onChange={mode=>onChange({connectedPercentageMode:mode,percentageBase:mode==='keep-original'?'parent':'question',percentageParent:selected,percentageMode:'legacy-respondents'})}/>
-   {supportsConnectedAnswerScope(result)&&<KoboAnswerScopeControl language={language} value={value.connectedAnswerScope} onChange={connectedAnswerScope=>onChange({connectedAnswerScope})}/>}
-   {value.connectedAnswerScope==='visible'&&mode==='keep-original'&&<small>{text('Parent respondents without an eligible follow-up answer remain in the base.','يبقى مستجيبو السؤال الأصل الذين ليس لديهم إجابة متابعة مؤهلة ضمن القاعدة.')}</small>}
+   {supportsConnectedAnswerScope(result)&&<KoboAnswerScopeControl language={language} multipleChoice={result.kind==='multiple'} value={value.connectedAnswerScope} onChange={connectedAnswerScope=>onChange({connectedAnswerScope})}/>}
+   {value.connectedAnswerScope==='visible'&&mode==='keep-original'&&<small>{text('People who answered the linked question still count if they had no eligible follow-up answer.','يظل من أجابوا عن السؤال المرتبط ضمن الحساب حتى إذا لم تكن لديهم إجابة متابعة مؤهلة.')}</small>}
   </>}
- {(!selected||!parents.some(p=>p.id===selected))&&<p className="kobo-values-hint">{text('Choose a connected base question to enable Keep original %.','اختر سؤال قاعدة مرتبطاً لتفعيل الاحتفاظ بالنسبة الأصلية.')}</p>}
+ {(!selected||!parents.some(p=>p.id===selected))&&<p className="kobo-values-hint">{text('Choose a linked question to use the people who answered it.','اختر سؤالاً مرتبطاً لاحتساب من أجابوا عنه.')}</p>}
  {result.respondentBasis?.issue&&<p className="kobo-placement-error" role="alert">{connectionMessage(result.respondentBasis.issue,ar)}</p>}
  </section>}
  </>;
 }
 
-export function KoboBasisSummary({result,language,hiddenCount=0,compact=false}:{result:KoboResult;language:'en'|'ar';hiddenCount?:number;compact?:boolean}){
+function percentageBaseUnit(language:'en'|'ar',repeatEntries:boolean,count:number){
+ if(language==='ar')return repeatEntries?'من الإدخالات':'من المستجيبين';
+ return repeatEntries?(count===1?'entry':'entries'):(count===1?'respondent':'respondents');
+}
+
+export function KoboBasisSummary({result,language,hiddenAnswersAction,compact=false}:{result:KoboResult;language:'en'|'ar';hiddenAnswersAction?:ReactNode;compact?:boolean}){
  const basis=result.respondentBasis;if(!basis)return null;
  const ar=language==='ar',n=new Intl.NumberFormat(language);
  const activeConnection=result.connections?.effectiveTree!==null;
- if(compact&&basis.active&&!basis.issue)return <div className="kobo-connected-base-status" role="status" dir={ar?'rtl':'ltr'}>
-  <span className="kobo-connected-base-number">
-   <span>{ar?'قاعدة النسبة':'Percentage base'} <strong>{n.format(basis.denominator??0)}</strong></span>
-   {basis.repeatEntries&&<span>{ar?'إدخالات متكررة':'Repeat entries'}</span>}
-   {hiddenCount>0&&<span>{n.format(hiddenCount)} {ar?'إجابات مخفية':hiddenCount===1?'answer hidden':'answers hidden'}</span>}
-  </span>
-  {basis.kind==='parent'&&<span className="kobo-connected-base-parent" dir="auto" title={basis.label}>{basis.label}</span>}
+ if(compact&&basis.active&&!basis.issue)return <div className="kobo-connected-base-status" dir={ar?'rtl':'ltr'}>
+  <div className="kobo-connected-base-heading">
+   <span className="kobo-connected-base-number" role="status">
+    <strong>{n.format(basis.denominator??0)}</strong> {percentageBaseUnit(language,basis.repeatEntries,basis.denominator??0)} {ar?'في قاعدة النسبة':'in the percentage base'}
+   </span>
+   {hiddenAnswersAction}
+  </div>
+  {basis.kind==='parent'&&<span className="kobo-connected-base-parent">{ar?'استنادًا إلى':'Based on'} <bdi>{basis.label}</bdi></span>}
+  <p className="kobo-connected-base-selection">
+   {koboCompactRespondentLabel(language,basis.kind==='parent')}
+   {supportsConnectedAnswerScope(result)&&<> <span aria-hidden="true">·</span> {basis.answerScope==='visible'?(ar?'الإجابات المخفية مستبعدة':'Hidden answers excluded'):(ar?'الإجابات المخفية مضمّنة':'Hidden answers included')}</>}
+  </p>
   {result.kind==='multiple'&&result.rows.length>0&&<span className="kobo-connected-base-note">{ar?'قد يتجاوز مجموع النسب 100٪ مع تعدد الاختيارات.':'Multiple selections can bring the total above 100%.'}</span>}
  </div>;
  const mode=activeConnection
@@ -105,9 +115,23 @@ export function KoboBasisSummary({result,language,hiddenCount=0,compact=false}:{
    {basis.kind==='parent'?` · ${basis.label}`:!activeConnection?(ar?' أجابوا عن هذا السؤال':' answered this question'):null}
    {mode&&` · ${mode}`}{basis.repeatEntries&&(ar?' · إدخالات متكررة':' · Repeat entries')}
    {activeConnection&&supportsConnectedAnswerScope(result)&&` · ${basis.answerScope==='visible'?(ar?'الإجابات الظاهرة':'Visible answers'):(ar?'كل الإجابات':'All answers')}`}
-   {activeConnection&&hiddenCount>0&&` · ${n.format(hiddenCount)} ${ar?'إجابات مخفية':hiddenCount===1?'answer hidden':'answers hidden'}`}
   </>}
  </p>;
+}
+
+export function KoboPercentageExample({result,language,hiddenAnswers}:{result:KoboResult;language:'en'|'ar';hiddenAnswers?:string[]}){
+ const basis=result.respondentBasis,ar=language==='ar';
+ if(!basis?.active||basis.issue||basis.denominator==null)return null;
+ if(!basis.denominator)return <p className="kobo-percentage-example">{ar?'لا يمكن حساب النسب لأن قاعدة النسبة تساوي صفرًا.':'Percentages are unavailable because the base is zero.'}</p>;
+ const example=result.rows.find(row=>row.id!=='__blank__'&&!hiddenAnswers?.includes(row.id)&&displayPercent(row)!=null);
+ if(!example)return null;
+ const n=new Intl.NumberFormat(language),hasBreakdowns=!!(result.breakdownFields?.length||result.breakdowns.length);
+ const title=hasBreakdowns?(ar?'مثال على النسبة الإجمالية':'Overall percentage example'):(ar?'مثال على حساب النسبة':'Percentage example');
+ return <div className="kobo-percentage-example">
+  <span>{title}</span>
+  <bdi className="kobo-percentage-example-answer">{example.label}</bdi>
+  <strong>{n.format(example.count)} {ar?'من':'of'} {n.format(basis.denominator)} {percentageBaseUnit(language,basis.repeatEntries,basis.denominator)} = <bdi>{formatPercent(displayPercent(example),percentageDecimals(result),language)}</bdi></strong>
+ </div>;
 }
 
 function ConnectionDialog({result,project,language,onClose,onEdit}:{onEdit?:()=>void;result:KoboResult;project:KoboProject;language:'en'|'ar';onClose:()=>void}){
@@ -133,7 +157,7 @@ function ConnectionDialog({result,project,language,onClose,onEdit}:{onEdit?:()=>
   {!!details?.ignoredSourceConditions?.length&&<section className="kobo-connection-ignored"><h3>{ar?'شروط متجاهلة لهذا السؤال':'Conditions ignored for this question'}</h3>{details.ignoredSourceConditions.map((entry,index)=><code dir="ltr" key={index}>{entry.expression}</code>)}</section>}
   <section><h3>{ar?'شروط كوبو الأصلية':'Original Kobo conditions'}</h3>{details?.source==='manual'&&<p>{ar?'يحل الارتباط اليدوي محل هذه الشروط في المشروع.':'A manual connection replaces these source conditions in this project.'}</p>}{!details?.conditions.length&&!result.connectionSetup?.recovered&&<p>{ar?'لا يوجد شرط كوبو أصلي محفوظ.':'No original Kobo condition is stored.'}</p>}{result.connectionSetup?.recovered?<KoboSourceCondition project={project} question={result.id} language={language} result={result}/>:details?.conditions.map((condition,index)=><div className="kobo-connection-condition" key={`${condition.source}:${index}`}><div className="kobo-original-condition-heading"><small>{condition.source===result.id?(ar?'شرط السؤال':'Question condition'):(ar?'شرط مجموعة موروث':'Inherited group condition')}</small><KoboConditionStatus condition={condition} language={language}/></div>{condition.readable&&<p dir="auto">{condition.readable}</p>}<div className="kobo-original-condition"><code dir="ltr">{condition.expression}</code></div><KoboConditionStateDetails condition={condition} language={language}/></div>)}</section>
   {!!(details?.diagnostics?.length||details?.reviewIssues?.length)&&<section className="kobo-connection-percentage-details"><details><summary>{ar?'تفاصيل التشخيص':'Diagnostic details'}</summary>{details.diagnostics?.map((diagnostic,index)=><p key={index}>{connectionMessage(diagnostic.code,ar)} <code dir="ltr">{diagnostic.field}</code>{diagnostic.expression&&<code dir="ltr">{diagnostic.expression}</code>}</p>)}{!details.diagnostics?.length&&details.reviewIssues?.map(code=><p key={code}>{connectionMessage(code,ar)}</p>)}</details></section>}
-  <section className="kobo-connection-percentage-details"><details><summary>{ar?'كيف تُحسب النسبة؟':'How is the percentage calculated?'}</summary><KoboBasisSummary result={result} language={language}/>{basis?.active&&!basis.issue&&example&&basis.denominator!==null&&basis.denominator>0&&<p className="kobo-connection-formula" dir="auto"><span>{example.label}</span><strong dir="ltr">{n.format(example.count)} ÷ {n.format(basis.denominator)} × 100 = {formatPercent(example.percent,result.percentageDecimals??0,language)}</strong></p>}{basis?.denominator===0&&<p>{ar?'القاعدة صفر؛ تظهر النسبة كقيمة غير متاحة.':'The base is zero; percentages are unavailable.'}</p>}<p>{ar?'تُطبّق عوامل تصفية الاستجابات أولاً. لكل فئة تقسيم وفترة زمنية قاعدتها. إخفاء سؤال أو إجابة في السؤال الأصل لا يغيّر قاعدة هذا السؤال.':'Response filters apply first. Each breakdown group and time period has its own base. Hiding a parent question or its answers does not change this question’s base.'}</p><p> {!basis?result.percentageBasis:details?.effectiveTree===null?(ar?'تستخدم هذه النسب قاعدة السؤال الحالي.':'These percentages use the current question’s respondent base.'):basis.answerScope==='visible'?(ar?'تستبعد القاعدة مستجيبي المتابعة المؤهلين الذين جميع اختياراتهم مخفية.':'Visible answers excludes eligible follow-up respondents whose selections are all hidden.'):basis.hiddenMode==='adjust'?(ar?'تُحسب النسب من مستجيبي سؤال المتابعة بعد تطبيق الشروط.':'Follow-up percentages use everyone who answered the question under the active conditions. Hiding answers only changes which options are displayed.'):(ar?'تُحسب النسب من مستجيبي السؤال الأصل قبل تطبيق الشروط.':'Parent percentages use the original parent group before applying the follow-up conditions.')}</p></details></section>
+  <section className="kobo-connection-percentage-details"><details><summary>{ar?'كيف تُحسب النسبة؟':'How is the percentage calculated?'}</summary><KoboBasisSummary result={result} language={language}/>{basis?.active&&!basis.issue&&example&&basis.denominator!==null&&basis.denominator>0&&<p className="kobo-connection-formula" dir="auto"><span>{example.label}</span><strong dir="ltr">{n.format(example.count)} ÷ {n.format(basis.denominator)} × 100 = {formatPercent(example.percent,result.percentageDecimals??0,language)}</strong></p>}{basis?.denominator===0&&<p>{ar?'القاعدة صفر؛ تظهر النسبة كقيمة غير متاحة.':'The base is zero; percentages are unavailable.'}</p>}<p>{ar?'تُطبّق عوامل تصفية الاستجابات أولاً. لكل فئة تقسيم وفترة زمنية قاعدتها. إخفاء سؤال أو إجابة في السؤال الأصل لا يغيّر قاعدة هذا السؤال.':'Response filters apply first. Each breakdown group and time period has its own base. Hiding a parent question or its answers does not change this question’s base.'}</p><p> {!basis?result.percentageBasis:details?.effectiveTree===null?(ar?'تستخدم هذه النسب قاعدة السؤال الحالي.':'These percentages use the current question’s respondent base.'):basis.answerScope==='visible'?(ar?'تستبعد القاعدة مستجيبي المتابعة المؤهلين الذين جميع اختياراتهم مخفية.':'The calculation excludes eligible follow-up respondents whose selections are all hidden.'):basis.hiddenMode==='adjust'?(ar?'تُحسب النسب من مستجيبي سؤال المتابعة بعد تطبيق الشروط.':'Follow-up percentages use everyone who answered the question under the active conditions. Hiding answers only changes which options are displayed.'):(ar?'تُحسب النسب من مستجيبي السؤال الأصل قبل تطبيق الشروط.':'Parent percentages use the original parent group before applying the follow-up conditions.')}</p></details></section>
   </>}</div><footer className={mode==='ignore'?'kobo-connection-ignore-footer':undefined}>{mode==='ignore'?<><button type="button" className="soft kobo-connection-back-action" disabled={conditionBusy} onClick={close}>{ar?<ArrowRight aria-hidden="true"/>:<ArrowLeft aria-hidden="true"/>}{ar?'العودة إلى التفاصيل':'Back to details'}</button><button type="button" className="primary" disabled={!ignoreControls?.canApply} onClick={()=>void ignoreControls?.apply()}>{ignoreControls?.label||(ar?'تجاهل الشروط المحددة':'Ignore selected conditions')}</button></>:mode==='edit'?<><button type="button" className="soft" disabled={editorControls?.busy} onClick={close}>{ar?'إلغاء التغييرات':'Cancel changes'}</button><button type="button" className="primary" disabled={!editorControls?.canSave} onClick={()=>void editorControls?.save()}>{editorControls?.busy?(ar?'جارٍ الحفظ…':'Saving…'):(ar?'حفظ الارتباط':'Save connection')}</button></>:<><button type="button" className="soft kobo-connection-footer-action" title={ar?'هذا السؤال فقط':'This question only'} onClick={()=>setMode('ignore')}><CircleMinus aria-hidden="true"/>{ar?'تجاهل الشروط':'Ignore conditions'}</button><button type="button" className="soft kobo-connection-footer-action" onClick={()=>setMode('edit')}><Pencil aria-hidden="true"/>{ar?'تعديل':'Edit'}</button><button type="button" className="primary" disabled={conditionBusy} onClick={close}>{ar?'إغلاق':'Close'}</button></>}</footer>
  </dialog>,opener.current instanceof Element?opener.current.closest('.kobo-shell')||document.body:document.body);
 }

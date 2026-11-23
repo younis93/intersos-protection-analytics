@@ -1,8 +1,54 @@
 import {describe,it,expect} from 'vitest';
 import {koboChartRows,koboScreenChartRows,koboScreenChartPage,isDenseKoboChart,koboPdfChartKey,koboPdfChartPanels,readableKoboChartType} from './koboChartDensity';
-import {chartSpec} from './koboChartSpec';
+import {chartImageSpec,chartSpec,fixedChartImageSpec} from './koboChartSpec';
 import type {KoboResult} from './koboTypes';
 const fixture=(count=24,series=2):KoboResult=>({id:'q',name:'q',label:'District',group:'',repeat:'',kind:'category',denominator:268,missing:0,total:268,statistics:{},percentageBasis:'Answered',colors:{},chart:'column',breakdowns:Array.from({length:series},(_,i)=>({id:`s${i}`,label:`Series ${i}`,denominator:134})),rows:Array.from({length:count},(_,i)=>({id:`r${i}`,label:`District ${i} - a long category name that must remain separate from its bars`,count:i+1,percent:50,series:Array.from({length:series},(_,j)=>({id:`s${j}`,count:i+j+1,percent:(i+j+1)/134*100}))}))});
+describe('fixed chart widths',()=>{
+ it('uses the rendered text, font and dimensions for a single chart image',()=>{
+  const source=fixture(4,0);
+  const live=chartSpec(source,'en',false,'glass-light',640);
+  const rendered={...live,width:613,height:407,layout:{...live.layout,
+   xaxis:{...live.layout.xaxis,ticktext:['One<br>line','Two','Three','Four']},
+   font:{...live.layout.font,size:17}}};
+  const image=chartImageSpec(source,'en',{width:640,page:0,rendered},'glass-light');
+  expect(image.data).toEqual(rendered.data);
+  expect(image.layout).toMatchObject({width:613,height:407,font:{size:17},xaxis:{ticktext:['One<br>line','Two','Three','Four']}});
+ });
+ it.each([['compact',480],['medium',800],['wide',1000],['extra-wide',1280]] as const)('uses the %s preset for one chart and one image', (chartWidthMode,width)=>{
+  const source:KoboResult={...fixture(125,1),appearance:{chartWidthMode,chartWidth:517}};
+  const page=koboScreenChartPage(source,koboScreenChartRows(source));
+  expect(page.pages).toBe(1);
+  expect(chartSpec(page.result,'en').layout.width).toBe(width);
+  const image=fixedChartImageSpec(source,'en')!;
+  expect(image.layout.width).toBe(width);
+  expect(image.layout.xaxis?.categoryarray).toHaveLength(125);
+  expect(chartSpec({...source,appearance:{...source.appearance,chartWidthMode:'custom'}},'en').layout.width).toBe(517);
+ });
+ it('fits every column into one chart and one fixed-width image',()=>{
+  const result:KoboResult={...fixture(125,1),appearance:{chartWidthMode:'narrow',title:'Districts by reporting group'}};
+  const page=koboScreenChartPage(result,koboScreenChartRows(result),1);
+  expect(page.pages).toBe(1);
+  expect(page.result.rows).toEqual(result.rows);
+  const image=fixedChartImageSpec(result,'en')!;
+  expect(image.layout).toMatchObject({width:640,autosize:false});
+  expect(image.layout.xaxis?.categoryarray).toEqual(result.rows.map(row=>row.id));
+  expect(image.layout.xaxis?.tickvals).toEqual(result.rows.map(row=>row.id));
+  expect(image.data[0]).toMatchObject({x:result.rows.map(row=>row.id)});
+ });
+ it('fits all measured heatmap cells into a single fixed-width image',()=>{
+  const result:KoboResult={...fixture(4,13),chart:'heatmap',appearance:{chartWidthMode:'custom',chartWidth:420},
+   measure:{operation:'sum',field:'amount',label:'Amount',unit:'',decimals:0,parentValuesRepeated:false}};
+  result.rows=result.rows.map(row=>({...row,series:row.series?.map((cell,index)=>({...cell,value:index-6}))}));
+  const image=fixedChartImageSpec(result,'en')!;
+  expect(image.layout.width).toBe(420);
+  expect(image.data[0]).toMatchObject({type:'heatmap',x:result.breakdowns.map(column=>column.id),y:result.rows.map(row=>row.id)});
+ });
+ it('uses automatic width by default and remembers an inactive custom width',()=>{
+  const source=fixture(4,0);
+  expect(fixedChartImageSpec({...source,appearance:{chartWidthMode:'auto',chartWidth:420}},'en')).toBeUndefined();
+  expect(chartSpec({...source,appearance:{chartWidthMode:'custom',chartWidth:420}},'en',false,undefined,1000).layout.width).toBe(420);
+ });
+});
 describe('crowded chart presentation',()=>{
  it('bounds a 25,000-answer field without dropping answers or changing the source',()=>{
   const source=fixture(25000,0),ordered=koboScreenChartRows(source),ids:string[]=[];
@@ -56,6 +102,42 @@ describe('dense screen views',()=>{
 
 
 describe('shared chart ordering',()=>{
+ it('exports only the selected category page when requested by the preview',()=>{
+  const source=fixture(105,0);
+  const view={width:640,page:1,pageOnly:true};
+  const labels=source.rows.slice(100).map(row=>row.id);
+  const image=chartImageSpec(source,'en',view,'glass-light');
+  expect(image.layout.xaxis?.tickvals).toEqual(labels);
+  const rendered={data:image.data,layout:image.layout,width:672,height:430};
+  expect(chartImageSpec(source,'en',{...view,rendered},'glass-light')).toMatchObject({
+   data:rendered.data,layout:{width:672,height:430,xaxis:{tickvals:labels}},
+  });
+ });
+ it('keeps rendered captions, font size and title in a full chart image across pages',()=>{
+  const source=fixture(101,0);
+  source.appearance={title:'A chart title with the same line breaks in the image',categoryLabelSize:16,categoryLabelLines:2};
+  source.rows=source.rows.map((row,index)=>({...row,label:index===100?'Particular nationalities or language groups':'Other groups with long captions'}));
+  const view={width:740,page:1};
+  const rows=koboScreenChartRows(source);
+  const live=chartSpec(koboScreenChartPage(source,rows,view.page).result,'en',false,'glass-light',view.width);
+  const image=chartImageSpec(source,'en',view,'glass-light');
+  expect(image.layout.xaxis?.tickvals).toEqual(rows.map(row=>row.id));
+  expect(image.layout.xaxis?.ticktext?.at(-1)).toBe(live.layout.xaxis?.ticktext?.[0]);
+  expect(image.layout.xaxis?.tickfont).toEqual(live.layout.xaxis?.tickfont);
+  expect(image.layout.title).toMatchObject({text:Reflect.get(live.layout.title!,'text')});
+  expect((image.data[0] as {x?:unknown[]}).x).toHaveLength(rows.length);
+ });
+ it('uses the same single-line Arabic caption in the live chart and image',()=>{
+  const source=fixture(9,0);
+  source.rows[0].label='الأسر التي تحتاج إلى خدمات إضافية';
+  source.appearance={categoryLabels:'truncate',categoryLabelSize:18};
+  const view={width:520,page:0};
+  const live=chartSpec(source,'ar',false,'glass-dark',view.width);
+  const image=chartImageSpec(source,'ar',view,'glass-dark');
+  expect(image.layout.xaxis?.ticktext).toEqual(live.layout.xaxis?.ticktext);
+  expect(image.layout.xaxis?.ticktext?.[0]).toContain('…');
+  expect(image.layout.xaxis?.ticktext?.[0]).not.toContain('<br>');
+ });
  it('labels every column in a narrow district chart, including answers reached by scrolling',()=>{
   const source=fixture(43,0);
   const names=['Other, please specify','Erbil City','Al-Kaim','Markas Kalar','Al-Karkh','Baquba','Kasnazan'];

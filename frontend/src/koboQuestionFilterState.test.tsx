@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {questionFilterSettings} from './koboQuestionFilterState';
+import {answerFilterSettings,questionFilterSettings} from './koboQuestionFilterState';
 import KoboQuestionFiltersBar from './KoboQuestionFiltersBar';
 import {questionDefaults,type KoboQuestion,type KoboResult} from './koboTypes';
 import {koboTableText,koboTableHtml} from './koboTableData';
@@ -15,6 +15,15 @@ describe('additional question filters',()=>{
  });
  it('treats numeric zero as an active question condition',()=>{
   expect(questionFilterSettings(questionDefaults,[{field:'number',kind:'number',values:[],minimum:0}]).filterMode).toBe('additional');
+ });
+ it('moves chosen rules into the answer calculation and retains the previous basis and other rules',()=>{
+  const region={field:'region',kind:'category' as const,values:['north']};
+  const age={field:'age',kind:'number' as const,values:[],minimum:18};
+  const config=questionFilterSettings({...questionDefaults,percentageMode:'row-total'},[region,age]);
+  const changed=answerFilterSettings(config,[region],['region']);
+  expect(config.ownFilters).toEqual([region,age]);
+  expect(changed).toMatchObject({filterMode:'additional',ownFilters:[age],answerFilters:[region],percentageMode:'row-total'});
+  expect(answerFilterSettings(changed,[],[])).toMatchObject({ownFilters:[age],answerFilters:[],percentageMode:'row-total'});
  });
  it('shows selected controls above the question while keeping legacy disabled rules inactive',()=>{
   const rules=[{field:'region',kind:'category' as const,values:['north']}];

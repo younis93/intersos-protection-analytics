@@ -509,6 +509,21 @@ def test_custom_analysis_shared_order_and_conditional_totals(env, display):
     assert all(totals_policy(q) == (False,False) for q in empty.json()['questions'])
 
 
+def test_custom_analysis_orders_numbered_labels_for_calculated_charts(env):
+    client, _ = env
+    preview = stage(client, b'Answer,Amount\nAnswer 10,4\nAnswer 20,2\nAnswer 2,8\n')
+    preview['config']['columns'][0]['kind'] = 'category'
+    saved = confirm(client, preview)
+    ids = {q['name']: q['id'] for q in saved['form']['questions']}
+    settings = saved['settings']
+    settings['questions'][ids['Answer']].update(
+        answerSort='label-asc', chart='column', calculation={'operation': 'sum', 'field': ids['Amount']})
+    response = client.post(f"/api/custom/projects/{saved['id']}/analysis", json={'settings': settings})
+    assert response.status_code == 200, response.text
+    result = next(q for q in response.json()['questions'] if q['id'] == ids['Answer'])
+    assert [(row['label'], row['value']) for row in result['rows']] == [('Answer 2', 8), ('Answer 10', 4), ('Answer 20', 2)]
+
+
 def test_hidden_chart_labels_survive_custom_project_reopen(env):
     client, store = env
     preview = stage(client)

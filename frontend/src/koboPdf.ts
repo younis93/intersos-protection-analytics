@@ -1,7 +1,7 @@
 import type {KoboAnalysis,KoboReport} from './koboTypes';
 import {resultWithColors} from './koboMarkColors';
 import {downloadBlob} from './koboApi';
-import {koboPdfChartKey,koboPdfChartPanels} from './koboChartDensity';
+import {koboPdfChartKey,koboPdfChartPanels,projectKoboChart} from './koboChartDensity';
 import {resultWithPivotOrdering} from './koboPivotSort';
 
 export function buildKoboPdf(name:string,snapshot:KoboAnalysis,signal:AbortSignal,onProgress:(progress:number,message:string)=>void,includeIntroduction=true,report?:KoboReport):Promise<Blob>{
@@ -13,7 +13,10 @@ export function buildKoboPdf(name:string,snapshot:KoboAnalysis,signal:AbortSigna
  return new Promise((resolve,reject)=>{
   if(signal.aborted){reject(new DOMException('Export cancelled','AbortError'));return}
   const worker=new Worker(new URL('./koboPdf.worker.ts',import.meta.url),{type:'module'});
-  const charts=snapshot.questions.filter(result=>result.denominator>0&&result.reportAttachment?.view!=='pivot').flatMap(koboPdfChartPanels);
+  const charts=snapshot.questions.filter(result=>projectKoboChart(result).denominator>0&&result.reportAttachment?.view!=='pivot').flatMap(result=>{
+   const cfg=snapshot.settings.questions[result.id];
+   return koboPdfChartPanels(cfg?resultWithColors(result,cfg):result);
+  });
   const chartIndex=new Map(charts.map((result,index)=>[koboPdfChartKey(result),index]));
   const images=new Map<string,Promise<string>>(),rendering=new AbortController();
   const render=(id:string)=>{
@@ -23,8 +26,7 @@ export function buildKoboPdf(name:string,snapshot:KoboAnalysis,signal:AbortSigna
     await new Promise(resolve=>setTimeout(resolve,0));rendering.signal.throwIfAborted();
     const {koboChartImage}=await import('./KoboChart');rendering.signal.throwIfAborted();
     const index=chartIndex.get(id),result=index===undefined?undefined:charts[index];if(!result)throw new Error('Question missing from export snapshot.');
-    const cfg=snapshot.settings.questions[result.id];
-    return koboChartImage(cfg?resultWithColors(result,cfg):result,snapshot.settings.language,'png',rendering.signal);
+    return koboChartImage(result,snapshot.settings.language,'png',rendering.signal);
    })();images.set(id,image);return image;
   };
   const cleanup=()=>{signal.removeEventListener('abort',abort);rendering.abort();images.clear();worker.terminate()};

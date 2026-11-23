@@ -12,7 +12,6 @@
 .theme-dropdown [data-theme-option='multicolor']{--option-accent:#8257c2}
 .theme-dropdown [data-theme-option='executive']{--option-accent:#9b722a}
 .theme-dropdown [data-theme-option='forest']{--option-accent:#347653}
-.theme-dropdown [data-theme-option='vice-city']{--option-accent:#ff5e8e}
 .theme-dropdown button[data-theme-option]:is(:hover,:focus-visible){
   background:color-mix(in srgb,var(--option-accent) 16%,var(--panel-strong));
   color:var(--ink);

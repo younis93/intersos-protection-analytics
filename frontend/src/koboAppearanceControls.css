@@ -17,8 +17,7 @@
 .kobo-title-style-fields{display:grid;gap:8px;min-width:0}
 .kobo-title-format-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .kobo-dialog .kobo-title-format-header h4{margin:0;color:var(--ink);font-size:12px;font-weight:650}
-.kobo-title-font-grid,.kobo-title-detail-grid,.kobo-title-toolbar{display:grid;gap:8px;min-width:0}
-.kobo-title-font-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.kobo-title-detail-grid,.kobo-title-toolbar{display:grid;gap:8px;min-width:0}
 .kobo-setting-group{display:grid;gap:12px;min-width:0;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
 .kobo-setting-group>h3{margin:0}
 .kobo-setting-group .app-select{width:100%;min-width:0;box-sizing:border-box;margin:0}
@@ -27,6 +26,17 @@
 .kobo-setting-group .kobo-appearance-radios{padding:4px 0 0;border:0;border-radius:0;background:transparent}
 .kobo-setting-group .kobo-appearance-radios>legend{padding:0}
 .kobo-setting-group .kobo-appearance-control>small{display:block;margin-top:5px}
+.kobo-custom-chart-width{margin-top:9px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel-strong)}
+.kobo-chart-width-heading,.kobo-chart-width-limits{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.kobo-chart-width-heading label{font-weight:600;font-size:12px;color:var(--ink)}
+.kobo-chart-width-heading span{padding:3px 8px;border-radius:6px;background:color-mix(in srgb,var(--blue) 12%,var(--panel));color:var(--ink);font-size:12px;font-weight:650;font-variant-numeric:tabular-nums}
+.kobo-chart-width-limits{font-size:11px;color:var(--muted)}
+.kobo-dialog .kobo-custom-chart-width input[type="range"]{appearance:none;display:block;width:100%;height:32px;padding:0;margin:0;border:0;border-radius:6px;background:transparent;cursor:pointer;direction:ltr}
+.kobo-custom-chart-width input::-webkit-slider-runnable-track{height:6px;border-radius:6px;background:linear-gradient(to right,var(--blue) var(--chart-width-progress),var(--line) var(--chart-width-progress))}
+.kobo-custom-chart-width input::-moz-range-track{height:6px;border-radius:6px;background:linear-gradient(to right,var(--blue) var(--chart-width-progress),var(--line) var(--chart-width-progress))}
+.kobo-custom-chart-width input::-webkit-slider-thumb{appearance:none;width:18px;height:18px;margin-top:-6px;border:2px solid var(--panel-strong);border-radius:50%;background:var(--blue);box-shadow:0 0 0 1px var(--blue)}
+.kobo-custom-chart-width input::-moz-range-thumb{width:14px;height:14px;border:2px solid var(--panel-strong);border-radius:50%;background:var(--blue);box-shadow:0 0 0 1px var(--blue)}
+.kobo-custom-chart-width input:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .kobo-customize .kobo-setting-group .kobo-chart-categories{padding:0;border:0;background:transparent}
 .kobo-title-detail-grid{grid-template-columns:52px minmax(0,1fr)}
 .kobo-title-toolbar{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -61,4 +71,4 @@
 .kobo-title-color input::-webkit-color-swatch{border:0;border-radius:3px}
 .kobo-title-color input::-moz-color-swatch{border:0;border-radius:3px}
 .kobo-dialog .kobo-title-formatting :is(button,input):focus-visible{outline:2px solid var(--blue);outline-offset:2px}
-@container(max-width:235px){.kobo-title-font-grid,.kobo-title-toolbar{grid-template-columns:minmax(0,1fr)}}
+@container(max-width:235px){.kobo-title-toolbar{grid-template-columns:minmax(0,1fr)}}

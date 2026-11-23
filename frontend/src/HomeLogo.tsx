@@ -4,13 +4,13 @@ import {createGlobeRenderer,loadGlobeMap} from './homeGlobeRenderer';
 const TURN_DURATION=2400;
 const smooth=(value:number)=>value*value*value*(value*(value*6-15)+10);
 
-export function HomeLogo({children,halloween=false,viceCity=false,frameDecoration}:{children?:ReactNode;halloween?:boolean;viceCity?:boolean;frameDecoration?:ReactNode}){
+export function HomeLogo({children,halloween=false,frameDecoration}:{children?:ReactNode;halloween?:boolean;frameDecoration?:ReactNode}){
   const [spinning,setSpinning]=useState(false),[highlighted,setHighlighted]=useState(false),[ready,setReady]=useState(false);
   const canvas=useRef<HTMLCanvasElement>(null),renderer=useRef<ReturnType<typeof createGlobeRenderer>|undefined>(undefined);
   const initialization=useRef<Promise<void>|undefined>(undefined);
   const autoPlayed=useRef(false);
   const rotation=useRef(0);
-  useLayoutEffect(()=>{renderer.current?.(rotation.current)},[halloween,viceCity]);
+  useLayoutEffect(()=>{renderer.current?.(rotation.current)},[halloween]);
   const busy=useRef(false),frame=useRef<number|undefined>(undefined),timer=useRef<number|undefined>(undefined),generation=useRef(0);
   const cancel=(updateState=true)=>{
     generation.current++;

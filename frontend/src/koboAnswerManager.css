@@ -34,10 +34,11 @@
 .kobo-managed-count{flex:0 0 50px;text-align:end;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .kobo-managed-actions{display:flex;align-items:center;justify-content:flex-end;gap:4px;flex:none;min-width:88px}
 .kobo-managed-actions button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:32px;padding:6px 8px;font-size:11px;box-shadow:none}
+/* The shared hover lift can move a row action out from under the pointer. */
+.kobo-dialog.kobo-answer-manager .kobo-managed-actions button:not(:disabled):hover{transform:none}
 .kobo-managed-actions button>svg{width:14px;height:14px}
-.kobo-pinned-answer{margin:10px 0 0;border:1px solid color-mix(in srgb,var(--blue) 35%,var(--line));border-radius:10px;overflow:hidden;background:color-mix(in srgb,var(--blue) 4%,var(--panel))}
-.kobo-pinned-answer>.kobo-managed-answer{background:transparent}
-.kobo-answer-manager .kobo-pinned-answer>.error{font-size:11px;line-height:1.6;margin:0;padding:0 11px 10px}
+.kobo-managed-answer.is-active{background:color-mix(in srgb,var(--blue) 5%,var(--panel-strong))}
+.kobo-managed-label>.kobo-inline-rename-error{color:var(--danger,#b42318)}
 .kobo-dialog.kobo-answer-manager .kobo-answer-manager-empty{font-size:12px;line-height:1.6;margin:12px 0;padding:12px;background:var(--panel);border-radius:8px;color:var(--muted)}
 .kobo-answer-manager .kobo-merge-answer-settings{margin-top:12px}
 .kobo-answer-manager .kobo-merge-answer-settings>p{font-size:11px;line-height:1.6;color:var(--muted);margin:0 0 10px}
@@ -68,4 +69,4 @@
 .kobo-answer-manager-footer button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:8px 12px;font-size:12px;box-shadow:none}
 .kobo-answer-manager-footer button>svg{width:15px;height:15px}
 .kobo-answer-manager button:disabled{cursor:not-allowed;opacity:.5;box-shadow:none}
-@media(max-width:560px){.kobo-dialog.kobo-answer-manager{width:calc(100vw - 16px);max-height:calc(100dvh - 16px);border-radius:14px}.kobo-dialog.kobo-answer-manager>header{padding:13px 16px}.kobo-answer-manager-body{padding:14px 16px}.kobo-answer-manager-footer{padding:12px 16px;flex-wrap:wrap;gap:7px}.kobo-answer-manager-footer>div{margin-inline-start:auto}.kobo-answer-manager .kobo-edit-field>strong{font-size:13px}.kobo-managed-answer{gap:7px;padding:8px}.kobo-managed-count{flex-basis:30px}.kobo-managed-actions{min-width:0}.kobo-managed-actions button{padding:6px;font-size:10px}.kobo-managed-actions button>svg{width:12px;height:12px}.kobo-managed-answer.is-active{flex-wrap:wrap}.kobo-managed-answer.is-active .kobo-managed-label{flex-basis:calc(100% - 45px)}.kobo-managed-answer.is-active .kobo-managed-actions{margin-inline-start:auto}.kobo-answer-destinations{width:100%}.kobo-answer-destinations>label{flex:1;padding:6px;gap:5px}.kobo-answer-preview-columns{gap:10px}}
+@media(max-width:560px){.kobo-dialog.kobo-answer-manager{width:calc(100vw - 16px);max-height:calc(100dvh - 16px);border-radius:14px}.kobo-dialog.kobo-answer-manager>header{padding:13px 16px}.kobo-answer-manager-body{padding:14px 16px}.kobo-answer-manager-footer{padding:12px 16px;flex-wrap:wrap;gap:7px}.kobo-answer-manager-footer>div{margin-inline-start:auto}.kobo-answer-manager .kobo-edit-field>strong{font-size:13px}.kobo-managed-answer{gap:7px;padding:8px}.kobo-managed-count{flex-basis:30px}.kobo-managed-actions{min-width:0}.kobo-managed-actions button{padding:6px;font-size:10px}.kobo-managed-actions button>svg{width:12px;height:12px}.kobo-answer-destinations{width:100%}.kobo-answer-destinations>label{flex:1;padding:6px;gap:5px}.kobo-answer-preview-columns{gap:10px}}

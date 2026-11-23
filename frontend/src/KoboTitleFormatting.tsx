@@ -1,6 +1,8 @@
 import {AlignLeft,AlignCenter,AlignRight,Minus,Plus,RotateCcw} from 'lucide-react';
 import {AppSelect} from './SelectionControls';
-import {appearanceDefaults,koboAnswerSizeOptions,koboChartFonts,maxTitleSpacing,resolveAppearance,titleSpacingPoints,type KoboAppearance} from './koboAppearance';
+import {useId} from 'react';
+import {ChartDimensionSlider} from './KoboAppearanceControls';
+import {answerSizeRange,appearanceDefaults,koboChartFonts,maxTitleSpacing,resolveAppearance,titleSpacingPoints,type KoboAppearance} from './koboAppearance';
 
 const titleSizes=[12,14,16,18,20,24,28,32,36,40,48];
 const styles=[
@@ -16,6 +18,7 @@ const alignments=[
 
 export default function KoboTitleFormatting({value,onChange,language='en'}:{value?:KoboAppearance;onChange:(value:KoboAppearance)=>void;language?:string}){
  const appearance=resolveAppearance(value);
+ const answerSizeId=useId();
  const text=(en:string,ar:string)=>language==='ar'?ar:en;
  const spacing=titleSpacingPoints(appearance.titleSpacing);
  const spacingLabel=new Intl.NumberFormat(language,{maximumFractionDigits:2}).format(spacing);
@@ -66,13 +69,11 @@ export default function KoboTitleFormatting({value,onChange,language='en'}:{valu
     </div>
    </div>
   </div>}
-  <div className="kobo-title-font-grid">
-   <AppSelect label={text('Chart font','خط الرسم البياني')} value={appearance.fontFamily} searchable preserveOrder
-    options={[...koboChartFonts].sort().map(font=>[font,font] as [string,string])}
-    onChange={fontFamily=>patch({fontFamily:fontFamily as KoboAppearance['fontFamily'],titleFont:'inherit'})}/>
-   <AppSelect label={text('Answer size','حجم الإجابات')} value={String(appearance.fontSize)} preserveOrder
-    options={koboAnswerSizeOptions(text('Auto','تلقائي'))}
-    onChange={fontSize=>patch({fontSize:Number(fontSize) as KoboAppearance['fontSize']})}/>
-  </div>
+  <AppSelect label={text('Chart font','خط الرسم البياني')} value={appearance.fontFamily} searchable preserveOrder
+   options={[...koboChartFonts].sort().map(font=>[font,font] as [string,string])}
+   onChange={fontFamily=>patch({fontFamily:fontFamily as KoboAppearance['fontFamily'],titleFont:'inherit'})}/>
+  <ChartDimensionSlider dimension="Answer size" label={text('Manual answer size','حجم الإجابات اليدوي')} id={answerSizeId}
+   value={appearance.fontSize||answerSizeRange.initial} min={answerSizeRange.min} max={answerSizeRange.max} mixed={false}
+   onChange={fontSize=>patch({fontSize})}/>
  </div>;
 }

@@ -30,6 +30,11 @@ class ReviewBlankSelection(BaseModel):
     columnFilters: list[dict] = Field(default_factory=list, max_length=100)
 
 
+class AnswerRename(BaseModel):
+    id: str
+    label: str = Field(max_length=1000)
+
+
 class EditOperation(BaseModel):
     kind: Literal['cells','answers']
     cells: list[CellChange] = Field(default_factory=list)
@@ -40,9 +45,17 @@ class EditOperation(BaseModel):
     sources: list[str] = Field(default_factory=list, max_length=10000)
     label: str = Field('', max_length=1000)
     target: str = ''
+    renames: list[AnswerRename] | None = Field(None, min_length=1, max_length=10000)
     destination: Literal['same','new'] = 'new'
     name: str = Field('', max_length=1000)
     language: Literal['en','ar'] = 'en'
+
+    @model_validator(mode='after')
+    def validate_renames(self):
+        if self.renames is not None and (self.kind != 'answers' or self.sources or self.target or self.label):
+            raise ValueError('Choose either separate answer renames or a single rename or merge.')
+        return self
+
 
 class EditRequest(BaseModel):
     revision: int = Field(ge=0)
@@ -71,6 +84,9 @@ def match_value(value, question):
 
 
 def resolve_operation(project, operation):
+    if operation.renames is not None:
+        options = choices_for(project, operation.field, operation.language)
+        validate_answer_renames(operation.renames, options)
     if operation.reviewBlanks:
         from .kobo import KoboSettings, missing
         from .column_filters import ColumnFilter
@@ -117,6 +133,26 @@ def choices_for(project, field, language='en'):
         counts.update(list(dict.fromkeys(value)) if isinstance(value,list) else [str(value)])
     labels={c['name']:label(c,language) for c in q['choices']}
     return [{'id':code,'label':labels.get(code,code),'count':counts[code]} for code in dict.fromkeys([*labels,*counts])]
+
+
+def validate_answer_renames(renames, options):
+    original = {option['id']: text(option['label']) for option in options}
+    occupied = set(original.values())
+    renamed_ids, replacement_labels = set(), set()
+    for rename in renames:
+        if rename.id not in original:
+            raise ValueError('Select available answers to rename.')
+        if rename.id in renamed_ids:
+            raise ValueError('Rename each answer only once.')
+        replacement = text(rename.label)
+        if not replacement:
+            raise ValueError('Enter an answer label.')
+        if replacement == original[rename.id]:
+            raise ValueError('Enter a different label.')
+        if replacement in occupied or replacement in replacement_labels:
+            raise ValueError('This label is already used. Use Merge to combine answers.')
+        renamed_ids.add(rename.id)
+        replacement_labels.add(replacement)
 
 
 def scalar_value(value,q):
@@ -171,17 +207,25 @@ def apply_operation(project,operation,replay=False,place_after_source=True):
     source=questions.get(op.field)
     if not source or source['kind'] not in {'category','multiple','text'} or not editable(source):raise ValueError('Choose an editable text or choice field.')
     options=choices_for(project,op.field,op.language);known={c['id']:c for c in options}
-    if replay:
-        for code in op.sources:
-            if code not in known:known[code]={'id':code,'label':code,'count':0};options.append(known[code])
-    if not op.sources or any(code not in known for code in op.sources):raise ValueError('Select available answers to rename or merge.')
-    if not text(op.label):raise ValueError('Enter a destination answer label.')
-    matches=[c['id'] for c in options if text(c['label'])==text(op.label)]
-    if op.target:
-        if op.target not in known:raise ValueError('Choose an available destination option.')
-        target=op.target
-    elif len(matches)>1:raise ValueError('Several options have this label. Select a destination code.')
-    else:target=matches[0] if matches else op.sources[0] if len(op.sources)==1 else identity('local_',op.field,text(op.label))
+    if op.renames is not None:
+        if not replay:
+            validate_answer_renames(op.renames, options)
+        replacements = {rename.id: text(rename.label) for rename in op.renames}
+        merged = set()
+    else:
+        if replay:
+            for code in op.sources:
+                if code not in known:known[code]={'id':code,'label':code,'count':0};options.append(known[code])
+        if not op.sources or any(code not in known for code in op.sources):raise ValueError('Select available answers to rename or merge.')
+        if not text(op.label):raise ValueError('Enter a destination answer label.')
+        matches=[c['id'] for c in options if text(c['label'])==text(op.label)]
+        if op.target:
+            if op.target not in known:raise ValueError('Choose an available destination option.')
+            target=op.target
+        elif len(matches)>1:raise ValueError('Several options have this label. Select a destination code.')
+        else:target=matches[0] if matches else op.sources[0] if len(op.sources)==1 else identity('local_',op.field,text(op.label))
+        replacements = {target: text(op.label)}
+        merged = set(op.sources) - {target}
     q=source
     if op.destination=='new':
         if not text(op.name):raise ValueError('Enter the new field name.')
@@ -195,14 +239,17 @@ def apply_operation(project,operation,replay=False,place_after_source=True):
         else:project['form']['questions'].append(q)
     labels={c['name']:deepcopy(c['labels']) for c in source['choices']}
     for item in options:labels.setdefault(item['id'],{op.language:item['label']})
-    labels.setdefault(target,{})[op.language]=text(op.label)
-    merged=set(op.sources)-{target}
+    for code, replacement in replacements.items():
+        labels.setdefault(code, {})[op.language] = replacement
     q['choices']=[{'name':code,'labels':captions} for code,captions in labels.items() if code not in merged]
+    if op.renames is not None and op.destination == 'same':
+        return
     for record in project['records']:
         if record['scope']!=source['repeat']:continue
         value=record['values'].get(source['id'])
-        if isinstance(value,list):value=list(dict.fromkeys(target if v in op.sources else v for v in value))
-        elif not missing(value):value=target if str(value) in op.sources else value
+        if op.renames is None:
+            if isinstance(value,list):value=list(dict.fromkeys(target if v in op.sources else v for v in value))
+            elif not missing(value):value=target if str(value) in op.sources else value
         record['values'][q['id']]=deepcopy(value)
 
 
@@ -226,7 +273,7 @@ def effective_project(project):
 def revision(project):return project.get('dataEdits',{}).get('revision',0)
 def remap_merge_filters(settings,operation,after):
     op=EditOperation.model_validate(operation)
-    if op.kind!='answers' or op.destination!='same':return []
+    if op.kind!='answers' or op.destination!='same' or op.renames is not None:return []
     from .kobo import label
     q=next(q for q in after['form']['questions'] if q['id']==op.field)
     target=op.target or next((c['name'] for c in q['choices'] if text(label(c,op.language))==text(op.label)),None)
@@ -249,7 +296,8 @@ def inherit_new_field_settings(settings,operation,after):
     if op.kind!='answers' or op.destination!='new':return
     qid=identity('local_field_',op.field,op.name)
     question=next(q for q in after['form']['questions'] if q['id']==qid)
-    target=op.target or next(c['name'] for c in question['choices'] if text(label(c,op.language))==text(op.label))
+    target = '' if op.renames is not None else op.target or next(
+        c['name'] for c in question['choices'] if text(label(c,op.language))==text(op.label))
     sources=set(op.sources)
     def mapped(code):return target if code in sources else code
     cfg=deepcopy(settings.get('questions',{}).get(op.field))

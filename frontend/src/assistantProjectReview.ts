@@ -119,9 +119,9 @@ export function checkReportClaims(draft:string,sources:ReportCheckSource[]){
    if(match.length===1&&percentages.length<=1&&counts.length<=1&&denominators.length<=1){
     const {label,result,row}=match[0];
     const percent=displayPercent(row);
-    const expectedBase=/hidden answers remain included/i.test(result.percentageBasis||'')?undefined:
+    const expectedBase=result.answerFilterSummary?.denominator??(/hidden answers remain included/i.test(result.percentageBasis||'')?undefined:
      result.percentageMode==='legacy-respondents'?result.respondentBasis?.denominator??result.denominator:
-     result.percentageMode==='row-total'?row.count:result.pivotTotal?.count;
+     result.percentageMode==='row-total'?row.count:result.pivotTotal?.count);
     const mismatch=percentages.some(([,raw])=>percent==null||Math.abs(Number(raw)-percent)>0.5*10**-(raw.split('.')[1]?.length||0)+1e-8)
      ||counts.some(([,raw])=>Number(raw.replaceAll(',',''))!==row.count)
      ||denominators.some(([,raw])=>expectedBase!==undefined&&Number(raw.replaceAll(',',''))!==expectedBase);

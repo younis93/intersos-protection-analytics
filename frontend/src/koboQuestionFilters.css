@@ -14,6 +14,46 @@
 .kobo-dialog .kobo-question-filter-search>input{width:100%;min-width:0;margin:0;padding:10px 0;font:inherit;font-size:12px;border:0!important;outline:none!important;box-shadow:none!important;background:transparent;border-radius:0;color:var(--ink)}
 .kobo-question-filter-search>button{display:grid;place-items:center;width:26px;height:26px;border:0;background:transparent;color:var(--muted);padding:5px}
 .kobo-question-filter-search>button svg{width:14px;height:14px}
+.kobo-answer-filter-picker{container-type:inline-size;min-width:0}
+.kobo-answer-filter-layout{display:grid;gap:12px;align-items:start}
+.kobo-answer-filter-browser,.kobo-answer-filter-panel{min-width:0;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:10px}
+.kobo-answer-filter-tabs{display:flex;gap:4px;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid var(--line)}
+.kobo-answer-filter-picker .kobo-answer-filter-tabs>button{display:inline-flex;align-items:center;gap:5px;min-height:34px;padding:5px 9px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--muted);box-shadow:none;font-size:12px;font-weight:600}
+.kobo-answer-filter-picker .kobo-answer-filter-tabs>button[aria-pressed=true]{border-color:color-mix(in srgb,var(--blue) 28%,var(--line));background:color-mix(in srgb,var(--blue) 9%,var(--panel));color:var(--blue)}
+.kobo-answer-filter-tabs>button>span{font-variant-numeric:tabular-nums}
+.kobo-answer-filter-questions{position:relative;display:grid;gap:4px;max-height:12rem;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:6px 3px 3px}
+.kobo-answer-filter-picker .kobo-answer-filter-question{display:flex;align-items:center;gap:7px;width:100%;min-height:44px;padding:7px 8px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--ink);text-align:start;white-space:normal;box-shadow:none}
+.kobo-answer-filter-picker .kobo-answer-filter-question:hover{background:var(--panel-strong)}
+.kobo-answer-filter-picker .kobo-answer-filter-question[aria-pressed=true]{border-color:var(--blue);background:color-mix(in srgb,var(--blue) 10%,var(--panel));color:var(--blue)}
+.kobo-answer-filter-question-text{flex:1;min-width:0;display:grid;gap:2px;font-size:13px;font-weight:600;line-height:1.4;overflow-wrap:anywhere}
+.kobo-answer-filter-question-text>small{font-size:11px;font-weight:400;color:var(--muted)}
+.kobo-answer-filter-chevron,.kobo-answer-filter-count>svg,.kobo-answer-filter-clear>svg{width:14px;height:14px;flex:none}
+.kobo-answer-filter-picker[dir=rtl] .kobo-answer-filter-chevron{transform:scaleX(-1)}
+.kobo-answer-filter-count{display:inline-flex;align-items:center;gap:3px;flex:none;padding:2px 6px;border-radius:6px;background:color-mix(in srgb,var(--blue) 10%,var(--panel));color:var(--blue);font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
+.kobo-answer-filter-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:7px;padding:1px 2px 9px}
+.kobo-answer-filter-heading>div{min-width:0}
+.kobo-answer-filter-heading>div>span{display:block;color:var(--muted);font-size:11px;font-weight:600}
+.kobo-dialog .kobo-answer-filter-heading h4{margin:2px 0 0;font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+.kobo-answer-filter-choices{display:grid;gap:5px;min-inline-size:0;margin:0;padding:0;border:0}
+.kobo-answer-filter-picker .kobo-answer-filter-choice{display:flex;align-items:center;gap:9px;min-height:42px;padding:6px 9px;border:1px solid var(--line);border-radius:8px;cursor:pointer;color:var(--ink);font-size:13px;overflow-wrap:anywhere}
+.kobo-answer-filter-choice:hover{background:var(--panel-strong)}
+.kobo-answer-filter-picker .kobo-answer-filter-choice:has(input:checked){border-color:color-mix(in srgb,var(--blue) 52%,var(--line));background:color-mix(in srgb,var(--blue) 9%,var(--panel));font-weight:600}
+.kobo-answer-filter-choice input{width:16px;height:16px;margin:0;flex:none;accent-color:var(--blue)}
+.kobo-answer-filter-choice:focus-within,.kobo-answer-filter-question:focus-visible,.kobo-answer-filter-tabs>button:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+.kobo-answer-filter-picker .kobo-answer-filter-clear{display:inline-flex;align-items:center;gap:5px;margin-top:6px;min-height:36px;padding:4px 7px;border:0;border-radius:7px;background:transparent;color:var(--blue);box-shadow:none;font-size:12px;font-weight:600}
+.kobo-answer-filter-picker .kobo-answer-filter-clear:hover{background:color-mix(in srgb,var(--blue) 9%,var(--panel))}
+.kobo-answer-filter-placeholder{display:grid;justify-items:center;align-content:center;gap:6px;min-height:100px;color:var(--muted);text-align:center;font-size:13px}
+.kobo-answer-filter-placeholder>svg{width:20px;height:20px}
+.kobo-answer-filter-empty{padding:10px 6px;color:var(--muted);text-align:center;font-size:12px}
+@container (min-width:560px){
+ .kobo-answer-filter-layout{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+ .kobo-answer-filter-questions{max-height:18rem}
+ .kobo-answer-filter-choices{max-height:20rem;overflow:auto;scrollbar-gutter:stable;padding:3px}
+}
+.kobo-move-answer-filters{margin-bottom:10px}
+.kobo-move-answer-filters summary{cursor:pointer;font-weight:600}
+.kobo-move-answer-filters>.soft{display:block;margin-top:6px;max-width:100%;white-space:normal;text-align:start}
+.kobo-question-export-row:has(>.kobo-question-filter-action){flex-wrap:wrap}
 .kobo-question-filter-toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:14px 0}
 .kobo-question-filter-toolbar>div{display:flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:9px;background:var(--panel)}
 .kobo-question-filter-toolbar>div>button{display:flex;align-items:center;justify-content:center;gap:7px;min-height:32px;padding:6px 11px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted);font-size:12px}

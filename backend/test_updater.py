@@ -1,9 +1,12 @@
 import os
 import shutil
+import socket
+import ssl
 import subprocess
 import tempfile
 import time
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -38,13 +41,31 @@ class UpdaterTests(unittest.TestCase):
         with patch.object(updater, "ENABLED", True), patch.object(updater, "_json", return_value=manifest):
             result = updater.check()
         self.assertFalse(result["available"])
-        self.assertIn("Invalid update manifest", result["message"])
+        self.assertTrue(result["checkFailed"])
+        self.assertIn("invalid release information", result["message"])
 
-    def test_network_failure_never_raises(self):
-        with patch.object(updater, "ENABLED", True), patch.object(updater, "_json", side_effect=OSError("offline")):
+    def test_check_failures_return_actionable_messages_and_log_technical_details(self):
+        failures = (
+            (urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed")), "Check your internet connection", "getaddrinfo failed"),
+            (urllib.error.URLError(TimeoutError("socket timed out")), "took too long", "socket timed out"),
+            (urllib.error.URLError(ssl.SSLError("certificate details")), "secure connection", "certificate details"),
+            (urllib.error.HTTPError("", 503, "Service unavailable", {}, None), "Try again in a few minutes", "HTTP 503"),
+        )
+        for error, guidance, diagnostic in failures:
+            with self.subTest(error=error), patch.object(updater, "ENABLED", True), patch.object(updater, "_json", side_effect=error):
+                with self.assertLogs(updater.logger, level="WARNING") as logs:
+                    result = updater.check()
+                self.assertTrue(result["checkFailed"])
+                self.assertFalse(result["available"])
+                self.assertIn(guidance, result["message"])
+                self.assertNotIn(diagnostic, result["message"])
+                self.assertIn(diagnostic, logs.output[0])
+
+    def test_check_rejects_json_that_is_not_an_object(self):
+        with patch.object(updater, "ENABLED", True), patch.object(updater, "_json", return_value=[]):
             result = updater.check()
+        self.assertTrue(result["checkFailed"])
         self.assertFalse(result["available"])
-        self.assertIn("Unable to check", result["message"])
 
     def test_update_installer_uses_the_installer_relaunch_flow(self):
         command = updater._installer_command(Path("setup.exe"))

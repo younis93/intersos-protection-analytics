@@ -24,6 +24,12 @@ describe('customization drafts',()=>{
   const draft=customizeDraft({id:'q',chart:'bar'} as KoboResult,settings);draft.colors.a='#445566';
   expect(draft.breakdowns).toEqual(['gender']);expect(settings.questions.q.colors.a).toBe('#112233');
  });
+ it('refreshes the preview when checked answers or the effective filter scope change',()=>{
+  const draft={...questionDefaults,filterMode:'additional' as const,ownFilters:[{field:'region',kind:'category' as const,values:['north','west']}]};
+  expect(calculationKey(draft)).not.toBe(calculationKey(questionDefaults));
+  expect(calculationKey(draft)).not.toBe(calculationKey({...draft,filterMode:'page'}));
+  expect(calculationKey(draft)).not.toBe(calculationKey({...draft,ownFilters:[{...draft.ownFilters[0],values:['north']}]}));
+ });
  it('uses series colors for line charts and skips blank answers',()=>{
   const result:KoboResult={id:'q',name:'q',label:'Question',group:'',kind:'category',repeat:'',denominator:1,missing:0,total:1,statistics:{},chart:'bar',breakdowns:[],rows:[{id:'a',label:'Answer',count:1,percent:100},{id:'__blank__',label:'Blank',count:0,percent:null}],percentageBasis:'Respondents',colors:{}};
   expect(colorEntries(result).map(entry=>entry.id)).toEqual(['a']);expect(defaultKoboColor(result,'a')).toBe('#2166AC');

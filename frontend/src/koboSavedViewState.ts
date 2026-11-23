@@ -1,12 +1,12 @@
 import {questionDefaults,type KoboSettings,type KoboProject} from './koboTypes';
-import {appearanceDefaults} from './koboAppearance';
+import {appearanceDefaults,resolveAppearance} from './koboAppearance';
 import type {KoboSavedView,KoboViewSnapshot} from './koboSavedViewTypes';
 
 const defaults={percentageDefault:null,dateFilterModes:{},language:'en',filters:[],filterFields:[],hidden:[],metadata:false,hideBlanks:true,hideZero:true,hideEmpty:true,percentageDecimals:0,questionSort:'form',questions:{},viewMode:'charts'} as const;
 const questionDefault={...questionDefaults,palette:null,chart:null,pointColors:{},trendDateField:'',trendUnit:'month' as const,appearance:appearanceDefaults};
 export function viewSnapshot(settings:KoboSettings|KoboViewSnapshot):KoboViewSnapshot{
  const snapshot=Object.fromEntries(Object.entries(defaults).map(([key,value])=>[key,settings[key as keyof KoboViewSnapshot]??value])) as KoboViewSnapshot;
- snapshot.questions=Object.fromEntries(Object.entries(snapshot.questions).map(([id,cfg])=>[id,{...questionDefault,...cfg,appearance:{...appearanceDefaults,...cfg.appearance}}]));
+ snapshot.questions=Object.fromEntries(Object.entries(snapshot.questions).map(([id,cfg])=>[id,{...questionDefault,...cfg,appearance:resolveAppearance(cfg.appearance)}]));
  return structuredClone(snapshot);
 }
 function canonical(value:unknown):unknown{

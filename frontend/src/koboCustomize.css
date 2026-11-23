@@ -29,7 +29,11 @@
 .kobo-preview-heading{display:flex;gap:12px;justify-content:space-between;align-items:flex-start;margin-bottom:16px}
 .kobo-preview-heading>div{min-width:0}
 .kobo-shell .kobo-preview-heading h3{font-size:14px;margin-top:7px;overflow-wrap:anywhere}
-.kobo-preview-heading>span{font-size:10px;color:var(--muted);white-space:nowrap;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 9px}
+.kobo-preview-heading>span,.kobo-preview-actions>span{font-size:10px;color:var(--muted);white-space:nowrap;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:6px 9px}
+.kobo-preview-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+.kobo-preview-export-controls{display:flex;align-items:center;gap:8px}
+.kobo-preview-share-in-settings{display:none}
+.kobo-preview-actions .app-select-trigger{min-height:34px;padding:6px 9px;font-size:12px}
 .kobo-customize-preview-chart{max-height:450px;overflow:auto;border:1px solid var(--line);border-radius:14px;background:var(--panel-strong);padding:8px}
 .kobo-customize-preview-chart .kobo-empty{min-height:300px;font-size:12px;padding:20px}
 .kobo-preview-legend{list-style:none;display:flex;flex-wrap:wrap;gap:10px 18px;padding:12px 2px 0;margin:0;font-size:11px;color:var(--muted)}
@@ -88,6 +92,8 @@
  .kobo-customize>footer>div{width:100%;justify-content:flex-end}
  .kobo-customize>footer button{flex:1}
  .kobo-preview-heading{flex-direction:column}
+ .kobo-preview-actions{justify-content:flex-start}
+ .kobo-preview-share-in-settings{display:block}
 }
 
 .kobo-chart-types button small{display:block;font-size:10px;line-height:1.35;font-weight:400;max-width:150px}
@@ -100,3 +106,8 @@
 .kobo-category-options{display:grid;gap:12px;padding:13px;border:1px solid var(--line);border-radius:11px;background:var(--panel-strong)}.kobo-category-options>.app-select{margin:0;width:100%;min-width:0}.kobo-category-options>.kobo-field{margin:0}.kobo-category-options>.kobo-check{padding:4px 0;font-size:12px;line-height:1.6}.kobo-category-options input[type=number]{min-height:42px;border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:var(--panel);color:var(--ink);width:100%;box-sizing:border-box}
 .kobo-customize .kobo-chart-categories>.kobo-category-note{font-size:11px;line-height:1.8;color:var(--muted);margin:0;padding-inline-start:11px;border-inline-start:2px solid color-mix(in srgb,var(--blue) 30%,var(--line))}
 @media(prefers-reduced-motion:reduce){.kobo-category-switch,.kobo-category-switch:after{transition:none}}
+
+.kobo-answer-share{display:flex;align-items:center;gap:12px;width:fit-content;max-width:100%;margin:8px 0;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow-wrap:anywhere}
+.kobo-answer-share>strong{color:var(--blue);font-size:21px;font-variant-numeric:tabular-nums}
+.kobo-answer-share small{color:var(--muted)}
+.kobo-answer-share ul{margin:5px 0;padding-inline-start:18px}

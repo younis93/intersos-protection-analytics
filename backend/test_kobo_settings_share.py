@@ -14,6 +14,20 @@ def configuration():
         questions={'group/needs': {'chart': 'column', 'breakdowns': ['group/gender'], 'colors': {'water': '#123456'}}})
 
 
+def test_settings_share_keeps_stack_source_after_clearing_the_percentage_summary(sample):
+    project = sample[0]
+    settings = KoboSettings(questions={'group/needs': {
+        'chart': 'bar', 'breakdowns': ['group/gender'], 'answerStackMode': 'count',
+        'answerShareQuestion': 'group/gender', 'answerShareAnswer': '',
+    }})
+    review = preview_settings(project, KoboSettings(), export_settings(project, settings))
+    imported = review['settings']['questions']['group/needs']
+    assert not review['warnings']
+    assert imported['answerShareQuestion'] == 'group/gender'
+    assert imported['answerShareAnswer'] == ''
+    assert imported['answerStackMode'] == 'count'
+
+
 def test_round_trip_current_settings_without_data_and_apply(preview_client):
     client, store, pid = preview_client
     before = store.get(pid)

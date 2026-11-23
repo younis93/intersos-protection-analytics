@@ -214,6 +214,9 @@ class AnswerVisibility(BaseModel):
 
 
 class QuestionResult(BaseModel):
+    answerFilterSummary: dict[str, Any] | None = None
+    answerShare: dict[str, Any] | None = None
+    answerStack: dict[str, Any] | None = None
     conditionalWarnings: dict[str, int] = Field(default_factory=dict)
     missingAnswers: dict[str, int] = Field(default_factory=dict)
     connectionSetup: dict | None = None

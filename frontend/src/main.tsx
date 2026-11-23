@@ -8,6 +8,7 @@ import './tableSelection.css';
 const startupTheme=new URLSearchParams(window.location.search).get('appTheme');
 if(startupTheme&&startupTheme!=='vice-city')document.documentElement.dataset.theme=startupTheme;
 try {
+  if(localStorage.getItem('home-theme')==='vice-city')localStorage.removeItem('home-theme');
   for(const themeKey of ['app-theme','legal-platform-theme']){
     if(localStorage.getItem(themeKey)==='vice-city')localStorage.setItem(themeKey,'glass-light');
   }

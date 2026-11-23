@@ -1,7 +1,7 @@
 import {showRespondentPercentageControls} from './KoboHiddenAnswerControls';
 import {expect,it} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
-import KoboConnections,{KoboBasisSummary,KoboConnectionControls,KoboOriginalConnections} from './KoboConnections';
+import KoboConnections,{KoboBasisSummary,KoboConnectionControls,KoboOriginalConnections,KoboPercentageExample} from './KoboConnections';
 import type {KoboResult,KoboProject,KoboQuestionSettings} from './koboTypes';
 
 const result={id:'follow',name:'follow',label:'Follow-up',kind:'category',group:'',repeat:'',denominator:5,missing:95,total:100,statistics:{},percentageBasis:'Respondents',colors:{},chart:'bar',rows:[],breakdowns:[],connections:{parents:[{id:'main',name:'main',label:'Main',hidden:true,compatible:true,triggers:['Other']}],conditions:[{source:'follow',expression:"${main} = 'other'",readable:'Main = Other',supported:true}],issues:[]},respondentBasis:{kind:'parent',parentId:'main',label:'Main',denominator:100,active:true,issue:'',hiddenMode:'adjust',repeatEntries:false}} as KoboResult;
@@ -11,15 +11,36 @@ it('keeps connection information compact and does not render a permanent panel',
  const html=renderToStaticMarkup(<KoboConnections result={result} project={project} language="en"/>);
  expect(html).toContain('Connected · 1 question · Edit');expect(html).toContain('aria-haspopup="dialog"');expect(html).not.toContain('<dialog');
 });
-it('explains the selected base and hidden-answer behavior in both languages',()=>{
- const html=renderToStaticMarkup(<KoboBasisSummary result={result} language="en" hiddenCount={1}/>);
- expect(html).toContain('1 answer hidden');
+it('explains the selected base in both languages and shows the hidden-answer action in the compact summary',()=>{
+ const html=renderToStaticMarkup(<KoboBasisSummary result={result} language="en"/>);
  expect(html).toContain('100');expect(html).toContain('Main');expect(html).toContain('Parent respondents');
+ const compact=renderToStaticMarkup(<KoboBasisSummary compact result={result} language="en" hiddenAnswersAction={<button type="button" aria-haspopup="dialog">1 answer hidden</button>}/>);
+ expect(compact).toContain('<strong>100</strong> respondents in the percentage base');
+ expect(compact).toContain('</span><button type="button" aria-haspopup="dialog">1 answer hidden</button>');
+ expect(compact).toContain('Based on <bdi>Main</bdi>');
+ expect(compact).toContain('Linked question’s respondents');
+ expect(compact).toContain('Hidden answers included');
+ const repeat={...result,respondentBasis:{...result.respondentBasis!,repeatEntries:true}};
+ expect(renderToStaticMarkup(<KoboBasisSummary compact result={repeat} language="en"/>)).toContain('entries in the percentage base');
  const followUp={...result,respondentBasis:{...result.respondentBasis!,kind:'question' as const,denominator:5}};
  expect(renderToStaticMarkup(<KoboBasisSummary result={followUp} language="en"/>)).toContain('Follow-up respondents');
  expect(renderToStaticMarkup(<KoboBasisSummary result={result} language="ar"/>)).toContain('dir="rtl"');
  const invalid={...result,respondentBasis:{...result.respondentBasis!,issue:'missing-parent',denominator:null}};
  expect(renderToStaticMarkup(<KoboBasisSummary result={invalid} language="en"/>)).toContain('Percentage base unavailable');
+});
+it('uses an eligible visible answer and the displayed overall percentage for the calculation example',()=>{
+ const example={...result,respondentBasis:{...result.respondentBasis!,denominator:6},percentageDecimals:1 as const,breakdownFields:[{id:'region',label:'Region'}],rows:[
+  {id:'__blank__',label:'Blank',count:5,percent:null},
+  {id:'a',label:'Hidden option',count:3,percent:3},
+  {id:'b',label:'Visible option',count:1,percent:100/6,displayPercent:16.6},
+ ]};
+ const html=renderToStaticMarkup(<KoboPercentageExample result={example} language="en" hiddenAnswers={['a']}/>);
+ expect(html).toContain('Overall percentage example');
+ expect(html).toContain('Visible option');
+ expect(html).not.toContain('Hidden option');
+ expect(html).toContain('1 of 6 respondents = <bdi>16.6%</bdi>');
+ const zero={...example,respondentBasis:{...result.respondentBasis!,denominator:0}};
+ expect(renderToStaticMarkup(<KoboPercentageExample result={zero} language="en"/>)).toContain('Percentages are unavailable because the base is zero.');
 });
 it('describes an ignored connection using the question’s own respondent base',()=>{
  const ignored={...result,connections:{...result.connections!,effectiveTree:null},
@@ -32,7 +53,7 @@ it('describes an ignored connection using the question’s own respondent base',
 it('offers explicit parent selection while preserving an unavailable selection for repair',()=>{
  const value={percentageBase:'parent',percentageParent:'removed'} as KoboQuestionSettings;
  const html=renderToStaticMarkup(<KoboConnectionControls result={result} project={project} value={value} language="en" onChange={()=>{}}/>);
- expect(html).toContain('Question connection');expect(html).toContain('Review this question');expect(html).toContain('Original base question');
+ expect(html).toContain('Question connection');expect(html).toContain('Review this question');expect(html).toContain('Linked question to use');
  expect(renderToStaticMarkup(<KoboConnectionControls result={result} project={project} value={value} language="ar" onChange={()=>{}}/>)).toContain('ارتباط السؤال');
 });
 
@@ -97,16 +118,21 @@ it('places View conditions before Edit connection and outside the condition summ
 
 it('reserves parent percentage controls for legacy basis while keeping connection editing',()=>{
  const html=renderToStaticMarkup(<KoboConnectionControls result={result} project={project} value={{percentageMode:'grand-total'} as KoboQuestionSettings} language="en" onChange={()=>{}}/>);
- expect(html).not.toContain('Original base question');
+ expect(html).not.toContain('Linked question to use');
  expect(html).toContain('Question connection');
 });
 
 it('shows the selected answer scope alongside the parent respondent base',()=>{
  const value={percentageMode:'legacy-respondents',connectedPercentageMode:'keep-original',connectedAnswerScope:'visible'} as const;
  const html=renderToStaticMarkup(<KoboConnectionControls result={result} project={project} value={value as KoboQuestionSettings} language="en" onChange={()=>{}}/>);
- expect(html).toContain('Answer scope');
- expect(html).toMatch(/aria-pressed="true"[^>]*>Visible answers</);
- expect(html).toContain('Parent respondents without an eligible follow-up answer remain in the base.');
+ expect(html).toContain('How hidden answers affect percentages');
+ expect(html).toMatch(/aria-pressed="true"[^>]*>Exclude hidden answers from the calculation</);
+ expect(html).toContain('People who answered the linked question still count if they had no eligible follow-up answer.');
+ expect(html).not.toContain('Someone who selected both');
+ const multiple=renderToStaticMarkup(<KoboConnectionControls result={{...result,kind:'multiple'}} project={project} value={value as KoboQuestionSettings} language="en" onChange={()=>{}}/>);
+ const hintId=multiple.match(/aria-describedby="([^"]+)"[^>]*>Exclude hidden answers from the calculation/)?.[1];
+ expect(hintId).toBeTruthy();
+ expect(multiple).toContain(`id="${hintId}" class="kobo-answer-scope-hint">Someone who selected both a visible and a hidden answer still counts.`);
 });
 
 
@@ -129,10 +155,10 @@ it('shows respondent switches only for active connections or hidden answers',()=
   expect(html).not.toContain('kobo-answer-percentage-buttons');
  }
  const hidden=renderToStaticMarkup(<KoboConnectionControls result={plain} project={project} value={{...settings,hiddenAnswers:['a']}} language="en" onChange={()=>{}}/>);
- expect(hidden).toContain('Answer scope');
- expect(hidden).toMatch(/aria-pressed="true"[^>]*>Visible answers</);
- expect(hidden).toContain('All answers');
- expect(hidden).not.toContain('Original base question');
+ expect(hidden).toContain('How hidden answers affect percentages');
+ expect(hidden).toMatch(/aria-pressed="true"[^>]*>Exclude hidden answers from the calculation</);
+ expect(hidden).toContain('Include hidden answers in the calculation');
+ expect(hidden).not.toContain('Linked question to use');
 });
 
 
@@ -147,6 +173,7 @@ it('selecting % of Respondents alone does not reveal respondent switches',()=>{
    }
  expect(showRespondentPercentageControls(result,settings)).toBe(true);
  const connected=renderToStaticMarkup(<KoboConnectionControls section="percentages" result={result} project={project} value={settings} language="en" onChange={()=>{}}/>);
- expect(connected).toContain('Follow-up respondents');
- expect(connected).toContain('Parent respondents');
+ expect(connected).toContain('Who counts toward the percentage?');
+ expect(connected).toContain('People who answered this question');
+ expect(connected).toContain('People who answered the linked question');
 });

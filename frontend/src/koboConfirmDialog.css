@@ -63,3 +63,8 @@
 @media(max-width:480px){.kobo-dialog.kobo-confirm-dialog:not(.is-danger)>footer.kobo-dialog-actions{padding:10px}.kobo-dialog.kobo-confirm-dialog:not(.is-danger)>footer>.kobo-dialog-action-buttons>button{flex:1}}
 
 @media(max-width:540px){.kobo-dialog.kobo-unsaved-changes>footer>.kobo-dialog-action-buttons{flex-wrap:wrap}.kobo-dialog.kobo-unsaved-changes>footer>.kobo-dialog-action-buttons>button{flex:1 1 40%;min-width:0}.kobo-dialog.kobo-unsaved-changes>footer>.kobo-dialog-action-buttons>button.primary{flex-basis:100%}}
+.kobo-dialog.kobo-unsaved-changes>footer .kobo-dialog-action-buttons>button{font-weight:650}
+.kobo-dialog.kobo-unsaved-changes>footer .kobo-dialog-action-buttons>button.soft{border:1px solid color-mix(in srgb,var(--ink) 55%,var(--panel-strong));background:var(--panel-strong);color:var(--ink)}
+.kobo-dialog.kobo-unsaved-changes>footer .kobo-dialog-action-buttons>button.soft+.soft{border-color:currentColor;color:color-mix(in srgb,#df4545 55%,var(--ink))}
+.kobo-dialog.kobo-unsaved-changes>footer .kobo-dialog-action-buttons>button.primary{background:#075eaf;color:white}
+.kobo-dialog.kobo-unsaved-changes>footer .kobo-dialog-action-buttons>button:focus-visible{outline:3px solid var(--ink);outline-offset:2px}

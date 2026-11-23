@@ -19,11 +19,11 @@ export function koboThemeColor(id:string,theme:Theme=currentKoboTheme()){
  let hash=0;for(const char of id)hash=(hash*31+(char.codePointAt(0)||0))>>>0;
  return colors[id==='series'?0:hash%colors.length];
 }
-export function koboHeatmapScale(theme:Theme=currentKoboTheme(),high?:string):[number,string][]{
- const colors=high?Array.from({length:6},(_,index)=>{
+export function koboHeatmapScale(theme:Theme=currentKoboTheme(),high?:string,ramp?:string[]):[number,string][]{
+ const colors=high&&high.toUpperCase()!==ramp?.[0]?.toUpperCase()?Array.from({length:6},(_,index)=>{
   if(index===5)return high;
   const amount=.08+.92*index/5;
   return '#'+[1,3,5].map(offset=>Math.round(255+(parseInt(high.slice(offset,offset+2),16)-255)*amount).toString(16).padStart(2,'0')).join('');
- }):[...koboThemePalette(theme)].reverse();
+ }):[...(ramp??koboThemePalette(theme))].reverse();
  return colors.map((color,index)=>[index/(colors.length-1),color]);
 }

@@ -16,8 +16,9 @@ def pivot_records(project, settings, scope, records, selection):
         raise ValueError('The selected question belongs to a different response table.')
     lookup = {record['id']: record for record in project['records']}
     cfg = settings.questions.get(question['id'], QuestionSettings())
-    visible_cfg = cfg.model_copy(update={'hiddenAnswerPercentageMode': 'adjust'})
     snapshot = question_result(question, records, settings, questions, lookup)
+    answer_filtered = bool(snapshot.get('answerFilterSummary'))
+    visible_cfg = cfg if answer_filtered else cfg.model_copy(update={'hiddenAnswerPercentageMode': 'adjust'})
     records = question_cohort(question, records, visible_cfg, questions, lookup)
     answer, breakdown = selection.get('answer'), selection.get('breakdown')
     if answer is not None and not any(row['id'] == answer for row in snapshot['rows']):
@@ -25,7 +26,7 @@ def pivot_records(project, settings, scope, records, selection):
     column = next((column for column in snapshot['breakdowns'] if column['id'] == breakdown), None)
     if breakdown is not None and column is None:
         raise ValueError('The selected breakdown is no longer available in this pivot.')
-    if answer == '__blank__' and breakdown is not None:
+    if answer == '__blank__' and breakdown is not None and not answer_filtered:
         raise ValueError('Blank answers do not have breakdown values.')
     answered = [record for record in records if not missing(record['values'].get(question['id']))]
     _, _, categories = question_categories(question, answered, cfg)
@@ -33,7 +34,9 @@ def pivot_records(project, settings, scope, records, selection):
     selected = []
     for record in records:
         value = record['values'].get(question['id'])
-        matches = missing(value) if answer == '__blank__' else not missing(value) and (answer is None or answer in categories(value))
+        matches = (answer is None and answer_filtered) or (
+            missing(value) if answer == '__blank__' else not missing(value) and (answer is None or answer in categories(value))
+        )
         if matches and (column is None or list(breakdown_values(record, dimensions, lookup)) == column['values']):
             selected.append(record)
     if snapshot.get('measure'):

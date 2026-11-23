@@ -1,4 +1,4 @@
-import {useState,type ReactNode} from 'react';
+import {useState} from 'react';
 import {KoboUpdateHistory} from './KoboUpdateReview';
 import {analysisWorkspace} from './koboApi';
 import {Copy,Archive,LoaderCircle,Calculator,ClipboardCheck,Download,FolderCog,Pencil,Upload} from 'lucide-react';
@@ -7,7 +7,7 @@ import KoboActionMenu from './KoboActionMenu';
 import type {KoboProject} from './koboTypes';
 import './koboProjectHeader.css';
 
-export default function KoboProjectHeader({project,counts,saveStatus,exportDisabled,onReupload,onReview,onQualityReview,onPdf,onExcel,onRename,onIndicators,onBinaryExcel,onBackup,backupBusy,onCopyAll,copyProgress,assistantSettings}:{assistantSettings?:ReactNode;onQualityReview:()=>void;onCopyAll?:()=>void;copyProgress?:string;onBackup:()=>void;backupBusy:boolean;saveStatus:string;project:KoboProject;counts:{filtered:number;total:number}|null;exportDisabled:boolean;onReupload:()=>void;onReview:()=>void;onPdf:()=>void;onExcel:()=>Promise<void>;onRename:()=>void;onIndicators:()=>void;onBinaryExcel:()=>Promise<void>}){
+export default function KoboProjectHeader({project,counts,saveStatus,exportDisabled,onReupload,onReview,onQualityReview,onPdf,onExcel,onRename,onIndicators,onBinaryExcel,onBackup,backupBusy,onCopyAll,copyProgress}:{onQualityReview:()=>void;onCopyAll?:()=>void;copyProgress?:string;onBackup:()=>void;backupBusy:boolean;saveStatus:string;project:KoboProject;counts:{filtered:number;total:number}|null;exportDisabled:boolean;onReupload:()=>void;onReview:()=>void;onPdf:()=>void;onExcel:()=>Promise<void>;onRename:()=>void;onIndicators:()=>void;onBinaryExcel:()=>Promise<void>}){
  const[historyOpen,setHistoryOpen]=useState(false);
  const title=project.name,custom=analysisWorkspace()==='custom',pendingNotes=project.importNotes?.filter(note=>!note.reviewed).length||0;
  return <section className="kobo-page-heading kobo-project-heading" aria-label="Analysis overview">
@@ -16,7 +16,6 @@ export default function KoboProjectHeader({project,counts,saveStatus,exportDisab
    <span>{custom?'Records':'Submissions'}</span><div>{counts?<><strong>{counts.filtered.toLocaleString()}</strong>{counts.filtered!==counts.total&&<span> / {counts.total.toLocaleString()}</span>}</>:<span>Preparing…</span>}</div>
   </div>
   <div className="kobo-toolbar kobo-project-actions">
-   {assistantSettings}
    <button type="button" className="soft" onClick={onIndicators}><Calculator aria-hidden="true"/>{project.settings.language==='ar'?'الرؤى':'Insights'}</button>
    <button type="button" className="soft" aria-haspopup="dialog" aria-label={project.settings.language==='ar'?'مراجعة':'Review'} aria-description={pendingNotes?project.settings.language==='ar'?`${pendingNotes} ملاحظات استيراد غير مراجَعة`:`${pendingNotes} unreviewed import ${pendingNotes===1?'note':'notes'}`:undefined} onClick={onQualityReview}><ClipboardCheck aria-hidden="true"/>{project.settings.language==='ar'?'مراجعة':'Review'}{pendingNotes>0&&<span className="kobo-review-note-badge">{pendingNotes} {project.settings.language==='ar'?pendingNotes===1?'ملاحظة':'ملاحظات':pendingNotes===1?'note':'notes'}</span>}</button>
    <KoboActionMenu label={custom?'Manage data':'Data source'} icon={<FolderCog aria-hidden="true"/>}><button type="button" className="soft" onClick={onReview}><Pencil aria-hidden="true"/>{custom?'Prepare data':'Review import'}</button><button type="button" className="soft" onClick={onReupload}><Upload aria-hidden="true"/>{custom?'Replace source file':'Re-upload data'}</button><button type="button" className="soft" onClick={()=>setHistoryOpen(true)}>Update history</button></KoboActionMenu>

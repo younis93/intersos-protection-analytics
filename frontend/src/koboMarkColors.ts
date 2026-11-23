@@ -1,5 +1,5 @@
 import {koboThemeColor,currentKoboTheme} from './koboThemeColors';
-import {resolveKoboColors} from './koboCustomizeOptions';
+import {koboPalettes,resolveKoboColors} from './koboCustomizeOptions';
 import type {Theme} from './types';
 import type {KoboQuestionSettings,KoboResult} from './koboTypes';
 import type {KoboChartPanel} from './koboChartDensity';
@@ -15,12 +15,12 @@ export function markTargetFromPoint(result:KoboResult,customdata:unknown):KoboMa
 export const markColorKey=(result:KoboResult,target:KoboMarkTarget)=>JSON.stringify([(result.breakdownFields||[]).map(field=>field.id),target.breakdown??null,target.answer]);
 export const usesPointColor=(result:KoboResult)=>result.breakdowns.length>0||result.chart==='line';
 export const supportsAllBarsColor=(chart:KoboResult['chart'])=>chart==='bar'||chart==='column'||chart==='histogram';
-export const activeAllBarsColor=(result:KoboChartPanel)=>supportsAllBarsColor(result.sourceChart??result.chart)?result.allBarsColor:null;
+export const activeAllBarsColor=(result:KoboChartPanel)=>!result.answerStack&&!result.stackedAnswers&&supportsAllBarsColor(result.sourceChart??result.chart)?result.allBarsColor:null;
 export function markColor(result:KoboChartPanel,target:KoboMarkTarget,theme:Theme=currentKoboTheme()){
  const allBarsColor=activeAllBarsColor(result);
  if(allBarsColor)return allBarsColor;
  const override=result.pointColors?.[markColorKey(result,target)];
- if(usesPointColor(result)&&override)return override;
+ if(!result.stackedAnswers&&usesPointColor(result)&&override)return override;
  if(target.breakdown!==undefined)return result.colors[target.breakdown]||koboThemeColor(target.breakdown,theme);
  if(result.chart==='line')return result.colors.series||koboThemeColor('series',theme);
  return result.colors[target.answer]||koboThemeColor(target.answer,theme);
@@ -31,4 +31,9 @@ export function editMarkColor(result:KoboResult,cfg:KoboQuestionSettings,target:
  if(color===null)delete map[key];else map[key]=color;
  return next;
 }
-export const resultWithColors=(result:KoboChartPanel,cfg:KoboQuestionSettings,theme:Theme=currentKoboTheme()):KoboChartPanel=>({...result,colors:resolveKoboColors(result,cfg.palette,cfg.colors,theme),pointColors:cfg.pointColors||{},allBarsColor:cfg.allBarsColor});
+export function resultWithColors(result:KoboChartPanel,cfg:KoboQuestionSettings,theme:Theme=currentKoboTheme()):KoboChartPanel{
+ const ramp=result.chart==='heatmap'&&cfg.palette!=='Blue'
+  ?koboPalettes.find(option=>option.name===cfg.palette&&option.byValue)?.colors
+  :undefined;
+ return {...result,colors:resolveKoboColors(result,cfg.palette,cfg.colors,theme),heatmapRamp:ramp,pointColors:cfg.pointColors||{},allBarsColor:cfg.allBarsColor};
+}

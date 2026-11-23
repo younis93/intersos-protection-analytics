@@ -19,3 +19,19 @@ def test_palette_resolves_answers_breakdowns_and_line_colors(sample,palette):
 def test_existing_projects_keep_automatic_colors_without_palette(sample):
     assert all(question['colors']=={} for question in analyze(sample[0],KoboSettings())['questions'])
     assert QuestionSettings.model_validate({'colors':{}}).palette is None
+
+
+def test_excel_ranks_blue_shades_from_displayed_values():
+    from backend.kobo_excel_chart_projection import ranked_chart_colors
+
+    rows = [
+        {'id': 'low', 'count': 9, 'displayPercent': 1},
+        {'id': 'tied', 'count': 7, 'displayPercent': 6.125},
+        {'id': 'high', 'count': 3, 'displayPercent': 6.13},
+        {'id': 'custom', 'count': 2, 'displayPercent': 0},
+    ]
+    ramp = CHART_PALETTES['Navy']
+    assert ranked_chart_colors({'percentageDecimals': 2}, rows, 'Navy', 'percent', {'custom': '#ABCDEF'}) == [
+        ramp[3], ramp[0], ramp[0], '#ABCDEF',
+    ]
+    assert ranked_chart_colors({}, rows, 'Navy', 'count', {}) == [ramp[0], ramp[2], ramp[3], ramp[5]]

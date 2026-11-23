@@ -1,6 +1,6 @@
 import {useProjectTransfer} from './useProjectTransfer';
 import {projectFileAccept,projectUploadLimit} from './projectProtection';
-import {formatUpdateSize,UpdateReleaseNotes} from "./UpdateReleaseNotes";
+import {AppUpdateDialog} from "./AppUpdateDialog";
 import {AnimatedNavigationIcon} from './AnimatedNavigationIcon';
 
 import { deferredComponent } from './DeferredComponent';
@@ -11,7 +11,7 @@ import NotificationToast from './NotificationToast';
 import ImportSourceGuide from './ImportSourceGuide';
 import LegalProjectTransfer from './LegalProjectTransfer';
 import ProcessingRecords from './ProcessingRecords';
-import { UpdateFallbackNotice } from "./UpdateFallbackNotice";
+import {useAppUpdate} from "./useAppUpdate";
 
 import {
 AlertTriangle,
@@ -43,10 +43,7 @@ Users
 import { startTransition,useCallback,useEffect,useRef,useState } from "react";
 import {flushSync} from 'react-dom';
 import {
-checkForUpdates,
 getLegalMetadata,
-getUpdateStatus,
-installUpdate,
 uploadLegalFolder,
 importLegalProject,
 exportLegalProject
@@ -56,9 +53,9 @@ import { legalLoadScheduler,type LoadStatus } from "./legalLoadScheduler";
 import {pollLegalMetadata} from './legalMetadataPolling';
 import { LegalPage,labels } from './legalPageMetadata';
 import { setLegalRevision } from "./legalQueryCache";
-import type { LegalMetadata,Theme,UpdateCheck,UpdateStatus } from "./types";
+import type { LegalMetadata,Theme } from "./types";
 
-export const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+export {UPDATE_CHECK_INTERVAL_MS} from "./useAppUpdate";
 
 export {formatUpdateSize} from "./UpdateReleaseNotes";
 
@@ -269,9 +266,7 @@ export default function LegalPlatform({onStartupReady,checkSavedSource=false}:{o
     }
   },[importProgress,uploading,metadata?.loading]);
   const [sendIssuesStatus,setSendIssuesStatus]=useState<'idle'|'loading'|'ready'|'error'>('idle');
-  const [updateInfo, setUpdateInfo] = useState<UpdateCheck | null>(null);
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
-  const [updateOpen, setUpdateOpen] = useState(false);
+  const update = useAppUpdate();
   const folderInput = useRef<HTMLInputElement>(null);
   const projectInput = useRef<HTMLInputElement>(null);
   const filesInput = useRef<HTMLInputElement>(null);
@@ -290,23 +285,6 @@ export default function LegalPlatform({onStartupReady,checkSavedSource=false}:{o
     window.addEventListener("legal-copy", showCopied);
     return () => window.removeEventListener("legal-copy", showCopied);
   }, []);
-  useEffect(() => {
-    let active = true;
-    const refresh = (openWhenAvailable: boolean) => checkForUpdates().then((info) => {
-      if (!active) return;
-      setUpdateInfo(info);
-      if (openWhenAvailable && info.available) setUpdateOpen(true);
-    }).catch(() => undefined);
-    void refresh(true);
-    const timer = window.setInterval(() => void refresh(false), UPDATE_CHECK_INTERVAL_MS);
-    return () => { active = false; window.clearInterval(timer); };
-  }, []);
-  useEffect(() => {
-    if (!updateStatus || !["downloading", "verifying", "installing", "restarting"].includes(updateStatus.phase)) return;
-    const timer = window.setInterval(() => { void getUpdateStatus().then(setUpdateStatus).catch(() => undefined); }, 700);
-    return () => window.clearInterval(timer);
-  }, [updateStatus?.phase]);
-  const beginUpdate = () => installUpdate().then(setUpdateStatus).catch((error: Error) => setUpdateStatus({ phase: "error", progress: 0, error: error.message, currentVersion: updateInfo?.currentVersion || "1.0.18" }));
   useEffect(() => {document.documentElement.dataset.theme=theme;localStorage.setItem("legal-platform-theme",theme);localStorage.setItem("app-theme",theme);const syncNativeTitleBar=()=>{void (window as any).pywebview?.api?.set_title_bar_theme?.(theme)};syncNativeTitleBar();window.addEventListener("pywebviewready",syncNativeTitleBar,{once:true});return()=>window.removeEventListener("pywebviewready",syncNativeTitleBar)},[theme]);
   useEffect(() => {const sync=()=>setFullscreen(Boolean(document.fullscreenElement));document.addEventListener("fullscreenchange",sync);return()=>document.removeEventListener("fullscreenchange",sync)},[]);
   const toggleFullscreen=async()=>{const nativeApi=(window as any).pywebview?.api;if(nativeApi?.toggle_fullscreen)setFullscreen(await nativeApi.toggle_fullscreen());else if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()};
@@ -652,7 +630,7 @@ export default function LegalPlatform({onStartupReady,checkSavedSource=false}:{o
       {(uploading||restoringData||cancelPending||processingResult)&&<ProcessingRecords key={importOperationId||"startup"} progress={processingResult||importProgress} uploadPercent={uploading&&uploadPhase==="uploading"?uploadProgress:undefined} restoring={!uploading} onCancel={cancelProcessing} onDismiss={()=>setProcessingResult(null)} cancelPending={cancelPending} cancelError={cancelError}/>}
       {reviewCaseId && metadata?.ready && coreAvailable && <CaseReviewModal key={metadata.revision} caseId={reviewCaseId} metadata={metadata} onClose={() => setReviewCaseId("")} />}
       {projectTransfer.view}<NotificationToast message={copiedValue} label="Copied"/>
-      {updateOpen&&<div className="modal-backdrop"><section className="update-modal glass" role="dialog" aria-modal="true" aria-label="Application update"><div className="update-icon" data-updating={Boolean(updateStatus&&['downloading','verifying','installing','restarting'].includes(updateStatus.phase))} aria-hidden="true"><RefreshCw/></div><span className="eyebrow">APPLICATION UPDATE</span><h2>{updateInfo?.available?`Version ${updateInfo.latestVersion} is available`:updateInfo?.enabled===false?"Updates need configuration":updateInfo?.message?.startsWith("Unable")?"Unable to check for updates":"You’re up to date"}</h2>{updateInfo?.available?<UpdateReleaseNotes notes={updateInfo.notes} sizeBytes={updateInfo.sizeBytes}/>:<p>{updateInfo?.message||`You are using version ${updateInfo?.currentVersion||'1.0.18'}.`}</p>}{updateStatus&&updateStatus.phase!=="idle"&&<div className="update-progress"><div><span>{updateStatus.phase}</span><strong>{updateStatus.progress}%</strong></div><i><b style={{width:`${updateStatus.progress}%`}}/></i>{updateStatus.phase==="downloading"&&<small>Downloaded {formatUpdateSize(updateStatus.downloadedBytes)} of {formatUpdateSize(updateStatus.totalBytes||updateInfo?.sizeBytes)}</small>}{updateStatus.error&&<em>{updateStatus.error}</em>}</div>}{updateInfo?.available&&<UpdateFallbackNotice failed={updateStatus?.phase === "error"}/>}<div className="update-actions">{updateInfo?.available&&(!updateStatus||["idle","error"].includes(updateStatus.phase))&&<button className="primary" onClick={beginUpdate}>{updateStatus?.phase === "error" ? "Try again" : "Update now"}</button>}<button className="soft" onClick={()=>setUpdateOpen(false)} disabled={Boolean(updateStatus&&["installing","restarting"].includes(updateStatus.phase))}>{updateInfo?.available?"Later":"Close"}</button></div></section></div>}
+      <AppUpdateDialog {...update}/>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {createKoboApi} from './koboApi';
-import {loadKoboCopyAnalysis,prepareKoboQuestionCopy} from './koboCopy';
+import {copyChartPng,loadKoboCopyAnalysis,prepareKoboQuestionCopy} from './koboCopy';
 import {buildKoboBulkCopy} from './koboBulkCopy';
 import {questionDefaults,type KoboAnalysis,type KoboResult,type KoboSettings} from './koboTypes';
 
@@ -13,6 +13,28 @@ function result(breakdown:boolean):KoboResult{
   {id:'no',label:'No',count:0,percent:0,displayPercent:0,series:breakdown?[{id:'north',count:0,percent:0,displayPercent:0}]:undefined},
  ],statistics:{},breakdowns:breakdown?[{id:'north',label:'North',denominator:4}]:[],percentageDecimals:1,percentageBasis:'Answered respondents',chart:'bar',colors:{}};
 }
+
+it('writes a fresh PNG on each copy and discards an older render that finishes last',async()=>{
+ const copied:string[]=[];
+ vi.stubGlobal('ClipboardItem',class {
+  constructor(readonly data:{'image/png':Blob}){}
+ });
+ vi.stubGlobal('navigator',{clipboard:{write:async ([item]:{data:{'image/png':Blob}}[])=>{
+  expect(item.data['image/png']).toBeInstanceOf(Blob);
+  copied.push(await item.data['image/png'].text());
+ }}});
+ let finishFirst!: (value:Blob)=>void;
+ const delayed=new Promise<Blob>(resolve=>{finishFirst=resolve});
+ const png=(id:string)=>new Blob([id],{type:'image/png'});
+ const copy=(id:string)=>copyChartPng(async()=>id==='slow'?delayed:png(id));
+ await copy('first');
+ await copy('second');
+ const slow=copy('slow');
+ await copy('latest');
+ finishFirst(png('slow'));
+ await slow;
+ expect(copied).toEqual(['first','second','latest']);
+});
 
 describe.each(['kobo','custom'] as const)('%s zero-inclusive copying',workspace=>{
  it.each([false,true])('includes zero rows in single and bulk copies (breakdown: %s)',async breakdown=>{

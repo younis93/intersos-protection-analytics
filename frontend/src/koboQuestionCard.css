@@ -40,6 +40,8 @@
 .kobo-shell .kobo-hidden-answers-button:hover{border-color:#c68b36;background:color-mix(in srgb,#d99b3d 19%,var(--panel-strong));box-shadow:0 2px 7px #00000012}
 .kobo-shell .kobo-hidden-answers-button:focus-visible{outline:2px solid #c68b36;outline-offset:3px}
 .kobo-shell .kobo-hidden-answers-button:active{box-shadow:none}
+.kobo-shell .kobo-connected-base-heading .kobo-hidden-answers-button{margin:0}
+@media(max-width:520px){.kobo-shell .kobo-connected-base-heading .kobo-hidden-answers-button{min-height:44px}}
 @media(prefers-reduced-motion:reduce){.kobo-shell .kobo-hidden-answers-button{transition:none}}
 
 .kobo-settings-history{display:inline-flex;align-items:center;gap:5px}.kobo-settings-history button{min-width:54px;justify-content:center}

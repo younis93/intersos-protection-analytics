@@ -29,3 +29,14 @@
 .kobo-chart[data-color-editable=true] :is(.point,.slice,.scatterlayer .point){cursor:pointer}
 
 .kobo-chart[data-color-editable=true]:focus-visible{outline:2px solid var(--blue);outline-offset:3px;border-radius:8px}
+
+.kobo-color-wheel{margin:12px 0;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.kobo-color-wheel summary{padding:10px 12px;font-size:12px;font-weight:600;cursor:pointer}
+.kobo-color-wheel summary:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:8px}
+.kobo-color-wheel-controls{display:grid;justify-items:center;gap:14px;padding:4px 14px 12px}
+.kobo-color-wheel-disc{position:relative;width:min(168px,100%);aspect-ratio:1;border-radius:50%;direction:ltr;cursor:crosshair;touch-action:none;user-select:none;background:radial-gradient(circle closest-side,#fff 0%,#ffffff00 100%),conic-gradient(#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00);box-shadow:0 0 0 1px var(--line)}
+.kobo-color-wheel-shade,.kobo-color-wheel-marker{position:absolute;pointer-events:none;border-radius:50%}
+.kobo-color-wheel-shade{inset:0;background:#000}
+.kobo-color-wheel-marker{width:14px;height:14px;border:2px solid #fff;box-shadow:0 0 0 1px #000b;transform:translate(-50%,-50%);box-sizing:border-box}
+.kobo-color-wheel-brightness{display:grid;gap:5px;width:100%;font-size:11px}
+.kobo-color-wheel-brightness input[type=range]{width:100%;margin:0;accent-color:var(--blue)}

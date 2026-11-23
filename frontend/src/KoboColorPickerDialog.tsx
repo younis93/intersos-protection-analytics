@@ -2,6 +2,7 @@ import {useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import {Palette,RotateCcw,X} from 'lucide-react';
 import {koboPalettes,normalizeHex} from './koboCustomizeOptions';
+import KoboColorWheel from './KoboColorWheel';
 import {recentChartColors} from './koboRecentColors';
 import type {KoboQuestionSettings} from './koboTypes';
 import './koboMarkColorPicker.css';
@@ -59,6 +60,7 @@ export default function KoboColorPickerDialog({label,anchor,hex,hexLabel,colorLa
   <header><Palette aria-hidden="true"/><h2>Edit chart color</h2><button type="button" className="soft" aria-label="Close color picker" onClick={onClose}><X aria-hidden="true"/></button></header>
   <p dir="auto">{label}</p>
   {children}
+  <KoboColorWheel hex={valid} onColor={onColor}/>
   <div className="kobo-mark-color-inputs"><label>Color<input type="color" aria-label={colorLabel} value={valid||'#1683d8'} onChange={event=>onColor(event.target.value)}/></label><label>HEX color<input autoFocus aria-label={hexLabel} value={hex} spellCheck={false} aria-invalid={!valid} onChange={event=>onColor(event.target.value)}/></label></div>
   {!valid&&<p role="alert">Enter a valid HEX color, such as #1683D8.</p>}
   {recent.length>0&&<section className="kobo-mark-recent-colors" aria-label="Recently used chart colors"><h3>Recently used colors</h3><div className="kobo-mark-color-swatches">{recent.map(color=><button type="button" key={color} title={color} style={{backgroundColor:color}} aria-label={`Use recent color ${color}`} aria-pressed={valid===color} onClick={()=>onColor(color)}/>)}</div></section>}

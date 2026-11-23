@@ -9,6 +9,7 @@ from .kobo import AnalysisViewSettings, SavedAnalysisView, KoboSettings, Questio
 from .kobo_saved_views import saved_view_issues
 from .kobo_trends import trend_date_field
 from .kobo_indicators import IndicatorDefinition, indicator_issues
+from .kobo_answer_shares import answer_source
 
 
 class QuestionDescriptor(BaseModel):
@@ -145,6 +146,18 @@ def preview_settings(project, current, package):
                 own.append(rule)
             else: own.append({**rule,'field':field})
         config['ownFilters'] = own
+        answer_filters = []
+        for rule in config.get('answerFilters', []):
+            field = mapping.get(rule['field'])
+            source = destination.get(field)
+            if not source or source['kind'] not in {'category', 'multiple'} or (
+                source['repeat'] and source['repeat'] != target['repeat'] and not target['repeat'].startswith(source['repeat'] + '/')
+            ) or not set(rule['values']) <= ({choice['name'] for choice in source['choices']} | {'__blank__'}):
+                warnings.append(f"Answer percentage filter unavailable: {rule['field']}. Review {qid} before use.")
+                answer_filters.append(rule)
+            else:
+                answer_filters.append({**rule, 'field': field})
+        config['answerFilters'] = answer_filters
         if config.get('percentageParent'):
             original = config.get('percentageParent', '')
             from .kobo_connections import compatible
@@ -185,6 +198,29 @@ def preview_settings(project, current, package):
             warnings.append(f'Heatmap changed to Bar because no breakdowns matched: {qid}.')
         legacy = mapping.get(config['breakdown'], '')
         config['breakdowns'], config['breakdown'] = valid, legacy if legacy in valid else ''
+        if config['answerShareQuestion']:
+            original = config['answerShareQuestion']
+            source = destination.get(mapping.get(original))
+            selected_answer = config['answerShareAnswer']
+            if answer_source(target, source) and (
+                selected_answer in {choice['name'] for choice in source['choices']}
+                or (not selected_answer and config['answerStackMode'])
+            ):
+                config['answerShareQuestion'] = source['id']
+            else:
+                config['answerShareQuestion'] = config['answerShareAnswer'] = ''
+                warnings.append(f'Selected answer percentage skipped for {qid}: {original}.')
+        stack_source = destination.get(config['answerShareQuestion'], target)
+        if config['answerStackMode'] and (len(valid) != 1 or not answer_source(target, stack_source)):
+            config['answerStackMode'] = None
+        stack_colors = {}
+        for choice in stack_source['choices']:
+            code = choice['name']
+            original = next((key for key, value in mapping.items() if value == stack_source['id']), stack_source['id'])
+            old_key = json.dumps(['stack answer', original, code], ensure_ascii=False, separators=(',', ':'))
+            if old_key in config['colors']:
+                key = json.dumps(['stack answer', stack_source['id'], code], ensure_ascii=False, separators=(',', ':'))
+                stack_colors[key] = config['colors'].pop(old_key)
         if target['choices']:
             codes = {c['name'] for c in target['choices']} | {'series', '__blank__'}
             def supported_color(key):
@@ -198,6 +234,7 @@ def preview_settings(project, current, package):
             removed = {key for key in config['colors'] if not supported_color(key)}
             if removed: warnings.append(f'Unsupported color overrides skipped: {qid}.')
             config['colors'] = {k: v for k, v in config['colors'].items() if k not in removed}
+        config['colors'].update(stack_colors)
         retained_points = {}
         calculation = config.get('calculation')
         if calculation and calculation.get('operation') != 'count':

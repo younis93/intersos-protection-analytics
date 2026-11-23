@@ -50,6 +50,26 @@ def test_filters_rank_overall_counts_not_individual_breakdown_values():
     assert answer_ids(result) == ['b','a','c']
 
 
+@pytest.mark.parametrize('calculated', [False, True])
+@pytest.mark.parametrize('sort,expected', [('label-asc', ['c', 'a', 'b']), ('label-desc', ['b', 'a', 'c'])])
+def test_label_order_compares_numbered_answers_naturally(sort, expected, calculated):
+    project = fixture()
+    for choice, caption in zip(project['form']['questions'][0]['choices'], ['Answer 10', 'Answer 2', 'Answer 20']):
+        choice['labels']['en'] = caption
+    calculation = {'operation': 'sum', 'field': 'number'} if calculated else None
+    settings = KoboSettings(questions={'answer': QuestionSettings(answerSort=sort, calculation=calculation)})
+    assert answer_ids(analyze(project, settings)) == expected
+
+
+def test_date_chart_stays_chronological_with_saved_count_order():
+    settings = KoboSettings(questions={'date': QuestionSettings(answerSort='count-desc', chart='column')})
+    result = analyze(fixture(), settings)
+    assert answer_ids(result, 'date') == ['2026-02', '2026-01']
+    chart = next(q for q in result['questions'] if q['id'] == 'date')['chartProjection']
+    assert chart['axisOrder']
+    assert [row['id'] for row in chart['rows']] == ['2026-01', '2026-02']
+
+
 def test_histogram_bins_dates_and_blanks_keep_natural_positions():
     project = fixture()
     project['records'] += [dict(id='blank'+str(i), parent='',scope='',row=20+i,sheet=0,values={}) for i in range(8)]

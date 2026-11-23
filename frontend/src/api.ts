@@ -151,8 +151,31 @@ export const downloadExcelUrl = async (url:string, fallbackFilename="export.xlsx
   const disposition=response.headers.get("Content-Disposition")||"",match=disposition.match(/filename="?([^";]+)"?/i),blobUrl=URL.createObjectURL(await response.blob()),link=document.createElement("a");
   const filename=(match?.[1]||fallbackFilename).trim();link.href=blobUrl;link.download=/\.xlsx$/i.test(filename)?filename:`${filename}.xlsx`;document.body.appendChild(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(blobUrl),1500);
 };
-export const checkForUpdates = () =>
-  fetch(`${API}/update/check`, { cache: "no-store" }).then(parse<UpdateCheck>);
+export const checkForUpdates = async () => {
+  const signal = AbortSignal.timeout(20_000);
+  try {
+    const response = await fetch(`${API}/update/check`, { cache: "no-store", signal });
+    const info = await parse<UpdateCheck>(response);
+    if (!info || typeof info.enabled !== "boolean" || typeof info.available !== "boolean"
+      || typeof info.currentVersion !== "string" || (info.available && !info.latestVersion)) {
+      throw new Error("Invalid update check response");
+    }
+    // Older backends include raw exception text in this field.
+    if (!info.checkFailed && info.message?.startsWith("Unable to check for updates")) {
+      return {
+        ...info,
+        available: false,
+        checkFailed: true,
+        message: "The app couldn’t reach GitHub. Check your internet connection and try again.",
+      };
+    }
+    return info;
+  } catch {
+    throw new Error(signal.aborted
+      ? "The update check timed out. Check your internet connection and try again."
+      : "The app couldn’t get update information. Try again in a moment.");
+  }
+};
 export const getUpdateStatus = () =>
   fetch(`${API}/update/status`, { cache: "no-store" }).then(
     parse<UpdateStatus>,

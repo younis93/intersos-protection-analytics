@@ -116,8 +116,8 @@ export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,lo
   if(sourceResult.reportAttachment)paragraph(sourceResult.reportAttachment.source,9,false,muted);
   const stats=Object.entries(result.statistics).filter(([key,value])=>key!=='count'&&Number.isFinite(value)).map(([key,value])=>`${statisticLabels[key]?.[rtl?1:0]||key.replace(/([A-Z])/g,' $1')}: ${number(value)}`);
   if(stats.length)paragraph(stats.join('   |   '),9,false,muted);
-  if(!result.rows.length){paragraph(rtl?'لا توجد إجابات ضمن عوامل التصفية الحالية.':'No answered responses under the current filters.',10,false,muted);continue}
-  const chartPanels=sourceResult.denominator&&sourceResult.reportAttachment?.view!=='pivot'?koboPdfChartPanels(sourceResult):[];
+  const chartPanels=(sourceResult.denominator||sourceResult.answerStack)&&sourceResult.reportAttachment?.view!=='pivot'?koboPdfChartPanels(sourceResult):[];
+  if(!result.rows.length&&!chartPanels.length){paragraph(rtl?'لا توجد إجابات ضمن عوامل التصفية الحالية.':'No answered responses under the current filters.',10,false,muted);continue}
   if(sourceResult.reportAttachment?.view==='chart'){
    for(const [index,chart] of chartPanels.entries()){
     if(index||bottom-y<180)questionPage(true);
@@ -144,6 +144,14 @@ export async function createKoboPdfDocument(name:string,snapshot:KoboAnalysis,lo
   if(!sourceResult.reportAttachment){
    if(questionFilterNote(sourceResult.filterMode)){paragraph(questionFilterNote(sourceResult.filterMode),10,true);for(const note of sourceResult.filterSummary||[])paragraph(note,9,false,muted)}
    paragraph(sourceResult.percentageBasis,9,false,muted);
+   const answerFilter=sourceResult.answerFilterSummary;
+   if(answerFilter){
+    const number=new Intl.NumberFormat(rtl?'ar':'en');
+    const matched=number.format(answerFilter.count),base=number.format(answerFilter.denominator);
+    paragraph(rtl?`${matched} من أصل ${base} استجابة مؤهلة طابقت الإجابات المحددة`:
+     `${matched} of ${base} eligible responses matched the selected answers.`,10,true);
+    for(const selection of answerFilter.selections)paragraph(`${selection.question}: ${selection.exclude?(rtl?'باستثناء ':'excluding '):''}${selection.answers.join(rtl?'، ':', ')}`,9,false,muted);
+   }
   }
   if(isMeasure)paragraph(`${sourceResult.measure!.label} · ${sourceResult.measure!.unit}${sourceResult.measure!.parentValuesRepeated?' · Parent values are repeated once per matching repeat entry.':''}`,10,true);
   const metrics=breakdownDisplay==='both'?['count','percent']:[breakdownDisplay];

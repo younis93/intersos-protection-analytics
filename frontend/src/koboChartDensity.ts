@@ -1,11 +1,32 @@
 import type {KoboResult} from './koboTypes';
-import {resolveAppearance} from './koboAppearance';
+import {fixedChartWidth,resolveAppearance} from './koboAppearance';
 import {chartPercent,percentageDecimals,type PercentageValue} from './koboPercentages';
 
-export const projectKoboChart=(result:KoboResult):KoboResult=>result.chartProjection?{...result,...result.chartProjection,chartProjection:null}:result;
+export const projectKoboChart=<T extends KoboResult>(result:T):T=>{
+ const stack=result.answerStack;
+ if(stack&&(result.chart==='bar'||result.chart==='column')){
+  const id=(answer:string)=>JSON.stringify(['stack answer',stack.questionId,answer]);
+  const breakdowns=stack.answers.map(answer=>({...answer,id:id(answer.id),denominator:0}));
+  const rows=stack.groups.flatMap(group=>{
+   const total=Object.values(group.counts).reduce((sum,count)=>sum+count,0);
+   if(!total)return [];
+   const series=stack.answers.map(answer=>{
+    const count=Object.hasOwn(group.counts,answer.id)?group.counts[answer.id]:0;
+    return {id:id(answer.id),count,percent:100*count/total};
+   });
+   return [{id:group.id,label:group.label,count:total,percent:100,series}];
+  });
+  return {...result,label:stack.questionLabel,kind:'category',denominator:rows.length,rows,breakdowns,
+   chartProjection:null,measure:null,trend:null,answerStack:null,
+   stackedAnswers:{mode:stack.mode,highlightedSeries:stack.highlightedAnswer?id(stack.highlightedAnswer):''},
+   appearance:{...result.appearance,bars:'stack',metric:stack.mode},
+   allBarsColor:null,pointColors:{}};
+ }
+ return result.chartProjection?{...result,...result.chartProjection,chartProjection:null}:result;
+};
 
 // A pie or donut can render as bars in a paged chart or a PDF panel.
-export type KoboChartPanel=KoboResult&{chartMaximum?:number;sourceChart?:KoboResult['chart']};
+export type KoboChartPanel=KoboResult&{chartMaximum?:number;heatmapRamp?:string[];sourceChart?:KoboResult['chart']};
 
 export function koboChartRows(result:KoboResult){
  result=projectKoboChart(result);
@@ -40,7 +61,7 @@ export function koboScreenChartRows(result:KoboResult){
 export function koboScreenChartPage(result:KoboResult,rows:KoboResult['rows'],requestedPage=0){
  result=projectKoboChart(result);
  const pageSize=Math.max(1,Math.min(100,Math.floor(1000/Math.max(1,result.breakdowns.length))));
- const paged=!result.trend&&rows.length>pageSize;
+ const paged=!fixedChartWidth(result.appearance)&&!result.trend&&rows.length>pageSize;
  const pages=paged?Math.ceil(rows.length/pageSize):1;
  const page=Math.max(0,Math.min(pages-1,requestedPage));
  const start=paged?page*pageSize:0,end=paged?Math.min(rows.length,start+pageSize):rows.length;
